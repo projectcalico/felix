@@ -608,7 +608,7 @@ def del_rules(id,type):
         if call_silent(["ipset", "list", ipset]) == 0:
             subprocess.check_call(["ipset", "destroy", ipset])
 
-def do_icmpv6_wildcarding_emulation(rule):
+def do_icmpv6_wildcarding_emulation(rule, tmp_ipset_port):
     ipset_icmpv6_codenames = [
 	'no-route',
 	'communication-prohibited',
@@ -642,7 +642,7 @@ def do_icmpv6_wildcarding_emulation(rule):
 	    value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmpv6_codename)
 	    subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
 
-def do_icmp_wildcarding_emulation(rule):
+def do_icmp_wildcarding_emulation(rule, tmp_ipset_port):
     # this is really, really horrible, but should work within the ipset setup
     # when we detected an ICMP wildcard, to emulate this we add an ipset entry for net + every codename known...
     # realistically though, for icmp/* we should probably use an iptables rule and not an ipset...
@@ -783,9 +783,9 @@ def set_acls(id,type,inbound,in_default,outbound,out_default):
                         subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
             	elif rule['protocol'] == 'icmp':
             	    # icmp wildcarding does not appear to be supported by ipset (V6.20.1) - this function tries to emulate it.
-		    do_icmp_wildcarding_emulation(rule)
+		    do_icmp_wildcarding_emulation(rule, tmp_ipset_port)
             	elif rule['protocol'] == 'icmpv6':
-		    do_icmpv6_wildcarding_emulation(rule)
+		    do_icmpv6_wildcarding_emulation(rule, tmp_ipset_port)
             else:
                 value = rule['cidr']
                 subprocess.check_call(["ipset", "add", tmp_ipset_noport, value, "-exist"])
