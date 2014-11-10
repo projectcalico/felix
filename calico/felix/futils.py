@@ -356,7 +356,11 @@ def set_rules(id,iface,type,localips,mac):
     rule = get_rule(type)
     rule.create_target("RETURN")
     match = iptc.Match(rule, "set")
-    match.match_set = [to_ipset_port, "src"]
+    # fixing https://github.com/Metaswitch/calico/issues/31
+    # added missing ",dst" to work as intended:
+    # we specify src_host:dst_port to mean "this host can access our security group's port 22"
+    # just doing "src" on a net:port list did not appear to match any traffic at all (see github issue)
+    match.match_set = [to_ipset_port, "src,dst"]
     rule.add_match(match)
     insert_rule(rule,to_chain,index)
     index += 1
@@ -437,7 +441,8 @@ def set_rules(id,iface,type,localips,mac):
     rule = get_rule(type)
     rule.create_target("DROP")
     match = iptc.Match(rule, "set")
-    match.match_set = [from_ipset_port, "dst"]
+    # do we want to match dst host + dst port (dst,dst)  OR  dst host, src port? I assume it's both destination based (I don't want to talk to dst:dst_port to e.g. block off some unwanted ports - blocking off source ports seems rather unusual.
+    match.match_set = [from_ipset_port, "dst,dst"]
     rule.add_match(match)
     insert_rule(rule, from_chain, index)
     index += 1
@@ -661,13 +666,93 @@ def set_acls(id,type,inbound,in_default,outbound,out_default):
                 log.error("Invalid %s rule without port but no protocol for %s : %s",
                           (descr, id, rule))
                 continue
-
             if rule['port'] is not None:
+            	# this is hit when we have an IP protocol AND a port (if we have port, we must have proto!)
                 value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],rule['port'])
-                subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+                if rule['cidr'] == '0.0.0.0/0':
+                    log.warn("Cannot use 0.0.0.0 in net:port ipsets - rule was: %s...trying to autoconvert to 0/1 and 128/1", (value))
+                    for slash1 in ['0.0.0.0/1', '128.0.0.0/1']:
+                        value = "%s,%s:%s" % (slash1,rule['protocol'],rule['port'])                    	    
+                        subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])                    	    
+                else:
+                    subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+                
             elif rule['protocol'] is not None:
-                value = "%s,%s:0" % (rule['cidr'],rule['protocol'])
-                subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+            	# this is hit when we have an IP protocol, but no port (wildcard port)
+            	if rule['protocol'] in ['tcp','udp']:
+            	    value = "%s,%s:0" % (rule['cidr'],rule['protocol'])
+                    subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+            	elif rule['protocol'] == ['icmp']:
+            	    # icmp wildcarding does not appear to be supported by ipset (V6.20.1)
+            	    # this is really, really horrible, but should work within the ipset setup
+            	    # when we detect an ICMP wildcard, add an ipset entry for net + every codename known...
+            	    # realistically though, for icmp/* we should probably use an iptables rule and not an ipset...
+            	    ipset_icmp_codenames = [
+            	    	'echo-reply',
+            	    	'pong',
+            	    	'network-unreachable',
+            	    	'host-unreachable',
+            	    	'protocol-unreachable',
+            	    	'port-unreachable',
+            	    	'fragmentation-needed',
+            	    	'source-route-failed',
+            	    	'network-unknown',
+            	    	'host-unknown',
+            	    	'network-prohibited',
+            	    	'host-prohibited',
+            	    	'TOS-network-unreachable',
+            	    	'TOS-host-unreachable',
+            	    	'communication-prohibited',
+            	    	'host-precedence-violation',
+            	    	'precedence-cutoff',
+            	    	'source-quench',
+            	    	'network-redirect',
+            	    	'host-redirect',
+            	    	'TOS-network-redirect',
+            	    	'TOS-host-redirect',
+            	    	'echo-request',
+            	    	'ping',
+            	    	'router-advertisement',
+            	    	'router-solicitation',
+            	    	'ttl-zero-during-transit',
+            	    	'ttl-zero-during-reassembly',
+            	    	'ip-header-bad',
+            	    	'required-option-missing',
+            	    	'timestamp-request',
+            	    	'timestamp-reply',
+            	    	'address-mask-request',
+            	    	'address-mask-reply'
+            	    ]
+            	    for icmp_codename in ipset_icmp_codenames:
+            	        value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmp_codename)
+                        subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+            	elif rule['protocol'] == ['icmpv6']:
+            	    ipset_icmpv6_codenames = [
+            	    	'no-route',
+            	    	'communication-prohibited',
+            	    	'address-unreachable',
+            	    	'port-unreachable',
+            	    	'packet-too-big',
+            	    	'ttl-zero-during-transit',
+            	    	'ttl-zero-during-reassembly',
+            	    	'bad-header',
+            	    	'unknown-header-type',
+            	    	'unknown-option',
+            	    	'echo-request',
+            	    	'ping',
+            	    	'echo-reply',
+            	    	'pong',
+            	    	'router-solicitation',
+            	    	'router-advertisement',
+            	    	'neighbour-solicitation',
+            	    	'neigbour-solicitation',
+            	    	'neighbour-advertisement',
+            	    	'neigbour-advertisement',
+            	    	'redirect'
+            	    ]
+            	    for icmpv6_codename in ipset_icmpv6_codenames:
+            	        value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmpv6_codename)
+                        subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
             else:
                 value = rule['cidr']
                 subprocess.check_call(["ipset", "add", tmp_ipset_noport, value, "-exist"])
