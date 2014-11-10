@@ -1,3 +1,16 @@
+calico (0.6.4) trusty; urgency=medium
+
+  * Update version number in setup.cfg
+
+ -- Neil Jerram <nj@metaswitch.com>  Mon, 10 Nov 2014 16:29:06 +0000
+
+calico (0.6.3) trusty; urgency=medium
+
+  * Add Build-Depends: python-setuptools, python-pbr
+  * Add debian/source/format
+
+ -- Neil Jerram <nj@metaswitch.com>  Mon, 10 Nov 2014 15:51:45 +0000
+
 calico (0.6) trusty; urgency=medium
 
   * Many fixes and enhancements to Felix (the new Calico agent)
