@@ -608,6 +608,91 @@ def del_rules(id,type):
         if call_silent(["ipset", "list", ipset]) == 0:
             subprocess.check_call(["ipset", "destroy", ipset])
 
+def do_icmpv6_wildcarding_emulation(rule):
+    ipset_icmpv6_codenames = [
+	'no-route',
+	'communication-prohibited',
+	'address-unreachable',
+	'port-unreachable',
+	'packet-too-big',
+	'ttl-zero-during-transit',
+	'ttl-zero-during-reassembly',
+	'bad-header',
+	'unknown-header-type',
+	'unknown-option',
+	'echo-request',
+	'ping',
+	'echo-reply',
+	'pong',
+	'router-solicitation',
+	'router-advertisement',
+	'neighbour-solicitation',
+	'neigbour-solicitation',
+	'neighbour-advertisement',
+	'neigbour-advertisement',
+	'redirect'
+    ]
+    for icmpv6_codename in ipset_icmpv6_codenames:
+	if rule['cidr'] == '::/0':
+	    log.warn("Cannot use ::/0 in net:port ipsets - rule was: %s...trying to autoconvert to ::/1 and 80::/1", (value))
+	    for slash1 in ['::/1', '80::/1']:
+		value = "%s,%s:%s" % (slash1,rule['protocol'],icmpv6_codename)
+		subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+	else:
+	    value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmpv6_codename)
+	    subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+
+def do_icmp_wildcarding_emulation(rule):
+    # this is really, really horrible, but should work within the ipset setup
+    # when we detected an ICMP wildcard, to emulate this we add an ipset entry for net + every codename known...
+    # realistically though, for icmp/* we should probably use an iptables rule and not an ipset...
+    log.warn('detected ICMP wildcarding - iterate through all codetypes... convert me to iptables please.')
+    ipset_icmp_codenames = [
+	'echo-reply',
+	'pong',
+	'network-unreachable',
+	'host-unreachable',
+	'protocol-unreachable',
+	'port-unreachable',
+	'fragmentation-needed',
+	'source-route-failed',
+	'network-unknown',
+	'host-unknown',
+	'network-prohibited',
+	'host-prohibited',
+	'TOS-network-unreachable',
+	'TOS-host-unreachable',
+	'communication-prohibited',
+	'host-precedence-violation',
+	'precedence-cutoff',
+	'source-quench',
+	'network-redirect',
+	'host-redirect',
+	'TOS-network-redirect',
+	'TOS-host-redirect',
+	'echo-request',
+	'ping',
+	'router-advertisement',
+	'router-solicitation',
+	'ttl-zero-during-transit',
+	'ttl-zero-during-reassembly',
+	'ip-header-bad',
+	'required-option-missing',
+	'timestamp-request',
+	'timestamp-reply',
+	'address-mask-request',
+	'address-mask-reply'
+    ]
+    for icmp_codename in ipset_icmp_codenames:
+	if rule['cidr'] == '0.0.0.0/0':
+	    log.warn("Cannot use 0.0.0.0 in net:port ipsets - rule was: %s...trying to autoconvert to 0/1 and 128/1", (value))
+	    for slash1 in ['0.0.0.0/1', '128.0.0.0/1']:
+		value = "%s,%s:%s" % (slash1,rule['protocol'],icmp_codename)
+		subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+	else:
+	    value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmp_codename)
+	    subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+
 def set_acls(id,type,inbound,in_default,outbound,out_default):
     """
     Set up the ACLs, making sure that they match.
@@ -674,7 +759,7 @@ def set_acls(id,type,inbound,in_default,outbound,out_default):
                     if rule['cidr'] == '0.0.0.0/0':
                         slashes = ['0.0.0.0/1', '128.0.0.0/1']
                     else:
-                        slashes = ['::/0', '80::/0']
+                        slashes = ['::/1', '80::/1']
                     for slash1 in slashes:                    	    
                         value = "%s,%s:%s" % (slash1,rule['protocol'],rule['port'])                    	    
                         subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])                    	    
@@ -689,7 +774,7 @@ def set_acls(id,type,inbound,in_default,outbound,out_default):
                         if rule['cidr'] == '0.0.0.0/0':
                             slashes = ['0.0.0.0/1', '128.0.0.0/1']
                         else:
-                            slashes = ['::/0', '80::/0']
+                            slashes = ['::/1', '80::/1']
                         for slash1 in slashes:
             	            value = "%s,%s:0" % (slash1,rule['protocol'])
                             subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
@@ -697,89 +782,10 @@ def set_acls(id,type,inbound,in_default,outbound,out_default):
             	        value = "%s,%s:0" % (rule['cidr'],rule['protocol'])
                         subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
             	elif rule['protocol'] == 'icmp':
-            	    # icmp wildcarding does not appear to be supported by ipset (V6.20.1)
-            	    # this is really, really horrible, but should work within the ipset setup
-            	    # when we detect an ICMP wildcard, add an ipset entry for net + every codename known...
-            	    # realistically though, for icmp/* we should probably use an iptables rule and not an ipset...
-            	    log.warn('detected ICMP wildcarding - iterate through all codetypes... convert me to iptables please.')
-            	    ipset_icmp_codenames = [
-            	    	'echo-reply',
-            	    	'pong',
-            	    	'network-unreachable',
-            	    	'host-unreachable',
-            	    	'protocol-unreachable',
-            	    	'port-unreachable',
-            	    	'fragmentation-needed',
-            	    	'source-route-failed',
-            	    	'network-unknown',
-            	    	'host-unknown',
-            	    	'network-prohibited',
-            	    	'host-prohibited',
-            	    	'TOS-network-unreachable',
-            	    	'TOS-host-unreachable',
-            	    	'communication-prohibited',
-            	    	'host-precedence-violation',
-            	    	'precedence-cutoff',
-            	    	'source-quench',
-            	    	'network-redirect',
-            	    	'host-redirect',
-            	    	'TOS-network-redirect',
-            	    	'TOS-host-redirect',
-            	    	'echo-request',
-            	    	'ping',
-            	    	'router-advertisement',
-            	    	'router-solicitation',
-            	    	'ttl-zero-during-transit',
-            	    	'ttl-zero-during-reassembly',
-            	    	'ip-header-bad',
-            	    	'required-option-missing',
-            	    	'timestamp-request',
-            	    	'timestamp-reply',
-            	    	'address-mask-request',
-            	    	'address-mask-reply'
-            	    ]
-            	    for icmp_codename in ipset_icmp_codenames:
-                        if rule['cidr'] == '0.0.0.0/0':
-                            log.warn("Cannot use 0.0.0.0 in net:port ipsets - rule was: %s...trying to autoconvert to 0/1 and 128/1", (value))
-                            for slash1 in ['0.0.0.0/1', '128.0.0.0/1']:
-            	                value = "%s,%s:%s" % (slash1,rule['protocol'],icmp_codename)
-                                subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
-                        else:
-            	            value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmp_codename)
-                            subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+            	    # icmp wildcarding does not appear to be supported by ipset (V6.20.1) - this function tries to emulate it.
+		    do_icmp_wildcarding_emulation(rule)
             	elif rule['protocol'] == 'icmpv6':
-            	    ipset_icmpv6_codenames = [
-            	    	'no-route',
-            	    	'communication-prohibited',
-            	    	'address-unreachable',
-            	    	'port-unreachable',
-            	    	'packet-too-big',
-            	    	'ttl-zero-during-transit',
-            	    	'ttl-zero-during-reassembly',
-            	    	'bad-header',
-            	    	'unknown-header-type',
-            	    	'unknown-option',
-            	    	'echo-request',
-            	    	'ping',
-            	    	'echo-reply',
-            	    	'pong',
-            	    	'router-solicitation',
-            	    	'router-advertisement',
-            	    	'neighbour-solicitation',
-            	    	'neigbour-solicitation',
-            	    	'neighbour-advertisement',
-            	    	'neigbour-advertisement',
-            	    	'redirect'
-            	    ]
-            	    for icmpv6_codename in ipset_icmpv6_codenames:
-                        if rule['cidr'] == '::/0':
-                            log.warn("Cannot use ::/0 in net:port ipsets - rule was: %s...trying to autoconvert to ::0/1 and 80::/1", (value))
-                            for slash1 in ['::0/1', '80::/1']:
-            	                value = "%s,%s:%s" % (slash1,rule['protocol'],icmpv6_codename)
-                                subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
-                        else:
-            	            value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmpv6_codename)
-                            subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+		    do_icmpv6_wildcarding_emulation(rule)
             else:
                 value = rule['cidr']
                 subprocess.check_call(["ipset", "add", tmp_ipset_noport, value, "-exist"])
