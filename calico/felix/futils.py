@@ -669,9 +669,13 @@ def set_acls(id,type,inbound,in_default,outbound,out_default):
             if rule['port'] is not None:
             	# this is hit when we have an IP protocol AND a port (if we have port, we must have proto!)
                 value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],rule['port'])
-                if rule['cidr'] == '0.0.0.0/0':
-                    log.warn("Cannot use 0.0.0.0 in net:port ipsets - rule was: %s...trying to autoconvert to 0/1 and 128/1", (value))
-                    for slash1 in ['0.0.0.0/1', '128.0.0.0/1']:
+                if rule['cidr'] in ['0.0.0.0/0', '::/0']:
+                    log.warn("Cannot use 0.0.0.0 or ::/0 in net:port ipsets - rule was: %s...trying to autoconvert to two /1", (value))
+                    if rule['cidr'] == '0.0.0.0/0':
+                        slashes = ['0.0.0.0/1', '128.0.0.0/1']
+                    else:
+                        slashes = ['::/0', '80::/0']
+                    for slash1 in slashes:                    	    
                         value = "%s,%s:%s" % (slash1,rule['protocol'],rule['port'])                    	    
                         subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])                    	    
                 else:
@@ -679,14 +683,25 @@ def set_acls(id,type,inbound,in_default,outbound,out_default):
                 
             elif rule['protocol'] is not None:
             	# this is hit when we have an IP protocol, but no port (wildcard port)
-            	if rule['protocol'] in ['tcp','udp']:
-            	    value = "%s,%s:0" % (rule['cidr'],rule['protocol'])
-                    subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
-            	elif rule['protocol'] == ['icmp']:
+            	if rule['protocol'] in ['tcp','udp','tcp6','udp6']:
+                    if rule['cidr'] in ['0.0.0.0/0', '::/0']:
+                        log.warn("Cannot use 0.0.0.0 or ::/0 in net:port ipsets - rule was: %s...trying to autoconvert to two /1", (value))
+                        if rule['cidr'] == '0.0.0.0/0':
+                            slashes = ['0.0.0.0/1', '128.0.0.0/1']
+                        else:
+                            slashes = ['::/0', '80::/0']
+                        for slash1 in slashes:
+            	            value = "%s,%s:0" % (slash1,rule['protocol'])
+                            subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+            	    else:
+            	        value = "%s,%s:0" % (rule['cidr'],rule['protocol'])
+                        subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+            	elif rule['protocol'] == 'icmp':
             	    # icmp wildcarding does not appear to be supported by ipset (V6.20.1)
             	    # this is really, really horrible, but should work within the ipset setup
             	    # when we detect an ICMP wildcard, add an ipset entry for net + every codename known...
             	    # realistically though, for icmp/* we should probably use an iptables rule and not an ipset...
+            	    log.warn('detected ICMP wildcarding - iterate through all codetypes... convert me to iptables please.')
             	    ipset_icmp_codenames = [
             	    	'echo-reply',
             	    	'pong',
@@ -724,9 +739,15 @@ def set_acls(id,type,inbound,in_default,outbound,out_default):
             	    	'address-mask-reply'
             	    ]
             	    for icmp_codename in ipset_icmp_codenames:
-            	        value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmp_codename)
-                        subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
-            	elif rule['protocol'] == ['icmpv6']:
+                        if rule['cidr'] == '0.0.0.0/0':
+                            log.warn("Cannot use 0.0.0.0 in net:port ipsets - rule was: %s...trying to autoconvert to 0/1 and 128/1", (value))
+                            for slash1 in ['0.0.0.0/1', '128.0.0.0/1']:
+            	                value = "%s,%s:%s" % (slash1,rule['protocol'],icmp_codename)
+                                subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+                        else:
+            	            value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmp_codename)
+                            subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+            	elif rule['protocol'] == 'icmpv6':
             	    ipset_icmpv6_codenames = [
             	    	'no-route',
             	    	'communication-prohibited',
@@ -751,8 +772,14 @@ def set_acls(id,type,inbound,in_default,outbound,out_default):
             	    	'redirect'
             	    ]
             	    for icmpv6_codename in ipset_icmpv6_codenames:
-            	        value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmpv6_codename)
-                        subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+                        if rule['cidr'] == '::/0':
+                            log.warn("Cannot use ::/0 in net:port ipsets - rule was: %s...trying to autoconvert to ::0/1 and 80::/1", (value))
+                            for slash1 in ['::0/1', '80::/1']:
+            	                value = "%s,%s:%s" % (slash1,rule['protocol'],icmpv6_codename)
+                                subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
+                        else:
+            	            value = "%s,%s:%s" % (rule['cidr'],rule['protocol'],icmpv6_codename)
+                            subprocess.check_call(["ipset", "add", tmp_ipset_port, value, "-exist"])
             else:
                 value = rule['cidr']
                 subprocess.check_call(["ipset", "add", tmp_ipset_noport, value, "-exist"])
