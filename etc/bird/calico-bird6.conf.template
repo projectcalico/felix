@@ -1,11 +1,32 @@
 
 router id @MY_IPV4_ADDRESS@;
 
-filter export_bgp {
-  if ( net != ::/0 ) then {
-     accept;
+# Filters
+
+## tap*, veth*, dummy1 are networks we want to advertise
+## community strings:
+## @AS_NUMBER@:@NO_ADVERT@ - do not advertise via bgp
+## @AS_NUMBER@:@ADVERT@ - advertise it
+
+
+filter tag_direct {
+bgp_community.empty;
+if ( (ifname ~ "tap*") || (ifname ~ "veth*") || (ifname = "dummy1") ) then 
+   {
+	bgp_community.add ((@AS_NUMBER@,@ADVERT@));
+	accept;
+   } else {
+	bgp_community.add ((@AS_NUMBER,@NO_ADVERT@));
+	accept;
    }
-   reject;
+filter export_bgp {
+if (@AS_NUMBER@,@ADVERT@) ~ bgp_community then 
+   { 
+     bgp_community.empty;
+     accept;
+   } else {
+      reject;
+   }
 }
 
 # Configure synchronization between BIRD's routing tables and the
