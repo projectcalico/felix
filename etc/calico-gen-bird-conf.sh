@@ -3,6 +3,12 @@
 BIRD_CONF=/etc/bird/bird.conf
 BIRD_CONF_TEMPLATE=/usr/share/calico/bird/calico-bird.conf.template
 
+# Community Strings Could be an argument if we want
+# However, we should make that optional, if we do
+
+$advert_community_string=777
+$no_advert_community_string=666
+
 # Require 3 arguments.
 [ $# -eq 3 ] || cat <<EOF
 
@@ -30,6 +36,8 @@ sed -e "
 s/@MY_IP_ADDRESS@/$my_ip_address/;
 s/@RR_IP_ADDRESS@/$rr_ip_address/;
 s/@AS_NUMBER@/$as_number/;
+s/@ADVERT@/$advert_community_string/;
+s/@NO_ADVERT@/$no_advert_community_string/;
 " < $BIRD_CONF_TEMPLATE > $BIRD_CONF
 
 echo BIRD configuration generated at $BIRD_CONF

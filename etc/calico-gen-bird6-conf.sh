@@ -3,6 +3,13 @@
 BIRD_CONF=/etc/bird/bird6.conf
 BIRD_CONF_TEMPLATE=/usr/share/calico/bird/calico-bird6.conf.template
 
+# Community Strings Could be an argument if we want
+# However, we should make that optional, if we do
+
+$advert_community_string=777
+$no_advert_community_string=666
+
+
 # Require 4 arguments.
 [ $# -eq 4 ] || cat <<EOF
 
@@ -33,6 +40,8 @@ s/@MY_IPV4_ADDRESS@/$my_ipv4_address/;
 s/@MY_IPV6_ADDRESS@/$my_ipv6_address/;
 s/@RR_IPV6_ADDRESS@/$rr_ipv6_address/;
 s/@AS_NUMBER@/$as_number/;
+s/@ADVERT@/$advert_community_string/;
+s/@NO_ADVERT@/$no_advert_community_string/;
 " < $BIRD_CONF_TEMPLATE > $BIRD_CONF
 
 echo BIRD6 configuration generated at $BIRD_CONF
