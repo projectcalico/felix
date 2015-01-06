@@ -1,11 +1,49 @@
 
 router id @MY_IPV4_ADDRESS@;
 
-filter export_bgp {
-  if ( net != ::/0 ) then {
-     accept;
+# Filters
+
+## tap*, veth*, dummy1 are networks we want to advertise
+## community strings:
+## @AS_NUMBER@:@NO_ADVERT@ - do not advertise via bgp
+## @AS_NUMBER@:@ADVERT@ - advertise it
+
+
+filter tag_direct {
+# The ifname if match will match any route from a "calico advertisable interface"
+# and tag it with the advertise community string.  All other routes will also be 
+# accepted, but will be taged with the no advertise string
+# We start off unsetting all community strings on the route as a safety measure.
+# 
+# Update the ifname list if we have more interface types in Calico.  The dummy1
+# match is important.  There are "loopback" addresses we may want to advertise,
+# and those we don't.  Therefore, a loopback address that shouldn't be advertised
+# should be aliases on dummy0, and those that should be advertised are aliases
+# on dummy1.
+
+bgp_community.empty;
+if ( (ifname ~ "tap*") || (ifname ~ "veth*") || (ifname = "dummy1") ) then 
+   {
+	bgp_community.add ((@AS_NUMBER@,@ADVERT@));
+	accept;
+   } else {
+	bgp_community.add ((@AS_NUMBER,@NO_ADVERT@));
+	accept;
    }
-   reject;
+filter export_bgp {
+# if a route is tagged with the export community string, then we will export it,
+# first stripping off the community strings (we don't want to leak internal Calico
+# community strings - they may conflict with other bits of infra - we can't assume the
+# operator has impecible BGP hygine.
+# All other routes are rejected (not exported).
+
+if (@AS_NUMBER@,@ADVERT@) ~ bgp_community then 
+   { 
+     bgp_community.empty;
+     accept;
+   } else {
+      reject;
+   }
 }
 
 # Configure synchronization between BIRD's routing tables and the
