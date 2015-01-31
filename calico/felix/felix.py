@@ -650,6 +650,9 @@ class FelixAgent(object):
                 # Flush the message queue.
                 if sock.type == Socket.TYPE_EP_REQ:
                     self.endpoint_queue.clear()
+                    if self.resync_id is not None:
+                        # The resync we were doing has officially failed.
+                        self.complete_endpoint_resync(False)
                 elif sock.type == Socket.TYPE_ACL_REQ:
                     self.acl_queue.clear()
 
