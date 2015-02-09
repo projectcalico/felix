@@ -20,6 +20,7 @@ import os
 import os.path
 import setuptools
 
+
 def collect_requirements():
     def filter_requirements(filters, file):
         for reqfilter in filters:
@@ -34,7 +35,7 @@ def collect_requirements():
     # setup.py regardless of how you execute it. It's tempting to use __file__
     # but that only works if setup.py is executed directly, otherwise it all
     # goes terribly wrong.
-    directory =  os.path.dirname(
+    directory = os.path.dirname(
         os.path.abspath(inspect.getfile(inspect.currentframe()))
     )
 
@@ -61,11 +62,12 @@ def collect_requirements():
 
     return reqs
 
+
 setuptools.setup(
-    name = "calico",
-    version = "0.11",
-    packages = setuptools.find_packages(),
-    entry_points = {
+    name="calico",
+    version="0.11",
+    packages=setuptools.find_packages(),
+    entry_points={
         'console_scripts': [
             'calico-acl-manager = calico.acl_manager.acl_manager:main',
             'calico-felix = calico.felix.felix:main',
@@ -74,5 +76,8 @@ setuptools.setup(
             'calico = calico.openstack.mech_calico:CalicoMechanismDriver',
         ],
     },
-    install_requires=collect_requirements()
+    install_requires=collect_requirements(),
+    test_suite='nose.collector',
+    tests_require=["nose", "mock"],
+    setup_requires=['nose>=1.0'],
 )
