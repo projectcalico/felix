@@ -80,7 +80,8 @@ setuptools.setup(
     test_suite='nose.collector',
     tests_require=[
         "nose>=1.0",  # To use nose.collector.
-        "mock"
+        "mock",
+        "coverage",
     ],
     setup_requires=['nose>=1.0'],  # Required to provide "setup.py nosetests" command.
 )
