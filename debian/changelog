@@ -1,4 +1,4 @@
-calico (0.12.2~rc1) trusty; urgency=medium
+calico (0.12.2~rc3) trusty; urgency=medium
 
   * Temporary workaround for ipset maximum size.
 
