@@ -23,16 +23,11 @@ Calico common utilities.
 """
 import logging
 import logging.handlers
+import netaddr
 import os
 import re
 import sys
 import errno
-
-# Various useful regular expressions.
-IPV4_REGEX = re.compile("^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
-IPV6_REGEX = re.compile("^[a-f0-9]+:[:a-f0-9]+$")
-INT_REGEX  = re.compile("^[0-9]+$")
-
 
 AGENT_TYPE_CALICO = 'Calico agent'
 FORMAT_STRING = '%(asctime)s [%(levelname)s] %(name)s %(lineno)d: %(message)s'
@@ -63,20 +58,24 @@ def validate_ipv4_addr(addr):
     """
     Validates that an IP v4 address is valid. Returns true if valid, false if
     not.
-
-    Does a fairly basic check, so can be fooled by some addresses.
     """
-    return IPV4_REGEX.match(addr)
+    try:
+        ip = netaddr.IPAddress(addr, version=4)
+        return True
+    except (netaddr.core.AddrFormatError, ValueError):
+        return False
 
 
 def validate_ipv6_addr(addr):
     """
     Validates that an IP v6 address is valid. Returns true if valid, false if
     not.
-
-    Does a fairly basic check, so can be fooled by some addresses.
     """
-    return IPV6_REGEX.match(addr)
+    try:
+        ip = netaddr.IPAddress(addr, version=6)
+        return True
+    except (netaddr.core.AddrFormatError, ValueError):
+        return False
 
 
 def mkdir_p(path):

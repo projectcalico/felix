@@ -671,7 +671,7 @@ class TestTimings(TestFelixSuperclass):
         poll_result.add(TYPE_EP_REQ, resync_rsp)
         agent.run()
 
-        addrs = [ "2001::%s" + str(i) for i in range(1,6) ]
+        addrs = [ ("2001::%d" % i) for i in range(1,6) ]
         endpoints = []
         for addr in addrs:
             endpoint = CreatedEndpoint([addr], resync_id)
@@ -980,7 +980,7 @@ class TestTimings(TestFelixSuperclass):
         poll_result.add(TYPE_EP_REQ, resync_rsp)
         agent.run()
 
-        addrs = [ "2001::%s" + str(i) for i in range(1,6) ]
+        addrs = [ ("2001::%d" % i) for i in range(1,6) ]
         ep_ids = set()
         endpoints = []
         for addr in addrs:
@@ -1202,7 +1202,7 @@ class TestMessages(TestFelixSuperclass):
         agent.run()
         response = context.sent_data[TYPE_EP_REP].pop()
         self.assertEqual(response['rc'], "INVALID")
-        self.assertIn("Missing \"addr\" field", response['message'])
+        self.assertIn("Invalid address for endpoint", response['message'])
 
         for missing in ["endpoint_id"]:
             log.debug("Testing ENDPOINTDESTROYED with missing %s", missing)
@@ -1397,14 +1397,6 @@ class CreatedEndpoint(object):
     def __init__(self, addresses, resync_id="", interface=None, prefix="tap"):
         self.id = str(uuid.uuid4())
         self.mac = stub_utils.get_mac()
-        if interface:
-            self.interface = interface
-        else:
-            self.interface = prefix + self.id[:11]
-
-        self.suffix = self.interface.replace(prefix, "", 1)
-        if not prefix:
-            prefix = "tap"
 
         if interface:
             self.interface = interface
