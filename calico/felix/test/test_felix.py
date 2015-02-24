@@ -1394,9 +1394,15 @@ class CreatedEndpoint(object):
 
     addresses is a list or set of addresses; we just need to iterate over it.
     """
-    def __init__(self, addresses, resync_id="", interface=None, prefix=None):
+    def __init__(self, addresses, resync_id="", interface=None, prefix="tap"):
         self.id = str(uuid.uuid4())
         self.mac = stub_utils.get_mac()
+        if interface:
+            self.interface = interface
+        else:
+            self.interface = prefix + self.id[:11]
+
+        self.suffix = self.interface.replace(prefix, "", 1)
         if not prefix:
             prefix = "tap"
 
