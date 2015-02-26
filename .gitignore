@@ -5,3 +5,5 @@ tmp/
 *.log
 .coverage
 *.egg
+/htmlcov
+/.dir-locals.el

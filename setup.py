@@ -64,10 +64,10 @@ def collect_requirements():
 
 
 setuptools.setup(
-    name="calico",
-    version="0.11",
-    packages=setuptools.find_packages(),
-    entry_points={
+    name = "calico",
+    version = "0.12.1",
+    packages = setuptools.find_packages(),
+    entry_points = {
         'console_scripts': [
             'calico-acl-manager = calico.acl_manager.acl_manager:main',
             'calico-felix = calico.felix.felix:main',

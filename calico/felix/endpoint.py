@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 # Copyright (c) 2014 Metaswitch Networks
 # All Rights Reserved.
 #
@@ -21,6 +20,7 @@ felix.endpoint
 
 Contains Felix logic to manage endpoints and their configuration.
 """
+from calico import common
 from calico.felix import devices
 from calico.felix import frules
 from calico.felix import futils
@@ -28,6 +28,8 @@ import logging
 
 log = logging.getLogger(__name__)
 
+class InvalidAddress(Exception):
+    pass
 
 class Address(object):
     """
@@ -35,17 +37,25 @@ class Address(object):
     does not use). The input *fields* parameter is the fields from the API
     ENDPOINTCREATED (or other ENDPOINT*) request, of which we just need the
     address.
+
+    Raises KeyError if there is a missing "addr" field in the parameters.
     """
     def __init__(self, fields):
         #*********************************************************************#
-        #* An address must have an IP field, and so if we get one that does  *#
-        #* not have one we should throw an exception.                        *#
+        #* This constructor throws InvalidAddress if there is a missing or   *#
+        #* invalid field.                                                    *#
         #*********************************************************************#
-        self.ip = fields['addr'].encode('ascii')
-        if ":" in self.ip:
+        try:
+            self.ip = fields['addr'].encode('ascii')
+        except KeyError:
+            raise InvalidAddress
+
+        if common.validate_ip_addr(self.ip, 4):
+            self.type = futils.IPV4
+        elif common.validate_ip_addr(self.ip, 6):
             self.type = futils.IPV6
         else:
-            self.type = futils.IPV4
+            raise InvalidAddress
 
 
 class Endpoint(object):
@@ -57,14 +67,14 @@ class Endpoint(object):
     STATE_DISABLED = "disabled"
     STATES         = [STATE_ENABLED, STATE_DISABLED]
 
-    def __init__(self, uuid, mac):
-        self.uuid           = uuid.encode('ascii')
-        self.suffix         = uuid.encode('ascii')[:11]
-        self.tap            = "tap" + self.suffix
-        self.mac            = mac.encode('ascii')
+    def __init__(self, uuid, mac, interface, prefix):
+        self.uuid = uuid.encode('ascii')
+        self.mac = mac.encode('ascii')
+        self.interface = interface.encode('ascii')
+        self.suffix = interface.replace(prefix, "", 1)
 
         # Addresses is a set of Address objects.
-        self.addresses      = set()
+        self.addresses = set()
 
         #*********************************************************************#
         #* pending_resync is set True when we have triggered a resync and    *#
@@ -86,18 +96,33 @@ class Endpoint(object):
         #* first set up. If this is not a new endpoint, then we should leave *#
         #* any ACLs in place from when they were last configured.            *#
         #*********************************************************************#
-        self.acl_data       = None   # ACL data structure
+        self.acl_data = None
 
         # Assume disabled until we know different
-        self.state          = Endpoint.STATE_DISABLED
+        self.state = Endpoint.STATE_DISABLED
 
-    def remove(self):
-        # Delete a programmed endpoint. Remove the rules only, since the routes
-        # will vanish in due course when the tap interface goes.
-        frules.del_rules(self.suffix, futils.IPV4)
-        frules.del_rules(self.suffix, futils.IPV6)
+    def remove(self, iptables_state):
+        """
+        Delete a programmed endpoint. Remove the routes, then the rules.
+        """
+        if devices.interface_exists(self.interface):
+            for type in (futils.IPV4, futils.IPV6):
+                try:
+                    ips = devices.list_interface_ips(type, self.interface)
+                    for ip in ips:
+                        devices.del_route(type, ip, self.interface)
+                except futils.FailedSystemCall:
+                    # There is a window where the interface gets deleted under
+                    # our feet. If it has gone now, ignore the error, otherwise
+                    # rethrow it.
+                    if devices.interface_exists(self.interface):
+                        raise
+                    break
 
-    def program_endpoint(self):
+        frules.del_rules(iptables_state, self.suffix, futils.IPV4)
+        frules.del_rules(iptables_state, self.suffix, futils.IPV6)
+
+    def program_endpoint(self, iptables_state):
         """
         Given an endpoint, make the programmed state match the desired state,
         setting up rules and creating chains and ipsets, but not putting
@@ -122,37 +147,37 @@ class Endpoint(object):
         # Declare some utility functions
         def add_routes(routes, type):
             for route in routes:
-                log.info("Add route to %s address %s for tap %s" %
-                         (type, route, self.tap))
-                devices.add_route(type, route, self.tap, self.mac)
+                log.info("Add route to %s address %s for interface %s",
+                         type, route, self.interface)
+                devices.add_route(type, route, self.interface, self.mac)
 
         def remove_routes(routes, type):
             for route in routes:
-                log.info("Remove extra %s route to address %s for tap %s" %
-                         (type, route, self.tap))
-                devices.del_route(type, route, self.tap)
+                log.info("Remove extra %s route to address %s for interface %s",
+                         type, route, self.interface)
+                devices.del_route(type, route, self.interface)
 
-        if not devices.tap_exists(self.tap):
+        if not devices.interface_exists(self.interface):
             if self.state == Endpoint.STATE_ENABLED:
-                log.error("Unable to configure non-existent interface %s" %
-                          self.tap)
+                log.error("Unable to configure non-existent interface %s",
+                          self.interface)
                 return True
             else:
-                # No tap interface, but disabled. This is not an error, and
-                # there is nothing to do.
-                log.debug("Tap interface missing when disabling endpoint %s" %
+                # No interface, but disabled. This is not an error, and there
+                # is nothing to do.
+                log.debug("Interface missing when disabling endpoint %s",
                           self.uuid)
                 return False
 
         # If the interface is down, we can't configure it.
-        if not devices.interface_up(self.tap):
-            log.error("Unable to configure interface %s: interface is down." %
-                      self.tap)
+        if not devices.interface_up(self.interface):
+            log.error("Unable to configure interface %s: interface is down.",
+                      self.interface)
             return True
 
-        # Configure the tap interface.
+        # Configure the interface.
         if self.state == Endpoint.STATE_ENABLED:
-            devices.configure_tap(self.tap)
+            devices.configure_interface(self.interface)
 
             # Build up list of addresses that should be present
             ipv4_intended = set([addr.ip.encode('ascii')
@@ -166,14 +191,15 @@ class Endpoint(object):
             ipv4_intended = set()
             ipv6_intended = set()
 
-        ipv4_existing   = devices.list_tap_ips(futils.IPV4, self.tap)
-        ipv6_existing   = devices.list_tap_ips(futils.IPV6, self.tap)
+        ipv4_existing = devices.list_interface_ips(futils.IPV4, self.interface)
+        ipv6_existing = devices.list_interface_ips(futils.IPV6, self.interface)
 
         # Determine the addresses that won't be changed.
         unchanged = ((ipv4_intended & ipv4_existing) |
                      (ipv6_intended & ipv6_existing))
 
-        log.debug("Already got routes for %s for tap %s", unchanged, self.tap)
+        log.debug("Already got routes for %s for interface %s",
+                  unchanged, self.interface)
 
         #*********************************************************************#
         #* Add and remove routes. Add any route we need but don't have, and  *#
@@ -190,9 +216,11 @@ class Endpoint(object):
         #* if the endpoint is disabled, then it has no permitted addresses,  *#
         #* so it cannot send any data.                                       *#
         #*********************************************************************#
-        frules.set_ep_specific_rules(self.suffix, self.tap, futils.IPV4,
+        frules.set_ep_specific_rules(iptables_state,
+                                     self.suffix, self.interface, futils.IPV4,
                                      ipv4_intended, self.mac)
-        frules.set_ep_specific_rules(self.suffix, self.tap, futils.IPV6,
+        frules.set_ep_specific_rules(iptables_state,
+                                     self.suffix, self.interface, futils.IPV6,
                                      ipv6_intended, self.mac)
 
         #*********************************************************************#

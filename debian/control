@@ -68,8 +68,8 @@ Architecture: all
 Depends:
  calico-common (= ${binary:Version}),
  ipset,
- python-pip,
  python-zmq,
+ python-netaddr,
  ${misc:Depends},
  ${python:Depends},
  ${shlibs:Depends}

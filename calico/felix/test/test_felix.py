@@ -20,6 +20,7 @@ Top level tests for Felix.
 """
 import logging
 import mock
+import pkg_resources
 import socket
 import sys
 import time
@@ -36,15 +37,10 @@ import calico.felix.test.stub_zmq as stub_zmq
 from calico.felix.test.stub_zmq import (TYPE_EP_REQ, TYPE_EP_REP,
                                         TYPE_ACL_REQ, TYPE_ACL_SUB)
 sys.modules['zmq'] = stub_zmq
+import calico.felix.fsocket as fsocket
 
-# Hide iptc, since we do not have it.
-sys.modules['iptc'] = __import__('calico.felix.test.stub_empty')
-
-# Replace calico.felix.fiptables with calico.felix.test.stub_fiptables
-import calico.felix.test.stub_fiptables
-sys.modules['calico.felix.fiptables'] = __import__('calico.felix.test.stub_fiptables')
-calico.felix.fiptables = calico.felix.test.stub_fiptables
-stub_fiptables = calico.felix.test.stub_fiptables
+# Stub out a few bits of fiptables.
+import calico.felix.test.stub_fiptables as stub_fiptables
 
 #*****************************************************************************#
 #* Load calico.felix.devices and calico.felix.test.stub_devices, and the     *#
@@ -58,16 +54,22 @@ import calico.felix.test.stub_ipsets as stub_ipsets
 
 # Now import felix, and away we go.
 import calico.felix.felix as felix
+import calico.felix.fiptables as fiptables
 import calico.felix.endpoint as endpoint
 import calico.felix.frules as frules
 import calico.common as common
 from calico.felix.futils import IPV4, IPV6
 from calico.felix.endpoint import Endpoint
-from calico.felix.fsocket import Socket 
+from calico.felix.fsocket import Socket
 
 # IPtables state.
 expected_iptables = stub_fiptables.TableState()
 expected_ipsets = stub_ipsets.IpsetState()
+
+# Dummy out package resolution, so it works from a git checkout
+def dummy_package(name):
+    return "calico version"
+pkg_resources.get_distribution = dummy_package
 
 # Default config path.
 config_path = "calico/felix/test/data/felix_debug.cfg"
@@ -75,7 +77,7 @@ config_path = "calico/felix/test/data/felix_debug.cfg"
 # Logger
 log = logging.getLogger(__name__)
 
-class TestBasic(unittest.TestCase):
+class TestFelixSuperclass(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # Completely replace the devices and ipsets modules.
@@ -83,40 +85,41 @@ class TestBasic(unittest.TestCase):
         endpoint.devices = stub_devices
         cls.real_ipsets = calico.felix.ipsets
         frules.ipsets = stub_ipsets
+        cls.real_TableState = fiptables.TableState
+        calico.felix.fiptables.TableState = stub_fiptables.TableState
 
     @classmethod
     def tearDownClass(cls):
         # Reinstate the modules we overwrote
         endpoint.devices = cls.real_devices
         frules.ipsets = cls.real_ipsets
-
-    def create_patch(self, name):
-        return thing
+        fiptables.TableState = cls.real_TableState
 
     def setUp(self):
         # Mock out time
         patcher = mock.patch('calico.felix.futils.time_ms')
         patcher.start().side_effect = stub_utils.get_time
         self.addCleanup(patcher.stop)
-        
+
         stub_utils.set_time(0)
-        stub_fiptables.reset_current_state()
         stub_devices.reset()
         stub_ipsets.reset()
 
-        expected_iptables.reset()
+        # Set the expected IP tables state to be clean.
+        expected_iptables.set_empty()
         expected_ipsets.reset()
 
     def tearDown(self):
         pass
 
+
+class TestBasic(TestFelixSuperclass):
     def test_startup(self):
         common.default_logging()
         context = stub_zmq.Context()
         agent = felix.FelixAgent(config_path, context)
 
-        set_expected_global_rules()
-        stub_fiptables.check_state(expected_iptables)
+        agent.iptables_state.check_state(expected_iptables)
         stub_ipsets.check_state(expected_ipsets)
 
         self.assertEqual(agent.hostname, "test_hostname")
@@ -131,8 +134,25 @@ class TestBasic(unittest.TestCase):
         context.add_poll_result(0)
         agent.run()
 
-        set_expected_global_rules()
-        stub_fiptables.check_state(expected_iptables)
+        agent.iptables_state.check_state(expected_iptables)
+        stub_ipsets.check_state(expected_ipsets)
+
+        # Send an empty response to the RESYNC request.
+        resync_req = context.sent_data[TYPE_EP_REQ].pop()
+        log.debug("Resync request : %s" % resync_req)
+        self.assertFalse(context.sent_data_present())
+        resync_id = resync_req['resync_id']
+        resync_rsp = { 'type': "RESYNCSTATE",
+                       'endpoint_count': 0,
+                       'interface_prefix': "tap",
+                       'rc': "SUCCESS",
+                       'message': "hello" }
+
+        poll_result = context.add_poll_result(0)
+        poll_result.add(TYPE_EP_REQ, resync_rsp)
+        agent.run()
+
+        expected_iptables.set_expected_global_rules()
         stub_ipsets.check_state(expected_ipsets)
 
     def test_main_flow(self):
@@ -152,6 +172,7 @@ class TestBasic(unittest.TestCase):
         resync_id = resync_req['resync_id']
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': 1,
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
 
@@ -167,7 +188,6 @@ class TestBasic(unittest.TestCase):
         poll_result.add(TYPE_EP_REP, endpoint.create_req)
         agent.run()
 
-        log.debug("Create tap interface %s", endpoint.tap)
         poll_result = context.add_poll_result(150)
         agent.run()
 
@@ -190,9 +210,10 @@ class TestBasic(unittest.TestCase):
         poll_result.add(TYPE_ACL_REQ, acl_rsp)
 
         # Check the rules are what we expect.
-        set_expected_global_rules()
-        add_endpoint_rules(endpoint.suffix, endpoint.tap, addr, None, endpoint.mac)
-        stub_fiptables.check_state(expected_iptables)
+        expected_iptables.set_expected_global_rules()
+        expected_iptables.add_endpoint_rules(endpoint.suffix, endpoint.interface,
+                                             addr, None, endpoint.mac)
+        agent.iptables_state.check_state(expected_iptables)
         add_endpoint_ipsets(endpoint.suffix)
         stub_ipsets.check_state(expected_ipsets)
 
@@ -251,10 +272,11 @@ class TestBasic(unittest.TestCase):
         poll_result.add(TYPE_ACL_SUB, acl_req, endpoint.id)
         agent.run()
 
-        stub_fiptables.check_state(expected_iptables)
+        agent.iptables_state.check_state(expected_iptables)
+
         expected_ipsets.add("felix-from-icmp-" + endpoint.suffix, "0.0.0.0/1")
         expected_ipsets.add("felix-from-icmp-" + endpoint.suffix, "128.0.0.0/1")
-        expected_ipsets.add("felix-from-port-" + endpoint.suffix, "1.2.3.0/24,tcp:0")
+        expected_ipsets.add("felix-from-port-" + endpoint.suffix, "1.2.3.0/24,tcp:1-65535")
         expected_ipsets.add("felix-from-port-" + endpoint.suffix, "0.0.0.0/1,tcp:80")
         expected_ipsets.add("felix-from-port-" + endpoint.suffix, "128.0.0.0/1,tcp:80")
 
@@ -287,21 +309,62 @@ class TestBasic(unittest.TestCase):
         self.assertEqual(acl_req['endpoint_id'], endpoint2.id)
         self.assertFalse(context.sent_data_present())
 
-        add_endpoint_rules(endpoint2.suffix, endpoint2.tap, addr2, None, endpoint2.mac)
-        stub_fiptables.check_state(expected_iptables)
+        expected_iptables.add_endpoint_rules(endpoint2.suffix, endpoint2.interface,
+                                             addr2, None, endpoint2.mac)
+        agent.iptables_state.check_state(expected_iptables)
         add_endpoint_ipsets(endpoint2.suffix)
-        stub_ipsets.check_state(expected_ipsets)
+        agent.iptables_state.check_state(expected_iptables)
 
         # OK, finally wind down with an ENDPOINTDESTROYED message for that second endpoint.
         poll_result = context.add_poll_result(300)
         poll_result.add(TYPE_EP_REP, endpoint2.destroy_req)
-        stub_devices.del_tap(endpoint2.tap)
+        stub_devices.del_interface(endpoint2.interface)
         agent.run()
 
         # Rebuild and recheck the state. Only the first endpoint still exists.
-        set_expected_global_rules()
-        add_endpoint_rules(endpoint.suffix, endpoint.tap, addr, None, endpoint.mac)
-        stub_fiptables.check_state(expected_iptables)
+        expected_iptables.set_expected_global_rules()
+        expected_iptables.add_endpoint_rules(endpoint.suffix, endpoint.interface,
+                                             addr, None, endpoint.mac)
+        agent.iptables_state.check_state(expected_iptables)
+
+    def test_destroy_absent_endpoint(self):
+        """
+        Test receiving ENDPOINTDESTROYED for a non-existent endpoint.
+        """
+        common.default_logging()
+        context = stub_zmq.Context()
+        agent = felix.FelixAgent(config_path, context)
+        context.add_poll_result(0)
+        agent.run()
+
+        # Now we want to reply to the RESYNC request.
+        resync_req = context.sent_data[TYPE_EP_REQ].pop()
+        log.debug("Resync request : %s" % resync_req)
+        self.assertFalse(context.sent_data_present())
+        resync_id = resync_req['resync_id']
+        resync_rsp = { 'type': "RESYNCSTATE",
+                       'endpoint_count': 0,
+                       'interface_prefix': "tap",
+                       'rc': "SUCCESS",
+                       'message': "hello" }
+
+        poll_result = context.add_poll_result(50)
+        poll_result.add(TYPE_EP_REQ, resync_rsp)
+        agent.run()
+
+        # Send ENDPOINTDESTROYED for an endpoint that does not exist.
+        addr = "1.2.3.4"
+        endpoint = CreatedEndpoint([addr])
+        log.debug("Build endpoint destroyed : %s", endpoint.id)
+        poll_result = context.add_poll_result(100)
+        poll_result.add(TYPE_EP_REP, endpoint.destroy_req)
+        agent.run()
+
+        #*********************************************************************#
+        #* Expect an ENDPOINTDESTROYED response saying NOTEXIST.             *#
+        #*********************************************************************#
+        endpoint_destroyed_rsp = context.sent_data[TYPE_EP_REP].pop()
+        self.assertEqual(endpoint_destroyed_rsp['rc'], "NOTEXIST")
 
     def test_rule_reordering(self):
         # TODO: Want to check that with extra rules, the extras get tidied up.
@@ -312,38 +375,7 @@ class TestBasic(unittest.TestCase):
         pass
 
 
-class TestTimings(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # Completely replace the devices and ipsets modules.
-        cls.real_devices = calico.felix.devices
-        endpoint.devices = stub_devices
-        cls.real_ipsets = calico.felix.ipsets
-        frules.ipsets = stub_ipsets
-
-    @classmethod
-    def tearDownClass(cls):
-        # Reinstate the modules we overwrote
-        endpoint.devices = cls.real_devices
-        frules.ipsets = cls.real_ipsets
-
-    def setUp(self):
-        # Mock out time
-        patcher = mock.patch('calico.felix.futils.time_ms')
-        patcher.start().side_effect = stub_utils.get_time
-        self.addCleanup(patcher.stop)
-        
-        stub_utils.set_time(0)
-        stub_fiptables.reset_current_state()
-        stub_devices.reset()
-        stub_ipsets.reset()
-
-        expected_iptables.reset()
-        expected_ipsets.reset()
-
-    def tearDown(self):
-        pass
-
+class TestTimings(TestFelixSuperclass):
     def test_resync(self):
         """
         Test the resync flows.
@@ -371,6 +403,7 @@ class TestTimings(unittest.TestCase):
         resync_id = resync_req['resync_id']
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': "0",
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
 
@@ -395,6 +428,7 @@ class TestTimings(unittest.TestCase):
         resync_id = resync_req['resync_id']
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': "2",
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
 
@@ -403,7 +437,7 @@ class TestTimings(unittest.TestCase):
         poll_result.add(TYPE_EP_REQ, resync_rsp)
         agent.run()
         self.assertFalse(context.sent_data_present())
-       
+
         # Send an endpoint created message to Felix.
         addr = '1.2.3.4'
         endpoint = CreatedEndpoint([addr], resync_id)
@@ -467,6 +501,7 @@ class TestTimings(unittest.TestCase):
         resync_id = resync_req['resync_id']
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': "0",
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
 
@@ -493,7 +528,7 @@ class TestTimings(unittest.TestCase):
                         {'type': "HEARTBEAT", 'rc': "SUCCESS"})
         agent.run()
         self.assertFalse(context.sent_data_present())
-      
+
         # Now we should get another keepalive sent at 14 seconds on ACL_REQ,
         # and 11 on EP_REQ
         poll_result = context.add_poll_result(11001)
@@ -535,12 +570,19 @@ class TestTimings(unittest.TestCase):
         resync_id = resync_req['resync_id']
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': "0",
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
 
         # Send keepalives on the connections that expect them
         poll_result = context.add_poll_result(0)
         poll_result.add(TYPE_EP_REQ, resync_rsp)
+        agent.run()
+
+        # Send keepalives on the connections that expect them. This must not be
+        # combined with the poll above, as only after the first resync does
+        # Felix start listening on other sockets.
+        poll_result = context.add_poll_result(0)
         poll_result.add(TYPE_EP_REP, {'type': "HEARTBEAT"})
         poll_result.add(TYPE_ACL_SUB, {'type': "HEARTBEAT"}, 'aclheartbeat')
         agent.run()
@@ -622,13 +664,14 @@ class TestTimings(unittest.TestCase):
         poll_request = context.add_poll_result(120000)
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': "5",
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
 
         poll_result.add(TYPE_EP_REQ, resync_rsp)
         agent.run()
 
-        addrs = [ "2001::%s" + str(i) for i in range(1,6) ]
+        addrs = [ ("2001::%d" % i) for i in range(1,6) ]
         endpoints = []
         for addr in addrs:
             endpoint = CreatedEndpoint([addr], resync_id)
@@ -722,7 +765,7 @@ class TestTimings(unittest.TestCase):
             poll_result.add(TYPE_ACL_REQ,
                             {'type': "GETACLSTATE", 'rc': "SUCCESS", 'message': ""})
 
-            agent.run()      
+            agent.run()
 
     def test_queues(self):
         """
@@ -748,6 +791,7 @@ class TestTimings(unittest.TestCase):
         agent.run()
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': "0",
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
 
@@ -802,7 +846,7 @@ class TestTimings(unittest.TestCase):
             self.assertEqual(acl_req['endpoint_id'], endpoints[i - 1].id)
             poll_result.add(TYPE_ACL_REQ,
                             {'type': "GETACLSTATE", 'rc': "SUCCESS", 'message': "" })
- 
+
             # Heartbeats for the other connections.
             keepalive_rsp = context.sent_data[TYPE_EP_REP].pop()
             self.assertEqual(keepalive_rsp['type'], "HEARTBEAT")
@@ -883,6 +927,7 @@ class TestTimings(unittest.TestCase):
         resync_id = resync_req['resync_id']
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': 0,
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
 
@@ -929,12 +974,13 @@ class TestTimings(unittest.TestCase):
         poll_result = context.add_poll_result(0)
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': "5",
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
         poll_result.add(TYPE_EP_REQ, resync_rsp)
         agent.run()
 
-        addrs = [ "2001::%s" + str(i) for i in range(1,6) ]
+        addrs = [ ("2001::%d" % i) for i in range(1,6) ]
         ep_ids = set()
         endpoints = []
         for addr in addrs:
@@ -974,10 +1020,11 @@ class TestTimings(unittest.TestCase):
         ep_ids.add(new_endpoint.id)
 
         rm_endpoint = endpoints.pop()
-                              
+
         poll_result = context.add_poll_result(0)
         resync_rsp = { 'type': "RESYNCSTATE",
                        'endpoint_count': "4",
+                       'interface_prefix': "tap",
                        'rc': "SUCCESS",
                        'message': "hello" }
         poll_result.add(TYPE_EP_REQ, resync_rsp)
@@ -1018,7 +1065,288 @@ class TestTimings(unittest.TestCase):
         endpoint_created_rsp = context.sent_data[TYPE_EP_REP].pop()
         self.assertEqual(endpoint_created_rsp['rc'], "SUCCESS")
         self.assertEqual(ep_ids, set(agent.endpoints.keys()))
-       
+
+
+class TestInterfacePrefix(TestFelixSuperclass):
+    def test_interface_specification(self):
+        """
+        Test with a non-standard interface setup.
+        """
+        common.default_logging()
+        context = stub_zmq.Context()
+        agent = felix.FelixAgent(config_path, context)
+        context.add_poll_result(0)
+        agent.run()
+
+        # Now we want to reply to the RESYNC request.
+        resync_req = context.sent_data[TYPE_EP_REQ].pop()
+        log.debug("Resync request : %s" % resync_req)
+        self.assertFalse(context.sent_data_present())
+        resync_id = resync_req['resync_id']
+        resync_rsp = { 'type': "RESYNCSTATE",
+                       'endpoint_count': 1,
+                       'interface_prefix': "veth",
+                       'rc': "SUCCESS",
+                       'message': "hello" }
+
+        poll_result = context.add_poll_result(50)
+        poll_result.add(TYPE_EP_REQ, resync_rsp)
+        agent.run()
+
+        # Felix expects one endpoint created message - give it what it wants
+        addr = "1.2.3.4"
+        endpoint = CreatedEndpoint([addr], prefix="veth")
+        log.debug("Build first endpoint created : %s", endpoint.id)
+        poll_result = context.add_poll_result(100)
+        poll_result.add(TYPE_EP_REP, endpoint.create_req)
+        agent.run()
+
+        poll_result = context.add_poll_result(150)
+        agent.run()
+
+        #*********************************************************************#
+        #* As soon as that endpoint has been made to exist, we should see an *#
+        #* ACL request coming through, and a response to the endpoint        *#
+        #* created.  We send a reply to that now.                            *#
+        #*********************************************************************#
+        endpoint_created_rsp = context.sent_data[TYPE_EP_REP].pop()
+        self.assertEqual(endpoint_created_rsp['rc'], "SUCCESS")
+
+        acl_req = context.sent_data[TYPE_ACL_REQ].pop()
+        self.assertFalse(context.sent_data_present())
+        self.assertEqual(acl_req['endpoint_id'], endpoint.id)
+
+        acl_rsp = { 'type': "GETACLSTATE",
+                    'rc': "SUCCESS",
+                    'message': "" }
+        poll_result = context.add_poll_result(200)
+        poll_result.add(TYPE_ACL_REQ, acl_rsp)
+
+        # Check the rules are what we expect.
+        expected_iptables.set_expected_global_rules("veth")
+        expected_iptables.add_endpoint_rules(endpoint.suffix, endpoint.interface,
+                                             addr, None, endpoint.mac)
+        agent.iptables_state.check_state(expected_iptables)
+        add_endpoint_ipsets(endpoint.suffix)
+        stub_ipsets.check_state(expected_ipsets)
+
+        #*********************************************************************#
+        #* Now give it another endpoint created, with an explicit interface. *#
+        #*********************************************************************#
+        addr = "1.2.3.5"
+        endpoint = CreatedEndpoint([addr], interface="veth_12345")
+        log.debug("Build first endpoint created : %s", endpoint.id)
+        poll_result = context.add_poll_result(200)
+        poll_result.add(TYPE_EP_REP, endpoint.create_req)
+        agent.run()
+
+        poll_result = context.add_poll_result(200)
+        agent.run()
+
+        self.assertEqual(agent.endpoints[endpoint.id].interface, "veth_12345")
+
+
+class TestMessages(TestFelixSuperclass):
+    def test_invalid_ep_requests(self):
+        """
+        Test a range of invalid EP created messages.
+        """
+        common.default_logging()
+        context = stub_zmq.Context()
+        agent = felix.FelixAgent(config_path, context)
+        # Set up interface prefix so we'll notice the messages.
+        agent.iface_prefix = "tap"
+
+        # We build a valid endpoint request, then monkey with it.
+        addr = "1.2.3.4"
+        endpoint = CreatedEndpoint([addr])
+
+        for missing in ["endpoint_id", "mac", "resync_id",
+                        "state", "addrs", "interface_name"]:
+            log.debug("Testing ENDPOINTCREATED with missing %s", missing)
+            request = endpoint.create_req.copy()
+            del request[missing]
+            poll_result = context.add_poll_result(0)
+            poll_result.add(TYPE_EP_REP, request)
+            agent.run()
+            response = context.sent_data[TYPE_EP_REP].pop()
+            self.assertEqual(response['rc'], "INVALID")
+            self.assertIn("Missing \"%s\" field" % missing, response['message'])
+
+        log.debug("Testing ENDPOINTCREATED with invalid interface")
+        request = endpoint.create_req.copy()
+        request['interface_name'] = "bloop"
+        poll_result = context.add_poll_result(0)
+        poll_result.add(TYPE_EP_REP, request)
+        agent.run()
+        response = context.sent_data[TYPE_EP_REP].pop()
+        self.assertEqual(response['rc'], "INVALID")
+        self.assertIn("Interface \"bloop\" does not start with \"tap\"",
+                      response['message'])
+
+        log.debug("Testing ENDPOINTCREATED with invalid state")
+        request = endpoint.create_req.copy()
+        request['state'] = "bloop"
+        poll_result = context.add_poll_result(0)
+        poll_result.add(TYPE_EP_REP, request)
+        agent.run()
+        response = context.sent_data[TYPE_EP_REP].pop()
+        self.assertEqual(response['rc'], "INVALID")
+        self.assertIn("Invalid state \"bloop\"", response['message'])
+
+        log.debug("Testing ENDPOINTCREATED with addresses with no IP in address")
+        request = endpoint.create_req.copy()
+        request['addrs'] = [{'gateway':"1.2.3.4"}]
+        poll_result = context.add_poll_result(0)
+        poll_result.add(TYPE_EP_REP, request)
+        agent.run()
+        response = context.sent_data[TYPE_EP_REP].pop()
+        self.assertEqual(response['rc'], "INVALID")
+        self.assertIn("Invalid address for endpoint", response['message'])
+
+        for missing in ["endpoint_id"]:
+            log.debug("Testing ENDPOINTDESTROYED with missing %s", missing)
+            request = endpoint.destroy_req.copy()
+            del request[missing]
+            poll_result = context.add_poll_result(0)
+            poll_result.add(TYPE_EP_REP, request)
+            agent.run()
+            response = context.sent_data[TYPE_EP_REP].pop()
+            self.assertEqual(response['rc'], "INVALID")
+            self.assertIn("Missing \"%s\" field" % missing, response['message'])
+
+        for missing in ["endpoint_id", "mac", "state", "addrs"]:
+            log.debug("Testing ENDPOINTUPDATED with missing %s", missing)
+            request = endpoint.create_req.copy()
+            request['type'] = "ENDPOINTUPDATED"
+            del request[missing]
+            poll_result = context.add_poll_result(0)
+            poll_result.add(TYPE_EP_REP, request)
+            agent.run()
+            response = context.sent_data[TYPE_EP_REP].pop()
+            self.assertEqual(response['rc'], "INVALID")
+            self.assertIn("Missing \"%s\" field" % missing, response['message'])
+
+        # Invalid message type
+        log.debug("Testing invalid message type")
+        request = endpoint.create_req.copy()
+        request['type'] = "ENDPOINTINVALID"
+        poll_result = context.add_poll_result(0)
+        poll_result.add(TYPE_EP_REP, request)
+        with self.assertRaisesRegexp(felix.InvalidRequest,
+                                     "Unrecognised message type"):
+            agent.run()
+
+        # TODO: Missing message type currently just produces a KeyError.
+        log.debug("Testing missing message type")
+        request = endpoint.create_req.copy()
+        del request['type']
+        poll_result = context.add_poll_result(0)
+        poll_result.add(TYPE_EP_REP, request)
+        with self.assertRaisesRegexp(KeyError, "type"):
+            agent.run()
+
+    def test_invalid_resync_responses(self):
+        """
+        Test invalid resync responses.
+        """
+        common.default_logging()
+
+        for missing in [ 'endpoint_count', 'rc', 'message',
+                         'interface_prefix', None ]:
+            with mock.patch('calico.felix.felix.FelixAgent.complete_endpoint_resync') \
+                 as mock_complete:
+                context = stub_zmq.Context()
+                agent = felix.FelixAgent(config_path, context)
+
+                resync_req = context.sent_data[TYPE_EP_REQ].pop()
+                log.debug("Resync request : %s" % resync_req)
+                self.assertFalse(context.sent_data_present())
+                resync_id = resync_req['resync_id']
+                resync_rsp = { 'type': "RESYNCSTATE",
+                               'endpoint_count': 1,
+                               'interface_prefix': "tap",
+                               'rc': "SUCCESS",
+                               'message': "hello" }
+
+                if missing is None:
+                    resync_rsp['rc'] = "BLEARGH!"
+                else:
+                    resync_rsp.pop(missing)
+                poll_result = context.add_poll_result(50)
+                poll_result.add(TYPE_EP_REQ, resync_rsp)
+                agent.run()
+
+                self.assertEqual(mock_complete.call_count, 1)
+                mock_complete.assert_has_calls([mock.call(False)])
+
+
+    def test_invalid_acl_responses(self):
+        """
+        Test sending invalid responses to GETACLSTATE. We just directly
+        inject it since the code does nothing but log it anyway.
+        """
+        common.default_logging()
+        context = stub_zmq.Context()
+        agent = felix.FelixAgent(config_path, context)
+        sock = agent.sockets[TYPE_ACL_REQ]
+
+        fields = {'message': "Hello"}
+        agent.handle_getaclstate(fsocket.Message("GETACLSTATE", fields),
+                                 sock)
+
+        fields = {'rc': "SUCCESS"}
+        agent.handle_getaclstate(fsocket.Message("GETACLSTATE", fields),
+                                 sock)
+
+        fields = {'rc': "WHOOPS", 'message': "Hello" }
+        agent.handle_getaclstate(fsocket.Message("GETACLSTATE", fields),
+                                 sock)
+
+    def test_odd_ep_requests(self):
+        """
+        Test some endpoint requests in slightly odd states.
+        """
+        common.default_logging()
+        context = stub_zmq.Context()
+        agent = felix.FelixAgent(config_path, context)
+        agent.iface_prefix = "tap"
+
+        # We build a valid endpoint request, then monkey with it.
+        addr = "1.2.3.4"
+        endpoint = CreatedEndpoint([addr])
+
+        log.debug("Testing ENDPOINTUPDATED when does not exist")
+        request = endpoint.create_req.copy()
+        request['type'] = "ENDPOINTUPDATED"
+        del request['resync_id']
+        poll_result = context.add_poll_result(0)
+        poll_result.add(TYPE_EP_REP, request)
+        agent.run()
+        response = context.sent_data[TYPE_EP_REP].pop()
+        self.assertEqual(response['rc'], "NOTEXIST")
+        self.assertIn("does not exist", response['message'])
+
+        # Now create twice - both should succeed.
+        log.debug("Issue ENDPOINTCREATED twice")
+        for loop in range(0,2):
+            request = endpoint.create_req.copy()
+            poll_result = context.add_poll_result(0)
+            poll_result.add(TYPE_EP_REP, request)
+            agent.run()
+            response = context.sent_data[TYPE_EP_REP].pop()
+            self.assertEqual(response['rc'], "SUCCESS")
+
+        log.debug("Testing ENDPOINTCREATED with empty set of addresses")
+        endpoint = CreatedEndpoint([])
+        request = endpoint.create_req.copy()
+        poll_result = context.add_poll_result(0)
+        poll_result.add(TYPE_EP_REP, request)
+        agent.run()
+        response = context.sent_data[TYPE_EP_REP].pop()
+        self.assertEqual(response['rc'], "SUCCESS")
+
+
 def get_blank_acls():
     """
     Return a blank set of ACLs, with nothing permitted.
@@ -1036,258 +1364,6 @@ def get_blank_acls():
     acls['v6']['inbound'] = []
     acls['v6']['outbound'] = []
     return acls
-
-def set_expected_global_rules():
-    """
-    Sets up the minimal global rules we expect to have.
-    """
-    expected_iptables.reset()
-
-    table = expected_iptables.tables_v4["filter"]
-    stub_fiptables.get_chain(table, "felix-TO-ENDPOINT")
-    stub_fiptables.get_chain(table, "felix-FROM-ENDPOINT")
-    stub_fiptables.get_chain(table, "felix-FORWARD")
-    stub_fiptables.get_chain(table, "felix-INPUT")
-    chain = table._chains_dict["FORWARD"]
-    chain.rules.append(stub_fiptables.Rule(IPV4, "felix-FORWARD"))
-    chain = table._chains_dict["INPUT"]
-    chain.rules.append(stub_fiptables.Rule(IPV4, "felix-INPUT"))
-
-    chain = table._chains_dict["felix-FORWARD"]
-    rule  = stub_fiptables.Rule(type, "felix-FROM-ENDPOINT")
-    rule.in_interface = "tap+"
-    chain.rules.append(rule)
-    rule  = stub_fiptables.Rule(type, "felix-TO-ENDPOINT")
-    rule.out_interface = "tap+"
-    chain.rules.append(rule)
-    rule  = stub_fiptables.Rule(type, "ACCEPT")
-    rule.in_interface = "tap+"
-    chain.rules.append(rule)
-    rule  = stub_fiptables.Rule(type, "ACCEPT")
-    rule.out_interface = "tap+"
-    chain.rules.append(rule)
-
-    chain = table._chains_dict["felix-INPUT"]
-    rule  = stub_fiptables.Rule(type, "felix-FROM-ENDPOINT")
-    rule.in_interface = "tap+"
-    chain.rules.append(rule)
-    rule  = stub_fiptables.Rule(type, "ACCEPT")
-    rule.in_interface = "tap+"
-    chain.rules.append(rule)
-
-    table = expected_iptables.tables_v4["nat"]
-    chain = table._chains_dict["PREROUTING"]
-    chain.rules.append(stub_fiptables.Rule(IPV4, "felix-PREROUTING"))
-
-    chain = stub_fiptables.get_chain(table, "felix-PREROUTING")
-    rule = stub_fiptables.Rule(IPV4)
-    rule.protocol = "tcp"
-    rule.create_tcp_match("80")
-    rule.create_target("DNAT", {'to_destination': '127.0.0.1:9697'})
-    chain.rules.append(rule)
-
-    table = expected_iptables.tables_v6["filter"]
-    stub_fiptables.get_chain(table, "felix-TO-ENDPOINT")
-    stub_fiptables.get_chain(table, "felix-FROM-ENDPOINT")
-    stub_fiptables.get_chain(table, "felix-FORWARD")
-    stub_fiptables.get_chain(table, "felix-INPUT")
-    chain = table._chains_dict["FORWARD"]
-    chain.rules.append(stub_fiptables.Rule(IPV6, "felix-FORWARD"))
-    chain = table._chains_dict["INPUT"]
-    chain.rules.append(stub_fiptables.Rule(IPV6, "felix-INPUT"))
-
-    chain = table._chains_dict["felix-FORWARD"]
-    rule  = stub_fiptables.Rule(type, "felix-FROM-ENDPOINT")
-    rule.in_interface = "tap+"
-    chain.rules.append(rule)
-    rule  = stub_fiptables.Rule(type, "felix-TO-ENDPOINT")
-    rule.out_interface = "tap+"
-    chain.rules.append(rule)
-    rule  = stub_fiptables.Rule(type, "ACCEPT")
-    rule.in_interface = "tap+"
-    chain.rules.append(rule)
-    rule  = stub_fiptables.Rule(type, "ACCEPT")
-    rule.out_interface = "tap+"
-    chain.rules.append(rule)
-
-    chain = table._chains_dict["felix-INPUT"]
-    rule  = stub_fiptables.Rule(type, "felix-FROM-ENDPOINT")
-    rule.in_interface = "tap+"
-    chain.rules.append(rule)
-    rule  = stub_fiptables.Rule(type, "ACCEPT")
-    rule.in_interface = "tap+"
-    chain.rules.append(rule)
-
-
-def add_endpoint_rules(suffix, tap, ipv4, ipv6, mac):
-    """
-    This adds the rules for an endpoint, appending to the end. This generates
-    a clean state to allow us to test that the state is correct, even after
-    it starts with extra rules etc.
-    """
-    table = expected_iptables.tables_v4["filter"]
-    chain = table._chains_dict["felix-FROM-ENDPOINT"]
-    rule = stub_fiptables.Rule(IPV4, "felix-from-%s" % suffix)
-    rule.in_interface = tap
-    chain.rules.append(rule)
-
-    chain = table._chains_dict["felix-TO-ENDPOINT"]
-    rule = stub_fiptables.Rule(IPV4, "felix-to-%s" % suffix)
-    rule.out_interface = tap
-    chain.rules.append(rule)
-
-    chain = stub_fiptables.get_chain(table, "felix-from-%s" % suffix)
-    rule = stub_fiptables.Rule(IPV4, "DROP")
-    rule.create_conntrack_match(["INVALID"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "RETURN")
-    rule.create_conntrack_match(["RELATED,ESTABLISHED"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "RETURN")
-    rule.protocol = "udp"
-    rule.create_udp_match("68", "67")
-    chain.rules.append(rule)
-
-    if ipv4 is not None:
-        rule = stub_fiptables.Rule(IPV4)
-        rule.create_target("MARK", {"set_mark": "1"})
-        rule.src = ipv4
-        rule.create_mac_match(mac)
-        chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "DROP")
-    rule.create_mark_match("!1")
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "RETURN")
-    rule.create_set_match(["felix-from-port-%s" % suffix, "dst,dst"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "RETURN")
-    rule.create_set_match(["felix-from-addr-%s" % suffix, "dst"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "RETURN")
-    rule.protocol = "icmp"
-    rule.create_set_match(["felix-from-icmp-%s" % suffix, "dst"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "DROP")
-    chain.rules.append(rule)
-
-    chain = stub_fiptables.get_chain(table, "felix-to-%s" % suffix)
-    rule = stub_fiptables.Rule(IPV4, "DROP")
-    rule.create_conntrack_match(["INVALID"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "RETURN")
-    rule.create_conntrack_match(["RELATED,ESTABLISHED"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "RETURN")
-    rule.create_set_match(["felix-to-port-%s" % suffix, "src,dst"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "RETURN")
-    rule.create_set_match(["felix-to-addr-%s" % suffix, "src"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "RETURN")
-    rule.protocol = "icmp"
-    rule.create_set_match(["felix-to-icmp-%s" % suffix, "src"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV4, "DROP")
-    chain.rules.append(rule)
-
-    table = expected_iptables.tables_v6["filter"]
-    chain = table._chains_dict["felix-FROM-ENDPOINT"]
-    rule = stub_fiptables.Rule(IPV6, "felix-from-%s" % suffix)
-    rule.in_interface = tap
-    chain.rules.append(rule)
-
-    chain = table._chains_dict["felix-TO-ENDPOINT"]
-    rule = stub_fiptables.Rule(IPV6, "felix-to-%s" % suffix)
-    rule.out_interface = tap
-    chain.rules.append(rule)
-
-    chain = stub_fiptables.get_chain(table, "felix-from-%s" % suffix)
-    rule = stub_fiptables.Rule(type, "RETURN")
-    rule.protocol = "icmpv6"
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "DROP")
-    rule.create_conntrack_match(["INVALID"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "RETURN")
-    rule.create_conntrack_match(["RELATED,ESTABLISHED"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "RETURN")
-    rule.protocol = "udp"
-    rule.create_udp_match("546", "547")
-    chain.rules.append(rule)
-
-    if ipv6 is not None:
-        rule = stub_fiptables.Rule(IPV6)
-        rule.create_target("MARK", {"set_mark": "1"})
-        rule.src = ipv6
-        rule.create_mac_match(mac)
-        chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "DROP")
-    rule.create_mark_match("!1")
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "RETURN")
-    rule.create_set_match(["felix-6-from-port-%s" % suffix, "dst,dst"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "RETURN")
-    rule.create_set_match(["felix-6-from-addr-%s" % suffix, "dst"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "RETURN")
-    rule.protocol = "icmpv6"
-    rule.create_set_match(["felix-6-from-icmp-%s" % suffix, "dst"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "DROP")
-    chain.rules.append(rule)
-
-    chain = stub_fiptables.get_chain(table, "felix-to-%s" % suffix)
-    for icmp in ["130", "131", "132", "134", "135", "136"]:
-        rule = stub_fiptables.Rule(futils.IPV6, "RETURN")
-        rule.protocol = "icmpv6"
-        rule.create_icmp6_match([icmp])
-        chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "DROP")
-    rule.create_conntrack_match(["INVALID"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "RETURN")
-    rule.create_conntrack_match(["RELATED,ESTABLISHED"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "RETURN")
-    rule.create_set_match(["felix-6-to-port-%s" % suffix, "src,dst"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "RETURN")
-    rule.create_set_match(["felix-6-to-addr-%s" % suffix, "src"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "RETURN")
-    rule.protocol = "icmpv6"
-    rule.create_set_match(["felix-6-to-icmp-%s" % suffix, "src"])
-    chain.rules.append(rule)
-
-    rule = stub_fiptables.Rule(IPV6, "DROP")
-    chain.rules.append(rule)
 
 
 def add_endpoint_ipsets(suffix):
@@ -1310,6 +1386,7 @@ def add_endpoint_ipsets(suffix):
     expected_ipsets.create("felix-6-from-addr-" + suffix, "hash:net", "inet6")
     expected_ipsets.create("felix-6-from-icmp-" + suffix, "hash:net", "inet6")
 
+
 class CreatedEndpoint(object):
     """
     Builds an object which contains all the information we might need. Useful
@@ -1317,25 +1394,35 @@ class CreatedEndpoint(object):
 
     addresses is a list or set of addresses; we just need to iterate over it.
     """
-    def __init__(self, addresses, resync_id=""):
+    def __init__(self, addresses, resync_id="", interface=None, prefix="tap"):
         self.id = str(uuid.uuid4())
         self.mac = stub_utils.get_mac()
-        self.suffix = self.id[:11]
-        self.tap = "tap" + self.suffix
+
+        if interface:
+            self.interface = interface
+        else:
+            self.interface = prefix + self.id[:11]
+
+        self.suffix = self.interface.replace(prefix, "", 1)
+
         addrs = []
         for addr in addresses:
             if "." in addr:
                 addrs.append({'gateway': "1.2.3.1", 'addr': addr})
             else:
                 addrs.append({'gateway': "2001::1234", 'addr': addr})
-                
+
         self.create_req = { 'type': "ENDPOINTCREATED",
-                     'endpoint_id': self.id,
-                     'resync_id': resync_id,
-                     'issued': str(futils.time_ms()),
-                     'mac': self.mac,
-                     'state': Endpoint.STATE_ENABLED,
-                     'addrs': addrs }
+                            'endpoint_id': self.id,
+                            'interface_name': self.interface,
+                            'resync_id': resync_id,
+                            'issued': str(futils.time_ms()),
+                            'mac': self.mac,
+                            'state': Endpoint.STATE_ENABLED,
+                            'addrs': addrs }
+
+        if interface:
+            self.create_req['interface_id'] = self.interface
 
         self.destroy_req = { 'type': "ENDPOINTDESTROYED",
                              'endpoint_id': self.id,
@@ -1343,6 +1430,4 @@ class CreatedEndpoint(object):
 
         log.debug("Create test endpoint %s", self.id)
 
-        tap_obj = stub_devices.TapInterface(self.tap)
-        stub_devices.add_tap(tap_obj)
-
+        stub_devices.add_interface(stub_devices.TapInterface(self.interface))

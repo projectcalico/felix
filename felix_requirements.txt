@@ -1,2 +1,2 @@
 pyzmq
-python-iptables>=0.7.0
+netaddr
