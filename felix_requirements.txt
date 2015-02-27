@@ -1,2 +1,3 @@
-pyzmq
 netaddr
+python-etcd
+gevent

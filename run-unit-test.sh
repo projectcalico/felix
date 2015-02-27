@@ -11,7 +11,7 @@
 # passes.
 
 #rm -rf env
-virtualenv env
+virtualenv --python=python2.6 env
 . env/bin/activate
 pip install -e .
 pip install nose mock coverage
