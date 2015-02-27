@@ -3,6 +3,8 @@
 # Monkey-patch before we do anything else...
 import json
 from gevent import monkey
+from gevent.event import AsyncResult
+
 monkey.patch_all()
 
 import logging
@@ -347,21 +349,113 @@ class DBCache(Actor):
 DB_CACHE = DBCache()
 
 
-def rule_to_iptables_updates(chain_name, rule):
-    # We require the chain that we're being put in but we may also add some additional
-    # sub-chains below.
-    required_chains = set([chain_name])
+KNOWN_RULE_KEYS = set([
+    "action",
+    "protocol",
+    "src_net",
+    "src_tag",
+    "src_ports",
+    "dst_net",
+    "dst_tag",
+    "dst_ports",
+    "icmp_type",
+])
 
-    # Now for the bit switch on rule types...
-    if rule:
-        pass
+
+def rule_to_iptables_update(chain_name, rule, on_allow="ACCEPT",
+                            on_deny="DROP"):
+    """
+    Convert a rule dict to an iptables fragment suitable to use with
+    iptables-restore.
+
+    :param str chain_name: Name of the chain this rule belongs to (used in the
+           --append)
+    :param dict[str,str|list|int] rule: Rule dict.
+    :param str on_allow: iptables action to use when the rule allows traffic.
+           For example: "ACCEPT" or "RETURN".
+    :param str on_deny: iptables action to use when the rule denies traffic.
+           For example: "DROP".
+    :return str: iptables --append fragment.
+    """
+
+    # Check we've not got any unknown fields.
+    unknown_keys = set(rule.keys()) - KNOWN_RULE_KEYS
+    assert not unknown_keys, "Unknown keys: %s" % ", ".join(unknown_keys)
+
+    # Build up the update in chunks and join them below.
+    update_fragments = ["--append", chain_name]
+    append = update_fragments.append
+
+    proto = None
+    if "protocol" in rule:
+        proto = rule["protocol"]
+        assert proto in ["tcp", "udp", "icmp", "icmpv6"]
+        append("--protocol")
+        append(proto)
+
+    for dirn in ["src", "dst"]:
+        direction = "source" if dirn == "src" else "destination"
+        # Network (CIDR).
+        net_key = dirn + "_net"
+        if net_key in rule:
+            network = rule[net_key]
+            append("--%s" % direction)
+            append(network)
+
+        # Tag, which maps to an ipset.
+        tag_key = dirn + "_tag"
+        if tag_key in rule:
+            ipset = tag_to_ipset_name(rule[tag_key])
+            append("--match set")  # Note: "set" is param to --match
+            append("--match-set")  # Note: "--match-set" is param to "set"
+            append(ipset)
+            append(dirn)
+
+        # Port lists/ranges, which we map to multiport.
+        ports_key = dirn + "_ports"
+        if ports_key in rule:
+            assert proto in ["tcp", "udp"], "Protocol %s not supported" % proto
+            ports = ','.join([str(p) for p in rule[ports_key]])
+            # multiport only supports 15 ports.
+            assert ports.count(",") + ports.count(":") < 15, "Too many ports"
+            append("--match multiport")
+            append("--%s-ports" % direction)
+            append(ports)
+
+    if "icmp_type" in rule:
+        icmp_type = rule["icmp_type"]
+        assert isinstance(icmp_type, int), "ICMP type should be an int"
+        if proto == "icmp":
+            append("--match icmp")
+            append("--icmp-type")
+            append(rule["icmp_type"])
+        else:
+            assert proto == "icmpv6"
+            append("--match icmp6")
+            append("--icmpv6-type")  # Param has different spelling to match.
+            append(rule["icmp_type"])
+
+    # Add the action
+    append("--jump")
+    if rule["action"] == "allow":
+        append(on_allow)
+    else:
+        assert rule["action"] == "deny"
+        append(on_deny)
+
+    return " ".join(str(x) for x in update_fragments)
+
+
+def tag_to_ipset_name(tag_name):
+    assert re.match(r'^\w+$', tag_name), "Tags must be alphanumeric for now"
+    return tag_name
 
 
 def monitor_etcd():
     client = etcd.Client()
 
     # Load initial dump from etcd.  First just get all the endpoints and
-    # profiles by id.  The response containsa  generation ID allowing us
+    # profiles by id.  The response contains a generation ID allowing us
     # to then start polling for updates without missing any.
     initial_dump = client.read("/calico/", recursive=True)
     profiles_by_id = {}
@@ -384,6 +478,11 @@ def monitor_etcd():
 
     wait_index = initial_dump.etcd_index
     while True:
+        if f_apply_snap and f_apply_snap.ready():
+            # Snapshot application finished, check for exceptions.
+            _log.info("Snapshot application finished.")
+            f_apply_snap.get_nowait()
+            f_apply_snap = None
         # TODO Handle deletions.
         # TODO Handle read getting too far behind (have to resync or die)
         response = client.read("/calico/",

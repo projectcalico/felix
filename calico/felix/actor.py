@@ -1,7 +1,6 @@
 # Copyright (c) Metaswitch Networks 2015. All rights reserved.
 
 import logging
-from calico.felix.felix2 import _log
 import gevent
 from gevent.event import AsyncResult
 from gevent.queue import Queue
@@ -30,6 +29,7 @@ class Actor(object):
 
     def __init__(self):
         self._event_queue = Queue()
+        # FIXME should defer to a start method.
         gevent.spawn(self._loop)
 
     def _loop(self):
