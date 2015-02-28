@@ -64,8 +64,12 @@ class IpsetUpdater(Actor):
     @actor_event
     def remove_member(self, member):
         _log.info("Removing member %s from ipset %s", member, self.name)
-        self.members.remove(member)
-        self._sync_to_ipset()
+        try:
+            self.members.remove(member)
+        except KeyError:
+            _log.info("%s was not in ipset %s", member, self.name)
+        else:
+            self._sync_to_ipset()
 
     def _load_from_ipset(self):
         try:
