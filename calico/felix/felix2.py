@@ -4,12 +4,13 @@
 from gevent import monkey
 monkey.patch_all()
 
-import json
-import socket
-import logging
 from collections import defaultdict
+import json
+import logging
 import re
+import socket
 from subprocess import CalledProcessError
+import sys
 
 import etcd
 from etcd import EtcdException
@@ -628,6 +629,8 @@ def watch_etcd():
     del endpoints_by_id
 
     last_etcd_index = initial_dump.etcd_index
+    last_value = None
+    last_key = None
     while True:
         if f_apply_snap and f_apply_snap.ready():
             # Snapshot application finished, check for exceptions.
@@ -638,22 +641,32 @@ def watch_etcd():
         # TODO Handle deletions.
         # TODO Handle read getting too far behind (have to resync or die)
         try:
+            _log.debug("About to wait for etcd update %s", last_etcd_index + 1)
             response = client.read("/calico/",
                                    wait=True,
                                    waitIndex=last_etcd_index + 1,
                                    recursive=True,
                                    timeout=0)
+            _log.debug("etcd response: %r", response)
         except EtcdException:
             _log.exception("Failed to read from etcd. wait_index=%s",
                            last_etcd_index)
             raise
         last_etcd_index = response.etcd_index
+        if response.value == last_value and response.key == last_key:
+            _log.debug("Skipping duplicate update")
+            continue
+        last_key = response.key
+        last_value = response.value
+        
         profile_id, profile = parse_if_profile(response)
         if profile_id:
+            _log.info("Scheduling profile update %s", profile_id)
             UPDATE_SEQUENCER.on_profile_change(profile_id, profile).get()
             continue
         endpoint_id, endpoint = parse_if_endpoint(response)
         if endpoint_id:
+            _log.info("Scheduling endpoint update %s", endpoint_id)
             UPDATE_SEQUENCER.on_endpoint_change(endpoint_id, endpoint).get()
             continue
 
@@ -698,8 +711,10 @@ def watchdog():
 
 
 def main():
-    logging.basicConfig(level=logging.DEBUG,
+    log_level = logging.DEBUG if '-d' in sys.argv else logging.INFO
+    logging.basicConfig(level=log_level,
         format="%(levelname).1s %(asctime)s %(process)s|%(thread)x "
                "%(filename)s:%(funcName)s:%(lineno)d %(message)s")
+    _log.info("Starting up")
     gevent.spawn_later(1, watchdog)
     gevent.spawn(_main_greenlet).join()  # Should never return
