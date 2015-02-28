@@ -360,6 +360,7 @@ class UpdateSequencer(Actor):
 
             # Create any missing ipsets.
             self._ensure_profile_ipsets_exist(profile)
+            # TODO: Remove orphaned ipsets.
 
             # Update the rules.
             if self._profile_active(profile_id):
@@ -395,7 +396,7 @@ class UpdateSequencer(Actor):
         Process an update to the given endpoint.  endpoint may be None if
         the endpoint was deleted.
         """
-        _log.info("Profile update: %s", endpoint_id)
+        _log.info("Endpoint update: %s", endpoint_id)
         if endpoint is None:
             # TODO Handle deletion.
             pass
@@ -408,49 +409,46 @@ class UpdateSequencer(Actor):
             if endpoint_id in self.endpoints_by_id:
                 _log.debug("Update to existing endpoint %s.", endpoint_id)
                 old_endpoint = self.endpoints_by_id[endpoint_id]
+                if old_endpoint == endpoint:
+                    _log.info("No change to endpoint, skipping.")
+                    return
                 old_profile_id = old_endpoint["profile"]
                 old_profile = self.profiles_by_id[old_profile_id]
                 old_tags = old_profile["tags"]
 
-                if old_profile_id != new_profile_id:
-                    # Profile has changed, recalculate tag membership.
-                    # Find the endpoint's previous contribution to the ipsets.
-                    _log.info("Profile has changed, was %s, now %s",
-                              old_profile_id, new_profile_id)
-                    for tag in old_tags:
-                        old_ips_per_tag[tag].update(
-                            old_endpoint["ip_addresses"])
-                        self.endpoint_ids_by_tag[tag].remove(endpoint_id)
-                    # Remove from the index, we'll fix up below.  No race,
-                    # we can't be interrupted.
-                    self.endpoint_ids_by_profile_id[old_profile_id].remove(
-                        endpoint_id)
+                # Find the endpoint's previous contribution to the ipsets.
+                for tag in old_tags:
+                    old_ips_per_tag[tag].update(old_endpoint["ip_addresses"])
+                    self.endpoint_ids_by_tag[tag].remove(endpoint_id)
+                # Remove from the index, we'll fix up below.  No race,
+                # we can't be interrupted.
+                self.endpoint_ids_by_profile_id[old_profile_id].remove(
+                    endpoint_id)
             else:
                 # New endpoint, implicitly had no tags before.
                 _log.info("New endpoint: %s", endpoint_id)
-                old_tags = set()
+                old_tags = []
                 old_profile_id = None
 
-            if old_profile_id != new_profile_id:
-                # Either profile change or new endpoint.  Sync the tags.
-                _log.debug("Need to sync tags.")
-                new_ips_per_tag = defaultdict(set)
-                for tag in new_tags:
-                    new_ips_per_tag[tag].update(endpoint["ip_addresses"])
-                    self.endpoint_ids_by_tag[tag].add(endpoint_id)
+            # Figure out current contribution to tags.
+            _log.debug("Need to sync tags.")
+            new_ips_per_tag = defaultdict(set)
+            for tag in new_tags:
+                new_ips_per_tag[tag].update(endpoint["ip_addresses"])
+                self.endpoint_ids_by_tag[tag].add(endpoint_id)
 
-                # Diff the set of old vs new IP addresses and apply deltas.
-                for tag in old_tags + new_tags:
-                    if tag not in self.active_ipsets_by_tag:
-                        # ipset isn't in use on this host, skip.
-                        continue
-                    ipset = self.active_ipsets_by_tag[tag]
-                    for ip in old_ips_per_tag[tag] - new_ips_per_tag[tag]:
-                        _log.debug("Removing %s from ipset for %s", ip, tag)
-                        ipset.remove_member(ip).get()
-                    for ip in new_ips_per_tag[tag] - old_ips_per_tag[tag]:
-                        _log.debug("Adding %s from ipset for %s", ip, tag)
-                        ipset.add_member(ip).get()
+            # Diff the set of old vs new IP addresses and apply deltas.
+            for tag in set(old_tags + new_tags):
+                if tag not in self.active_ipsets_by_tag:
+                    # ipset isn't in use on this host, skip.
+                    continue
+                ipset = self.active_ipsets_by_tag[tag]
+                for ip in old_ips_per_tag[tag] - new_ips_per_tag[tag]:
+                    _log.debug("Removing %s from ipset for %s", ip, tag)
+                    ipset.remove_member(ip).get()
+                for ip in new_ips_per_tag[tag] - old_ips_per_tag[tag]:
+                    _log.debug("Adding %s to ipset for %s", ip, tag)
+                    ipset.add_member(ip).get()
 
             self.endpoint_ids_by_profile_id[new_profile_id].add(endpoint_id)
             self.endpoints_by_id[endpoint_id] = endpoint
@@ -461,11 +459,11 @@ class UpdateSequencer(Actor):
                 self.local_endpoint_ids.add(endpoint_id)
                 self._ensure_profile_ipsets_exist(new_profile)
 
-                # Local endpoint, make sure profile is active.
-                for in_or_out in ["inbound", "outbound"]:
-                    chain_name = "calico-profile-%s-%s" % (new_profile_id,
-                                                           in_or_out)
-                    update_chain(chain_name, new_profile[in_or_out]).get()
+                if new_profile_id not in self.active_profile_ids:
+                    for in_or_out in ["inbound", "outbound"]:
+                        chain_name = "calico-profile-%s-%s" % (new_profile_id,
+                                                               in_or_out)
+                        update_chain(chain_name, new_profile[in_or_out]).get()
 
                 if old_profile_id and old_profile_id != new_profile_id:
                     # Old profile may be unused. Recalculate.
@@ -473,7 +471,7 @@ class UpdateSequencer(Actor):
                     self.active_profile_ids = set()
                     for endpoint_id in self.local_endpoint_ids:
                         endpoint = self.endpoints_by_id[endpoint_id]
-                        self.active_profile_ids.add(endpoint_id["profile"])
+                        self.active_profile_ids.add(endpoint["profile"])
                     # TODO: GC unused chains
 
         _log.info("Endpoint update complete.")
@@ -700,6 +698,8 @@ def watchdog():
 
 
 def main():
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG,
+        format="%(levelname).1s %(asctime)s %(process)s|%(thread)x "
+               "%(filename)s:%(funcName)s:%(lineno)d %(message)s")
     gevent.spawn_later(1, watchdog)
     gevent.spawn(_main_greenlet).join()  # Should never return
