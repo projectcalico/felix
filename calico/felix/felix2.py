@@ -50,17 +50,20 @@ class IpsetUpdater(Actor):
 
     @actor_event
     def replace_members(self, members):
+        _log.info("Replacing members of ipset %s", self.name)
         assert isinstance(members, set), "Expected members to be a set"
         self.members = members
         self._sync_to_ipset()
 
     @actor_event
     def add_member(self, member):
+        _log.info("Adding member %s to ipset %s", member, self.name)
         self.members.add(member)
         self._sync_to_ipset()
 
     @actor_event
     def remove_member(self, member):
+        _log.info("Removing member %s from ipset %s", member, self.name)
         self.members.remove(member)
         self._sync_to_ipset()
 
@@ -175,7 +178,7 @@ def extract_tags_from_profile(profile):
 
 def extract_tags_from_rule(rule):
     tags = set()
-    for key in ["source_tag", "dest_tag"]:
+    for key in ["src_tag", "dst_tag"]:
         try:
             tag = rule[key]
         except KeyError:
@@ -242,18 +245,23 @@ class UpdateSequencer(Actor):
         # turn into ipsets).
         new_active_tags = set()
         for profile_id in new_active_profile_ids:
-            _log.debug("Determining in-use tags for profile %s", profile_id)
             profile = profiles_by_id[profile_id]
-            new_active_tags.update(extract_tags_from_profile(profile))
+            tags = extract_tags_from_profile(profile)
+            new_active_tags.update(tags)
+            _log.debug("In-use tags for profile %s: %s", profile_id, tags)
 
         # Stage 3: look up IP addresses associated with endpoints.
         new_active_ipset_members_by_tag = defaultdict(set)
         for tag in new_active_tags:
             _log.debug("Determining IPs for tag %s", tag)
+            # Slight subtlety: accessing new_active_ipset_members_by_tag[tag]
+            # ensures it gets created even if there are no IPs.
+            members = new_active_ipset_members_by_tag[tag]
             for endpoint_id in new_endpoint_ids_by_tag[tag]:
                 endpoint = endpoints_by_id[endpoint_id]
-                new_active_ipset_members_by_tag[tag].update(
-                    endpoint.get("ip_addresses", []))
+                members.update(endpoint.get("ip_addresses", []))
+            _log.debug("IPs for tag %s: %s", tag, 
+                       new_active_ipset_members_by_tag[tag])
 
         # Stage 4: update live tag ipsets, creating any that are missing.
         # Since the ipset updates are async, collect the futures to wait on below.  We need them
@@ -272,12 +280,12 @@ class UpdateSequencer(Actor):
         # Shouldn't be an issue with non-snapshot updates since we sequence profile and endpoint
         # updates.
         futures = []
-        for tag, members in new_active_ipset_members_by_tag:
+        for tag, members in new_active_ipset_members_by_tag.iteritems():
             _log.debug("Updating ipset for tag %s", tag)
             if tag in self.active_ipsets_by_tag:
                 ipset = self.active_ipsets_by_tag[tag]
             else:
-                ipset = IpsetUpdater("calico_tag_%s" % tag, "hash:ip")
+                ipset = IpsetUpdater(tag_to_ipset_name(tag), "hash:ip")
                 self.active_ipsets_by_tag[tag] = ipset
             f = ipset.replace_members(members)  # Does an efficient update.
             futures.append(f)
@@ -373,7 +381,7 @@ class UpdateSequencer(Actor):
                 for endpoint_id in self.endpoint_ids_by_tag[tag]:
                     endpoint = self.endpoints_by_id[endpoint_id]
                     members.update(endpoint.get("ip_addresses", []))
-                ipset = IpsetUpdater(tag, "hash:ip")
+                ipset = IpsetUpdater(tag_to_ipset_name(tag), "hash:ip")
                 self.active_ipsets_by_tag[tag] = ipset
                 ipset.replace_members(members).get()
 
@@ -577,7 +585,7 @@ def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
 
 def tag_to_ipset_name(tag_name):
     assert re.match(r'^\w+$', tag_name), "Tags must be alphanumeric for now"
-    return tag_name
+    return "calico-tag-" + tag_name
 
 
 def watch_etcd():
