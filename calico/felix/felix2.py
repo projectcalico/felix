@@ -2,6 +2,8 @@
 
 # Monkey-patch before we do anything else...
 import json
+import socket
+from etcd import EtcdException
 from gevent import monkey
 from gevent.event import AsyncResult
 
@@ -27,8 +29,7 @@ ENDPOINT_RE = re.compile(
     r'^/calico/host/(?P<hostname>[^/]+)/endpoint/(?P<endpoint_id>[^/]+)')
 
 
-# FIXME: Temporarily use localhost as only local hostname
-OUR_HOSTNAME = "localhost"
+OUR_HOSTNAME = socket.gethostname()
 
 
 class RulesActor(Actor):
@@ -193,13 +194,23 @@ class IptablesRestore(Actor):
 IPTABLES_RESTORE = IptablesRestore()
 
 
+def extract_tags_from_profile(profile):
+    tags = set()
+    for in_or_out in ["inbound", "outbound"]:
+        for rule in profile[in_or_out]:
+            tags.update(extract_tags_from_rule(rule))
+    return tags
+
+
 def extract_tags_from_rule(rule):
     tags = set()
     for key in ["source_tag", "dest_tag"]:
         try:
-            tags.add(rule[key])
+            tag = rule[key]
         except KeyError:
             pass
+        else:
+            tags.add(tag)
     return tags
 
 
@@ -207,14 +218,18 @@ class DBCache(Actor):
     def __init__(self):
         super(DBCache, self).__init__()
 
+        # Data.
         self.profiles_by_id = {}
         self.endpoints_by_id = {}
+
+        # Indexes.
         self.endpoint_ids_by_tag = defaultdict(set)
         self.endpoint_ids_by_profile_id = defaultdict(set)
         self.local_endpoint_ids = set()
+        self.active_profile_ids = set()
 
+        # Child actors.
         self.active_ipsets_by_tag = {}
-        self.active_chains_by_id = {}
 
     @actor_event
     def apply_snapshot(self, profiles_by_id, endpoints_by_id):
@@ -257,10 +272,7 @@ class DBCache(Actor):
         new_active_tags = set()
         for profile_id in new_active_profile_ids:
             profile = profiles_by_id[profile_id]
-            for rule in profile["inbound"]:
-                new_active_tags.update(extract_tags_from_rule(rule))
-            for rule in profile["outbound"]:
-                new_active_tags.update(extract_tags_from_rule(rule))
+            new_active_tags.update(extract_tags_from_profile(profile))
 
         # Stage 3: look up IP addresses associated with endpoints.
         new_active_ipset_members_by_tag = defaultdict(set)
@@ -299,10 +311,22 @@ class DBCache(Actor):
             futures.pop().get()
 
         # Stage 5: update live profile chains
+        for profile_id in new_active_profile_ids:
+            for in_or_out in ["inbound", "outbound"]:
+                chain_name = "calico-profile-%s-%s" % (profile_id, in_or_out)
+                update_chain(chain_name, profiles_by_id[profile_id][in_or_out])
 
-        # Stage 6: update master rules to use all the profile chains.
+        # Stage 6: replace the database with the new snapshot.
+        self.profiles_by_id = profiles_by_id
+        self.endpoints_by_id = endpoints_by_id
+        self.endpoint_ids_by_tag = new_endpoint_ids_by_tag
+        self.endpoint_ids_by_profile_id = new_endpoint_ids_by_profile_id
+        self.local_endpoint_ids = new_local_endpoint_ids
+        self.active_profile_ids = new_active_profile_ids
 
-        # Stage 7: program routing rules?
+        # Stage 7: update master rules to use all the profile chains.
+
+        # Stage 8: program routing rules?
 
 
     @actor_event
@@ -315,22 +339,61 @@ class DBCache(Actor):
             # TODO: Handle deletion
             pass
         else:
-            if profile_id not in self.active_chains_by_id:
-                # Profile is not in use, just stash it.
-                self.profiles_by_id[profile_id] = profile
-            else:
-                # Profile must be in use.
-                old_profile = self.profiles_by_id[profile_id]
-                if set(profile["tags"]) != set(old_profile["tags"]):
-                    # Tags have changed, TODO track down the ipsets that need
-                    # to be updated.
-                    _log.debug("Tags of profile %s have changed.", profile_id)
-                if profile["inbound"] != old_profile["inbound"]:
-                    # TODO Handle rule updates
-                    pass
-                if profile["outbound"] != old_profile["outbound"]:
-                    # TODO Handle rule updates
-                    pass
+            # Lookup old profile, if any.
+            old_profile = self.profiles_by_id.get(profile_id, {"tags": []})
+
+            # Process any tag updates.  Do this first so that any newly-created
+            # iptables are present.
+            old_tags = set(old_profile["tags"])
+            new_tags = set(old_profile["tags"])
+            endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id,
+                                                               set())
+            for added_tag in (new_tags - old_tags):
+                self.endpoint_ids_by_tag[added_tag] += endpoint_ids
+                if added_tag in self.active_ipsets_by_tag:
+                    ipset = self.active_ipsets_by_tag[added_tag]
+                    for endpoint_id in endpoint_ids:
+                        endpoint = self.endpoints_by_id[endpoint_id]
+                        for ip in endpoint["ip_addresses"]:
+                            ipset.add_member(ip).get()
+            # TODO Commonize this duplicate code.
+            for removed_tag in (old_tags - new_tags):
+                self.endpoint_ids_by_tag[removed_tag] += endpoint_ids
+                if removed_tag in self.active_ipsets_by_tag:
+                    ipset = self.active_ipsets_by_tag[removed_tag]
+                    for endpoint_id in endpoint_ids:
+                        endpoint = self.endpoints_by_id[endpoint_id]
+                        for ip in endpoint["ip_addresses"]:
+                            ipset.remove_member(ip).get()
+
+            # Create any missing ipsets.
+            self._ensure_profile_ipsets_exist(profile)
+
+            # Update the rules.
+            if self._profile_active(profile_id):
+                for in_or_out in ["inbound", "outbound"]:
+                    # Profile in use, look for rule changes.
+                    if profile[in_or_out] != old_profile.get(in_or_out):
+                        chain_name = "calico-profile-%s-%s" % \
+                                     (profile_id, in_or_out)
+                        update_chain(chain_name, profile[in_or_out])
+
+            # Stash the profile.
+            self.profiles_by_id[profile_id] = profile
+
+    def _profile_active(self, profile_id):
+        return profile_id in self.active_profile_ids
+
+    def _ensure_profile_ipsets_exist(self, profile):
+        for tag in extract_tags_from_profile(profile):
+            if tag not in self.active_ipsets_by_tag:
+                members = set()
+                for endpoint_id in self.endpoint_ids_by_tag[tag]:
+                    endpoint = self.endpoints_by_id[endpoint_id]
+                    members.update(endpoint.get("ip_addresses", []))
+                ipset = IpsetActor(tag, "hash:ip")
+                self.active_ipsets_by_tag[tag] = ipset
+                ipset.replace_members(members).get()
 
     @actor_event
     def on_endpoint_change(self, endpoint_id, endpoint):
@@ -342,8 +405,71 @@ class DBCache(Actor):
             # TODO Handle deletion.
             pass
         else:
-            # New or updated endpoint.
-            pass
+            new_profile_id = endpoint["profile"]
+            new_profile = self.profiles_by_id[new_profile_id]
+            new_tags = new_profile["tags"]
+            old_ips_per_tag = defaultdict(set)
+
+            if endpoint_id in self.endpoints_by_id:
+                old_endpoint = self.endpoints_by_id[endpoint_id]
+                old_profile_id = old_endpoint["profile"]
+                old_profile = self.profiles_by_id[old_profile_id]
+                old_tags = old_profile["tags"]
+
+                if old_profile_id != new_profile_id:
+                    # Profile has changed, recalculate tag membership.
+                    # Find the endpoint's previous contribution to the ipsets.
+                    for tag in old_tags:
+                        old_ips_per_tag[tag].update(
+                            old_endpoint["ip_addresses"])
+                        self.endpoint_ids_by_tag[tag].remove(endpoint_id)
+
+                    self.endpoint_ids_by_profile_id[old_profile_id].remove(
+                        endpoint_id)
+            else:
+                # New endpoint, had no tags before.
+                old_tags = set()
+                old_profile_id = None
+
+            if old_profile_id != new_profile_id:
+                # Either profile change or new endpoint.  Sync the tags.
+                new_ips_per_tag = defaultdict(set)
+                for tag in new_tags:
+                    new_ips_per_tag[tag].update(endpoint["ip_addresses"])
+                    self.endpoint_ids_by_tag[tag].add(endpoint_id)
+
+                # Diff the set of old vs new IP addresses and apply deltas.
+                for tag in old_tags + new_tags:
+                    if tag not in self.active_ipsets_by_tag:
+                        # ipset isn't in use on this host, skip.
+                        continue
+                    ipset = self.active_ipsets_by_tag[tag]
+                    for ip in old_ips_per_tag[tag] - new_ips_per_tag[tag]:
+                        ipset.remove_member(ip).get()
+                    for ip in new_ips_per_tag[tag] - old_ips_per_tag[tag]:
+                        ipset.add_member(ip).get()
+
+            self.endpoint_ids_by_profile_id[new_profile_id].add(endpoint_id)
+            self.endpoints_by_id[endpoint_id] = endpoint
+
+            if endpoint["host"] == OUR_HOSTNAME:
+                # Create any missing ipsets.
+                self.local_endpoint_ids.add(endpoint_id)
+                self._ensure_profile_ipsets_exist(new_profile)
+
+                # Local endpoint, make sure profile is active.
+                for in_or_out in ["inbound", "outbound"]:
+                    chain_name = "calico-profile-%s-%s" % (new_profile_id,
+                                                           in_or_out)
+                    update_chain(chain_name, new_profile[in_or_out])
+
+                if old_profile_id and old_profile_id != new_profile_id:
+                    # Old profile may be unused. Recalculate.
+                    self.active_profile_ids = set()
+                    for endpoint_id in self.local_endpoint_ids:
+                        endpoint = self.endpoints_by_id[endpoint_id]
+                        self.active_profile_ids.add(endpoint_id["profile"])
+                    # TODO: GC unused chains
 
 
 DB_CACHE = DBCache()
@@ -362,7 +488,13 @@ KNOWN_RULE_KEYS = set([
 ])
 
 
-def rule_to_iptables_update(chain_name, rule, on_allow="ACCEPT",
+def update_chain(name, rule_list):
+    fragments = ["--flush %s" % name]
+    fragments += [rule_to_iptables_fragment(name, r) for r in rule_list]
+    IPTABLES_RESTORE.apply_updates("filter", [name], fragments)
+
+
+def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
                             on_deny="DROP"):
     """
     Convert a rule dict to an iptables fragment suitable to use with
@@ -384,56 +516,49 @@ def rule_to_iptables_update(chain_name, rule, on_allow="ACCEPT",
 
     # Build up the update in chunks and join them below.
     update_fragments = ["--append", chain_name]
-    append = update_fragments.append
+    append = lambda *args: update_fragments.extend(args)
 
     proto = None
     if "protocol" in rule:
         proto = rule["protocol"]
         assert proto in ["tcp", "udp", "icmp", "icmpv6"]
-        append("--protocol")
-        append(proto)
+        append("--protocol", proto)
 
     for dirn in ["src", "dst"]:
+        # Some params use the long-form of the name.
         direction = "source" if dirn == "src" else "destination"
+
         # Network (CIDR).
         net_key = dirn + "_net"
         if net_key in rule:
-            network = rule[net_key]
-            append("--%s" % direction)
-            append(network)
+            ip_or_cidr = rule[net_key]
+            append("--%s" % direction, ip_or_cidr)
 
         # Tag, which maps to an ipset.
         tag_key = dirn + "_tag"
         if tag_key in rule:
-            ipset = tag_to_ipset_name(rule[tag_key])
-            append("--match set")  # Note: "set" is param to --match
-            append("--match-set")  # Note: "--match-set" is param to "set"
-            append(ipset)
-            append(dirn)
+            ipset_name = tag_to_ipset_name(rule[tag_key])
+            append("--match set", "--match-set", ipset_name, dirn)
 
         # Port lists/ranges, which we map to multiport.
         ports_key = dirn + "_ports"
         if ports_key in rule:
-            assert proto in ["tcp", "udp"], "Protocol %s not supported" % proto
+            assert proto in ["tcp", "udp"], "Protocol %s not supported with " \
+                                            "%s" % (proto, ports_key)
             ports = ','.join([str(p) for p in rule[ports_key]])
             # multiport only supports 15 ports.
             assert ports.count(",") + ports.count(":") < 15, "Too many ports"
-            append("--match multiport")
-            append("--%s-ports" % direction)
-            append(ports)
+            append("--match multiport", "--%s-ports" % direction, ports)
 
     if "icmp_type" in rule:
         icmp_type = rule["icmp_type"]
         assert isinstance(icmp_type, int), "ICMP type should be an int"
         if proto == "icmp":
-            append("--match icmp")
-            append("--icmp-type")
-            append(rule["icmp_type"])
+            append("--match icmp", "--icmp-type", rule["icmp_type"])
         else:
             assert proto == "icmpv6"
-            append("--match icmp6")
-            append("--icmpv6-type")  # Param has different spelling to match.
-            append(rule["icmp_type"])
+            # Note variant spelling of icmp[v]6
+            append("--match icmp6", "--icmpv6-type", rule["icmp_type"])
 
     # Add the action
     append("--jump")
@@ -451,7 +576,18 @@ def tag_to_ipset_name(tag_name):
     return tag_name
 
 
-def monitor_etcd():
+def watch_etcd():
+    """
+    Loads the snapshot from etcd and then monitors etcd for changes.
+    Posts events to the DBCache.
+
+    Intended to be used as a greenlet.  Intended to be restarted if
+    it raises an exception.
+
+    :returns: Does not return.
+    :raises EtcdException: if a read from etcd fails and we may fall out of
+            sync.
+    """
     client = etcd.Client()
 
     # Load initial dump from etcd.  First just get all the endpoints and
@@ -483,19 +619,26 @@ def monitor_etcd():
             _log.info("Snapshot application finished.")
             f_apply_snap.get_nowait()
             f_apply_snap = None
+
         # TODO Handle deletions.
         # TODO Handle read getting too far behind (have to resync or die)
-        response = client.read("/calico/",
-                               wait=True,
-                               waitIndex=wait_index,
-                               recursive=True)
+        try:
+            response = client.read("/calico/",
+                                   wait=True,
+                                   waitIndex=wait_index,
+                                   recursive=True)
+        except EtcdException:
+            _log.exception("Failed to read from etcd. wait_index=%s",
+                           wait_index)
+            raise
+        wait_index = response.etcd_index
         profile_id, profile = parse_if_profile(response)
         if profile_id:
-            DB_CACHE.on_profile_change(profile_id, profile)
+            DB_CACHE.on_profile_change(profile_id, profile).get()
             continue
         endpoint_id, endpoint = parse_if_endpoint(response)
         if endpoint_id:
-            DB_CACHE.on_endpoint_change(endpoint_id, endpoint)
+            DB_CACHE.on_endpoint_change(endpoint_id, endpoint).get()
             continue
 
 
@@ -521,6 +664,18 @@ def parse_if_profile(etcd_node):
     return None, None
 
 
+def _main_greenlet():
+    while True:
+        try:
+            gevent.spawn(watch_etcd).join()
+        except Exception:
+            _log.exception("watch_etcd failed.")
+        else:
+            _log.error("watch_etcd unexpectedly returned.")
+        gevent.sleep(1)
+        _log.error("Re-spawning etcd monitor.")
+
+
 def main():
     logging.basicConfig(level=logging.DEBUG)
-    gevent.spawn(monitor_etcd).join()
+    gevent.spawn(_main_greenlet).join()  # Should never return
