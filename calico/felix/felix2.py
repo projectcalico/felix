@@ -1,22 +1,20 @@
 # Copyright (c) Metaswitch Networks 2015. All rights reserved.
 
 # Monkey-patch before we do anything else...
-import json
-import socket
-from etcd import EtcdException
 from gevent import monkey
-from gevent.event import AsyncResult
-
 monkey.patch_all()
 
+import json
+import socket
 import logging
 from collections import defaultdict
 import re
 from subprocess import CalledProcessError
 
+import etcd
+from etcd import EtcdException
 import gevent
 from gevent import subprocess
-import etcd
 
 from calico.felix.actor import actor_event, Actor
 
@@ -32,37 +30,10 @@ ENDPOINT_RE = re.compile(
 OUR_HOSTNAME = socket.gethostname()
 
 
-class RulesActor(Actor):
-
-    def __init__(self):
-        super(RulesActor, self).__init__()
-        self.profile_id = None
-        self.rules = None
-        self.current_state = None
-        self.present_in_iptables = None
-        self.referrers = set()
-
-    @actor_event
-    def on_profile_update(self, profile):
-        self.rules = profile["rules"]
-        if self.profile_id is None:
-            # Very first update, stash the profile ID and sync our state from
-            # iptables.
-            self.profile_id = profile["id"]
-            self._load_rules_from_iptables()  # One-time load
-        self._sync_rules_to_iptables()
-
-    def _load_rules_from_iptables(self):
-        pass
-
-    def _sync_rules_to_iptables(self):
-        pass
-
-
-class IpsetActor(Actor):
+class IpsetUpdater(Actor):
 
     def __init__(self, name, set_type):
-        super(IpsetActor, self).__init__()
+        super(IpsetUpdater, self).__init__()
 
         self.name = name
         self.set_type = set_type
@@ -131,7 +102,7 @@ class IpsetActor(Actor):
         assert self.programmed_members == self.members
 
 
-class IptablesRestore(Actor):
+class IptablesUpdater(Actor):
     """
     Actor that maintains an iptables-restore subprocess for
     injecting rules into iptables.
@@ -191,7 +162,7 @@ class IptablesRestore(Actor):
             raise CalledProcessError(cmd=cmd, returncode=rc)
 
 
-IPTABLES_RESTORE = IptablesRestore()
+IPTABLES_UPDATER = IptablesUpdater()
 
 
 def extract_tags_from_profile(profile):
@@ -214,9 +185,9 @@ def extract_tags_from_rule(rule):
     return tags
 
 
-class DBCache(Actor):
+class UpdateSequencer(Actor):
     def __init__(self):
-        super(DBCache, self).__init__()
+        super(UpdateSequencer, self).__init__()
 
         # Data.
         self.profiles_by_id = {}
@@ -271,12 +242,14 @@ class DBCache(Actor):
         # turn into ipsets).
         new_active_tags = set()
         for profile_id in new_active_profile_ids:
+            _log.debug("Determining in-use tags for profile %s", profile_id)
             profile = profiles_by_id[profile_id]
             new_active_tags.update(extract_tags_from_profile(profile))
 
         # Stage 3: look up IP addresses associated with endpoints.
         new_active_ipset_members_by_tag = defaultdict(set)
         for tag in new_active_tags:
+            _log.debug("Determining IPs for tag %s", tag)
             for endpoint_id in new_endpoint_ids_by_tag[tag]:
                 endpoint = endpoints_by_id[endpoint_id]
                 new_active_ipset_members_by_tag[tag].update(
@@ -300,10 +273,11 @@ class DBCache(Actor):
         # updates.
         futures = []
         for tag, members in new_active_ipset_members_by_tag:
+            _log.debug("Updating ipset for tag %s", tag)
             if tag in self.active_ipsets_by_tag:
                 ipset = self.active_ipsets_by_tag[tag]
             else:
-                ipset = IpsetActor("calico_tag_%s" % tag, "hash:ip")
+                ipset = IpsetUpdater("calico_tag_%s" % tag, "hash:ip")
                 self.active_ipsets_by_tag[tag] = ipset
             f = ipset.replace_members(members)  # Does an efficient update.
             futures.append(f)
@@ -312,11 +286,14 @@ class DBCache(Actor):
 
         # Stage 5: update live profile chains
         for profile_id in new_active_profile_ids:
+            _log.debug("Updating live profile chain for %s", profile_id)
             for in_or_out in ["inbound", "outbound"]:
                 chain_name = "calico-profile-%s-%s" % (profile_id, in_or_out)
-                update_chain(chain_name, profiles_by_id[profile_id][in_or_out])
+                rules = profiles_by_id[profile_id][in_or_out]
+                update_chain(chain_name, rules).get()
 
         # Stage 6: replace the database with the new snapshot.
+        _log.info("Replacing state with new snapshot.")
         self.profiles_by_id = profiles_by_id
         self.endpoints_by_id = endpoints_by_id
         self.endpoint_ids_by_tag = new_endpoint_ids_by_tag
@@ -329,12 +306,15 @@ class DBCache(Actor):
         # Stage 8: program routing rules?
 
 
+        _log.info("Finished applying snapshot.")
+
     @actor_event
     def on_profile_change(self, profile_id, profile):
         """
         Process an update to the given profile.  profile may be None if the
         profile was deleted.
         """
+        _log.info("Profile update: %s", profile_id)
         if profile is None:
             # TODO: Handle deletion
             pass
@@ -376,10 +356,12 @@ class DBCache(Actor):
                     if profile[in_or_out] != old_profile.get(in_or_out):
                         chain_name = "calico-profile-%s-%s" % \
                                      (profile_id, in_or_out)
-                        update_chain(chain_name, profile[in_or_out])
+                        update_chain(chain_name, profile[in_or_out]).get()
 
             # Stash the profile.
             self.profiles_by_id[profile_id] = profile
+
+        _log.info("Profile update: %s complete", profile_id)
 
     def _profile_active(self, profile_id):
         return profile_id in self.active_profile_ids
@@ -391,7 +373,7 @@ class DBCache(Actor):
                 for endpoint_id in self.endpoint_ids_by_tag[tag]:
                     endpoint = self.endpoints_by_id[endpoint_id]
                     members.update(endpoint.get("ip_addresses", []))
-                ipset = IpsetActor(tag, "hash:ip")
+                ipset = IpsetUpdater(tag, "hash:ip")
                 self.active_ipsets_by_tag[tag] = ipset
                 ipset.replace_members(members).get()
 
@@ -401,6 +383,7 @@ class DBCache(Actor):
         Process an update to the given endpoint.  endpoint may be None if
         the endpoint was deleted.
         """
+        _log.info("Profile update: %s", endpoint_id)
         if endpoint is None:
             # TODO Handle deletion.
             pass
@@ -411,6 +394,7 @@ class DBCache(Actor):
             old_ips_per_tag = defaultdict(set)
 
             if endpoint_id in self.endpoints_by_id:
+                _log.debug("Update to existing endpoint %s.", endpoint_id)
                 old_endpoint = self.endpoints_by_id[endpoint_id]
                 old_profile_id = old_endpoint["profile"]
                 old_profile = self.profiles_by_id[old_profile_id]
@@ -419,20 +403,25 @@ class DBCache(Actor):
                 if old_profile_id != new_profile_id:
                     # Profile has changed, recalculate tag membership.
                     # Find the endpoint's previous contribution to the ipsets.
+                    _log.info("Profile has changed, was %s, now %s",
+                              old_profile_id, new_profile_id)
                     for tag in old_tags:
                         old_ips_per_tag[tag].update(
                             old_endpoint["ip_addresses"])
                         self.endpoint_ids_by_tag[tag].remove(endpoint_id)
-
+                    # Remove from the index, we'll fix up below.  No race,
+                    # we can't be interrupted.
                     self.endpoint_ids_by_profile_id[old_profile_id].remove(
                         endpoint_id)
             else:
-                # New endpoint, had no tags before.
+                # New endpoint, implicitly had no tags before.
+                _log.info("New endpoint: %s", endpoint_id)
                 old_tags = set()
                 old_profile_id = None
 
             if old_profile_id != new_profile_id:
                 # Either profile change or new endpoint.  Sync the tags.
+                _log.debug("Need to sync tags.")
                 new_ips_per_tag = defaultdict(set)
                 for tag in new_tags:
                     new_ips_per_tag[tag].update(endpoint["ip_addresses"])
@@ -445,8 +434,10 @@ class DBCache(Actor):
                         continue
                     ipset = self.active_ipsets_by_tag[tag]
                     for ip in old_ips_per_tag[tag] - new_ips_per_tag[tag]:
+                        _log.debug("Removing %s from ipset for %s", ip, tag)
                         ipset.remove_member(ip).get()
                     for ip in new_ips_per_tag[tag] - old_ips_per_tag[tag]:
+                        _log.debug("Adding %s from ipset for %s", ip, tag)
                         ipset.add_member(ip).get()
 
             self.endpoint_ids_by_profile_id[new_profile_id].add(endpoint_id)
@@ -454,6 +445,7 @@ class DBCache(Actor):
 
             if endpoint["host"] == OUR_HOSTNAME:
                 # Create any missing ipsets.
+                _log.info("Endpoint is local, checking profile.")
                 self.local_endpoint_ids.add(endpoint_id)
                 self._ensure_profile_ipsets_exist(new_profile)
 
@@ -461,18 +453,21 @@ class DBCache(Actor):
                 for in_or_out in ["inbound", "outbound"]:
                     chain_name = "calico-profile-%s-%s" % (new_profile_id,
                                                            in_or_out)
-                    update_chain(chain_name, new_profile[in_or_out])
+                    update_chain(chain_name, new_profile[in_or_out]).get()
 
                 if old_profile_id and old_profile_id != new_profile_id:
                     # Old profile may be unused. Recalculate.
+                    _log.debug("Recalculating active_profile_ids index.")
                     self.active_profile_ids = set()
                     for endpoint_id in self.local_endpoint_ids:
                         endpoint = self.endpoints_by_id[endpoint_id]
                         self.active_profile_ids.add(endpoint_id["profile"])
                     # TODO: GC unused chains
 
+        _log.info("Endpoint update complete.")
 
-DB_CACHE = DBCache()
+
+UPDATE_SEQUENCER = UpdateSequencer()
 
 
 KNOWN_RULE_KEYS = set([
@@ -488,10 +483,19 @@ KNOWN_RULE_KEYS = set([
 ])
 
 
-def update_chain(name, rule_list):
+def update_chain(name, rule_list, iptable="filter"):
+    """
+    Atomically creates/replaces the contents of the named iptables chain
+    with the rules from rule_list.
+    :param list[dict] rule_list: Ordered list of rule dicts.
+    :return: AsyncResult from the IPTABLES_UPDATER.
+    """
+    # Delete all rules int he chain.  This is done atomically with the
+    # appends below so the end result will be a chain with only the new rules
+    # in it.
     fragments = ["--flush %s" % name]
     fragments += [rule_to_iptables_fragment(name, r) for r in rule_list]
-    IPTABLES_RESTORE.apply_updates("filter", [name], fragments)
+    return IPTABLES_UPDATER.apply_updates(iptable, [name], fragments)
 
 
 def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
@@ -579,7 +583,7 @@ def tag_to_ipset_name(tag_name):
 def watch_etcd():
     """
     Loads the snapshot from etcd and then monitors etcd for changes.
-    Posts events to the DBCache.
+    Posts events to the UpdateSequencer.
 
     Intended to be used as a greenlet.  Intended to be restarted if
     it raises an exception.
@@ -606,17 +610,18 @@ def watch_etcd():
             endpoints_by_id[endpoint_id] = endpoint
             continue
 
-    # Actually apply the snapshot.  The DBCache will apply deltas as
+    # Actually apply the snapshot.  The UpdateSequencer will apply deltas as
     # appropriate.  Grab the future in case it raises an error.
-    f_apply_snap = DB_CACHE.apply_snapshot(profiles_by_id, endpoints_by_id)
+    f_apply_snap = UPDATE_SEQUENCER.apply_snapshot(profiles_by_id,
+                                                   endpoints_by_id)
     del profiles_by_id
     del endpoints_by_id
 
-    wait_index = initial_dump.etcd_index
+    last_etcd_index = initial_dump.etcd_index
     while True:
         if f_apply_snap and f_apply_snap.ready():
             # Snapshot application finished, check for exceptions.
-            _log.info("Snapshot application finished.")
+            _log.info("Snapshot application returned, checking for errors.")
             f_apply_snap.get_nowait()
             f_apply_snap = None
 
@@ -625,20 +630,21 @@ def watch_etcd():
         try:
             response = client.read("/calico/",
                                    wait=True,
-                                   waitIndex=wait_index,
-                                   recursive=True)
+                                   waitIndex=last_etcd_index + 1,
+                                   recursive=True,
+                                   timeout=0)
         except EtcdException:
             _log.exception("Failed to read from etcd. wait_index=%s",
-                           wait_index)
+                           last_etcd_index)
             raise
-        wait_index = response.etcd_index
+        last_etcd_index = response.etcd_index
         profile_id, profile = parse_if_profile(response)
         if profile_id:
-            DB_CACHE.on_profile_change(profile_id, profile).get()
+            UPDATE_SEQUENCER.on_profile_change(profile_id, profile).get()
             continue
         endpoint_id, endpoint = parse_if_endpoint(response)
         if endpoint_id:
-            DB_CACHE.on_endpoint_change(endpoint_id, endpoint).get()
+            UPDATE_SEQUENCER.on_endpoint_change(endpoint_id, endpoint).get()
             continue
 
 
@@ -676,6 +682,12 @@ def _main_greenlet():
         _log.error("Re-spawning etcd monitor.")
 
 
+def watchdog():
+    _log.info("Still alive")
+    gevent.spawn_later(20, watchdog)
+
+
 def main():
     logging.basicConfig(level=logging.DEBUG)
+    gevent.spawn_later(1, watchdog)
     gevent.spawn(_main_greenlet).join()  # Should never return
