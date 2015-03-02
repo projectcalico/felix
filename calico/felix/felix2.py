@@ -176,21 +176,13 @@ IPTABLES_UPDATER = IptablesUpdater()
 def extract_tags_from_profile(profile):
     tags = set()
     for in_or_out in ["inbound", "outbound"]:
-        for rule in profile[in_or_out]:
+        for rule in profile.get(in_or_out, []):
             tags.update(extract_tags_from_rule(rule))
     return tags
 
 
 def extract_tags_from_rule(rule):
-    tags = set()
-    for key in ["src_tag", "dst_tag"]:
-        try:
-            tag = rule[key]
-        except KeyError:
-            pass
-        else:
-            tags.add(tag)
-    return tags
+    return set([rule[key] for key in ["src_tag", "dst_tag"] if key in rule])
 
 
 class UpdateSequencer(Actor):
@@ -269,28 +261,31 @@ class UpdateSequencer(Actor):
                        new_active_ipset_members_by_tag[tag])
 
         # Stage 4: update live tag ipsets, creating any that are missing.
-        # Since the ipset updates are async, collect the futures to wait on below.  We need them
-        # all to exist before we update the rules to use them.
+        # Since the ipset updates are async, collect the futures to wait on
+        # below.  We need them all to exist before we update the rules to use
+        # them.
 
-        # FIXME: Updating ipsets in-place may temporarily make inconsistencies vs old profiles.
-        # Could "double buffer" ipsets and chains to avoid that.  Should be doable, just
-        # return the current name via the Future and use it to update/create the profile chains.
-        # However, it would double the occupancy of the ipsets and slow us down.
+        # FIXME: Updating ipsets in-place may temporarily make inconsistencies
+        # vs old profiles.  Could "double buffer" ipsets and chains to avoid
+        # that.  Should be doable, just return the current name via the Future
+        # and use it to update/create the profile chains. However, it would
+        # double the occupancy of the ipsets and slow us down.
         #
-        # Alternatively, could drop all traffic on profiles that are about to be modified
-        # until we've fixed them up.
+        # Alternatively, could drop all traffic on profiles that are about to
+        # be modified until we've fixed them up.
         #
-        # Or, we could try to come up with a smarter algorithm.  I suspect that's not worth it.
+        # Or, we could try to come up with a smarter algorithm.  I suspect
+        # that's not worth it.
         #
-        # Shouldn't be an issue with non-snapshot updates since we sequence profile and endpoint
-        # updates.
+        # Shouldn't be an issue with non-snapshot updates since we sequence
+        # profile and endpoint updates.
         futures = []
         for tag, members in new_active_ipset_members_by_tag.iteritems():
             _log.debug("Updating ipset for tag %s", tag)
             if tag in self.active_ipsets_by_tag:
                 ipset = self.active_ipsets_by_tag[tag]
             else:
-                ipset = IpsetUpdater(tag_to_ipset_name(tag), "hash:ip")
+                ipset = IpsetUpdater(tag_to_ipset_name(tag), "hash:ip").start()
                 self.active_ipsets_by_tag[tag] = ipset
             f = ipset.replace_members(members)  # Does an efficient update.
             futures.append(f)
@@ -317,7 +312,6 @@ class UpdateSequencer(Actor):
         # Stage 7: update master rules to use all the profile chains.
 
         # Stage 8: program routing rules?
-
 
         _log.info("Finished applying snapshot.")
 
@@ -387,7 +381,7 @@ class UpdateSequencer(Actor):
                 for endpoint_id in self.endpoint_ids_by_tag[tag]:
                     endpoint = self.endpoints_by_id[endpoint_id]
                     members.update(endpoint.get("ip_addresses", []))
-                ipset = IpsetUpdater(tag_to_ipset_name(tag), "hash:ip")
+                ipset = IpsetUpdater(tag_to_ipset_name(tag), "hash:ip").start()
                 self.active_ipsets_by_tag[tag] = ipset
                 ipset.replace_members(members).get()
 
@@ -510,7 +504,7 @@ def update_chain(name, rule_list, iptable="filter"):
 
 
 def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
-                            on_deny="DROP"):
+                              on_deny="DROP"):
     """
     Convert a rule dict to an iptables fragment suitable to use with
     iptables-restore.
@@ -576,12 +570,7 @@ def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
             append("--match icmp6", "--icmpv6-type", rule["icmp_type"])
 
     # Add the action
-    append("--jump")
-    if rule["action"] == "allow":
-        append(on_allow)
-    else:
-        assert rule["action"] == "deny"
-        append(on_deny)
+    append("--jump", on_allow if rule.get("action") == "allow" else on_deny)
 
     return " ".join(str(x) for x in update_fragments)
 
@@ -639,7 +628,6 @@ def watch_etcd():
             f_apply_snap = None
 
         # TODO Handle deletions.
-        # TODO Handle read getting too far behind (have to resync or die)
         try:
             _log.debug("About to wait for etcd update %s", last_etcd_index + 1)
             response = client.read("/calico/",
@@ -694,27 +682,39 @@ def parse_if_profile(etcd_node):
 
 
 def _main_greenlet():
+    UPDATE_SEQUENCER.start()
+    IPTABLES_UPDATER.start()
+    greenlets = [UPDATE_SEQUENCER.greenlet,
+                 IPTABLES_UPDATER.greenlet,
+                 gevent.spawn(watch_etcd),
+                 gevent.spawn(watchdog)]
     while True:
+        stopped_greenlets_iter = gevent.iwait(greenlets)
         try:
-            gevent.spawn(watch_etcd).join()
+            stopped_greenlet = next(stopped_greenlets_iter)
+            stopped_greenlet.get()
         except Exception:
-            _log.exception("watch_etcd failed.")
+            _log.exception("Greenlet failed: %s", stopped_greenlet)
         else:
-            _log.error("watch_etcd unexpectedly returned.")
+            _log.error("Greenlet unexpectedly returned.")
         gevent.sleep(1)
-        _log.error("Re-spawning etcd monitor.")
+        _log.error("Re-spawning.")
+        stopped_greenlet.start()
 
 
 def watchdog():
-    _log.info("Still alive")
-    gevent.spawn_later(20, watchdog)
+    while True:
+        _log.info("Still alive")
+        gevent.sleep(20)
 
 
 def main():
     log_level = logging.DEBUG if '-d' in sys.argv else logging.INFO
     logging.basicConfig(level=log_level,
-        format="%(levelname).1s %(asctime)s %(process)s|%(thread)x "
-               "%(filename)s:%(funcName)s:%(lineno)d %(message)s")
+                        format="%(levelname).1s %(asctime)s "
+                               "%(process)s|%(thread)x "
+                               "%(filename)s:%(funcName)s:%(lineno)d "
+                               "%(message)s")
     _log.info("Starting up")
     gevent.spawn_later(1, watchdog)
     gevent.spawn(_main_greenlet).join()  # Should never return
