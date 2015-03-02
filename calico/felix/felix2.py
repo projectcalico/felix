@@ -873,13 +873,19 @@ def watch_etcd():
             continue
 
 
+# Intern JSON keys as we load them to reduce occupancy.
+def intern_dict(d):
+    return dict((intern(str(k)), v) for k,v in d.iteritems())
+json_decoder = json.JSONDecoder(object_hook=intern_dict)
+
+
 def parse_if_endpoint(etcd_node):
     m = ENDPOINT_RE.match(etcd_node.key)
     if m:
         # Got an endpoint.
         endpoint_id = m.group("endpoint_id")
         hostname = m.group("hostname")
-        endpoint = json.loads(etcd_node.value)
+        endpoint = json_decoder.decode(etcd_node.value)
         endpoint["host"] = hostname
         return endpoint_id, endpoint
     return None, None
@@ -890,7 +896,7 @@ def parse_if_profile(etcd_node):
     if m:
         # Got a profile.
         profile_id = m.group("profile_id")
-        profile = json.loads(etcd_node.value)
+        profile = json_decoder.decode(etcd_node.value)
         return profile_id, profile
     return None, None
 
