@@ -389,8 +389,8 @@ class UpdateSequencer(Actor):
                 for in_or_out in ["inbound", "outbound"]:
                     # Profile in use, look for rule changes.
                     if profile[in_or_out] != old_profile.get(in_or_out):
-                        chain_name = CHAIN_PROFILE_PREFIX + "-%s-%s" % \
-                                     (profile_id, in_or_out)
+                        chain_name = profile_to_chain_name(in_or_out,
+                                                           profile_id)
                         update_chain(chain_name, profile[in_or_out]).get()
 
             # Stash the profile.
