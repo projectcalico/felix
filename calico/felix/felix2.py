@@ -340,8 +340,6 @@ class UpdateSequencer(Actor):
         self.local_endpoint_ids = new_local_endpoint_ids
         self.active_profile_ids = new_active_profile_ids
 
-
-
         _log.info("Finished applying snapshot.")
 
     @actor_event
@@ -555,9 +553,10 @@ def install_ep_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     to_chain.append("--append %s --jump %s" %
                     (to_chain_name, profile_in_chain))
     to_chain.append("--append %s --jump DROP" % to_chain_name)
-    # TODO: Clean up unused CHAIN_TO_ENDPOINT entries
+    # Add rule to global chain to direct traffic to the endpoint-specific one.
     to_chain.append("--append %s --out-interface %s --jump %s" %
                     (CHAIN_TO_ENDPOINT, iface, to_chain_name))
+    # TODO: Clean up unused CHAIN_TO_ENDPOINT entries
 
     # Now the chain that manages packets from the interface...
     from_chain_name = CHAIN_FROM_PREFIX + suffix
@@ -582,20 +581,23 @@ def install_ep_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
         from_chain.append("--append %s --protocol udp --sport 546 --dport 547 "
                           "--jump RETURN" % from_chain_name)
 
-    # Anti-spoofing rules.
+    # Anti-spoofing rules.  Only allow traffic from known (IP, MAC) pairs to
+    # get to the profile chain, drop other traffic.
+    profile_out_chain = profile_to_chain_name("outbound", profile_id)
     for ip in local_ips:
         cidr = "%s/32" % ip if ip_version == 4 else "%s/64" % ip
+        # Note use of --goto rather than --jump; this means that when the
+        # profile chain returns, it will return the chain that called us, not
+        # this chain.
         from_chain.append("--append %s --src %s --match mac --mac-source %s "
-                          "--jump MARK --set-mark 1" %
-                          (from_chain_name, cidr, mac.upper()))
-    from_chain.append("--append %s --match mark ! --mark 1 --jump DROP" %
-                      from_chain_name)
-    profile_out_chain = profile_to_chain_name("outbound", profile_id)
-    from_chain.append("--append %s --jump %s" %
-                      (from_chain_name, profile_out_chain))
-    # TODO: Clean up unused CHAIN_FROM_ENDPOINT entries
+                          "--goto %s" % (from_chain_name, cidr,
+                                         mac.upper(), profile_out_chain))
+    from_chain.append("--append %s --jump DROP" % from_chain_name)
+
+    # Add rule to global chain to direct traffic to the endpoint-specific one.
     from_chain.append("--append %s --in-interface %s --jump %s" %
                       (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
+    # TODO: Clean up unused CHAIN_FROM_ENDPOINT entries
 
     updates = to_chain + from_chain
     iptables_updater = (IPTABLES_V4_UPDATER if ip_version == 4 else
@@ -884,9 +886,12 @@ def parse_if_endpoint(etcd_node):
     if m:
         # Got an endpoint.
         endpoint_id = m.group("endpoint_id")
-        hostname = m.group("hostname")
-        endpoint = json_decoder.decode(etcd_node.value)
-        endpoint["host"] = hostname
+        if etcd_node.action == "delete":
+            endpoint = None
+        else:
+            hostname = m.group("hostname")
+            endpoint = json_decoder.decode(etcd_node.value)
+            endpoint["host"] = hostname
         return endpoint_id, endpoint
     return None, None
 
@@ -896,7 +901,10 @@ def parse_if_profile(etcd_node):
     if m:
         # Got a profile.
         profile_id = m.group("profile_id")
-        profile = json_decoder.decode(etcd_node.value)
+        if etcd_node.action == "delete":
+            profile = None
+        else:
+            profile = json_decoder.decode(etcd_node.value)
         return profile_id, profile
     return None, None
 
