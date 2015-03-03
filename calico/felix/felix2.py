@@ -17,7 +17,8 @@ from etcd import EtcdException
 import gevent
 from gevent import subprocess
 
-from calico.felix.actor import actor_event, Actor
+from calico.felix.actor import actor_event, Actor, wait_and_check
+from calico.felix.config import Config
 
 _log = logging.getLogger(__name__)
 
@@ -306,10 +307,9 @@ class UpdateSequencer(Actor):
             else:
                 ipset = IpsetUpdater(tag_to_ipset_name(tag), "hash:ip").start()
                 self.active_ipsets_by_tag[tag] = ipset
-            f = ipset.replace_members(members)  # Does an efficient update.
+            f = ipset.replace_members(members, async=True)  # Efficient update.
             futures.append(f)
-        while futures:
-            futures.pop().get()
+        wait_and_check(futures)
 
         # Stage 5: update live profile chains
         for profile_id in new_active_profile_ids:
@@ -318,7 +318,7 @@ class UpdateSequencer(Actor):
             for in_or_out in ["inbound", "outbound"]:
                 chain_name = profile_to_chain_name(in_or_out, profile_id)
                 rules = profile[in_or_out]
-                update_chain(chain_name, rules).get()
+                update_chain(chain_name, rules)
 
         # Stage 6: replace the database with the new snapshot.
         _log.info("Replacing state with new snapshot.")
@@ -354,6 +354,7 @@ class UpdateSequencer(Actor):
                                                            set())
         added_tags = new_tags - old_tags
         removed_tags = old_tags - new_tags
+        futures = []
         for added, upd_tags in [(True, added_tags), (False, removed_tags)]:
             for tag in upd_tags:
                 if added:
@@ -367,9 +368,11 @@ class UpdateSequencer(Actor):
                         endpoint = self.endpoints_by_id[endpoint_id]
                         for ip in endpoint["ip_addresses"]:
                             if added:
-                                ipset.add_member(ip).get()
+                                f = ipset.add_member(ip, async=True)
                             else:
-                                ipset.remove_member(ip).get()
+                                f = ipset.remove_member(ip, async=True)
+                            futures.append(f)
+        wait_and_check(futures)
 
     @actor_event
     def on_profile_change(self, profile_id, profile):
@@ -416,6 +419,7 @@ class UpdateSequencer(Actor):
         return profile_id in self.active_profile_ids
 
     def _ensure_profile_ipsets_exist(self, profile):
+        futures = []
         for tag in extract_tags_from_profile(profile):
             if tag not in self.active_ipsets_by_tag:
                 members = set()
@@ -424,7 +428,9 @@ class UpdateSequencer(Actor):
                     members.update(endpoint.get("ip_addresses", []))
                 ipset = IpsetUpdater(tag_to_ipset_name(tag), "hash:ip").start()
                 self.active_ipsets_by_tag[tag] = ipset
-                ipset.replace_members(members).get()
+                f = ipset.replace_members(members, async=True)
+                futures.append(f)
+        wait_and_check(futures)
 
     @actor_event
     def on_endpoint_change(self, endpoint_id, endpoint):
@@ -474,6 +480,7 @@ class UpdateSequencer(Actor):
                 self.endpoint_ids_by_tag[tag].add(endpoint_id)
 
             # Diff the set of old vs new IP addresses and apply deltas.
+            futures = []
             for tag in set(old_tags + new_tags):
                 if tag not in self.active_ipsets_by_tag:
                     # ipset isn't in use on this host, skip.
@@ -481,10 +488,13 @@ class UpdateSequencer(Actor):
                 ipset = self.active_ipsets_by_tag[tag]
                 for ip in old_ips_per_tag[tag] - new_ips_per_tag[tag]:
                     _log.debug("Removing %s from ipset for %s", ip, tag)
-                    ipset.remove_member(ip).get()
+                    f = ipset.remove_member(ip, async=True)
+                    futures.append(f)
                 for ip in new_ips_per_tag[tag] - old_ips_per_tag[tag]:
                     _log.debug("Adding %s to ipset for %s", ip, tag)
-                    ipset.add_member(ip).get()
+                    f = ipset.add_member(ip, async=True)
+                    futures.append(f)
+            wait_and_check(futures)
 
             self.endpoint_ids_by_profile_id[new_profile_id].add(endpoint_id)
             self.endpoints_by_id[endpoint_id] = endpoint
@@ -532,10 +542,11 @@ class UpdateSequencer(Actor):
 
             # Add rule to global chain to direct traffic to the
             # endpoint-specific one.
-            updates.append("--append %s --out-interface %s --jump %s" %
+            updates.append("--append %s --out-interface %s --goto %s" %
                            (CHAIN_TO_ENDPOINT, iface, to_chain_name))
-            updates.append("--append %s --in-interface %s --jump %s" %
+            updates.append("--append %s --in-interface %s --goto %s" %
                            (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
+            # FIXME: should we drop at end of this?
         return updates
 
 UPDATE_SEQUENCER = UpdateSequencer()
@@ -653,7 +664,7 @@ def install_global_rules(config, iface_prefix):
                       "--destination 169.254.169.254/32 "
                       "--jump DNAT --to-destination %s:%s" %
                       (config.METADATA_IP, config.METADATA_PORT))
-    IPTABLES_V4_UPDATER.apply_updates("nat", [CHAIN_PREROUTING], nat_pr).get()
+    IPTABLES_V4_UPDATER.apply_updates("nat", [CHAIN_PREROUTING], nat_pr)
 
     # Ensure we have a rule that forces us through the chain we just created.
     rule = "PREROUTING --jump %s" % CHAIN_PREROUTING
@@ -662,11 +673,11 @@ def install_global_rules(config, iface_prefix):
         # assume it wasn't present and insert it.
         pr = ["--delete %s" % rule,
               "--insert %s" % rule]
-        IPTABLES_V4_UPDATER.apply_updates("nat", [], pr).get()
+        IPTABLES_V4_UPDATER.apply_updates("nat", [], pr)
     except CalledProcessError:
         _log.info("Failed to detect pre-routing rule, will insert it.")
         pr = ["--insert %s" % rule]
-        IPTABLES_V4_UPDATER.apply_updates("nat", [], pr).get()
+        IPTABLES_V4_UPDATER.apply_updates("nat", [], pr)
 
     # Now the filter table. This needs to have calico-filter-FORWARD and
     # calico-filter-INPUT chains, which we must create before adding any
@@ -711,17 +722,17 @@ def install_global_rules(config, iface_prefix):
                 (CHAIN_INPUT, iface_match),
         ])
 
-        iptables_updater.apply_updates("filter", req_chains, updates).get()
+        iptables_updater.apply_updates("filter", req_chains, updates)
 
 
 def program_profile_chains(profile_id, profile):
     for in_or_out in ["inbound", "outbound"]:
         chain_name = profile_to_chain_name(in_or_out,
                                            profile_id)
-        update_chain(chain_name, profile[in_or_out]).get()
+        update_chain(chain_name, profile[in_or_out])
 
 
-def update_chain(name, rule_list, iptable="filter"):
+def update_chain(name, rule_list, iptable="filter", async=False):
     """
     Atomically creates/replaces the contents of the named iptables chain
     with the rules from rule_list.
@@ -735,7 +746,8 @@ def update_chain(name, rule_list, iptable="filter"):
     fragments += [rule_to_iptables_fragment(name, r, on_allow="RETURN")
                   for r in rule_list]
     # TODO: IPv6 support
-    return IPTABLES_V4_UPDATER.apply_updates(iptable, [name], fragments)
+    return IPTABLES_V4_UPDATER.apply_updates(iptable, [name], fragments,
+                                             async=async)
 
 
 def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
@@ -889,12 +901,15 @@ def watch_etcd():
         profile_id, profile = parse_if_profile(response)
         if profile_id:
             _log.info("Scheduling profile update %s", profile_id)
-            UPDATE_SEQUENCER.on_profile_change(profile_id, profile).get()
+            # TODO: we fire-and-forget this message, should make sure we resync on failure
+            UPDATE_SEQUENCER.on_profile_change(profile_id, profile,
+                                               async=True)
             continue
         endpoint_id, endpoint = parse_if_endpoint(response)
         if endpoint_id:
             _log.info("Scheduling endpoint update %s", endpoint_id)
-            UPDATE_SEQUENCER.on_endpoint_change(endpoint_id, endpoint).get()
+            UPDATE_SEQUENCER.on_endpoint_change(endpoint_id, endpoint,
+                                                async=True)
             continue
 
 

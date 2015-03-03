@@ -45,9 +45,17 @@ def actor_event(fn):
     @functools.wraps(fn)
     def queue_fn(self, *args, **kwargs):
         result = AsyncResult()
+        async = kwargs.pop("async", False)
         partial = functools.partial(fn, self, *args, **kwargs)
         self._event_queue.put(Message(function=partial, result=result),
                               block=self.greenlet)
-        return result
+        if async:
+            return result
+        else:
+            return result.get()
     return queue_fn
 
+
+def wait_and_check(async_results):
+    for r in async_results:
+        r.get()
