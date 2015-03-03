@@ -1,0 +1,2 @@
+./etcdctl set calico/network/profile/p1/policy '{"tags":["a", "c"], "inbound": [{"action": "allow", "src_tag": "b"}], "outbound": []}'
+./etcdctl set /calico/host/smc-ubuntu/endpoint/e1 '{"profile": "p1", "ip_addresses": ["10.0.0.1"], "interface_name": "tape1", "mac": "aa:bb:cc:dd:ee:ee"}'
