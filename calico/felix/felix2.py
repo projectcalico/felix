@@ -359,31 +359,32 @@ class UpdateSequencer(Actor):
             # Lookup old profile, if any.
             old_profile = self.profiles_by_id.get(profile_id, {"tags": []})
 
-            # Process any tag updates.  Do this first so that any newly-created
-            # iptables are present.
+            # Process any tag updates.
             old_tags = set(old_profile["tags"])
-            new_tags = set(old_profile["tags"])
+            new_tags = set(profile["tags"])
             endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id,
                                                                set())
-            for added_tag in (new_tags - old_tags):
-                self.endpoint_ids_by_tag[added_tag] += endpoint_ids
-                if added_tag in self.active_ipsets_by_tag:
-                    ipset = self.active_ipsets_by_tag[added_tag]
-                    for endpoint_id in endpoint_ids:
-                        endpoint = self.endpoints_by_id[endpoint_id]
-                        for ip in endpoint["ip_addresses"]:
-                            ipset.add_member(ip).get()
-            # TODO Commonize this duplicate code.
-            for removed_tag in (old_tags - new_tags):
-                self.endpoint_ids_by_tag[removed_tag] += endpoint_ids
-                if removed_tag in self.active_ipsets_by_tag:
-                    ipset = self.active_ipsets_by_tag[removed_tag]
-                    for endpoint_id in endpoint_ids:
-                        endpoint = self.endpoints_by_id[endpoint_id]
-                        for ip in endpoint["ip_addresses"]:
-                            ipset.remove_member(ip).get()
+            added_tags = new_tags - old_tags
+            removed_tags = old_tags - new_tags
+            for added, upd_tags in [(True, added_tags), (False, removed_tags)]:
+                for tag in upd_tags:
+                    if added:
+                        self.endpoint_ids_by_tag[tag] |= endpoint_ids
+                    else:
+                        self.endpoint_ids_by_tag[tag] -= endpoint_ids
+                    if tag in self.active_ipsets_by_tag:
+                        # Tag is in-use, update its members.
+                        ipset = self.active_ipsets_by_tag[tag]
+                        for endpoint_id in endpoint_ids:
+                            endpoint = self.endpoints_by_id[endpoint_id]
+                            for ip in endpoint["ip_addresses"]:
+                                if added:
+                                    ipset.add_member(ip).get()
+                                else:
+                                    ipset.remove_member(ip).get()
 
-            # Create any missing ipsets.
+            # Create any missing ipsets.  Must do this before we reference them
+            # in rules below.
             self._ensure_profile_ipsets_exist(profile)
             # TODO: Remove orphaned ipsets.
 
