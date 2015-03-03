@@ -314,9 +314,10 @@ class UpdateSequencer(Actor):
         # Stage 5: update live profile chains
         for profile_id in new_active_profile_ids:
             _log.debug("Updating live profile chain for %s", profile_id)
+            profile = profiles_by_id[profile_id]
             for in_or_out in ["inbound", "outbound"]:
                 chain_name = profile_to_chain_name(in_or_out, profile_id)
-                rules = profiles_by_id[profile_id][in_or_out]
+                rules = profile[in_or_out]
                 update_chain(chain_name, rules).get()
 
         # Stage 6: update master rules to use all the profile chains.
@@ -389,9 +390,8 @@ class UpdateSequencer(Actor):
                 for in_or_out in ["inbound", "outbound"]:
                     # Profile in use, look for rule changes.
                     if profile[in_or_out] != old_profile.get(in_or_out):
-                        chain_name = profile_to_chain_name(in_or_out,
-                                                           profile_id)
-                        update_chain(chain_name, profile[in_or_out]).get()
+                        program_profile_chains(profile_id, profile)
+                        break
 
             # Stash the profile.
             self.profiles_by_id[profile_id] = profile
@@ -482,10 +482,7 @@ class UpdateSequencer(Actor):
                 self._ensure_profile_ipsets_exist(new_profile)
 
                 if new_profile_id not in self.active_profile_ids:
-                    for in_or_out in ["inbound", "outbound"]:
-                        chain_name = profile_to_chain_name(in_or_out,
-                                                           new_profile_id)
-                        update_chain(chain_name, new_profile[in_or_out]).get()
+                    program_profile_chains(new_profile_id, new_profile)
 
                 if old_profile_id and old_profile_id != new_profile_id:
                     # Old profile may be unused. Recalculate.
@@ -696,6 +693,13 @@ def install_global_rules(config, iface_prefix):
         ])
 
         iptables_updater.apply_updates("filter", req_chains, updates).get()
+
+
+def program_profile_chains(profile_id, profile):
+    for in_or_out in ["inbound", "outbound"]:
+        chain_name = profile_to_chain_name(in_or_out,
+                                           profile_id)
+        update_chain(chain_name, profile[in_or_out]).get()
 
 
 def update_chain(name, rule_list, iptable="filter"):
