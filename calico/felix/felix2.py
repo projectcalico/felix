@@ -320,19 +320,7 @@ class UpdateSequencer(Actor):
                 rules = profile[in_or_out]
                 update_chain(chain_name, rules).get()
 
-        # Stage 6: update master rules to use all the profile chains.
-        for endpoint_id in new_local_endpoint_ids:
-            endpoint = endpoints_by_id[endpoint_id]
-            install_ep_rules(endpoint_id,
-                             endpoint["interface_name"],
-                             4,
-                             endpoint["ip_addresses"],
-                             endpoint["mac"],
-                             endpoint["profile"])
-
-        # TODO Stage 7: program routing rules?
-
-        # Stage 8: replace the database with the new snapshot.
+        # Stage 6: replace the database with the new snapshot.
         _log.info("Replacing state with new snapshot.")
         self.profiles_by_id = profiles_by_id
         self.endpoints_by_id = endpoints_by_id
@@ -340,6 +328,20 @@ class UpdateSequencer(Actor):
         self.endpoint_ids_by_profile_id = new_endpoint_ids_by_profile_id
         self.local_endpoint_ids = new_local_endpoint_ids
         self.active_profile_ids = new_active_profile_ids
+
+        # Stage 7: update master rules to use all the profile chains.
+        for endpoint_id in new_local_endpoint_ids:
+            endpoint = endpoints_by_id[endpoint_id]
+            chains, updates = get_endpoint_rules(endpoint_id,
+                                                 endpoint["interface_name"],
+                                                 4,
+                                                 endpoint["ip_addresses"],
+                                                 endpoint["mac"],
+                                                 endpoint["profile"])
+            updates += self.active_endpoint_updates()
+            IPTABLES_V4_UPDATER.apply_updates("filter", chains, updates)
+
+        # TODO Stage 8: program routing rules?
 
         _log.info("Finished applying snapshot.")
 
@@ -493,15 +495,36 @@ class UpdateSequencer(Actor):
                         self.active_profile_ids.add(endpoint["profile"])
                     # TODO: GC unused chains
 
-                install_ep_rules(endpoint_id,
-                                 endpoint["interface_name"],
-                                 4,
-                                 endpoint["ip_addresses"],
-                                 endpoint["mac"],
-                                 endpoint["profile"])
+                chains, updates = get_endpoint_rules(
+                    endpoint_id,
+                    endpoint["interface_name"],
+                    4,
+                    endpoint["ip_addresses"],
+                    endpoint["mac"],
+                    endpoint["profile"])
+                updates += self.active_endpoint_updates()
+                IPTABLES_V4_UPDATER.apply_updates("filter", chains, updates)
 
         _log.info("Endpoint update complete.")
 
+    def active_endpoint_updates(self):
+        updates = [
+            "--flush " + CHAIN_FROM_ENDPOINT,
+            "--flush " + CHAIN_TO_ENDPOINT,
+        ]
+        for endpoint_id in self.local_endpoint_ids:
+            endpoint = self.endpoints_by_id[endpoint_id]
+            iface = endpoint["interface_name"]
+            to_chain_name = CHAIN_TO_PREFIX + endpoint_id
+            from_chain_name = CHAIN_FROM_PREFIX + endpoint_id
+
+            # Add rule to global chain to direct traffic to the
+            # endpoint-specific one.
+            updates.append("--append %s --out-interface %s --jump %s" %
+                           (CHAIN_TO_ENDPOINT, iface, to_chain_name))
+            updates.append("--append %s --in-interface %s --jump %s" %
+                           (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
+        return updates
 
 UPDATE_SEQUENCER = UpdateSequencer()
 
@@ -519,7 +542,7 @@ KNOWN_RULE_KEYS = set([
 ])
 
 
-def install_ep_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
+def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     to_chain_name = CHAIN_TO_PREFIX + suffix
     
     to_chain = ["--flush %s" % to_chain_name]
@@ -550,10 +573,6 @@ def install_ep_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     to_chain.append("--append %s --jump %s" %
                     (to_chain_name, profile_in_chain))
     to_chain.append("--append %s --jump DROP" % to_chain_name)
-    # Add rule to global chain to direct traffic to the endpoint-specific one.
-    to_chain.append("--append %s --out-interface %s --jump %s" %
-                    (CHAIN_TO_ENDPOINT, iface, to_chain_name))
-    # TODO: Clean up unused CHAIN_TO_ENDPOINT entries
 
     # Now the chain that manages packets from the interface...
     from_chain_name = CHAIN_FROM_PREFIX + suffix
@@ -591,19 +610,7 @@ def install_ep_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
                                          mac.upper(), profile_out_chain))
     from_chain.append("--append %s --jump DROP" % from_chain_name)
 
-    # Add rule to global chain to direct traffic to the endpoint-specific one.
-    from_chain.append("--append %s --in-interface %s --jump %s" %
-                      (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
-    # TODO: Clean up unused CHAIN_FROM_ENDPOINT entries
-
-    updates = to_chain + from_chain
-    iptables_updater = (IPTABLES_V4_UPDATER if ip_version == 4 else
-                        IPTABLES_V6_UPDATER)
-    iptables_updater.apply_updates("filter",
-                                   [CHAIN_TO_ENDPOINT, CHAIN_FROM_ENDPOINT,
-                                    to_chain_name, from_chain_name,
-                                    profile_out_chain, profile_in_chain],
-                                   updates)
+    return [to_chain_name, from_chain_name], to_chain + from_chain
 
 
 def install_global_rules(config, iface_prefix):
