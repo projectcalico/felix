@@ -345,6 +345,32 @@ class UpdateSequencer(Actor):
 
         _log.info("Finished applying snapshot.")
 
+    def _process_tag_updates(self, profile_id, old_tags, new_tags):
+        """
+        Updates the active ipsets associated with the change in tags
+        of the given profile ID.
+        """
+        endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id,
+                                                           set())
+        added_tags = new_tags - old_tags
+        removed_tags = old_tags - new_tags
+        for added, upd_tags in [(True, added_tags), (False, removed_tags)]:
+            for tag in upd_tags:
+                if added:
+                    self.endpoint_ids_by_tag[tag] |= endpoint_ids
+                else:
+                    self.endpoint_ids_by_tag[tag] -= endpoint_ids
+                if tag in self.active_ipsets_by_tag:
+                    # Tag is in-use, update its members.
+                    ipset = self.active_ipsets_by_tag[tag]
+                    for endpoint_id in endpoint_ids:
+                        endpoint = self.endpoints_by_id[endpoint_id]
+                        for ip in endpoint["ip_addresses"]:
+                            if added:
+                                ipset.add_member(ip).get()
+                            else:
+                                ipset.remove_member(ip).get()
+
     @actor_event
     def on_profile_change(self, profile_id, profile):
         """
@@ -352,37 +378,25 @@ class UpdateSequencer(Actor):
         profile was deleted.
         """
         _log.info("Profile update: %s", profile_id)
+
+        # Lookup old profile, if any.
+        old_profile = self.profiles_by_id.get(profile_id, {"tags": []})
+        old_tags = set(old_profile["tags"])
+
         if profile is None:
-            # TODO: Handle deletion
-            pass
+            _log.info("Delete for profile %s", profile_id)
+            if self._profile_active(profile_id):
+                raise ValueError("Inconsistent update: attempt to remove "
+                                 "profile %s, which is active." % profile_id)
+            new_tags = set()
+            del self.profiles_by_id[profile_id]
         else:
-            # Lookup old profile, if any.
-            old_profile = self.profiles_by_id.get(profile_id, {"tags": []})
+            new_tags = set(profile.get("tags", []))
+            self.profiles_by_id[profile_id] = profile
 
-            # Process any tag updates.
-            old_tags = set(old_profile["tags"])
-            new_tags = set(profile["tags"])
-            endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id,
-                                                               set())
-            added_tags = new_tags - old_tags
-            removed_tags = old_tags - new_tags
-            for added, upd_tags in [(True, added_tags), (False, removed_tags)]:
-                for tag in upd_tags:
-                    if added:
-                        self.endpoint_ids_by_tag[tag] |= endpoint_ids
-                    else:
-                        self.endpoint_ids_by_tag[tag] -= endpoint_ids
-                    if tag in self.active_ipsets_by_tag:
-                        # Tag is in-use, update its members.
-                        ipset = self.active_ipsets_by_tag[tag]
-                        for endpoint_id in endpoint_ids:
-                            endpoint = self.endpoints_by_id[endpoint_id]
-                            for ip in endpoint["ip_addresses"]:
-                                if added:
-                                    ipset.add_member(ip).get()
-                                else:
-                                    ipset.remove_member(ip).get()
+        self._process_tag_updates(profile_id, old_tags, new_tags)
 
+        if profile is not None:
             # Create any missing ipsets.  Must do this before we reference them
             # in rules below.
             self._ensure_profile_ipsets_exist(profile)
@@ -395,9 +409,6 @@ class UpdateSequencer(Actor):
                     if profile[in_or_out] != old_profile.get(in_or_out):
                         program_profile_chains(profile_id, profile)
                         break
-
-            # Stash the profile.
-            self.profiles_by_id[profile_id] = profile
 
         _log.info("Profile update: %s complete", profile_id)
 
