@@ -31,9 +31,9 @@ import logging
 import gevent
 
 from calico import common
-from calico.felix.fiptables import IPTABLES_V4_UPDATER, IPTABLES_V6_UPDATER
+from calico.felix.fiptables import IptablesUpdater
 from calico.felix.frules import install_global_rules
-from calico.felix.dbcache import UPDATE_SEQUENCER
+from calico.felix.dbcache import UpdateSequencer
 
 _log = logging.getLogger(__name__)
 
@@ -44,20 +44,24 @@ def _main_greenlet(config):
     its children if desired.
     """
 
-    UPDATE_SEQUENCER.start()
-    IPTABLES_V4_UPDATER.start()
-    IPTABLES_V6_UPDATER.start()
-    greenlets = [UPDATE_SEQUENCER.greenlet,
-                 IPTABLES_V4_UPDATER.greenlet,
-                 IPTABLES_V6_UPDATER.greenlet,
+    v4_updater = IptablesUpdater(ip_version=4)
+    v6_updater = IptablesUpdater(ip_version=6)
+    update_sequencer = UpdateSequencer(v4_updater, v6_updater)
+
+    update_sequencer.start()
+    v4_updater.start()
+    v6_updater.start()
+    greenlets = [update_sequencer.greenlet,
+                 v4_updater.greenlet,
+                 v6_updater.greenlet,
                  gevent.spawn(watchdog)]
 
     # Install the global rules before we start polling for updates.
     iface_prefix = "tap"
-    install_global_rules(config, iface_prefix)
+    install_global_rules(config, iface_prefix, v4_updater, v6_updater)
 
     # Start polling for updates.
-    greenlets.append(gevent.spawn(watch_etcd, UPDATE_SEQUENCER))
+    greenlets.append(gevent.spawn(watch_etcd, update_sequencer))
 
     # Wait for somethign to fail.
     # TODO: Maybe restart failed greenlets.

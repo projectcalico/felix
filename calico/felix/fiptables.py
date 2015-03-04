@@ -92,6 +92,3 @@ class IptablesUpdater(Actor):
                        self.cmd_name, out, err)
             raise CalledProcessError(cmd=cmd, returncode=rc)
 
-
-IPTABLES_V4_UPDATER = IptablesUpdater(ip_version=4)
-IPTABLES_V6_UPDATER = IptablesUpdater(ip_version=6)

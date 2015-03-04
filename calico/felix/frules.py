@@ -20,7 +20,6 @@ Felix rule management, including iptables and ipsets.
 """
 import logging
 from subprocess import CalledProcessError
-from calico.felix.fiptables import IPTABLES_V4_UPDATER, IPTABLES_V6_UPDATER
 import re
 
 _log = logging.getLogger(__name__)
@@ -131,7 +130,7 @@ def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     return [to_chain_name, from_chain_name], to_chain + from_chain
 
 
-def install_global_rules(config, iface_prefix):
+def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
     """
     Set up global iptables rules. These are rules that do not change with
     endpoint, and are expected never to change (such as the rules that send all
@@ -159,7 +158,7 @@ def install_global_rules(config, iface_prefix):
                       "--destination 169.254.169.254/32 "
                       "--jump DNAT --to-destination %s:%s" %
                       (config.METADATA_IP, config.METADATA_PORT))
-    IPTABLES_V4_UPDATER.apply_updates("nat", [CHAIN_PREROUTING], nat_pr)
+    v4_updater.apply_updates("nat", [CHAIN_PREROUTING], nat_pr)
 
     # Ensure we have a rule that forces us through the chain we just created.
     rule = "PREROUTING --jump %s" % CHAIN_PREROUTING
@@ -168,16 +167,16 @@ def install_global_rules(config, iface_prefix):
         # assume it wasn't present and insert it.
         pr = ["--delete %s" % rule,
               "--insert %s" % rule]
-        IPTABLES_V4_UPDATER.apply_updates("nat", [], pr)
+        v4_updater.apply_updates("nat", [], pr)
     except CalledProcessError:
         _log.info("Failed to detect pre-routing rule, will insert it.")
         pr = ["--insert %s" % rule]
-        IPTABLES_V4_UPDATER.apply_updates("nat", [], pr)
+        v4_updater.apply_updates("nat", [], pr)
 
     # Now the filter table. This needs to have calico-filter-FORWARD and
     # calico-filter-INPUT chains, which we must create before adding any
     # rules that send to them.
-    for iptables_updater in [IPTABLES_V4_UPDATER, IPTABLES_V6_UPDATER]:
+    for iptables_updater in [v4_updater, v6_updater]:
         req_chains = [CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT, CHAIN_INPUT,
                       CHAIN_FORWARD]
 
@@ -227,7 +226,7 @@ def program_profile_chains(profile_id, profile):
         update_chain(chain_name, profile[in_or_out])
 
 
-def update_chain(name, rule_list, iptable="filter", async=False):
+def update_chain(name, rule_list, v4_updater, iptable="filter", async=False):
     """
     Atomically creates/replaces the contents of the named iptables chain
     with the rules from rule_list.
@@ -241,7 +240,7 @@ def update_chain(name, rule_list, iptable="filter", async=False):
     fragments += [rule_to_iptables_fragment(name, r, on_allow="RETURN")
                   for r in rule_list]
     # TODO: IPv6 support
-    return IPTABLES_V4_UPDATER.apply_updates(iptable, [name], fragments,
+    return v4_updater.apply_updates(iptable, [name], fragments,
                                              async=async)
 
 

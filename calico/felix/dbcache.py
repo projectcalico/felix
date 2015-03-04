@@ -6,7 +6,6 @@ import socket
 
 
 from calico.felix.actor import actor_event, Actor, wait_and_check
-from calico.felix.fiptables import IPTABLES_V4_UPDATER
 from calico.felix.frules import (tag_to_ipset_name, profile_to_chain_name,
                                  update_chain, get_endpoint_rules,
                                  program_profile_chains,
@@ -21,8 +20,11 @@ OUR_HOSTNAME = socket.gethostname()
 
 
 class UpdateSequencer(Actor):
-    def __init__(self):
+    def __init__(self, v4_updater, v6_updater):
         super(UpdateSequencer, self).__init__()
+
+        self.v4_updater = v4_updater
+        self.v6_updater = v6_updater
 
         # Data.
         self.profiles_by_id = {}
@@ -133,7 +135,7 @@ class UpdateSequencer(Actor):
             for in_or_out in ["inbound", "outbound"]:
                 chain_name = profile_to_chain_name(in_or_out, profile_id)
                 rules = profile[in_or_out]
-                update_chain(chain_name, rules)
+                update_chain(chain_name, rules, self.v4_updater)
 
         # Stage 6: replace the database with the new snapshot.
         _log.info("Replacing state with new snapshot.")
@@ -154,7 +156,8 @@ class UpdateSequencer(Actor):
                                                  endpoint["mac"],
                                                  endpoint["profile"])
             updates += self.active_endpoint_updates()
-            IPTABLES_V4_UPDATER.apply_updates("filter", chains, updates)
+            # TODO: IPv6
+            self.v4_updater.apply_updates("filter", chains, updates)
 
         # TODO Stage 8: program routing rules?
 
@@ -340,7 +343,8 @@ class UpdateSequencer(Actor):
                     endpoint["mac"],
                     endpoint["profile"])
                 updates += self.active_endpoint_updates()
-                IPTABLES_V4_UPDATER.apply_updates("filter", chains, updates)
+                # TODO: IPv6
+                self.v4_updater.apply_updates("filter", chains, updates)
 
         _log.info("Endpoint update complete.")
 
@@ -377,5 +381,4 @@ def extract_tags_from_rule(rule):
     return set([rule[key] for key in ["src_tag", "dst_tag"] if key in rule])
 
 
-UPDATE_SEQUENCER = UpdateSequencer()
 
