@@ -1,24 +1,53 @@
+# -*- coding: utf-8 -*-
 # Copyright (c) Metaswitch Networks 2015. All rights reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
+"""
+felix.felix
+~~~~~~~~~~~
+
+The main logic for Felix.
+"""
 
 # Monkey-patch before we do anything else...
 from gevent import monkey
 monkey.patch_all()
+
+import os
 
 from collections import defaultdict
 import json
 import logging
 import re
 import socket
-from subprocess import CalledProcessError
-import sys
 
 import etcd
 from etcd import EtcdException
 import gevent
-from gevent import subprocess
 
+from calico import common
 from calico.felix.actor import actor_event, Actor, wait_and_check
-from calico.felix.config import Config
+from calico.felix.fiptables import IptablesUpdater, IPTABLES_V4_UPDATER, \
+    IPTABLES_V6_UPDATER
+from calico.felix.frules import (tag_to_ipset_name, profile_to_chain_name,
+                                 update_chain, get_endpoint_rules,
+                                 program_profile_chains,
+                                 CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,
+                                 CHAIN_TO_PREFIX, CHAIN_FROM_PREFIX,
+                                 install_global_rules)
+from calico.felix.ipsets import IpsetUpdater
+
 
 _log = logging.getLogger(__name__)
 
@@ -30,167 +59,6 @@ ENDPOINT_RE = re.compile(
 
 
 OUR_HOSTNAME = socket.gethostname()
-
-
-class IpsetUpdater(Actor):
-
-    def __init__(self, name, set_type):
-        super(IpsetUpdater, self).__init__()
-
-        self.name = name
-        self.set_type = set_type
-        self.members = set()
-        """Database state"""
-
-        self.programmed_members = None
-        """
-        State loaded from ipset command.  None if we haven't loaded
-        yet or the set doesn't exist.
-        """
-
-        self._load_from_ipset()
-
-    @actor_event
-    def replace_members(self, members):
-        _log.info("Replacing members of ipset %s", self.name)
-        assert isinstance(members, set), "Expected members to be a set"
-        self.members = members
-        self._sync_to_ipset()
-
-    @actor_event
-    def add_member(self, member):
-        _log.info("Adding member %s to ipset %s", member, self.name)
-        self.members.add(member)
-        self._sync_to_ipset()
-
-    @actor_event
-    def remove_member(self, member):
-        _log.info("Removing member %s from ipset %s", member, self.name)
-        try:
-            self.members.remove(member)
-        except KeyError:
-            _log.info("%s was not in ipset %s", member, self.name)
-        else:
-            self._sync_to_ipset()
-
-    def _load_from_ipset(self):
-        try:
-            output = subprocess.check_output(["ipset", "list", self.name])
-        except CalledProcessError as cpe:
-            if cpe.returncode == 1:
-                # ipset doesn't exist.  TODO: better check?
-                self.programmed_members = None
-            else:
-                raise
-        else:
-            # Output ends with:
-            # Members:
-            # <one member per line>
-            lines = output.splitlines()
-            self.programmed_members = set(lines[lines.index("Members:") + 1:])
-
-    def _sync_to_ipset(self):
-        if self.programmed_members is None:
-            # We're only called after _load_from_ipset() so we know that the
-            # ipset doesn't exist.
-            subprocess.check_output(
-                ["ipset", "create", self.name, self.set_type])
-            self.programmed_members = set()
-        _log.debug("Programmed members: %s", self.programmed_members)
-        _log.debug("Desired members: %s", self.members)
-        members_to_add = self.members - self.programmed_members
-        _log.debug("Adding members: %s", members_to_add)
-        for member in members_to_add:
-            subprocess.check_output(["ipset", "add", self.name, member])
-            self.programmed_members.add(member)
-        members_to_remove = self.programmed_members - self.members
-        _log.debug("Removing members: %s", members_to_remove)
-        for member in members_to_remove:
-            subprocess.check_output(["ipset", "del", self.name, member])
-            self.programmed_members.remove(member)
-        assert self.programmed_members == self.members
-
-
-# Chain names
-CHAIN_PREROUTING = "felix-PREROUTING"
-CHAIN_INPUT = "felix-INPUT"
-CHAIN_FORWARD = "felix-FORWARD"
-CHAIN_TO_ENDPOINT = "felix-TO-ENDPOINT"
-CHAIN_FROM_ENDPOINT = "felix-FROM-ENDPOINT"
-CHAIN_TO_PREFIX = "felix-to-"
-CHAIN_FROM_PREFIX = "felix-from-"
-CHAIN_PROFILE_PREFIX = "felix-profile-"
-
-
-class IptablesUpdater(Actor):
-    """
-    Actor that maintains an iptables-restore subprocess for
-    injecting rules into iptables.
-
-    Note: due to the internal architecture of IP tables,
-    multiple concurrent calls to iptables-restore can clobber
-    each other.  Use one instance of this class.
-    """
-    def __init__(self, ip_version=4):
-        super(IptablesUpdater, self).__init__()
-        if ip_version == 4:
-            self.cmd_name = "iptables-restore"
-        else:
-            assert ip_version == 6
-            self.cmd_name = "ip6tables-restore"
-
-    @actor_event
-    def apply_updates(self, table_name, required_chains, update_calls):
-        """
-        Atomically apply a set of updates to an iptables table.
-
-        :param table_name: one of "raw" "mangle" "filter" "nat".
-        :param required_chains: list of chains that the updates
-               operate on; they will be created if needed.
-        :param update_calls: list of iptables-style update calls,
-               e.g. ["-A chain_name -j ACCEPT"] If rewriting a
-               whole chain, start with "-F chain_name" to flush
-               the chain.
-        :returns an AsyncResult that may raise CalledProcessError
-                 if a problem occurred.
-        """
-        # Run iptables-restore in noflush mode so that it doesn't
-        # blow away all the tables we're not touching.
-
-        # Valid input looks like this.
-        #
-        # *table
-        # :chain_name
-        # :chain_name_2
-        # -F chain_name
-        # -A chain_name -j ACCEPT
-        # COMMIT
-        #
-        # The chains are created if they don't exist.
-        chains = [":%s -" % c if isinstance(c, basestring) else ":%s %s" % c
-                  for c in required_chains]
-        restore_input = "\n".join(
-            ["*%s" % table_name] +
-            chains +
-            update_calls +
-            ["COMMIT\n"]
-        )
-        _log.debug("iptables-restore input:\n%s", restore_input)
-        cmd = [self.cmd_name, "--noflush"]
-        iptables_proc = subprocess.Popen(cmd,
-                                         stdin=subprocess.PIPE,
-                                         stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE)
-        out, err = iptables_proc.communicate(restore_input)
-        rc = iptables_proc.wait()
-        if rc != 0:
-            _log.error("Failed to run %s.\nOutput:%s\nError: %s",
-                       self.cmd_name, out, err)
-            raise CalledProcessError(cmd=cmd, returncode=rc)
-
-
-IPTABLES_V4_UPDATER = IptablesUpdater(ip_version=4)
-IPTABLES_V6_UPDATER = IptablesUpdater(ip_version=6)
 
 
 def extract_tags_from_profile(profile):
@@ -552,285 +420,6 @@ class UpdateSequencer(Actor):
 UPDATE_SEQUENCER = UpdateSequencer()
 
 
-KNOWN_RULE_KEYS = set([
-    "action",
-    "protocol",
-    "src_net",
-    "src_tag",
-    "src_ports",
-    "dst_net",
-    "dst_tag",
-    "dst_ports",
-    "icmp_type",
-])
-
-
-def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
-    to_chain_name = CHAIN_TO_PREFIX + suffix
-    
-    to_chain = ["--flush %s" % to_chain_name]
-    if ip_version == 6:
-        #  In ipv6 only, there are 6 rules that need to be created first.       
-        #  RETURN ipv6-icmp anywhere anywhere ipv6-icmptype 130                 
-        #  RETURN ipv6-icmp anywhere anywhere ipv6-icmptype 131                 
-        #  RETURN ipv6-icmp anywhere anywhere ipv6-icmptype 132                 
-        #  RETURN ipv6-icmp anywhere anywhere ipv6-icmp router-advertisement    
-        #  RETURN ipv6-icmp anywhere anywhere ipv6-icmp neighbour-solicitation  
-        #  RETURN ipv6-icmp anywhere anywhere ipv6-icmp neighbour-advertisement 
-        #                                                                       
-        #  These rules are ICMP types 130, 131, 132, 134, 135 and 136, and can  
-        #  be created on the command line with something like :                 
-        #     ip6tables -A plw -j RETURN --protocol ipv6-icmp --icmpv6-type 130
-        for icmp_type in ["130", "131", "132", "134", "135", "136"]:
-            to_chain.append("--append %s --jump RETURN "
-                            "--protocol ipv6-icmp "
-                            "--icmpv6-type %s" % (to_chain_name, icmp_type))
-    to_chain.append("--append %s --match conntrack --ctstate INVALID "
-                    "--jump DROP" % to_chain_name)
-
-    # FIXME: Do we want conntrack RELATED,ESTABLISHED?
-    to_chain.append("--append %s --match conntrack "
-                    "--ctstate RELATED,ESTABLISHED --jump RETURN" %
-                    to_chain_name)
-    profile_in_chain = profile_to_chain_name("inbound", profile_id)
-    to_chain.append("--append %s --jump %s" %
-                    (to_chain_name, profile_in_chain))
-    to_chain.append("--append %s --jump DROP" % to_chain_name)
-
-    # Now the chain that manages packets from the interface...
-    from_chain_name = CHAIN_FROM_PREFIX + suffix
-    from_chain = ["--flush %s" % from_chain_name]
-    if ip_version == 6:
-        # In ipv6 only, allows all ICMP traffic from this endpoint to anywhere.
-        from_chain.append("--append %s --protocol ipv6-icmp")
-
-    # Conntrack rules.
-    from_chain.append("--append %s --match conntrack --ctstate INVALID "
-                    "--jump DROP" % from_chain_name)
-    # FIXME: Do we want conntrack RELATED,ESTABLISHED?
-    from_chain.append("--append %s --match conntrack "
-                      "--ctstate RELATED,ESTABLISHED --jump RETURN" %
-                      from_chain_name)
-
-    if ip_version == 4:
-        from_chain.append("--append %s --protocol udp --sport 68 --dport 67 "
-                          "--jump RETURN" % from_chain_name)
-    else:
-        assert ip_version == 6
-        from_chain.append("--append %s --protocol udp --sport 546 --dport 547 "
-                          "--jump RETURN" % from_chain_name)
-
-    # Anti-spoofing rules.  Only allow traffic from known (IP, MAC) pairs to
-    # get to the profile chain, drop other traffic.
-    profile_out_chain = profile_to_chain_name("outbound", profile_id)
-    for ip in local_ips:
-        cidr = "%s/32" % ip if ip_version == 4 else "%s/64" % ip
-        # Note use of --goto rather than --jump; this means that when the
-        # profile chain returns, it will return the chain that called us, not
-        # this chain.
-        from_chain.append("--append %s --src %s --match mac --mac-source %s "
-                          "--goto %s" % (from_chain_name, cidr,
-                                         mac.upper(), profile_out_chain))
-    from_chain.append("--append %s --jump DROP" % from_chain_name)
-
-    return [to_chain_name, from_chain_name], to_chain + from_chain
-
-
-def install_global_rules(config, iface_prefix):
-    """
-    Set up global iptables rules. These are rules that do not change with
-    endpoint, and are expected never to change (such as the rules that send all
-    traffic through the top level Felix chains).
-
-    This method therefore :
-
-    - ensures that all the required global tables are present;
-    - applies any changes required.
-    """
-
-    # The interface matching string; for example, if interfaces start "tap"
-    # then this string is "tap+".
-    iface_match = iface_prefix + "+"
-
-    # The IPV4 nat table first. This must have a felix-PREROUTING chain.
-    nat_pr = ["--flush %s" % CHAIN_PREROUTING]
-    if config.METADATA_IP is not None:
-        # Need to expose the metadata server on a link-local.
-        #  DNAT tcp -- any any anywhere 169.254.169.254
-        #              tcp dpt:http to:127.0.0.1:9697
-        nat_pr.append("--append " + CHAIN_PREROUTING + " "
-                      "--protocol tcp "
-                      "--dport 80 "
-                      "--destination 169.254.169.254/32 "
-                      "--jump DNAT --to-destination %s:%s" %
-                      (config.METADATA_IP, config.METADATA_PORT))
-    IPTABLES_V4_UPDATER.apply_updates("nat", [CHAIN_PREROUTING], nat_pr)
-
-    # Ensure we have a rule that forces us through the chain we just created.
-    rule = "PREROUTING --jump %s" % CHAIN_PREROUTING
-    try:
-        # Try to atomically delete and reinsert the rule, if we fail, we
-        # assume it wasn't present and insert it.
-        pr = ["--delete %s" % rule,
-              "--insert %s" % rule]
-        IPTABLES_V4_UPDATER.apply_updates("nat", [], pr)
-    except CalledProcessError:
-        _log.info("Failed to detect pre-routing rule, will insert it.")
-        pr = ["--insert %s" % rule]
-        IPTABLES_V4_UPDATER.apply_updates("nat", [], pr)
-
-    # Now the filter table. This needs to have calico-filter-FORWARD and
-    # calico-filter-INPUT chains, which we must create before adding any
-    # rules that send to them.
-    for iptables_updater in [IPTABLES_V4_UPDATER, IPTABLES_V6_UPDATER]:
-        req_chains = [CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT, CHAIN_INPUT,
-                      CHAIN_FORWARD]
-
-        updates = []
-
-        # Add rules to the global chains to direct to our own.
-        # Force FORWARD traffic to go through our chain.
-        # TODO: remove any old version of the rule
-        updates.extend([
-            "--insert FORWARD --jump %s" % CHAIN_FORWARD
-        ])
-        # Force INPUT traffic to go through our chain.
-        updates.extend([
-            "--insert INPUT --jump %s" % CHAIN_INPUT
-        ])
-
-        # Configure our chains.
-        # The felix forward chain tests traffic to and from endpoints
-        updates.extend([
-            "--flush %s" % CHAIN_FORWARD,
-            "--append %s --jump %s --in-interface %s" %
-                (CHAIN_FORWARD, CHAIN_FROM_ENDPOINT, iface_match),
-            "--append %s --jump %s --out-interface %s" %
-                (CHAIN_FORWARD, CHAIN_TO_ENDPOINT, iface_match),
-            "--append %s --jump ACCEPT --in-interface %s" %
-                (CHAIN_FORWARD, iface_match),
-            "--append %s --jump ACCEPT --out-interface %s" %
-                (CHAIN_FORWARD, iface_match),
-        ])
-
-        # The felix INPUT chain tests traffic from endpoints
-        updates.extend([
-            "--flush %s" % CHAIN_INPUT,
-            "--append %s --jump %s --in-interface %s" %
-                (CHAIN_INPUT, CHAIN_FROM_ENDPOINT, iface_match),
-            "--append %s --jump ACCEPT --in-interface %s" %
-                (CHAIN_INPUT, iface_match),
-        ])
-
-        iptables_updater.apply_updates("filter", req_chains, updates)
-
-
-def program_profile_chains(profile_id, profile):
-    for in_or_out in ["inbound", "outbound"]:
-        chain_name = profile_to_chain_name(in_or_out,
-                                           profile_id)
-        update_chain(chain_name, profile[in_or_out])
-
-
-def update_chain(name, rule_list, iptable="filter", async=False):
-    """
-    Atomically creates/replaces the contents of the named iptables chain
-    with the rules from rule_list.
-    :param list[dict] rule_list: Ordered list of rule dicts.
-    :return: AsyncResult from the IPTABLES_UPDATER.
-    """
-    # Delete all rules int he chain.  This is done atomically with the
-    # appends below so the end result will be a chain with only the new rules
-    # in it.
-    fragments = ["--flush %s" % name]
-    fragments += [rule_to_iptables_fragment(name, r, on_allow="RETURN")
-                  for r in rule_list]
-    # TODO: IPv6 support
-    return IPTABLES_V4_UPDATER.apply_updates(iptable, [name], fragments,
-                                             async=async)
-
-
-def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
-                              on_deny="DROP"):
-    """
-    Convert a rule dict to an iptables fragment suitable to use with
-    iptables-restore.
-
-    :param str chain_name: Name of the chain this rule belongs to (used in the
-           --append)
-    :param dict[str,str|list|int] rule: Rule dict.
-    :param str on_allow: iptables action to use when the rule allows traffic.
-           For example: "ACCEPT" or "RETURN".
-    :param str on_deny: iptables action to use when the rule denies traffic.
-           For example: "DROP".
-    :return str: iptables --append fragment.
-    """
-
-    # Check we've not got any unknown fields.
-    unknown_keys = set(rule.keys()) - KNOWN_RULE_KEYS
-    assert not unknown_keys, "Unknown keys: %s" % ", ".join(unknown_keys)
-
-    # Build up the update in chunks and join them below.
-    update_fragments = ["--append", chain_name]
-    append = lambda *args: update_fragments.extend(args)
-
-    proto = None
-    if "protocol" in rule:
-        proto = rule["protocol"]
-        assert proto in ["tcp", "udp", "icmp", "icmpv6"]
-        append("--protocol", proto)
-
-    for dirn in ["src", "dst"]:
-        # Some params use the long-form of the name.
-        direction = "source" if dirn == "src" else "destination"
-
-        # Network (CIDR).
-        net_key = dirn + "_net"
-        if net_key in rule:
-            ip_or_cidr = rule[net_key]
-            append("--%s" % direction, ip_or_cidr)
-
-        # Tag, which maps to an ipset.
-        tag_key = dirn + "_tag"
-        if tag_key in rule:
-            ipset_name = tag_to_ipset_name(rule[tag_key])
-            append("--match set", "--match-set", ipset_name, dirn)
-
-        # Port lists/ranges, which we map to multiport.
-        ports_key = dirn + "_ports"
-        if ports_key in rule:
-            assert proto in ["tcp", "udp"], "Protocol %s not supported with " \
-                                            "%s" % (proto, ports_key)
-            ports = ','.join([str(p) for p in rule[ports_key]])
-            # multiport only supports 15 ports.
-            assert ports.count(",") + ports.count(":") < 15, "Too many ports"
-            append("--match multiport", "--%s-ports" % direction, ports)
-
-    if "icmp_type" in rule:
-        icmp_type = rule["icmp_type"]
-        assert isinstance(icmp_type, int), "ICMP type should be an int"
-        if proto == "icmp":
-            append("--match icmp", "--icmp-type", rule["icmp_type"])
-        else:
-            assert proto == "icmpv6"
-            # Note variant spelling of icmp[v]6
-            append("--match icmp6", "--icmpv6-type", rule["icmp_type"])
-
-    # Add the action
-    append("--jump", on_allow if rule.get("action") == "allow" else on_deny)
-
-    return " ".join(str(x) for x in update_fragments)
-
-
-def tag_to_ipset_name(tag_name):
-    assert re.match(r'^\w+$', tag_name), "Tags must be alphanumeric for now"
-    return "calico-tag-" + tag_name
-
-
-def profile_to_chain_name(inbound_or_outbound, profile_id):
-    return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_id, inbound_or_outbound)
-
-
 def watch_etcd():
     """
     Loads the snapshot from etcd and then monitors etcd for changes.
@@ -947,16 +536,11 @@ def parse_if_profile(etcd_node):
     return None, None
 
 
-class FakeConfig(object):
-    pass
-
-
-def _main_greenlet():
-    # TODO: Load config
-    config = FakeConfig()
-    config.METADATA_IP = "127.0.0.1"
-    config.METADATA_PORT = 8080
-    iface_prefix = "tap"
+def _main_greenlet(config):
+    """
+    The root of our tree of greenlets.  Responsible for restarting
+    its children if desired.
+    """
 
     UPDATE_SEQUENCER.start()
     IPTABLES_V4_UPDATER.start()
@@ -967,24 +551,24 @@ def _main_greenlet():
                  gevent.spawn(watchdog)]
 
     # Install the global rules before we start polling for updates.
+    iface_prefix = "tap"
     install_global_rules(config, iface_prefix)
 
     # Start polling for updates.
     greenlets.append(gevent.spawn(watch_etcd))
 
-    while True:
-        stopped_greenlets_iter = gevent.iwait(greenlets)
-        try:
-            stopped_greenlet = next(stopped_greenlets_iter)
-            stopped_greenlet.get()
-        except Exception:
-            _log.exception("Greenlet failed: %s", stopped_greenlet)
-        else:
-            _log.error("Greenlet unexpectedly returned.")
-        gevent.sleep(1)
-        _log.error("Re-spawning.")
-        # FIXME this isn't working!!  It starts it at the same point!
-        stopped_greenlet.start()
+    # Wait for somethign to fail.
+    # TODO: Maybe restart failed greenlets.
+    stopped_greenlets_iter = gevent.iwait(greenlets)
+    stopped_greenlet = next(stopped_greenlets_iter)
+    try:
+        stopped_greenlet.get()
+    except Exception:
+        _log.exception("Greenlet failed: %s", stopped_greenlet)
+        raise
+    else:
+        _log.error("Greenlet %s unexpectedly returned.", stopped_greenlet)
+        raise AssertionError("Greenlet unexpectedly returned")
 
 
 def watchdog():
@@ -993,12 +577,27 @@ def watchdog():
         gevent.sleep(20)
 
 
+class FakeConfig(object):
+    pass
+
+
 def main():
-    log_level = logging.DEBUG if '-d' in sys.argv else logging.INFO
-    logging.basicConfig(level=log_level,
-                        format="%(levelname).1s %(asctime)s "
-                               "%(process)s|%(thread)x "
-                               "%(filename)s:%(funcName)s:%(lineno)d "
-                               "%(message)s")
-    _log.info("Starting up")
-    gevent.spawn(_main_greenlet).join()  # Should never return
+    try:
+        # Initialise the logging with default parameters.
+        common.default_logging()
+
+        # TODO: Load config
+        config = FakeConfig()
+        config.METADATA_IP = "127.0.0.1"
+        config.METADATA_PORT = 8080
+
+        # FIXME: old felix used argparse but that's not in Python 2.6.
+        _log.info("Starting up")
+        gevent.spawn(_main_greenlet, config).join()  # Should never return
+    except BaseException:
+        # Make absolutely sure that we exit by asking the OS to terminate our
+        # process.  We don't wan to let a stray background thread keep us
+        # alive.
+        _log.exception("Felix exiting due to exception")
+        os._exit(1)
+        raise  # Unreachable but keeps the linter happy about the broad except.
