@@ -21,6 +21,7 @@ The main logic for Felix.
 """
 
 # Monkey-patch before we do anything else...
+from calico.felix.devices import watch_interfaces
 from calico.felix.fetcd import watch_etcd
 from calico.felix.ipsets import IpsetPool
 from gevent import monkey
@@ -66,8 +67,9 @@ def _main_greenlet(config):
 
     # Start polling for updates.
     greenlets.append(gevent.spawn(watch_etcd, update_sequencer))
+    greenlets.append(gevent.spawn(watch_interfaces, update_sequencer))
 
-    # Wait for somethign to fail.
+    # Wait for something to fail.
     # TODO: Maybe restart failed greenlets.
     stopped_greenlets_iter = gevent.iwait(greenlets)
     stopped_greenlet = next(stopped_greenlets_iter)

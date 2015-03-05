@@ -247,6 +247,10 @@ class UpdateSequencer(Actor):
 
         _log.info("Profile update: %s complete", profile_id)
 
+    @actor_event
+    def on_interface_update(self, name, iface_state):
+        pass
+
     def _process_tag_updates(self, profile_id, old_tags, new_tags):
         """
         Updates the active ipsets associated with the change in tags

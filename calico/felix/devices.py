@@ -19,6 +19,9 @@ felix.devices
 Utility functions for managing devices in Felix.
 """
 import logging
+import collections
+import gevent
+from gevent import subprocess
 import os
 import time
 
@@ -26,7 +29,9 @@ from calico import common
 from calico.felix import futils
 
 # Logger
-log = logging.getLogger(__name__)
+import re
+
+_log = logging.getLogger(__name__)
 
 def interface_exists(interface):
     """
@@ -51,7 +56,7 @@ def list_interface_ips(type, interface):
 
     lines = data.split("\n")
 
-    log.debug("Existing routes to %s : %s" % (interface, ",".join(lines)))
+    _log.debug("Existing routes to %s : %s" % (interface, ",".join(lines)))
 
     for line in lines:
         #*********************************************************************#
@@ -68,7 +73,7 @@ def list_interface_ips(type, interface):
                 # routes to networks configured when the interface is created.
                 ips.add(words[0])
 
-    log.debug("Found existing IP addresses : %s", ips)
+    _log.debug("Found existing IP addresses : %s", ips)
 
     return ips
 
@@ -125,3 +130,41 @@ def interface_up(if_name):
         state = f.read()
 
     return 'up' in state
+
+
+InterfaceState = collections.namedtuple("Interface",
+                                        ["name", "iface_id", "up"])
+
+
+def watch_interfaces(update_sequencer):
+    """
+    Greenlet: watches linux interfaces come and go and fires events
+    into the update sequencer.
+    """
+    # TODO: use netlink socket to monitor rather than poll?
+    interfaces = {}
+    while True:
+        # Use "ip link" to get the list of interfaces and their kernel IDs.
+        # The kernel ID should change if an interface with a particular ID
+        # is removed and then added back in-between polls.
+        output = subprocess.check_output(["ip", "link"])
+        # Lines we care about look like this:
+        # 1234: iface_name: <UP,SOME_FLAG,LOWER_UP> ...
+        # Regex extracts "1234", "iface_name" and "UP,SOME_FLAG,LOWER_UP".
+        seen_interfaces = set()
+        for num, name, attrs in re.findall(r"^(\d+): ([^:]+): <([^>]+)>",
+                                           output, flags=re.MULTILINE):
+            seen_interfaces.add(name)
+            is_up = "UP" in attrs.split(",")
+            old_state = interfaces.get(name)
+            new_state = InterfaceState(name=name, iface_id=int(num), up=is_up)
+            if old_state != new_state:
+                _log.info("Interface %s changed state: %s", name, new_state)
+                interfaces[name] = new_state
+                update_sequencer.on_interface_update(name, new_state)
+        previous_interfaces = set(interfaces.keys())
+        for removed_interface in previous_interfaces - seen_interfaces:
+            _log.info("Interface %s went away.", removed_interface)
+            del interfaces[removed_interface]
+            update_sequencer.on_interface_update(removed_interface, None)
+        gevent.sleep(0.5)
