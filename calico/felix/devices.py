@@ -161,6 +161,12 @@ def watch_interfaces(update_sequencer):
             if old_state != new_state:
                 _log.info("Interface %s changed state: %s", name, new_state)
                 interfaces[name] = new_state
+                if old_state and old_state.iface_id != new_state.iface_id:
+                    # Interface ID has changed, indicates the interface
+                    # was deleted and then re-added.
+                    _log.debug("Interface ID changed for %s. simulating "
+                               "remove then add.", name)
+                    update_sequencer.on_interface_update(name, None)
                 update_sequencer.on_interface_update(name, new_state)
         previous_interfaces = set(interfaces.keys())
         for removed_interface in previous_interfaces - seen_interfaces:
