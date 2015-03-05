@@ -1,97 +1,40 @@
-# Copyright (c) Metaswitch Networks 2015. All rights reserved.
+# -*- coding: utf-8 -*-
+# Copyright (c) 2015 Metaswitch Networks
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+"""
+felix.dbcache
+~~~~~~~~~~~~~
 
+Our cache of the etcd database.
+"""
 from collections import defaultdict
 import functools
 import logging
 import socket
 
-
 from calico.felix.actor import actor_event, Actor, wait_and_check
-from calico.felix.frules import (profile_to_chain_name,
-                                 update_chain, get_endpoint_rules,
+from calico.felix.fiptables import ActiveProfile
+from calico.felix.frules import (get_endpoint_rules,
                                  program_profile_chains,
                                  CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,
-                                 CHAIN_TO_PREFIX, CHAIN_FROM_PREFIX,
-                                 rules_to_chain_rewrite_lines)
-from calico.felix.ipsets import IpsetUpdater
+                                 CHAIN_TO_PREFIX, CHAIN_FROM_PREFIX)
 
 _log = logging.getLogger(__name__)
 
 
 OUR_HOSTNAME = socket.gethostname()
-
-
-class ActiveProfile(Actor):
-    def __init__(self, profile_id, iptables_updaters):
-        super(ActiveProfile, self).__init__()
-        self.id = profile_id
-        self._iptables_updaters = iptables_updaters
-        self._profile = None
-        """:type dict: filled in by first update"""
-        self._tag_to_ip_set_name = None
-        """:type dict[str, str]: current mapping from tag name to ipset name."""
-
-    @actor_event
-    def on_profile_update(self, profile, tag_to_ipset_name):
-        """
-        Update the programmed iptables configuration with the new
-        profile
-        """
-        assert profile["id"] == self.id
-
-        futures = self._update_chain(profile, "inbound", tag_to_ipset_name)
-        futures += self._update_chain(profile, "outbound", tag_to_ipset_name)
-        wait_and_check(futures)
-
-        self._profile = profile
-        self._tag_to_ip_set_name = tag_to_ipset_name
-
-    @actor_event
-    def remove(self):
-        """
-        Called to tell us that this profile is no longer needed.  Removes
-        our iptables configuration.
-
-        Thread safety: Caller should wait on the result of this method before
-        creating a new ActiveProfile with the same name.  Otherwise, the
-        delete calls in this method could be issued after the initialization
-        of the new profile.
-        """
-        futures = []
-        for direction in ["inbound", "outbound"]:
-            chain_name = profile_to_chain_name(direction, self.id)
-            for updater in self._iptables_updaters.values():
-                f = updater.delete_chain(chain_name, async=True)
-                futures.append(f)
-        wait_and_check(futures)
-
-        self._profile = None
-        self._tag_to_ip_set_name = None
-
-    def _update_chain(self, new_profile, direction, tag_to_ipset_name):
-        new_rules = new_profile.get(direction, [])
-        if (self._profile is None or
-            new_rules != self._profile.get(direction) or
-            tag_to_ipset_name != self._tag_to_ip_set_name):
-            _log.debug("Update to %s affects %s rules.", self.id, direction)
-            chain_name = profile_to_chain_name(direction, self.id)
-            futures = []
-            for version, ipt in self._iptables_updaters.iteritems():
-                if version == 6:
-                    _log.error("Ignoring v6")
-                    continue
-                updates = rules_to_chain_rewrite_lines(chain_name,
-                                                       new_rules,
-                                                       version,
-                                                       tag_to_ipset_name,
-                                                       on_allow="RETURN")
-                f = ipt.apply_updates("filter", [chain_name], updates,
-                                      async=True)
-                futures.append(f)
-            return futures
-        else:
-            _log.debug("Update to %s didn't affect %s rules.",
-                       self.id, direction)
 
 
 class UpdateSequencer(Actor):
