@@ -68,7 +68,8 @@ def watch_etcd(update_sequencer):
     # Actually apply the snapshot.  The UpdateSequencer will apply deltas as
     # appropriate.  Grab the future in case it raises an error.
     f_apply_snap = update_sequencer.apply_snapshot(profiles_by_id,
-                                                   endpoints_by_id)
+                                                   endpoints_by_id,
+                                                   async=True)
     del profiles_by_id
     del endpoints_by_id
 

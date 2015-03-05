@@ -92,3 +92,7 @@ class IptablesUpdater(Actor):
                        self.cmd_name, out, err)
             raise CalledProcessError(cmd=cmd, returncode=rc)
 
+    @actor_event
+    def delete_chain(self, table_name, chain_name):
+        updates = ["--delete-chain %s" % chain_name]
+        self.apply_updates(table_name, [chain_name], updates)  # Skips queue.

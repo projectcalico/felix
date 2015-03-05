@@ -50,11 +50,6 @@ KNOWN_RULE_KEYS = set([
 ])
 
 
-def tag_to_ipset_name(tag_name):
-    assert re.match(r'^\w+$', tag_name), "Tags must be alphanumeric for now"
-    return "calico-tag-" + tag_name
-
-
 def profile_to_chain_name(inbound_or_outbound, profile_id):
     return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_id, inbound_or_outbound)
 
@@ -244,8 +239,19 @@ def update_chain(name, rule_list, v4_updater, iptable="filter", async=False):
                                              async=async)
 
 
-def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
-                              on_deny="DROP"):
+def rules_to_chain_rewrite_lines(chain_name, rules, ip_version, tag_to_ipset,
+                                 on_allow="ACCEPT", on_deny="DROP"):
+    fragments = ["--flush %s" % chain_name]
+    for r in rules:
+        fragments.append(rule_to_iptables_fragment(chain_name, r, ip_version,
+                                                   tag_to_ipset,
+                                                   on_allow=on_allow,
+                                                   on_deny=on_deny))
+    return fragments
+
+
+def rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,
+                              on_allow="ACCEPT", on_deny="DROP"):
     """
     Convert a rule dict to an iptables fragment suitable to use with
     iptables-restore.
@@ -282,12 +288,13 @@ def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
         net_key = dirn + "_net"
         if net_key in rule:
             ip_or_cidr = rule[net_key]
-            append("--%s" % direction, ip_or_cidr)
+            if (":" in ip_or_cidr) == (ip_version == 6):
+                append("--%s" % direction, ip_or_cidr)
 
         # Tag, which maps to an ipset.
         tag_key = dirn + "_tag"
         if tag_key in rule:
-            ipset_name = tag_to_ipset_name(rule[tag_key])
+            ipset_name = tag_to_ipset[rule[tag_key]]
             append("--match set", "--match-set", ipset_name, dirn)
 
         # Port lists/ranges, which we map to multiport.
@@ -297,15 +304,16 @@ def rule_to_iptables_fragment(chain_name, rule, on_allow="ACCEPT",
                                             "%s" % (proto, ports_key)
             ports = ','.join([str(p) for p in rule[ports_key]])
             # multiport only supports 15 ports.
+            # TODO: return multiple rules if we have more than one port
             assert ports.count(",") + ports.count(":") < 15, "Too many ports"
             append("--match multiport", "--%s-ports" % direction, ports)
 
     if "icmp_type" in rule:
         icmp_type = rule["icmp_type"]
         assert isinstance(icmp_type, int), "ICMP type should be an int"
-        if proto == "icmp":
+        if proto == "icmp" and ip_version == 4:
             append("--match icmp", "--icmp-type", rule["icmp_type"])
-        else:
+        elif ip_version == 6:
             assert proto == "icmpv6"
             # Note variant spelling of icmp[v]6
             append("--match icmp6", "--icmpv6-type", rule["icmp_type"])

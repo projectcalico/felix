@@ -25,8 +25,45 @@ import logging
 from subprocess import CalledProcessError
 from calico.felix.actor import Actor, actor_event
 from gevent import subprocess
+import re
 
 _log = logging.getLogger(__name__)
+
+
+class IpsetPool(Actor):
+    @actor_event
+    def allocate_ipset(self, id_tag):
+        """
+        Allocate an ipset from the pool.  If an existing ipset exists with
+        the name provided, will return that set with its members as-loaded
+        from the kernel.  Otherwise, queues a flush on the returned ipset.
+
+        Guarantees that the ipset returned already exists in the kernel by the
+        time it is returned.
+
+        :param id_tag: Name to associate with this ipset.  Used to retrieve the
+               same underlying ipset across process invocations.  Note: this
+               may not be the name of the ipset itself.
+        :return: an IpsetUpdater.
+        """
+
+        # TODO: replace this simple version with an actual pool!
+        ipset = IpsetUpdater(tag_to_ipset_name(id_tag), "hash:ip").start()
+        ipset.replace_members(set())
+        return ipset
+
+    @actor_event
+    def return_ipset(self, ipset):
+        """
+        Returns an ipset ot the pool so that it may be reused.
+        :param IpsetUpdater ipset:
+        """
+        pass
+
+
+def tag_to_ipset_name(tag_name):
+    assert re.match(r'^\w+$', tag_name), "Tags must be alphanumeric for now"
+    return "calico-tag-" + tag_name
 
 
 class IpsetUpdater(Actor):
@@ -45,7 +82,7 @@ class IpsetUpdater(Actor):
         yet or the set doesn't exist.
         """
 
-        self._load_from_ipset()
+        self._load_from_ipset(async=True)
 
     @actor_event
     def replace_members(self, members):
@@ -70,6 +107,7 @@ class IpsetUpdater(Actor):
         else:
             self._sync_to_ipset()
 
+    @actor_event
     def _load_from_ipset(self):
         try:
             output = subprocess.check_output(["ipset", "list", self.name])

@@ -22,6 +22,7 @@ The main logic for Felix.
 
 # Monkey-patch before we do anything else...
 from calico.felix.fetcd import watch_etcd
+from calico.felix.ipsets import IpsetPool
 from gevent import monkey
 monkey.patch_all()
 
@@ -44,14 +45,17 @@ def _main_greenlet(config):
     its children if desired.
     """
 
+    ipset_pool = IpsetPool()
     v4_updater = IptablesUpdater(ip_version=4)
     v6_updater = IptablesUpdater(ip_version=6)
-    update_sequencer = UpdateSequencer(v4_updater, v6_updater)
+    update_sequencer = UpdateSequencer(ipset_pool, v4_updater, v6_updater)
 
+    ipset_pool.start()
     update_sequencer.start()
     v4_updater.start()
     v6_updater.start()
     greenlets = [update_sequencer.greenlet,
+                 ipset_pool.greenlet,
                  v4_updater.greenlet,
                  v6_updater.greenlet,
                  gevent.spawn(watchdog)]
