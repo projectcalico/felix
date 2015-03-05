@@ -26,6 +26,7 @@ from calico.felix.fetcd import watch_etcd
 from calico.felix.ipsets import IpsetPool
 from gevent import monkey
 monkey.patch_all()
+from etcd import EtcdException
 
 import os
 
@@ -37,6 +38,7 @@ from calico.felix.fiptables import IptablesUpdater, DispatchChains, \
     ActiveProfileManager
 from calico.felix.frules import install_global_rules
 from calico.felix.dbcache import UpdateSequencer
+from calico.felix.config import Config
 
 _log = logging.getLogger(__name__)
 
@@ -73,8 +75,7 @@ def _main_greenlet(config):
                  v6_updater.greenlet]
 
     # Install the global rules before we start polling for updates.
-    iface_prefix = "tap"
-    install_global_rules(config, iface_prefix, v4_updater, v6_updater)
+    install_global_rules(config, v4_updater, v6_updater)
 
     # Start polling for updates.
     greenlets.append(gevent.spawn(watch_etcd, update_sequencer))
@@ -94,8 +95,10 @@ def _main_greenlet(config):
         raise AssertionError("Greenlet unexpectedly returned")
 
 
-class FakeConfig(object):
-    pass
+def watchdog():
+    while True:
+        _log.info("Still alive")
+        gevent.sleep(20)
 
 
 def main():
@@ -103,17 +106,35 @@ def main():
         # Initialise the logging with default parameters.
         common.default_logging()
 
-        # TODO: Load config
-        config = FakeConfig()
-        config.METADATA_IP = "127.0.0.1"
-        config.METADATA_PORT = 8080
+        # Load config
+        # FIXME: old felix used argparse but that's not in Python 2.6, so
+        # hard-coded path.
 
-        # FIXME: old felix used argparse but that's not in Python 2.6.
+        try:
+            config = Config("/etc/calico/felix.cfg")
+        except:
+            # Attempt to open a log file, ignoring any errors it gets, before
+            # we raise the exception.
+            try:
+                common.complete_logging("/var/log/calico/felix.log",
+                                        logging.DEBUG,
+                                        logging.DEBUG,
+                                        logging.DEBUG)
+            except:
+                pass
+
+            raise
+
+        common.complete_logging(config.LOGFILE,
+                                config.LOGLEVFILE,
+                                config.LOGLEVSYS,
+                                config.LOGLEVSCR)
+
         _log.info("Starting up")
         gevent.spawn(_main_greenlet, config).join()  # Should never return
     except BaseException:
         # Make absolutely sure that we exit by asking the OS to terminate our
-        # process.  We don't wan to let a stray background thread keep us
+        # process.  We don't want to let a stray background thread keep us
         # alive.
         _log.exception("Felix exiting due to exception")
         os._exit(1)

@@ -18,6 +18,7 @@ felix.fetcd
 
 Etcd polling functions.
 """
+import itertools
 import json
 import logging
 import socket
@@ -180,3 +181,30 @@ def parse_if_tags(etcd_node):
             tags = json_decoder.decode(etcd_node.value)
         return profile_id, tags
     return None, None
+
+def load_config(host, port):
+    """
+    TODO: Add watching of the config.
+
+    Load configuration detail for this host from etcd.
+    :returns: a dictionary of key to paarameters
+    :raises EtcdException: if a read from etcd fails and we may fall out of
+            sync.
+    """
+    client = etcd.Client(port=port)
+
+    config_dict = {}
+
+    # Load initial dump from etcd.  First just get all the endpoints and
+    # profiles by id.  The response contains a generation ID allowing us
+    # to then start polling for updates without missing any.
+    global_cfg = client.read("/calico/config/")
+    host_cfg = client.read("/calico/host/%s/config/" % host)
+
+    for child in itertools.chain(global_cfg.children, host_cfg.children):
+        _log.info("Got config parameter : %s=%s", child.key, str(child.value))
+        key = child.key.rsplit("/").pop()
+        value = str(child.value)
+        config_dict[key] = value
+
+    return config_dict

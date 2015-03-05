@@ -53,7 +53,7 @@ def profile_to_chain_name(inbound_or_outbound, profile_id):
     return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_id, inbound_or_outbound)
 
 
-def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
+def install_global_rules(config, v4_updater, v6_updater):
     """
     Set up global iptables rules. These are rules that do not change with
     endpoint, and are expected never to change (such as the rules that send all
@@ -67,7 +67,7 @@ def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
 
     # The interface matching string; for example, if interfaces start "tap"
     # then this string is "tap+".
-    iface_match = iface_prefix + "+"
+    iface_match = config.IFACE_PREFIX + "+"
 
     # The IPV4 nat table first. This must have a felix-PREROUTING chain.
     nat_pr = []
