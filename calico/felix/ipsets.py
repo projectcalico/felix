@@ -46,7 +46,16 @@ def create(name, typename, family):
     if futils.call_silent(["ipset", "list", name]) != 0:
         # ipset list failed - either does not exist, or an error. Either way,
         # try creation, throwing an error if it does not work.
-        futils.check_call(["ipset", "create", name, typename, "family", family])
+        futils.check_call(
+            ["ipset",
+             "create",
+             name,
+             typename,
+             "family",
+             family,
+             "maxelem",
+             "6553500"]
+        )
 
 def destroy(name):
     """

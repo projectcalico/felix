@@ -1,3 +1,9 @@
+calico (0.12.2~rc3) trusty; urgency=medium
+
+  * Temporary workaround for ipset maximum size.
+
+ -- Cory Benfield <cory.benfield@metaswitch.com>  Thu, 19 Feb 2015 14:10:10 +0000
+
 calico (0.12.1) trusty; urgency=medium
 
   * Bug fixes and improvements to Calico components
