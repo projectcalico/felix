@@ -80,11 +80,25 @@ class ActiveProfile(Actor):
     def __init__(self, profile_id, iptables_updaters):
         super(ActiveProfile, self).__init__()
         self.id = profile_id
+        self._programmed = False
         self._iptables_updaters = iptables_updaters
         self._profile = None
         """:type dict: filled in by first update"""
         self._tag_to_ip_set_name = None
         """:type dict[str, str]: current mapping from tag name to ipset name."""
+
+    @actor_event
+    def ensure_chains_programmed(self):
+        if self._programmed:
+            return
+        else:
+            self._update_chains(self._profile, self._tag_to_ip_set_name)
+
+    def _update_chains(self, profile, tag_to_ipset_name):
+        futures = self._update_chain(profile, "inbound", tag_to_ipset_name)
+        futures += self._update_chain(profile, "outbound", tag_to_ipset_name)
+        wait_and_check(futures)
+        self._programmed = True
 
     @actor_event
     def on_profile_update(self, profile, tag_to_ipset_name):
@@ -94,10 +108,7 @@ class ActiveProfile(Actor):
         """
         assert profile["id"] == self.id
 
-        futures = self._update_chain(profile, "inbound", tag_to_ipset_name)
-        futures += self._update_chain(profile, "outbound", tag_to_ipset_name)
-        wait_and_check(futures)
-
+        self._update_chains(profile, tag_to_ipset_name)
         self._profile = profile
         self._tag_to_ip_set_name = tag_to_ipset_name
 
@@ -120,14 +131,17 @@ class ActiveProfile(Actor):
                 futures.append(f)
         wait_and_check(futures)
 
+        self._programmed = False
         self._profile = None
         self._tag_to_ip_set_name = None
 
     def _update_chain(self, new_profile, direction, tag_to_ipset_name):
+        new_profile = new_profile or {}
         new_rules = new_profile.get(direction, [])
-        if (self._profile is None or
-            new_rules != self._profile.get(direction) or
-            tag_to_ipset_name != self._tag_to_ip_set_name):
+        if (not self._programmed or
+                self._profile is None or
+                new_rules != self._profile.get(direction) or
+                tag_to_ipset_name != self._tag_to_ip_set_name):
             _log.debug("Update to %s affects %s rules.", self.id, direction)
             chain_name = profile_to_chain_name(direction, self.id)
             futures = []

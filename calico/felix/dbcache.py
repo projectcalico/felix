@@ -23,9 +23,10 @@ from collections import defaultdict
 import functools
 import logging
 import socket
+import collections
 
 from calico.felix.actor import actor_event, Actor, wait_and_check
-from calico.felix.endpoint import get_endpoint_rules
+from calico.felix.endpoint import get_endpoint_rules, LocalEndpoint
 from calico.felix.fiptables import ActiveProfile
 from calico.felix.frules import (program_profile_chains,
                                  CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,
@@ -37,8 +38,48 @@ _log = logging.getLogger(__name__)
 OUR_HOSTNAME = socket.gethostname()
 
 
+class ActiveProfileManager(Actor):
+    def __init__(self, iptables_updaters):
+        super(ActiveProfileManager, self).__init__()
+        self.profiles_by_id = {}
+        self.profile_counts_by_id = defaultdict(lambda: 0)
+        self.iptables_updaters = iptables_updaters
+
+    @actor_event
+    def get_profile_and_incref(self, profile_id):
+        if profile_id not in self.profiles_by_id:
+            ap = ActiveProfile(profile_id, self.iptables_updaters).start()
+            self.profiles_by_id[profile_id] = ap
+        self.profile_counts_by_id[profile_id] += 1
+        return self.profiles_by_id[profile_id]
+
+    @actor_event
+    def return_profile(self, profile_id):
+        self.profile_counts_by_id[profile_id] -= 1
+        if self.profile_counts_by_id[profile_id] == 0:
+            _log.debug("No more references to profile %s", profile_id)
+            self._queue_profile_reap(profile_id)
+
+    def _queue_profile_reap(self, dead_profile_id):
+        ap = self.profiles_by_id[dead_profile_id]
+        f = ap.remove(async=True)
+        # We can't remove the profile until it's finished removing itself
+        # so ask the result to call us back when it's done.  In the
+        # meantime we might have revived the profile.
+        f.rawlink(functools.partial(self._on_active_profile_removed,
+                                    dead_profile_id, async=True))
+
+    @actor_event
+    def _on_active_profile_removed(self, profile_id):
+        if self.profile_counts_by_id[profile_id] == 0:
+            _log.debug("Reaping profile %s", profile_id)
+            self.profiles_by_id.pop(profile_id)
+            self.profile_counts_by_id.pop(profile_id)
+
+
 class UpdateSequencer(Actor):
-    def __init__(self, ipset_pool, v4_updater, v6_updater):
+    def __init__(self, ipset_pool, v4_updater, v6_updater, dispatch_chains,
+                 profile_manager):
         super(UpdateSequencer, self).__init__()
 
         self.ipset_pool = ipset_pool
@@ -48,6 +89,8 @@ class UpdateSequencer(Actor):
             4: v4_updater,
             6: v6_updater,
         }
+        self.dispatch_chains = dispatch_chains
+        self.profile_mgr = profile_manager
 
         # State.
         self.profiles_by_id = {}
@@ -60,10 +103,12 @@ class UpdateSequencer(Actor):
         self.active_profile_ids = set()
 
         # Child actors.
-        self.active_profiles_by_id = {}
+        self.local_endpoints_by_id = {}
+        self.local_endpoints_by_iface_name = {}
+        self.active_profiles = {}
         self.active_ipsets_by_tag = {}
-        self.profiles_to_reap = set()
         self.interfaces = {}
+        self.reap_idx = 0
 
     @actor_event
     def apply_snapshot(self, profiles_by_id, endpoints_by_id):
@@ -78,6 +123,29 @@ class UpdateSequencer(Actor):
         # - changes in the list of local endpoints.
         # - changes in the rules that are active for those endpoints.
         # - changes in the tag memberships of tags used in the active profiles.
+
+        # Stage 1: scan though endpoints to collect local ones.
+        for endpoint_id, endpoint in endpoints_by_id.iteritems():
+            if endpoint["host"] == OUR_HOSTNAME:
+                # Endpoint is local
+                profile_id = endpoint["profile_id"]
+                if profile_id in self.active_profiles:
+                    ap = self.active_profiles[profile_id]
+                else:
+                    ap = self.profile_mgr.get_profile_and_incref(profile_id)
+                    self.active_profiles[profile_id] = ap
+
+                iface = endpoint["interface_name"]
+                if iface in self.local_endpoints_by_iface_name:
+                    local_ep = self.local_endpoints_by_iface_name[iface]
+                else:
+                    local_ep = LocalEndpoint(self.iptables_updaters,
+                                             self.dispatch_chains,
+                                             self.profile_mgr)
+                self.local_endpoints_by_id[endpoint_id] = local_ep
+                local_ep.on_endpoint_update(endpoint, async=True)
+
+
 
         old_active_tags = set(self.active_ipsets_by_tag.keys())
         old_active_profile_ids = set(self.active_profiles_by_id.keys())
@@ -179,38 +247,21 @@ class UpdateSequencer(Actor):
 
         _log.info("Finished applying snapshot.")
 
-    def _queue_profile_reap(self, dead_profile_id):
-        # FIXME reap, add (cancels reap), reap, add could fail: canceled reap calls back and looks like second one
-        ap = self.active_profiles_by_id[dead_profile_id]
-        self.profiles_to_reap.add(dead_profile_id)
-        f = ap.remove(async=True)
-        # We can't remove the profile until it's finished removing itself
-        # so ask the result to call us back when it's done.  In the
-        # meantime we might revive the profile.
-        f.rawlink(functools.partial(self.on_active_profile_removed,
-                                    dead_profile_id,
-                                    async=True))
-
-    @actor_event
-    def on_active_profile_removed(self, profile_id):
-        if profile_id in self.profiles_to_reap:
-            _log.debug("Reaping profile %s", profile_id)
-            self.profiles_to_reap.remove(profile_id)
-            self.active_profiles_by_id.pop(profile_id, None)
-
-    def _get_or_create_profile(self, profile_id):
-        if profile_id not in self.active_profiles_by_id:
-            ap = ActiveProfile(profile_id, self.iptables_updaters).start()
-            self.active_profiles_by_id[profile_id] = ap
-        # If the profile was queued for deletion, reinstate it.
-        self.profiles_to_reap.discard(profile_id)
-        return self.active_profiles_by_id[profile_id]
-
     def _get_or_create_ipset(self, tag):
         if tag not in self.active_ipsets_by_tag:
             ipset = self.ipset_pool.allocate_ipset(tag)
             self.active_ipsets_by_tag[tag] = ipset
         return self.active_ipsets_by_tag[tag]
+
+    def _get_or_create_endpoint(self, iface_name, endpoint_id=None):
+        if iface_name not in self.local_endpoints_by_iface_name:
+            ep = LocalEndpoint(self.dispatch_chains, self.iptables_updaters)
+            self.local_endpoints_by_iface_name[iface_name] = ep
+        else:
+            ep = self.local_endpoints_by_iface_name[iface_name]
+        if endpoint_id:
+            self.local_endpoints_by_id[endpoint_id] = ep
+        return ep
 
     @actor_event
     def on_profile_change(self, profile_id, profile):

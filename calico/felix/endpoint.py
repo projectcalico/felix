@@ -31,10 +31,12 @@ _log = logging.getLogger(__name__)
 
 
 class LocalEndpoint(Actor):
-    def __init__(self, iptables_updaters, dispatch_chains):
+
+    def __init__(self, iptables_updaters, dispatch_chains, profile_manager):
         super(LocalEndpoint, self).__init__()
         self.iptables_updaters = iptables_updaters
         self.dispatch_chains = dispatch_chains
+        self.profile_mgr = profile_manager
 
         # Will be filled in as we learn about the OS interface and the
         # endpoint config.
@@ -47,12 +49,23 @@ class LocalEndpoint(Actor):
         # We'll force a reprogram next time we get a kick.
         self._failed = False
 
+        self._profile = None
+
     @actor_event
     def on_endpoint_update(self, endpoint):
         if endpoint and not self._iface_name:
             self._iface_name = endpoint.get("interface_name")
             self._endpoint_id = endpoint["id"]
         was_ready = self._ready
+        old_profile_id = self.endpoint and self.endpoint["profile_id"]
+        new_profile_id = endpoint and endpoint["profile_id"]
+        if old_profile_id != new_profile_id:
+            if self._profile:
+                self.profile_mgr.return_profile(old_profile_id)
+                self._profile = None
+            if new_profile_id:
+                self._profile = self.profile_mgr.get_profile_and_incref(
+                    new_profile_id)
         self.endpoint = endpoint
         self._maybe_update(was_ready)
 
@@ -66,7 +79,7 @@ class LocalEndpoint(Actor):
 
     @property
     def _ready(self):
-        if self.endpoint and self.iface_state:
+        if self.endpoint and self.iface_state and self._profile:
             return (self.endpoint.get("state", "active") == "active" and
                     self.iface_state.up)
         else:
@@ -79,6 +92,7 @@ class LocalEndpoint(Actor):
             ifce_name = self._iface_name
             if is_ready:
                 # We've got all the info and everything is active.
+                self._profile.ensure_chains_programmed()
                 ep_id = self.endpoint["id"]
                 try:
                     self._update_chains()
@@ -148,6 +162,7 @@ class LocalEndpoint(Actor):
         """
         Applies sysctls and routes to the interface.
         """
+        # TODO: delete routes...
         pass
 
 
