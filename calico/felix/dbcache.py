@@ -25,9 +25,9 @@ import logging
 import socket
 
 from calico.felix.actor import actor_event, Actor, wait_and_check
+from calico.felix.endpoint import get_endpoint_rules
 from calico.felix.fiptables import ActiveProfile
-from calico.felix.frules import (get_endpoint_rules,
-                                 program_profile_chains,
+from calico.felix.frules import (program_profile_chains,
                                  CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,
                                  CHAIN_TO_PREFIX, CHAIN_FROM_PREFIX)
 
@@ -49,7 +49,7 @@ class UpdateSequencer(Actor):
             6: v6_updater,
         }
 
-        # Data.
+        # State.
         self.profiles_by_id = {}
         self.endpoints_by_id = {}
 
@@ -63,6 +63,7 @@ class UpdateSequencer(Actor):
         self.active_profiles_by_id = {}
         self.active_ipsets_by_tag = {}
         self.profiles_to_reap = set()
+        self.interfaces = {}
 
     @actor_event
     def apply_snapshot(self, profiles_by_id, endpoints_by_id):
@@ -249,7 +250,12 @@ class UpdateSequencer(Actor):
 
     @actor_event
     def on_interface_update(self, name, iface_state):
-        pass
+        if iface_state and iface_state.up:
+            # Interface is present and UP.  (Re)program routes.
+            pass
+        else:
+            # Either deleted or DOWN, record that fact.
+            self.interfaces.pop(name)
 
     def _process_tag_updates(self, profile_id, old_tags, new_tags):
         """

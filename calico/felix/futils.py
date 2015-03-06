@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 # Flag to indicate "IP v4" or "IP v6"; format that can be printed in logs.
 IPV4 = "IPv4"
 IPV6 = "IPv6"
+IP_VERSIONS = [IPV4, IPV6]
 
 
 class FailedSystemCall(Exception):
@@ -77,7 +78,8 @@ def check_call(args):
       output.
     - It returns a tuple with stdout and stderr.
 
-    If the command supplied does not exist, then an OSError is thrown.
+    :raises FailedSystemCall: if the return code of the subprocess is non-zero.
+    :raises OSError: if, for example, there is a read error on stdout/err.
     """
     log.debug("Calling out to system : %s" % args)
 
@@ -87,7 +89,8 @@ def check_call(args):
     stdout, stderr = proc.communicate()
     retcode = proc.returncode
     if retcode:
-        raise FailedSystemCall("Failed system call", args, retcode, stdout, stderr)
+        raise FailedSystemCall("Failed system call",
+                               args, retcode, stdout, stderr)
 
     return CommandOutput(stdout, stderr)
 

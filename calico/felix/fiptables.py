@@ -20,13 +20,60 @@ IP tables management functions.
 """
 import logging
 from subprocess import CalledProcessError
+
 from calico.felix.actor import Actor, actor_event, wait_and_check
-from calico.felix.frules import (CHAIN_PROFILE_PREFIX,
-                                 rules_to_chain_rewrite_lines,
-                                 profile_to_chain_name)
+from calico.felix.frules import (rules_to_chain_rewrite_lines,
+                                 profile_to_chain_name, CHAIN_TO_PREFIX,
+                                 CHAIN_FROM_PREFIX, CHAIN_TO_ENDPOINT,
+                                 CHAIN_FROM_ENDPOINT)
 from gevent import subprocess
 
+
 _log = logging.getLogger(__name__)
+
+
+class DispatchChains(Actor):
+    """
+    Actor that owns the felix-TO/FROM-ENDPOINT chains, which we use to 
+    dispatch to endpoint-specific chains.
+    """
+    def __init__(self, iptables_updaters):
+        super(DispatchChains, self).__init__()
+        self.iptables_updaters = iptables_updaters
+        self.iface_to_chain_suffix = {}
+
+    @actor_event
+    def on_endpoint_chains_ready(self, iface_name, chain_suffix):
+        if self.iface_to_chain_suffix.get(iface_name) != chain_suffix:
+            self.iface_to_chain_suffix[iface_name] = chain_suffix
+            self._update_chains()
+
+    @actor_event
+    def remove_dispatch_rule(self, iface_name):
+        if iface_name in self.iface_to_chain_suffix:
+            self.iface_to_chain_suffix.pop(iface_name)
+            self._update_chains()
+
+    def _update_chains(self):
+        updates = []
+        for iface, chain in self.iface_to_chain_suffix.iteritems():
+            to_chain_name = CHAIN_TO_PREFIX + chain
+            from_chain_name = CHAIN_FROM_PREFIX + chain
+
+            # Add rule to global chain to direct traffic to the
+            # endpoint-specific one.  We use --goto so that a return from
+            # the destination chain will return to the felix-FORWARD chain
+            # rather than to us.
+            updates.append("--append %s --out-interface %s --goto %s" %
+                           (CHAIN_TO_ENDPOINT, iface, to_chain_name))
+            updates.append("--append %s --in-interface %s --goto %s" %
+                           (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
+        for ip_version, updater in self.iptables_updaters:
+            updater.apply_updates("filter",
+                                  # FIXME: should felix-TO-ENDPOINT be default DROP?
+                                  [CHAIN_TO_ENDPOINT,
+                                   (CHAIN_FROM_ENDPOINT, "DROP")],
+                                  updates)
 
 
 class ActiveProfile(Actor):

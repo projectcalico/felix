@@ -33,6 +33,7 @@ import re
 
 _log = logging.getLogger(__name__)
 
+
 def interface_exists(interface):
     """
     Returns True if interface device exists.
