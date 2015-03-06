@@ -29,10 +29,12 @@ _log = logging.getLogger(__name__)
 
 
 # etcd path regexes
-PROFILE_RE = re.compile(
-    r'^/calico/network/profile/(?P<profile_id>[^/]+)/policy')
+RULES_RE = re.compile(
+    r'^/calico/policy/profile/(?P<profile_id>[^/]+)/rules')
+TAGS_RE = re.compile(
+    r'^/calico/policy/profile/(?P<profile_id>[^/]+)/tags')
 ENDPOINT_RE = re.compile(
-    r'^/calico/host/(?P<hostname>[^/]+)/endpoint/(?P<endpoint_id>[^/]+)')
+    r'^/calico/host/(?P<hostname>[^/]+)/.+/endpoint/(?P<endpoint_id>[^/]+)')
 
 
 def watch_etcd(update_sequencer):
@@ -53,12 +55,17 @@ def watch_etcd(update_sequencer):
     # profiles by id.  The response contains a generation ID allowing us
     # to then start polling for updates without missing any.
     initial_dump = client.read("/calico/", recursive=True)
-    profiles_by_id = {}
+    rules_by_id = {}
+    tags_by_id = {}
     endpoints_by_id = {}
     for child in initial_dump.children:
-        profile_id, profile = parse_if_profile(child)
+        profile_id, rules = parse_if_rules(child)
         if profile_id:
-            profiles_by_id[profile_id] = profile
+            rules_by_id[profile_id] = rules
+            continue
+        profile_id, tags = parse_if_tags(child)
+        if profile_id:
+            tags_by_id[profile_id] = tags
             continue
         endpoint_id, endpoint = parse_if_endpoint(child)
         if endpoint_id:
@@ -67,10 +74,13 @@ def watch_etcd(update_sequencer):
 
     # Actually apply the snapshot.  The UpdateSequencer will apply deltas as
     # appropriate.  Grab the future in case it raises an error.
-    f_apply_snap = update_sequencer.apply_snapshot(profiles_by_id,
+    f_apply_snap = update_sequencer.apply_snapshot(rules_by_id,
+                                                   tags_by_id,
                                                    endpoints_by_id,
                                                    async=True)
-    del profiles_by_id
+    # Now owned by the update sequencer...
+    del rules_by_id
+    del tags_by_id
     del endpoints_by_id
 
     last_etcd_index = initial_dump.etcd_index
@@ -103,17 +113,22 @@ def watch_etcd(update_sequencer):
         last_key = response.key
         last_value = response.value
 
-        profile_id, profile = parse_if_profile(response)
+        # TODO: we fire-and-forget these messages...
+        # TODO: regex parsing getting messy.
+        profile_id, rules = parse_if_rules(response)
         if profile_id:
             _log.info("Scheduling profile update %s", profile_id)
-            # TODO: we fire-and-forget this message, should make sure we resync on failure
-            update_sequencer.on_profile_change(profile_id, profile,
-                                               async=True)
+            update_sequencer.on_rules_update(profile_id, rules, async=True)
+            continue
+        profile_id, tags = parse_if_tags(response)
+        if profile_id:
+            _log.info("Scheduling profile update %s", profile_id)
+            update_sequencer.on_tags_update(profile_id, tags, async=True)
             continue
         endpoint_id, endpoint = parse_if_endpoint(response)
         if endpoint_id:
             _log.info("Scheduling endpoint update %s", endpoint_id)
-            update_sequencer.on_endpoint_change(endpoint_id, endpoint,
+            update_sequencer.on_endpoint_update(endpoint_id, endpoint,
                                                 async=True)
             continue
 
@@ -135,18 +150,33 @@ def parse_if_endpoint(etcd_node):
             hostname = m.group("hostname")
             endpoint = json_decoder.decode(etcd_node.value)
             endpoint["host"] = hostname
+            endpoint["id"] = endpoint_id
         return endpoint_id, endpoint
     return None, None
 
 
-def parse_if_profile(etcd_node):
-    m = PROFILE_RE.match(etcd_node.key)
+def parse_if_rules(etcd_node):
+    m = RULES_RE.match(etcd_node.key)
     if m:
-        # Got a profile.
+        # Got some rules.
         profile_id = m.group("profile_id")
         if etcd_node.action == "delete":
-            profile = None
+            rules = None
         else:
-            profile = json_decoder.decode(etcd_node.value)
-        return profile_id, profile
+            rules = json_decoder.decode(etcd_node.value)
+            rules["id"] = profile_id
+        return profile_id, rules
+    return None, None
+
+
+def parse_if_tags(etcd_node):
+    m = TAGS_RE.match(etcd_node.key)
+    if m:
+        # Got some tags.
+        profile_id = m.group("profile_id")
+        if etcd_node.action == "delete":
+            tags = None
+        else:
+            tags = json_decoder.decode(etcd_node.value)
+        return profile_id, tags
     return None, None

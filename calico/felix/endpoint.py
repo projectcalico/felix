@@ -19,10 +19,13 @@ felix.endpoint
 
 Endpoint management.
 """
+
 import logging
 from subprocess import CalledProcessError
+import gevent
 from calico.felix import devices, futils
 from calico.felix.actor import Actor, actor_event, wait_and_check
+from calico.felix.fiptables import DispatchChains, ActiveProfileManager
 from calico.felix.frules import CHAIN_TO_PREFIX, profile_to_chain_name, \
     CHAIN_FROM_PREFIX
 from calico.felix.futils import FailedSystemCall
@@ -34,6 +37,8 @@ class LocalEndpoint(Actor):
 
     def __init__(self, iptables_updaters, dispatch_chains, profile_manager):
         super(LocalEndpoint, self).__init__()
+        assert isinstance(dispatch_chains, DispatchChains)
+        assert isinstance(profile_manager, ActiveProfileManager)
         self.iptables_updaters = iptables_updaters
         self.dispatch_chains = dispatch_chains
         self.profile_mgr = profile_manager
@@ -53,17 +58,20 @@ class LocalEndpoint(Actor):
 
     @actor_event
     def on_endpoint_update(self, endpoint):
+        _log.debug("Endpoint updated: %s", endpoint)
         if endpoint and not self._iface_name:
-            self._iface_name = endpoint.get("interface_name")
+            self._iface_name = endpoint.get("name")
             self._endpoint_id = endpoint["id"]
         was_ready = self._ready
         old_profile_id = self.endpoint and self.endpoint["profile_id"]
         new_profile_id = endpoint and endpoint["profile_id"]
         if old_profile_id != new_profile_id:
             if self._profile:
+                _log.debug("Returning old profile %s", old_profile_id)
                 self.profile_mgr.return_profile(old_profile_id)
                 self._profile = None
             if new_profile_id:
+                _log.debug("Acquiring new profile %s", new_profile_id)
                 self._profile = self.profile_mgr.get_profile_and_incref(
                     new_profile_id)
         self.endpoint = endpoint
@@ -71,6 +79,7 @@ class LocalEndpoint(Actor):
 
     @actor_event
     def on_interface_update(self, iface_state):
+        _log.debug("Interface state: %s", iface_state)
         if iface_state and not self._iface_name:
             self._iface_name = iface_state.name
         was_ready = self._ready
@@ -78,22 +87,40 @@ class LocalEndpoint(Actor):
         self._maybe_update(was_ready)
 
     @property
-    def _ready(self):
-        if self.endpoint and self.iface_state and self._profile:
-            return (self.endpoint.get("state", "active") == "active" and
-                    self.iface_state.up)
-        else:
-            return False
+    def _missing_deps(self):
+        missing_deps = []
+        if not self.endpoint:
+            missing_deps.append("endpoint")
+        elif self.endpoint.get("state", "active") != "active":
+            missing_deps.append("endpoint active")
+        if not self.iface_state:
+            missing_deps.append("interface")
+        elif not self.iface_state.up:
+            missing_deps.append("interface up")
+        if not self._profile:
+            missing_deps.append("profile")
+        return missing_deps
 
+    @property
+    def _ready(self):
+        return not self._missing_deps
+
+    @actor_event
     def _maybe_update(self, was_ready):
         is_ready = self._ready
+        if not is_ready :
+            _log.debug("Endpoint not ready, waiting on %s", self._missing_deps)
         if self._failed or is_ready != was_ready:
-            self._failed = False  # Ready to try again...
             ifce_name = self._iface_name
             if is_ready:
                 # We've got all the info and everything is active.
+                if self._failed:
+                    _log.warn("Retrying programming after a failure")
+                self._failed = False  # Ready to try again...
                 self._profile.ensure_chains_programmed()
                 ep_id = self.endpoint["id"]
+                _log.info("Endpoint %s for interface %s became ready to "
+                          "program.", ep_id, ifce_name)
                 try:
                     self._update_chains()
                     self.dispatch_chains.on_endpoint_chains_ready(ifce_name,
@@ -103,8 +130,13 @@ class LocalEndpoint(Actor):
                     _log.exception("Failed to program the dataplane for %s",
                                    ep_id)
                     self._failed = True  # Force retry next time.
+                    # Schedule a retry.
+                    gevent.spawn_later(5, self._maybe_update, False)
             else:
                 # We were active but now we're not, withdraw the dispatch rule.
+                _log.debug("Endpoint for interface %s became unready.",
+                           ifce_name)
+                self._failed = False  # Don't care any more.
                 self.dispatch_chains.remove_dispatch_rule(ifce_name)
                 if not self.endpoint:
                     # We're being deleted.
@@ -122,12 +154,14 @@ class LocalEndpoint(Actor):
     def _update_chains(self):
         futures = []
         for ip_version, updater in self.iptables_updaters.iteritems():
+            if ip_version == 6:
+                continue # TODO IPv6
             chains, updates = get_endpoint_rules(
                 self.endpoint["id"],
                 self._iface_name,
                 ip_version,
                 self.endpoint.get("ipv%s_nets" % ip_version, []),
-                self.endpoint["eui"],
+                self.endpoint["mac"],
                 self.endpoint["profile_id"])
             f = updater.apply_updates("filter", chains, updates, async=True)
             futures.append(f)
@@ -156,7 +190,7 @@ class LocalEndpoint(Actor):
                 # Note: this may fail if the interface has been deleted, we'll
                 # catch that in the caller...
                 devices.add_route(ip_type, ip, self._iface_name,
-                                  self.endpoint["eui"])
+                                  self.endpoint["mac"])
 
     def _deconfigure_interface(self):
         """

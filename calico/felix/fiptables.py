@@ -18,6 +18,8 @@ felix.fiptables
 
 IP tables management functions.
 """
+from collections import defaultdict
+import functools
 import logging
 from subprocess import CalledProcessError
 
@@ -68,11 +70,12 @@ class DispatchChains(Actor):
                            (CHAIN_TO_ENDPOINT, iface, to_chain_name))
             updates.append("--append %s --in-interface %s --goto %s" %
                            (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
-        for ip_version, updater in self.iptables_updaters:
+        for ip_version, updater in self.iptables_updaters.iteritems():
+            if ip_version == 6: continue # TODO IPv6
             updater.apply_updates("filter",
-                                  # FIXME: should felix-TO-ENDPOINT be default DROP?
+                                  # FIXME: should chains be default DROP?
                                   [CHAIN_TO_ENDPOINT,
-                                   (CHAIN_FROM_ENDPOINT, "DROP")],
+                                   CHAIN_FROM_ENDPOINT],
                                   updates)
 
 
@@ -233,3 +236,42 @@ class IptablesUpdater(Actor):
     def delete_chain(self, table_name, chain_name):
         updates = ["--delete-chain %s" % chain_name]
         self.apply_updates(table_name, [chain_name], updates)  # Skips queue.
+
+
+class ActiveProfileManager(Actor):
+    def __init__(self, iptables_updaters):
+        super(ActiveProfileManager, self).__init__()
+        self.profiles_by_id = {}
+        self.profile_counts_by_id = defaultdict(lambda: 0)
+        self.iptables_updaters = iptables_updaters
+
+    @actor_event
+    def get_profile_and_incref(self, profile_id):
+        if profile_id not in self.profiles_by_id:
+            ap = ActiveProfile(profile_id, self.iptables_updaters).start()
+            self.profiles_by_id[profile_id] = ap
+        self.profile_counts_by_id[profile_id] += 1
+        return self.profiles_by_id[profile_id]
+
+    @actor_event
+    def return_profile(self, profile_id):
+        self.profile_counts_by_id[profile_id] -= 1
+        if self.profile_counts_by_id[profile_id] == 0:
+            _log.debug("No more references to profile %s", profile_id)
+            self._queue_profile_reap(profile_id)
+
+    def _queue_profile_reap(self, dead_profile_id):
+        ap = self.profiles_by_id[dead_profile_id]
+        f = ap.remove(async=True)
+        # We can't remove the profile until it's finished removing itself
+        # so ask the result to call us back when it's done.  In the
+        # meantime we might have revived the profile.
+        f.rawlink(functools.partial(self._on_active_profile_removed,
+                                    dead_profile_id, async=True))
+
+    @actor_event
+    def _on_active_profile_removed(self, profile_id):
+        if self.profile_counts_by_id[profile_id] == 0:
+            _log.debug("Reaping profile %s", profile_id)
+            self.profiles_by_id.pop(profile_id)
+            self.profile_counts_by_id.pop(profile_id)

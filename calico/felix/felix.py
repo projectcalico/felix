@@ -33,7 +33,8 @@ import logging
 import gevent
 
 from calico import common
-from calico.felix.fiptables import IptablesUpdater
+from calico.felix.fiptables import IptablesUpdater, DispatchChains, \
+    ActiveProfileManager
 from calico.felix.frules import install_global_rules
 from calico.felix.dbcache import UpdateSequencer
 
@@ -49,13 +50,24 @@ def _main_greenlet(config):
     ipset_pool = IpsetPool()
     v4_updater = IptablesUpdater(ip_version=4)
     v6_updater = IptablesUpdater(ip_version=6)
-    update_sequencer = UpdateSequencer(ipset_pool, v4_updater, v6_updater)
+    iptables_updaters = {
+        4: v4_updater,
+        6: v6_updater,
+    }
+    profile_manager = ActiveProfileManager(iptables_updaters)
+    dispatch_chains = DispatchChains(iptables_updaters)
+    update_sequencer = UpdateSequencer(ipset_pool, v4_updater, v6_updater,
+                                       dispatch_chains, profile_manager)
 
+    profile_manager.start()
+    dispatch_chains.start()
     ipset_pool.start()
     update_sequencer.start()
     v4_updater.start()
     v6_updater.start()
-    greenlets = [update_sequencer.greenlet,
+    greenlets = [profile_manager.greenlet,
+                 dispatch_chains.greenlet,
+                 update_sequencer.greenlet,
                  ipset_pool.greenlet,
                  v4_updater.greenlet,
                  v6_updater.greenlet,

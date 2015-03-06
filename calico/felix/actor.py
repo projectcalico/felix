@@ -48,7 +48,7 @@ def actor_event(fn):
         if not async and self.greenlet == gevent.getcurrent():
             # Bypass the queue if we're already on the same greenlet.  This
             # is both useful and avoids deadlock.
-            return fn(*args, **kwargs)
+            return fn(self, *args, **kwargs)
         result = AsyncResult()
         partial = functools.partial(fn, self, *args, **kwargs)
         self._event_queue.put(Message(function=partial, result=result),

@@ -23,8 +23,7 @@ Felix utilities.
 """
 import logging
 import os
-import re
-import subprocess
+from gevent import subprocess
 import tempfile
 import time
 
@@ -122,3 +121,7 @@ def time_ms():
     mostly because it makes it easier to mock out for test purposes.
     """
     return(int(time.time() * 1000))
+
+
+def net_to_ip(net_or_ip):
+    return net_or_ip.split("/")[0]
