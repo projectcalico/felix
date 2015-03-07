@@ -24,12 +24,8 @@ import logging
 import socket
 
 from calico.felix import futils
-from calico.felix.actor import actor_event, Actor, wait_and_check
-from calico.felix.endpoint import get_endpoint_rules, LocalEndpoint
-from calico.felix.frules import (program_profile_chains,
-                                 CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,
-                                 CHAIN_TO_PREFIX, CHAIN_FROM_PREFIX)
-
+from calico.felix.actor import actor_event, Actor
+from calico.felix.endpoint import LocalEndpoint
 
 _log = logging.getLogger(__name__)
 
@@ -59,7 +55,6 @@ class UpdateSequencer(Actor):
         self.endpoints_by_id = {}
 
         # Indexes.
-        # FIXME: need to use IDs here, can't hash a dict.
         self.endpoint_ids_by_tag = defaultdict(set)
         self.endpoint_ids_by_profile_id = defaultdict(set)
 
@@ -69,18 +64,6 @@ class UpdateSequencer(Actor):
         self.active_profiles = {}
         self.active_ipsets_by_tag = {}
         self.interfaces = {}
-
-    def _get_or_create_profile(self, profile_id):
-        if profile_id in self.active_profiles:
-            ap = self.active_profiles[profile_id]
-        else:
-            ap = self.profile_mgr.get_profile_and_incref(profile_id)
-            self.active_profiles[profile_id] = ap
-        return ap
-
-    def _discard_active_profile(self, profile_id):
-        del self.active_profiles[profile_id]
-        self.profile_mgr.return_profile(profile_id)
 
     @actor_event
     def apply_snapshot(self, rules_by_prof_id, tags_by_prof_id,
@@ -112,7 +95,7 @@ class UpdateSequencer(Actor):
                 # Make sure any required ipsets exist.  We'll update their
                 # members below.
                 referenced_tags = extract_tags_from_profile(rules)
-                tag_mapping = self._assign_tag_mapping(referenced_tags)
+                _, tag_mapping = self._assign_tag_mapping(referenced_tags)
                 ap.on_profile_update(rules, tag_mapping, async=True)
                 new_active_tags.update(referenced_tags)
                 # Make sure the endpoint itself exists and update it.
@@ -174,8 +157,10 @@ class UpdateSequencer(Actor):
         if profile_id in self.active_profiles:
             ap = self.active_profiles[profile_id]
             required_tags = extract_tags_from_profile(rules)
-            tag_mapping = self._assign_tag_mapping(required_tags)
+            created_tags, tag_mapping = self._assign_tag_mapping(required_tags)
+            self._refresh_tags(created_tags)
             ap.on_profile_update(rules, tag_mapping)
+
             # TODO: Clean up unused tags.
 
         if rules is None:
@@ -208,18 +193,130 @@ class UpdateSequencer(Actor):
             ep = self.local_endpoints_by_iface_name[name]
             ep.on_interface_update(iface_state)
 
+    @actor_event
+    def on_endpoint_update(self, endpoint_id, endpoint):
+        """
+        Process an update to the given endpoint.  endpoint may be None if
+        the endpoint was deleted.
+        """
+        _log.info("Endpoint update: %s", endpoint_id)
+
+        old_endpoint = self.endpoints_by_id.get(endpoint_id, {})
+        old_prof_id = old_endpoint.get("profile_id")
+        old_tags = set(old_prof_id and self.tags_by_id[old_prof_id] or [])
+
+        if endpoint is None:
+            _log.info("Endpoint %s deleted", endpoint_id)
+            if endpoint_id not in self.endpoints_by_id:
+                _log.warn("Delete for unknown endpoint %s", endpoint_id)
+                return
+            # Update profile index.
+            eps_for_profile = self.endpoint_ids_by_profile_id[old_prof_id]
+            eps_for_profile.discard(endpoint_id)
+            if not eps_for_profile:
+                # Profile no longer has any endpoints using it, clean up
+                # the index.
+                _log.debug("Profile %s now unused", old_prof_id)
+                del self.endpoint_ids_by_profile_id[old_prof_id]
+                if old_prof_id in self.active_profiles:
+                    # Profile active but no longer needed.  Clean it up.
+                    self._discard_active_profile(old_prof_id)
+                    # TODO: clean up unused ipsets.
+            for tag in old_tags:
+                self.endpoint_ids_by_tag[tag].discard(endpoint_id)
+                if not self.endpoint_ids_by_tag[tag]:
+                    del self.endpoint_ids_by_tag[tag]
+                if tag in self.active_ipsets_by_tag:
+                    for ip in map(futils.net_to_ip,
+                                  old_endpoint["ipv4_nets"]):
+                        # TODO: IPv6
+                        ipset = self.active_ipsets_by_tag[tag]
+                        ipset.remove_member(ip, async=True)
+            if endpoint_id in self.local_endpoints_by_id:
+                loc_ep = self.local_endpoints_by_id.pop(endpoint_id)
+                self.local_endpoints_by_iface_name.pop(old_endpoint["name"])
+                # TODO Remove this blocking call, needed to make sure we
+                # don't recreate the endpoint before it has deleted its
+                # chain.
+                loc_ep.on_endpoint_update(endpoint)
+            self.endpoints_by_id.pop(endpoint_id)
+        else:
+            new_prof_id = endpoint["profile_id"]
+            new_tags = set(self.tags_by_id.get(new_prof_id, []))
+
+            if endpoint["host"] == OUR_HOSTNAME:
+                # Endpoint is local, make sure we have its profile.
+                _log.debug("Endpoint update is for local endpoint.")
+                profile_id = endpoint["profile_id"]
+                ap = self._get_or_create_profile(profile_id)
+                rules = self.rules_by_id.get(profile_id)
+                # Make sure any required ipsets exist.  We'll update their
+                # members below.
+                required_tags = extract_tags_from_profile(rules)
+                created_tags, tag_mapping = self._assign_tag_mapping(
+                    required_tags)
+                self._refresh_tags(created_tags)
+                ap.on_profile_update(rules, tag_mapping, async=True)
+                # Make sure the endpoint itself exists and update it.
+                iface = endpoint["name"]
+                ep = self._get_or_create_endpoint(iface,
+                                                  endpoint_id=endpoint_id)
+                ep.on_endpoint_update(endpoint, async=True)
+
+            # Calculate impact on tags due to any change of profile or IP
+            # address and queue updates to ipsets.
+            # TODO: IPv6
+            old_ips = set(old_endpoint.get("ipv4_nets", []))
+            new_ips = set(endpoint.get("ipv4_nets", []))
+            for removed_ip in old_ips - new_ips:
+                for tag in old_tags:
+                    if tag in self.active_ipsets_by_tag:
+                        ipset = self.active_ipsets_by_tag[tag]
+                        ipset.remove_member(removed_ip, async=True)
+            for tag in old_tags - new_tags:
+                if tag in self.active_ipsets_by_tag:
+                    ipset = self.active_ipsets_by_tag[tag]
+                    for ip in map(futils.net_to_ip,
+                                  old_endpoint.get("ipv4_nets", [])):
+                        ipset.remove_member(ip, async=True)
+            for tag in new_tags:
+                if tag in self.active_ipsets_by_tag:
+                    ipset = self.active_ipsets_by_tag[tag]
+                    for ip in map(futils.net_to_ip,
+                                  endpoint.get("ipv4_nets", [])):
+                        ipset.add_member(ip, async=True)
+
+        _log.info("Endpoint update complete.")
+
+    def _get_or_create_profile(self, profile_id):
+        if profile_id in self.active_profiles:
+            ap = self.active_profiles[profile_id]
+        else:
+            ap = self.profile_mgr.get_profile_and_incref(profile_id)
+            self.active_profiles[profile_id] = ap
+        return ap
+
+    def _discard_active_profile(self, profile_id):
+        del self.active_profiles[profile_id]
+        self.profile_mgr.return_profile(profile_id)
+
     def _assign_tag_mapping(self, tags):
+        created_tags = set()
         mapping = {}
         for tag in tags:
-            ipset = self._get_or_create_ipset(tag)
+            created, ipset = self._get_or_create_ipset(tag)
+            if created:
+                created_tags.add(tag)
             mapping[tag] = ipset.name
-        return mapping
+        return created_tags, mapping
 
     def _get_or_create_ipset(self, tag):
+        created = False
         if tag not in self.active_ipsets_by_tag:
             ipset = self.ipset_pool.allocate_ipset(tag)
             self.active_ipsets_by_tag[tag] = ipset
-        return self.active_ipsets_by_tag[tag]
+            created = True
+        return created, self.active_ipsets_by_tag[tag]
 
     def _get_or_create_endpoint(self, iface_name, endpoint_id=None):
         if iface_name not in self.local_endpoints_by_iface_name:
@@ -261,161 +358,15 @@ class UpdateSequencer(Actor):
                             else:
                                 ipset.remove_member(ip, async=True)
 
-    def _profile_active(self, profile_id):
-        return profile_id in self.active_profile_ids
-
-    def _ensure_profile_ipsets_exist(self, profile):
-        for tag in extract_tags_from_profile(profile):
-            self._get_or_create_ipset(tag)
-
-    @actor_event
-    def on_endpoint_update(self, endpoint_id, endpoint):
-        """
-        Process an update to the given endpoint.  endpoint may be None if
-        the endpoint was deleted.
-        """
-        _log.info("Endpoint update: %s", endpoint_id)
-        if endpoint is None:
-            if endpoint_id in self.endpoints_by_id:
-                old_endpoint = self.endpoints_by_id[endpoint_id]
-                profile_id = old_endpoint["profile_id"]
-                # Update profile index.
-                eps_for_profile = self.endpoint_ids_by_profile_id[profile_id]
-                eps_for_profile.discard(endpoint_id)
-                if not eps_for_profile:
-                    # Profile no longer has any endpoints using it, clean up
-                    # the index.
-                    del self.endpoint_ids_by_profile_id[profile_id]
-                    if profile_id in self.active_profiles:
-                        # Profile active but no longer needed.  Clean it up.
-                        self._discard_active_profile(profile_id)
-                        # TODO: clean up unused ipsets.
-                tags = self.tags_by_id.get(profile_id, [])
-                for tag in tags:
-                    self.endpoint_ids_by_tag[tag].discard(endpoint_id)
-                    if not self.endpoint_ids_by_tag[tag]:
-                        del self.endpoint_ids_by_tag[tag]
-                    if tag in self.active_ipsets_by_tag:
-                        for ip in map(futils.net_to_ip,
-                                      old_endpoint["ipv4_nets"]):
-                            # TODO: IPv6
-                            ipset = self.active_ipsets_by_tag[tag]
-                            ipset.remove_member(ip, async=True)
-                if endpoint_id in self.local_endpoints_by_id:
-                    loc_ep = self.local_endpoints_by_id.pop(endpoint_id)
-                    self.local_endpoints_by_iface_name.pop(endpoint["name"])
-                    # TODO Remove this blocking call, needed to make sure we
-                    # don't recreate the endpoint before it has deleted its
-                    # chain.
-                    loc_ep.on_endpoint_update(endpoint)
-                self.endpoints_by_id.pop(endpoint_id)
-        else:
-            new_profile_id = endpoint["profile_id"]
-            new_profile = self.rules_by_id[new_profile_id]
-            new_tags = new_profile["tags"]
-            old_ips_per_tag = defaultdict(set)
-
-            if endpoint_id in self.endpoints_by_id:
-                _log.debug("Update to existing endpoint %s.", endpoint_id)
-                old_endpoint = self.endpoints_by_id[endpoint_id]
-                if old_endpoint == endpoint:
-                    _log.info("No change to endpoint, skipping.")
-                    return
-                old_profile_id = old_endpoint["profile_id"]
-                old_profile = self.rules_by_id[old_profile_id]
-                old_tags = old_profile["tags"]
-
-                # Find the endpoint's previous contribution to the ipsets.
-                for tag in old_tags:
-                    old_ips_per_tag[tag].update(old_endpoint["ip_addresses"])
-                    self.endpoint_ids_by_tag[tag].remove(endpoint_id)
-                # Remove from the index, we'll fix up below.  No race,
-                # we can't be interrupted.
-                self.endpoint_ids_by_profile_id[old_profile_id].remove(
-                    endpoint_id)
-            else:
-                # New endpoint, implicitly had no tags before.
-                _log.info("New endpoint: %s", endpoint_id)
-                old_tags = []
-                old_profile_id = None
-
-            # Figure out current contribution to tags.
-            _log.debug("Need to sync tags.")
-            new_ips_per_tag = defaultdict(set)
-            for tag in new_tags:
-                new_ips_per_tag[tag].update(endpoint["ip_addresses"])
-                self.endpoint_ids_by_tag[tag].add(endpoint_id)
-
-            # Diff the set of old vs new IP addresses and apply deltas.
-            futures = []
-            for tag in set(old_tags + new_tags):
-                if tag not in self.active_ipsets_by_tag:
-                    # ipset isn't in use on this host, skip.
-                    continue
-                ipset = self.active_ipsets_by_tag[tag]
-                for ip in old_ips_per_tag[tag] - new_ips_per_tag[tag]:
-                    _log.debug("Removing %s from ipset for %s", ip, tag)
-                    f = ipset.remove_member(ip, async=True)
-                    futures.append(f)
-                for ip in new_ips_per_tag[tag] - old_ips_per_tag[tag]:
-                    _log.debug("Adding %s to ipset for %s", ip, tag)
-                    f = ipset.add_member(ip, async=True)
-                    futures.append(f)
-            wait_and_check(futures)
-
-            self.endpoint_ids_by_profile_id[new_profile_id].add(endpoint_id)
-            self.endpoints_by_id[endpoint_id] = endpoint
-
-            if endpoint["host"] == OUR_HOSTNAME:
-                # Create any missing ipsets.
-                _log.info("Endpoint is local, checking profile.")
-                self.local_endpoint_ids.add(endpoint_id)
-                self._ensure_profile_ipsets_exist(new_profile)
-
-                if new_profile_id not in self.active_profile_ids:
-                    program_profile_chains(new_profile_id, new_profile)
-
-                if old_profile_id and old_profile_id != new_profile_id:
-                    # Old profile may be unused. Recalculate.
-                    _log.debug("Recalculating active_profile_ids index.")
-                    self.active_profile_ids = set()
-                    for endpoint_id in self.local_endpoint_ids:
-                        endpoint = self.endpoints_by_id[endpoint_id]
-                        self.active_profile_ids.add(endpoint["profile_id"])
-                    # TODO: GC unused chains
-
-                chains, updates = get_endpoint_rules(
-                    endpoint_id,
-                    endpoint["name"],
-                    4,
-                    endpoint["ip_addresses"],
-                    endpoint["mac"],
-                    endpoint["profile_id"])
-                updates += self.active_endpoint_updates()
-                # TODO: IPv6
-                self.v4_updater.apply_updates("filter", chains, updates)
-
-        _log.info("Endpoint update complete.")
-
-    def active_endpoint_updates(self):
-        updates = [
-            "--flush " + CHAIN_FROM_ENDPOINT,
-            "--flush " + CHAIN_TO_ENDPOINT,
-        ]
-        for endpoint_id in self.local_endpoint_ids:
-            endpoint = self.endpoints_by_id[endpoint_id]
-            iface = endpoint["name"]
-            to_chain_name = CHAIN_TO_PREFIX + endpoint_id
-            from_chain_name = CHAIN_FROM_PREFIX + endpoint_id
-
-            # Add rule to global chain to direct traffic to the
-            # endpoint-specific one.
-            updates.append("--append %s --out-interface %s --goto %s" %
-                           (CHAIN_TO_ENDPOINT, iface, to_chain_name))
-            updates.append("--append %s --in-interface %s --goto %s" %
-                           (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
-            # FIXME: should we drop at end of this?
-        return updates
+    def _refresh_tags(self, tags):
+        for tag in tags:
+            _log.debug("Refreshing tag %s", tag)
+            new_members = set()
+            for ep_id in self.endpoint_ids_by_tag.get(tag, set()):
+                ep = self.endpoints_by_id.get(ep_id, {})
+                new_members.update(map(futils.net_to_ip, ep["ipv4_nets"]))
+            self.active_ipsets_by_tag[tag].replace_members(new_members,
+                                                           async=True)
 
 
 def extract_tags_from_profile(profile):

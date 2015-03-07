@@ -143,6 +143,7 @@ def watch_interfaces(update_sequencer):
     into the update sequencer.
     """
     # TODO: use netlink socket to monitor rather than poll?
+    # FIXME: this doesn't detect if an interface quickly flaps down/up
     interfaces = {}
     while True:
         # Use "ip link" to get the list of interfaces and their kernel IDs.
