@@ -111,7 +111,7 @@ class UpdateSequencer(Actor):
             new_members = set()
             for endpoint_id in new_endpoint_ids_by_tag[tag]:
                 endpoint = endpoints_by_id[endpoint_id]
-                nets = endpoint.get(["ipv4_nets"], [])  # FIXME IPv6
+                nets = endpoint.get("ipv4_nets", [])  # FIXME IPv6
                 new_members.update(map(futils.net_to_ip, nets))
             ipset.replace_members(new_members)
 
@@ -176,12 +176,16 @@ class UpdateSequencer(Actor):
         :param list[str] tags: List of tags for the given profile or None if
             deleted.
         """
-        old_tags = self.tags_by_id.get(profile_id, set())
-        new_tags = tags or set()
-        self._process_tag_updates(profile_id, old_tags, new_tags)
+        _log.info("Tags for profile %s updated", profile_id)
+        old_tags = self.tags_by_id.get(profile_id, [])
+        new_tags = tags or []
+        self._process_tag_updates(profile_id, set(old_tags), set(new_tags))
 
         if tags is None:
+            _log.info("Tags for profile %s deleted", profile_id)
             self.tags_by_id.pop(profile_id)
+        else:
+            self.tags_by_id[profile_id] = tags
 
     @actor_event
     def on_interface_update(self, name, iface_state):
@@ -339,8 +343,11 @@ class UpdateSequencer(Actor):
         of the given profile ID.
         """
         endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id, set())
+        _log.debug("Endpoint IDs with this profile: %s", endpoint_ids)
         added_tags = new_tags - old_tags
+        _log.debug("Profile %s added tags: %s", profile_id, added_tags)
         removed_tags = old_tags - new_tags
+        _log.debug("Profile %s removed tags: %s", profile_id, removed_tags)
         for added, upd_tags in [(True, added_tags), (False, removed_tags)]:
             for tag in upd_tags:
                 if added:
@@ -352,7 +359,9 @@ class UpdateSequencer(Actor):
                     ipset = self.active_ipsets_by_tag[tag]
                     for endpoint_id in endpoint_ids:
                         endpoint = self.endpoints_by_id[endpoint_id]
-                        for ip in endpoint["ip_addresses"]:
+                        for ip in map(futils.net_to_ip,
+                                      endpoint.get("ipv4_nets", [])):
+                            # TODO: IPv6
                             if added:
                                 ipset.add_member(ip, async=True)
                             else:

@@ -119,8 +119,7 @@ class LocalEndpoint(Actor):
                 self._failed = False  # Ready to try again...
                 self._profile.ensure_chains_programmed()
                 ep_id = self.endpoint["id"]
-                _log.info("Endpoint %s for interface %s became ready to "
-                          "program.", ep_id, ifce_name)
+                _log.info("%s became ready to program.", self)
                 try:
                     self._update_chains()
                     self.dispatch_chains.on_endpoint_chains_ready(ifce_name,
@@ -128,13 +127,13 @@ class LocalEndpoint(Actor):
                     self._configure_interface()
                 except (OSError, FailedSystemCall, CalledProcessError):
                     _log.exception("Failed to program the dataplane for %s",
-                                   ep_id)
+                                   self)
                     self._failed = True  # Force retry next time.
                     # Schedule a retry.
                     gevent.spawn_later(5, self._maybe_update, False)
             else:
                 # We were active but now we're not, withdraw the dispatch rule.
-                _log.debug("%s became unready.", self, ifce_name)
+                _log.debug("%s became unready.", self)
                 self._failed = False  # Don't care any more.
                 self.dispatch_chains.remove_dispatch_rule(ifce_name)
                 if not self.endpoint:

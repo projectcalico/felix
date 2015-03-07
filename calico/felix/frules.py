@@ -71,7 +71,7 @@ def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
     iface_match = iface_prefix + "+"
 
     # The IPV4 nat table first. This must have a felix-PREROUTING chain.
-    nat_pr = ["--flush %s" % CHAIN_PREROUTING]
+    nat_pr = []
     if config.METADATA_IP is not None:
         # Need to expose the metadata server on a link-local.
         #  DNAT tcp -- any any anywhere 169.254.169.254
@@ -101,6 +101,7 @@ def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
     # calico-filter-INPUT chains, which we must create before adding any
     # rules that send to them.
     for iptables_updater in [v4_updater, v6_updater]:
+        # FIXME: This flushes the FROM/TO_ENDPOINT chains.
         req_chains = [CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT, CHAIN_INPUT,
                       CHAIN_FORWARD]
 
@@ -120,7 +121,6 @@ def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
         # Configure our chains.
         # The felix forward chain tests traffic to and from endpoints
         updates.extend([
-            "--flush %s" % CHAIN_FORWARD,
             "--append %s --jump %s --in-interface %s" %
                 (CHAIN_FORWARD, CHAIN_FROM_ENDPOINT, iface_match),
             "--append %s --jump %s --out-interface %s" %
@@ -133,7 +133,6 @@ def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
 
         # The felix INPUT chain tests traffic from endpoints
         updates.extend([
-            "--flush %s" % CHAIN_INPUT,
             "--append %s --jump %s --in-interface %s" %
                 (CHAIN_INPUT, CHAIN_FROM_ENDPOINT, iface_match),
             "--append %s --jump ACCEPT --in-interface %s" %
@@ -170,7 +169,7 @@ def update_chain(name, rule_list, v4_updater, iptable="filter", async=False):
 
 def rules_to_chain_rewrite_lines(chain_name, rules, ip_version, tag_to_ipset,
                                  on_allow="ACCEPT", on_deny="DROP"):
-    fragments = ["--flush %s" % chain_name]
+    fragments = []
     for r in rules:
         fragments.append(rule_to_iptables_fragment(chain_name, r, ip_version,
                                                    tag_to_ipset,
@@ -248,6 +247,7 @@ def rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,
             append("--match icmp6", "--icmpv6-type", rule["icmp_type"])
 
     # Add the action
-    append("--jump", on_allow if rule.get("action") == "allow" else on_deny)
+    append("--jump", on_allow if rule.get("action", "allow") == "allow"
+                              else on_deny)
 
     return " ".join(str(x) for x in update_fragments)
