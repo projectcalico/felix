@@ -53,7 +53,6 @@ def profile_to_chain_name(inbound_or_outbound, profile_id):
     return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_id, inbound_or_outbound)
 
 
-
 def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
     """
     Set up global iptables rules. These are rules that do not change with
@@ -140,14 +139,6 @@ def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
         ])
 
         iptables_updater.apply_updates("filter", req_chains, updates)
-
-
-def program_profile_chains(profile_id, profile):
-    for in_or_out in ["inbound", "outbound"]:
-        chain_name = profile_to_chain_name(in_or_out,
-                                           profile_id)
-        update_chain(chain_name, profile[in_or_out])
-
 
 def update_chain(name, rule_list, v4_updater, iptable="filter", async=False):
     """

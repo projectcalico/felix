@@ -382,7 +382,7 @@ def extract_tags_from_profile(profile):
     if profile is None:
         return set()
     tags = set()
-    for in_or_out in ["inbound", "outbound"]:
+    for in_or_out in ["inbound_rules", "outbound_rules"]:
         for rule in profile.get(in_or_out, []):
             tags.update(extract_tags_from_rule(rule))
     return tags

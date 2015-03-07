@@ -141,11 +141,12 @@ class ActiveProfile(Actor):
 
     def _update_chain(self, new_profile, direction, tag_to_ipset_name):
         new_profile = new_profile or {}
-        new_rules = new_profile.get(direction, [])
+        rules_key = "%s_rules" % direction
+        new_rules = new_profile.get(rules_key, [])
         futures = []
         if (not self._programmed or
                 self._profile is None or
-                new_rules != self._profile.get(direction) or
+                new_rules != self._profile.get(rules_key) or
                 tag_to_ipset_name != self._tag_to_ip_set_name):
             _log.debug("Update to %s affects %s rules.", self.id, direction)
             chain_name = profile_to_chain_name(direction, self.id)
