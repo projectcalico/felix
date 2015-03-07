@@ -70,8 +70,7 @@ def _main_greenlet(config):
                  update_sequencer.greenlet,
                  ipset_pool.greenlet,
                  v4_updater.greenlet,
-                 v6_updater.greenlet,
-                 gevent.spawn(watchdog)]
+                 v6_updater.greenlet]
 
     # Install the global rules before we start polling for updates.
     iface_prefix = "tap"
@@ -93,12 +92,6 @@ def _main_greenlet(config):
     else:
         _log.error("Greenlet %s unexpectedly returned.", stopped_greenlet)
         raise AssertionError("Greenlet unexpectedly returned")
-
-
-def watchdog():
-    while True:
-        _log.info("Still alive")
-        gevent.sleep(20)
 
 
 class FakeConfig(object):

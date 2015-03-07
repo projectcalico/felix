@@ -38,6 +38,9 @@ class DispatchChains(Actor):
     """
     Actor that owns the felix-TO/FROM-ENDPOINT chains, which we use to 
     dispatch to endpoint-specific chains.
+
+    LocalEndpoint Actors give us kicks as they come and go so we can
+    add/remove them from the chains.
     """
     def __init__(self, iptables_updaters):
         super(DispatchChains, self).__init__()
@@ -59,21 +62,19 @@ class DispatchChains(Actor):
     def _update_chains(self):
         updates = []
         for iface, chain in self.iface_to_chain_suffix.iteritems():
-            to_chain_name = CHAIN_TO_PREFIX + chain
-            from_chain_name = CHAIN_FROM_PREFIX + chain
-
             # Add rule to global chain to direct traffic to the
-            # endpoint-specific one.  We use --goto so that a return from
-            # the destination chain will return to the felix-FORWARD chain
-            # rather than to us.
-            updates.append("--append %s --out-interface %s --goto %s" %
-                           (CHAIN_TO_ENDPOINT, iface, to_chain_name))
+            # endpoint-specific one.  Note that we use --goto, which means
+            # that, the endpoint-specific chain will return to our parent
+            # rather than to this chain.
+            ep_from_chain = CHAIN_FROM_PREFIX + chain
             updates.append("--append %s --in-interface %s --goto %s" %
-                           (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
+                           (CHAIN_FROM_ENDPOINT, iface, ep_from_chain))
+            ep_to_chain = CHAIN_TO_PREFIX + chain
+            updates.append("--append %s --out-interface %s --goto %s" %
+                           (CHAIN_TO_ENDPOINT, iface, ep_to_chain))
         for ip_version, updater in self.iptables_updaters.iteritems():
             if ip_version == 6: continue # TODO IPv6
             updater.apply_updates("filter",
-                                  # FIXME: should chains be default DROP?
                                   [CHAIN_TO_ENDPOINT,
                                    CHAIN_FROM_ENDPOINT],
                                   updates)
@@ -109,7 +110,7 @@ class ActiveProfile(Actor):
         Update the programmed iptables configuration with the new
         profile
         """
-        assert profile["id"] == self.id
+        assert profile is None or profile["id"] == self.id
 
         self._update_chains(profile, tag_to_ipset_name)
         self._profile = profile
@@ -141,13 +142,13 @@ class ActiveProfile(Actor):
     def _update_chain(self, new_profile, direction, tag_to_ipset_name):
         new_profile = new_profile or {}
         new_rules = new_profile.get(direction, [])
+        futures = []
         if (not self._programmed or
                 self._profile is None or
                 new_rules != self._profile.get(direction) or
                 tag_to_ipset_name != self._tag_to_ip_set_name):
             _log.debug("Update to %s affects %s rules.", self.id, direction)
             chain_name = profile_to_chain_name(direction, self.id)
-            futures = []
             for version, ipt in self._iptables_updaters.iteritems():
                 if version == 6:
                     _log.error("Ignoring v6")
@@ -160,10 +161,10 @@ class ActiveProfile(Actor):
                 f = ipt.apply_updates("filter", [chain_name], updates,
                                       async=True)
                 futures.append(f)
-            return futures
         else:
             _log.debug("Update to %s didn't affect %s rules.",
                        self.id, direction)
+        return futures
 
 
 class IptablesUpdater(Actor):

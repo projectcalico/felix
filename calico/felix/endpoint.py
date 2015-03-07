@@ -109,7 +109,7 @@ class LocalEndpoint(Actor):
     def _maybe_update(self, was_ready):
         is_ready = self._ready
         if not is_ready :
-            _log.debug("Endpoint not ready, waiting on %s", self._missing_deps)
+            _log.debug("%s not ready, waiting on %s", self, self._missing_deps)
         if self._failed or is_ready != was_ready:
             ifce_name = self._iface_name
             if is_ready:
@@ -134,8 +134,7 @@ class LocalEndpoint(Actor):
                     gevent.spawn_later(5, self._maybe_update, False)
             else:
                 # We were active but now we're not, withdraw the dispatch rule.
-                _log.debug("Endpoint for interface %s became unready.",
-                           ifce_name)
+                _log.debug("%s became unready.", self, ifce_name)
                 self._failed = False  # Don't care any more.
                 self.dispatch_chains.remove_dispatch_rule(ifce_name)
                 if not self.endpoint:
@@ -198,6 +197,10 @@ class LocalEndpoint(Actor):
         """
         # TODO: delete routes...
         pass
+
+    def __str__(self):
+        return "Endpoint<id=%s,iface=%s>" % (self._endpoint_id or "unknown",
+                                             self._iface_name or "unknown")
 
 
 def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
