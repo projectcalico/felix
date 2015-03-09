@@ -49,7 +49,7 @@ def watch_etcd(update_sequencer):
     :raises EtcdException: if a read from etcd fails and we may fall out of
             sync.
     """
-    client = etcd.Client()
+    client = etcd.Client(host=(('127.0.0.1', 4001), ('[::1]', 4001)))
 
     # Load initial dump from etcd.  First just get all the endpoints and
     # profiles by id.  The response contains a generation ID allowing us
