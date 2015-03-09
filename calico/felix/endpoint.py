@@ -70,7 +70,7 @@ class LocalEndpoint(Actor):
                 _log.debug("Returning old profile %s", old_profile_id)
                 self.profile_mgr.return_profile(old_profile_id)
                 self._profile = None
-            if new_profile_id:
+            if new_profile_id is not None:
                 _log.debug("Acquiring new profile %s", new_profile_id)
                 self._profile = self.profile_mgr.get_profile_and_incref(
                     new_profile_id)
@@ -79,7 +79,7 @@ class LocalEndpoint(Actor):
 
     @actor_event
     def on_interface_update(self, iface_state):
-        _log.debug("Interface state: %s", iface_state)
+        _log.debug("Endpoint received new interface state: %s", iface_state)
         if iface_state and not self._iface_name:
             self._iface_name = iface_state.name
         was_ready = self._ready
@@ -133,7 +133,7 @@ class LocalEndpoint(Actor):
                     gevent.spawn_later(5, self._maybe_update, False)
             else:
                 # We were active but now we're not, withdraw the dispatch rule.
-                _log.debug("%s became unready.", self)
+                _log.info("%s became unready.", self)
                 self._failed = False  # Don't care any more.
                 self.dispatch_chains.remove_dispatch_rule(ifce_name)
                 if not self.endpoint:

@@ -24,6 +24,7 @@ import socket
 from etcd import EtcdException
 import etcd
 import re
+from urllib3.exceptions import ReadTimeoutError
 
 _log = logging.getLogger(__name__)
 
@@ -102,6 +103,9 @@ def watch_etcd(update_sequencer):
                                    recursive=True,
                                    timeout=0)
             _log.debug("etcd response: %r", response)
+        except ReadTimeoutError:
+            _log.warning("Read from etcd timed out, retrying.")
+            continue
         except EtcdException:
             _log.exception("Failed to read from etcd. wait_index=%s",
                            last_etcd_index)
@@ -151,8 +155,31 @@ def parse_if_endpoint(etcd_node):
             endpoint = json_decoder.decode(etcd_node.value)
             endpoint["host"] = hostname
             endpoint["id"] = endpoint_id
+            validate_endpoint(endpoint)
         return endpoint_id, endpoint
     return None, None
+
+
+def validate_endpoint(endpoint):
+    issues = []
+
+    if "state" not in endpoint:
+        issues.append("Missing 'state' field.")
+    elif endpoint["state"] not in ("active", "inactive"):
+        issues.append("Expected 'state' to be one of active/inactive.")
+
+    for field in ["name", "mac", "profile_id"]:
+        if field not in endpoint:
+            issues.append("Missing '%s' field." % field)
+        elif not isinstance(endpoint["profile_id"], basestr):
+            issues.append("Expected '%s' to be a string." % field)
+
+    if issues:
+        raise ValidationFailed(", ".join(issues))
+
+
+class ValidationFailed(Exception):
+    pass
 
 
 def parse_if_rules(etcd_node):

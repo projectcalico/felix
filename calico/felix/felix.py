@@ -113,7 +113,7 @@ def main():
         gevent.spawn(_main_greenlet, config).join()  # Should never return
     except BaseException:
         # Make absolutely sure that we exit by asking the OS to terminate our
-        # process.  We don't wan to let a stray background thread keep us
+        # process.  We don't want to let a stray background thread keep us
         # alive.
         _log.exception("Felix exiting due to exception")
         os._exit(1)

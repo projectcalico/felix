@@ -49,6 +49,15 @@ class DispatchChains(Actor):
 
     @actor_event
     def on_endpoint_chains_ready(self, iface_name, chain_suffix):
+        """
+        Message sent to us by the LocalEndpoint to tell us its
+        endpoint-specific chain is in place and we should add it
+        to the dispatch chain.
+
+        :param iface_name: name of the linux interface.
+        :param chain_suffix: suffic to the per-endpoint chain names used
+            to form the names of the per-endpoint in/out chain.
+        """
         if self.iface_to_chain_suffix.get(iface_name) != chain_suffix:
             self.iface_to_chain_suffix[iface_name] = chain_suffix
             self._update_chains()
@@ -81,8 +90,12 @@ class DispatchChains(Actor):
 
 
 class ActiveProfile(Actor):
+    """
+    Actor that owns the per-profile rules chains.
+    """
     def __init__(self, profile_id, iptables_updaters):
         super(ActiveProfile, self).__init__()
+        assert profile_id is not None
         self.id = profile_id
         self._programmed = False
         self._iptables_updaters = iptables_updaters
@@ -93,12 +106,26 @@ class ActiveProfile(Actor):
 
     @actor_event
     def ensure_chains_programmed(self):
+        """
+        Waits until the chains are actually programmed into the dataplane.
+
+        Used by the endpoint actor to make sure that it doesn't program its
+        chains, which reference the profile chain, until the profile chain
+        is present.
+        """
         if self._programmed:
             return
         else:
             self._update_chains(self._profile, self._tag_to_ip_set_name)
 
     def _update_chains(self, profile, tag_to_ipset_name):
+        """
+        Updates the chains in the dataplane.
+        :param profile: The profile dict, containing hte inbound and
+            outbound rules.
+        :param tag_to_ipset_name: Dict that maps from name of tag to name of
+            ipset to use i the rules.
+        """
         futures = self._update_chain(profile, "inbound", tag_to_ipset_name)
         futures += self._update_chain(profile, "outbound", tag_to_ipset_name)
         wait_and_check(futures)
@@ -108,7 +135,7 @@ class ActiveProfile(Actor):
     def on_profile_update(self, profile, tag_to_ipset_name):
         """
         Update the programmed iptables configuration with the new
-        profile
+        profile.  Returns after the update is present in the dataplane.
         """
         assert profile is None or profile["id"] == self.id
 
@@ -140,6 +167,14 @@ class ActiveProfile(Actor):
         self._tag_to_ip_set_name = None
 
     def _update_chain(self, new_profile, direction, tag_to_ipset_name):
+        """
+        Updates one of our individual inbound/outbound chains from
+        the rules in the new_profile dict.
+
+        :param direction: "inbound" or "outbound"
+        :param tag_to_ipset_name: dict mapping name of tag to ipset name,
+            must contain all tags used in the rules.
+        """
         new_profile = new_profile or {}
         rules_key = "%s_rules" % direction
         new_rules = new_profile.get(rules_key, [])
@@ -173,7 +208,7 @@ class IptablesUpdater(Actor):
     Actor that maintains an iptables-restore subprocess for
     injecting rules into iptables.
 
-    Note: due to the internal architecture of IP tables,
+    Note: due to the internal architecture of iptables,
     multiple concurrent calls to iptables-restore can clobber
     each other.  Use one instance of this class.
     """
@@ -223,6 +258,7 @@ class IptablesUpdater(Actor):
         )
         _log.debug("iptables-restore input:\n%s", restore_input)
         cmd = [self.cmd_name, "--noflush"]
+        # TODO: retry if commit fails (due to concurrent use).
         iptables_proc = subprocess.Popen(cmd,
                                          stdin=subprocess.PIPE,
                                          stdout=subprocess.PIPE,
@@ -241,6 +277,14 @@ class IptablesUpdater(Actor):
 
 
 class ActiveProfileManager(Actor):
+    """
+    Actor that manages the life cycle of ActiveProfile objects.
+    Users must ensure that they correctly pair calls to
+    get_profile_and_incref() and return_profile().
+
+    This class ensures that rules chains are properly quiesced
+    before thier Actors are deleted.
+    """
     def __init__(self, iptables_updaters):
         super(ActiveProfileManager, self).__init__()
         self.profiles_by_id = {}
@@ -249,6 +293,7 @@ class ActiveProfileManager(Actor):
 
     @actor_event
     def get_profile_and_incref(self, profile_id):
+        assert profile_id is not None
         if profile_id not in self.profiles_by_id:
             ap = ActiveProfile(profile_id, self.iptables_updaters).start()
             self.profiles_by_id[profile_id] = ap
@@ -263,17 +308,30 @@ class ActiveProfileManager(Actor):
             self._queue_profile_reap(profile_id)
 
     def _queue_profile_reap(self, dead_profile_id):
+        """
+        Asks the profile to remove itself from the dataplane and
+        queues a callback to tell us that that work is complete.
+        """
         ap = self.profiles_by_id[dead_profile_id]
         f = ap.remove(async=True)
-        # We can't remove the profile until it's finished removing itself
-        # so ask the result to call us back when it's done.  In the
+        # We can't delete the profile Actor until it's finished removing
+        # itself so ask the result to call us back when it's done.  In the
         # meantime we might have revived the profile.
         f.rawlink(functools.partial(self._on_active_profile_removed,
                                     dead_profile_id, async=True))
 
     @actor_event
     def _on_active_profile_removed(self, profile_id):
+        """
+        Callback we queue when deleting an ActiveProfile Actor.
+        checks that the Actor is still unreferenced before cleaning
+        it up.
+        """
         if self.profile_counts_by_id[profile_id] == 0:
+            # Profile is still dead, clean it up.  Note: if the profile
+            # was revived and then removed again, we might get multiple
+            # calls to this method so we're defensive and use pop() to
+            # delete the profile/counter (in case we already did so).
             _log.debug("Reaping profile %s", profile_id)
             self.profiles_by_id.pop(profile_id)
             self.profile_counts_by_id.pop(profile_id)

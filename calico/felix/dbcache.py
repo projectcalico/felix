@@ -293,6 +293,7 @@ class UpdateSequencer(Actor):
         _log.info("Endpoint update complete.")
 
     def _get_or_create_profile(self, profile_id):
+        assert profile_id is not None
         if profile_id in self.active_profiles:
             ap = self.active_profiles[profile_id]
         else:
