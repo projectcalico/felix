@@ -13,7 +13,7 @@ _log = logging.getLogger(__name__)
 DEFAULT_QUEUE_SIZE = 10
 
 
-Message = collections.namedtuple("Message", ("function", "result"))
+Message = collections.namedtuple("Message", ("partial", "results"))
 
 
 class Actor(object):
@@ -31,14 +31,59 @@ class Actor(object):
     def _loop(self):
         while True:
             msg = self._event_queue.get()
-            assert isinstance(msg.result, AsyncResult)
+            batch = [msg]
+            while not self._event_queue.empty():
+                # We're the only ones getting from the queue so this should
+                # never fail.
+                batch.append(self._event_queue.get_nowait())
+
+            results = []
+            for msg in self._filter_message_batch(batch):
+                assert isinstance(msg.result, AsyncResult)
+                try:
+                    result = msg.partial()
+                except BaseException as e:
+                    _log.exception("Exception processing %s", msg)
+                    results.append((None, e))
+                else:
+                    results.append((result, None))
             try:
-                result = msg.function()
+                self._on_batch_processed(batch, results)
             except BaseException as e:
-                _log.exception("Exception on loop")
-                msg.result.set_exception(e)
-            else:
-                msg.result.set(result)
+                # Take over the final result.
+                # FIXME: Better approach?
+                _log.exception("_on_batch_processed failed.")
+                results[-1] = (None, e)
+
+            for msg, (result, exc) in zip(batch, results):
+                for future in msg.results:
+                    if exc is not None:
+                        future.set_exception(exc)
+                    else:
+                        future.set(result)
+
+    def _filter_message_batch(self, batch):
+        """
+        Called before processing a batch of messages to give subclasses
+        a chance to filter the batch.  Implementations must ensure that
+        every AsyncResult in the batch is correctly set.  Usually, that
+        means combining them into one list.
+
+        Intended to be overridden.  This implementation simply returns the
+        input batch.
+
+        :param list[Message] batch:
+        """
+        return batch
+
+    def _on_batch_processed(self, batch):
+        """
+        Called after a batch of events have been processed from the queue
+        before results are set.
+
+        Intended to be overridden.  This implementation does nothing.
+        """
+        pass
 
 
 def actor_event(fn):
@@ -51,12 +96,13 @@ def actor_event(fn):
             return fn(self, *args, **kwargs)
         result = AsyncResult()
         partial = functools.partial(fn, self, *args, **kwargs)
-        self._event_queue.put(Message(function=partial, result=result),
+        self._event_queue.put(Message(partial=partial, results=[result]),
                               block=self.greenlet)
         if async:
             return result
         else:
             return result.get()
+    queue_fn.func = fn
     return queue_fn
 
 
