@@ -81,6 +81,8 @@ class DispatchChains(Actor):
                            (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
             updates.append("--append %s --out-interface %s --goto %s" %
                            (CHAIN_TO_ENDPOINT, iface, to_chain_name))
+        updates.extend(["--append %s --jump DROP" % CHAIN_TO_ENDPOINT,
+                        "--append %s --jump DROP" % CHAIN_FROM_ENDPOINT])
         for ip_version, updater in self.iptables_updaters.iteritems():
             if ip_version == 6: continue # TODO IPv6
             updater.apply_updates("filter",
