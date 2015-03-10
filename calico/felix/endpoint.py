@@ -35,10 +35,11 @@ _log = logging.getLogger(__name__)
 
 class LocalEndpoint(Actor):
 
-    def __init__(self, iptables_updaters, dispatch_chains, profile_manager):
+    def __init__(self, config, iptables_updaters, dispatch_chains, profile_manager):
         super(LocalEndpoint, self).__init__()
         assert isinstance(dispatch_chains, DispatchChains)
         assert isinstance(profile_manager, ActiveProfileManager)
+        self.config = config
         self.iptables_updaters = iptables_updaters
         self.dispatch_chains = dispatch_chains
         self.profile_mgr = profile_manager
@@ -48,6 +49,7 @@ class LocalEndpoint(Actor):
         self.iface_state = None
         self.endpoint = None
         self._iface_name = None
+        self._iface_suffix = None
         self._endpoint_id = None
 
         # Track whether the last attempt to program the dataplane succeeded.
@@ -60,8 +62,9 @@ class LocalEndpoint(Actor):
     def on_endpoint_update(self, endpoint):
         _log.debug("Endpoint updated: %s", endpoint)
         if endpoint and (not self._iface_name or not self._endpoint_id):
-            self._iface_name = endpoint.get("name")
+            self._iface_name = endpoint["name"]
             self._endpoint_id = endpoint["id"]
+            self._suffix = interface_to_suffix(self.config, self._iface_name)
         was_ready = self._ready
         old_profile_id = self.endpoint and self.endpoint["profile_id"]
         new_profile_id = endpoint and endpoint["profile_id"]
@@ -82,6 +85,7 @@ class LocalEndpoint(Actor):
         _log.debug("Endpoint received new interface state: %s", iface_state)
         if iface_state and not self._iface_name:
             self._iface_name = iface_state.name
+            self._suffix = interface_to_suffix(self.config, self._iface_name)
         was_ready = self._ready
         self.iface_state = iface_state
         self._maybe_update(was_ready)
@@ -155,7 +159,7 @@ class LocalEndpoint(Actor):
             if ip_version == 6:
                 continue # TODO IPv6
             chains, updates = get_endpoint_rules(
-                self._endpoint_id,
+                self._suffix,
                 self._iface_name,
                 ip_version,
                 self.endpoint.get("ipv%s_nets" % ip_version, []),
@@ -167,7 +171,7 @@ class LocalEndpoint(Actor):
 
     def _remove_chains(self):
         if self._endpoint_id:
-            to_chain_name, from_chain_name = chain_names(self._endpoint_id)
+            to_chain_name, from_chain_name = chain_names(self._suffix)
             futures = []
             for ip_version, updater in self.iptables_updaters.iteritems():
                 f = updater.delete_chain("filter", to_chain_name, async=True)
@@ -201,16 +205,17 @@ class LocalEndpoint(Actor):
         return "Endpoint<id=%s,iface=%s>" % (self._endpoint_id or "unknown",
                                              self._iface_name or "unknown")
 
+def interface_to_suffix(config, iface_name):
+    return iface_name.replace(config.IFACE_PREFIX, "", 1)
 
-def chain_names(endpoint_id):
-    # FIXME: Shouldn't truncate chain name, might get clashes!
-    to_chain_name = (CHAIN_TO_PREFIX + endpoint_id)[:28]
-    from_chain_name = (CHAIN_FROM_PREFIX + endpoint_id)[:28]
+def chain_names(endpoint_suffix):
+    to_chain_name = (CHAIN_TO_PREFIX + endpoint_suffix)
+    from_chain_name = (CHAIN_FROM_PREFIX + endpoint_suffix)
     return to_chain_name, from_chain_name
 
 
-def get_endpoint_rules(endpoint_id, iface, ip_version, local_ips, mac, profile_id):
-    to_chain_name, from_chain_name = chain_names(endpoint_id)
+def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
+    to_chain_name, from_chain_name = chain_names(suffix)
 
     to_chain = ["--flush %s" % to_chain_name]
     if ip_version == 6:

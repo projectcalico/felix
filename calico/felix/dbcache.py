@@ -34,11 +34,12 @@ OUR_HOSTNAME = socket.gethostname()
 
 
 class UpdateSequencer(Actor):
-    def __init__(self, ipset_pool, v4_updater, v6_updater, dispatch_chains,
-                 profile_manager):
+    def __init__(self, config, ipset_pool, v4_updater, v6_updater,
+                 dispatch_chains, profile_manager):
         super(UpdateSequencer, self).__init__()
 
         # Peers/utility classes.
+        self.config = config
         self.ipset_pool = ipset_pool
         self.v4_updater = v4_updater
         self.v6_updater = v6_updater
@@ -324,7 +325,8 @@ class UpdateSequencer(Actor):
 
     def _get_or_create_endpoint(self, iface_name, endpoint_id=None):
         if iface_name not in self.local_endpoints_by_iface_name:
-            ep = LocalEndpoint(self.iptables_updaters,
+            ep = LocalEndpoint(self.config,
+                               self.iptables_updaters,
                                self.dispatch_chains,
                                self.profile_mgr).start()
             self.local_endpoints_by_iface_name[iface_name] = ep
@@ -390,6 +392,3 @@ def extract_tags_from_profile(profile):
 
 def extract_tags_from_rule(rule):
     return set([rule[key] for key in ["src_tag", "dst_tag"] if key in rule])
-
-
-
