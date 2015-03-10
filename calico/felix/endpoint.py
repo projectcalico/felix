@@ -186,6 +186,7 @@ class LocalEndpoint(Actor):
             for ip in self.endpoint.get(nets_key, []):
                 # Note: this may fail if the interface has been deleted, we'll
                 # catch that in the caller...
+                ip = futils.net_to_ip(ip)
                 devices.add_route(ip_type, ip, self._iface_name,
                                   self.endpoint["mac"])
 
@@ -266,7 +267,10 @@ def get_endpoint_rules(endpoint_id, iface, ip_version, local_ips, mac, profile_i
     # get to the profile chain, drop other traffic.
     profile_out_chain = profile_to_chain_name("outbound", profile_id)
     for ip in local_ips:
-        cidr = "%s/32" % ip if ip_version == 4 else "%s/64" % ip
+        if "/" in ip:
+            cidr = ip
+        else:
+            cidr = "%s/32" % ip if ip_version == 4 else "%s/128" % ip
         # Note use of --goto rather than --jump; this means that when the
         # profile chain returns, it will return the chain that called us, not
         # this chain.

@@ -270,8 +270,9 @@ class UpdateSequencer(Actor):
             # Calculate impact on tags due to any change of profile or IP
             # address and queue updates to ipsets.
             # TODO: IPv6
-            old_ips = set(old_endpoint.get("ipv4_nets", []))
-            new_ips = set(endpoint.get("ipv4_nets", []))
+            old_ips = set(map(futils.net_to_ip(
+                old_endpoint.get("ipv4_nets", []))))
+            new_ips = set(map(futils.net_to_ip(endpoint.get("ipv4_nets", []))))
             for removed_ip in old_ips - new_ips:
                 for tag in old_tags:
                     if tag in self.active_ipsets_by_tag:
@@ -280,14 +281,12 @@ class UpdateSequencer(Actor):
             for tag in old_tags - new_tags:
                 if tag in self.active_ipsets_by_tag:
                     ipset = self.active_ipsets_by_tag[tag]
-                    for ip in map(futils.net_to_ip,
-                                  old_endpoint.get("ipv4_nets", [])):
+                    for ip in old_ips:
                         ipset.remove_member(ip, async=True)
             for tag in new_tags:
                 if tag in self.active_ipsets_by_tag:
                     ipset = self.active_ipsets_by_tag[tag]
-                    for ip in map(futils.net_to_ip,
-                                  endpoint.get("ipv4_nets", [])):
+                    for ip in new_ips:
                         ipset.add_member(ip, async=True)
 
         _log.info("Endpoint update complete.")
