@@ -22,6 +22,7 @@ from collections import defaultdict
 import functools
 import logging
 from subprocess import CalledProcessError
+from types import StringTypes
 
 from calico.felix.actor import Actor, actor_event, wait_and_check
 from calico.felix.frules import (rules_to_chain_rewrite_lines,
@@ -157,7 +158,7 @@ class ActiveProfile(Actor):
         for direction in ["inbound", "outbound"]:
             chain_name = profile_to_chain_name(direction, self.id)
             for updater in self._iptables_updaters.values():
-                f = updater.delete_chain(chain_name, async=True)
+                f = updater.delete_chain("filter", chain_name, async=True)
                 futures.append(f)
         wait_and_check(futures)
 
@@ -247,7 +248,7 @@ class IptablesUpdater(Actor):
         # COMMIT
         #
         # The chains are created if they don't exist.
-        chains = [":%s -" % c if isinstance(c, basestring) else ":%s %s" % c
+        chains = [":%s -" % c if isinstance(c, StringTypes) else ":%s %s" % c
                   for c in required_chains]
         restore_input = "\n".join(
             ["*%s" % table_name] +
@@ -313,11 +314,14 @@ class ActiveProfileManager(Actor):
         """
         ap = self.profiles_by_id[dead_profile_id]
         f = ap.remove(async=True)
+
         # We can't delete the profile Actor until it's finished removing
         # itself so ask the result to call us back when it's done.  In the
         # meantime we might have revived the profile.
-        f.rawlink(functools.partial(self._on_active_profile_removed,
-                                    dead_profile_id, async=True))
+
+        def callback():
+            self._on_active_profile_removed(dead_profile_id)
+        f.rawlink(callback)
 
     @actor_event
     def _on_active_profile_removed(self, profile_id):

@@ -101,9 +101,24 @@ def install_global_rules(config, iface_prefix, v4_updater, v6_updater):
     # calico-filter-INPUT chains, which we must create before adding any
     # rules that send to them.
     for iptables_updater in [v4_updater, v6_updater]:
+        while True:
+            try:
+                iptables_updater.apply_updates("filter", [], [
+                    "--delete INPUT --jump %s" % CHAIN_INPUT
+                ])
+            except CalledProcessError:
+                break
+        while True:
+            try:
+                iptables_updater.apply_updates("filter", [], [
+                    "--delete FORWARD --jump %s" % CHAIN_FORWARD
+                ])
+            except CalledProcessError:
+                break
+
         # FIXME: This flushes the FROM/TO_ENDPOINT chains.
-        req_chains = [CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT, CHAIN_INPUT,
-                      CHAIN_FORWARD]
+        req_chains = [CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,
+                      CHAIN_INPUT, CHAIN_FORWARD]
 
         updates = []
 

@@ -86,6 +86,8 @@ def watch_etcd(update_sequencer):
     del endpoints_by_id
 
     last_etcd_index = initial_dump.etcd_index
+    del initial_dump
+
     last_value = None
     last_key = None
     while True:

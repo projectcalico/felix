@@ -237,9 +237,8 @@ def get_endpoint_rules(endpoint_id, iface, ip_version, local_ips, mac, profile_i
                     "--ctstate RELATED,ESTABLISHED --jump RETURN" %
                     to_chain_name)
     profile_in_chain = profile_to_chain_name("inbound", profile_id)
-    to_chain.append("--append %s --jump %s" %
+    to_chain.append("--append %s --goto %s" %
                     (to_chain_name, profile_in_chain))
-    to_chain.append("--append %s --jump DROP" % to_chain_name)
 
     # Now the chain that manages packets from the interface...
     from_chain = ["--flush %s" % from_chain_name]
@@ -249,7 +248,7 @@ def get_endpoint_rules(endpoint_id, iface, ip_version, local_ips, mac, profile_i
 
     # Conntrack rules.
     from_chain.append("--append %s --match conntrack --ctstate INVALID "
-                    "--jump DROP" % from_chain_name)
+                      "--jump DROP" % from_chain_name)
     # FIXME: Do we want conntrack RELATED,ESTABLISHED?
     from_chain.append("--append %s --match conntrack "
                       "--ctstate RELATED,ESTABLISHED --jump RETURN" %

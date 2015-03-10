@@ -166,6 +166,8 @@ class UpdateSequencer(Actor):
         if rules is None:
             self.rules_by_id.pop(profile_id)
             self._discard_active_profile(profile_id)
+        else:
+            self.rules_by_id[profile_id] = rules
 
         _log.info("Profile update: %s complete", profile_id)
 
@@ -270,9 +272,9 @@ class UpdateSequencer(Actor):
             # Calculate impact on tags due to any change of profile or IP
             # address and queue updates to ipsets.
             # TODO: IPv6
-            old_ips = set(map(futils.net_to_ip(
-                old_endpoint.get("ipv4_nets", []))))
-            new_ips = set(map(futils.net_to_ip(endpoint.get("ipv4_nets", []))))
+            old_ips = set(map(futils.net_to_ip,
+                              old_endpoint.get("ipv4_nets", [])))
+            new_ips = set(map(futils.net_to_ip, endpoint.get("ipv4_nets", [])))
             for removed_ip in old_ips - new_ips:
                 for tag in old_tags:
                     if tag in self.active_ipsets_by_tag:
