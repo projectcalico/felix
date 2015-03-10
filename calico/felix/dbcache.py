@@ -205,7 +205,6 @@ class UpdateSequencer(Actor):
         Process an update to the given endpoint.  endpoint may be None if
         the endpoint was deleted.
         """
-        _log.info("Endpoint update: %s", endpoint_id)
 
         old_endpoint = self.endpoints_by_id.get(endpoint_id, {})
         old_prof_id = old_endpoint.get("profile_id")
@@ -247,6 +246,7 @@ class UpdateSequencer(Actor):
                 loc_ep.on_endpoint_update(endpoint)
             self.endpoints_by_id.pop(endpoint_id)
         else:
+            _log.info("Endpoint %s update received.", endpoint_id)
             new_prof_id = endpoint["profile_id"]
             new_tags = set(self.tags_by_id.get(new_prof_id, []))
 
@@ -268,6 +268,11 @@ class UpdateSequencer(Actor):
                 ep = self._get_or_create_endpoint(iface,
                                                   endpoint_id=endpoint_id)
                 ep.on_endpoint_update(endpoint, async=True)
+                if iface in self.interfaces:
+                    _log.debug("Already have interface state for %s", iface)
+                    ep.on_interface_update(self.interfaces[iface])
+            else:
+                _log.debug("Endpoint is not local.")
 
             # Calculate impact on tags due to any change of profile or IP
             # address and queue updates to ipsets.
@@ -281,15 +286,25 @@ class UpdateSequencer(Actor):
                         ipset = self.active_ipsets_by_tag[tag]
                         ipset.remove_member(removed_ip, async=True)
             for tag in old_tags - new_tags:
+                self.endpoint_ids_by_tag[tag].discard(endpoint_id)
                 if tag in self.active_ipsets_by_tag:
                     ipset = self.active_ipsets_by_tag[tag]
                     for ip in old_ips:
                         ipset.remove_member(ip, async=True)
             for tag in new_tags:
+                self.endpoint_ids_by_tag[tag].add(endpoint_id)
                 if tag in self.active_ipsets_by_tag:
                     ipset = self.active_ipsets_by_tag[tag]
                     for ip in new_ips:
                         ipset.add_member(ip, async=True)
+
+            self.endpoints_by_id[endpoint_id] = endpoint
+            if old_prof_id:
+                ids = self.endpoint_ids_by_profile_id[old_prof_id]
+                ids.discard(endpoint_id)
+                if not ids:
+                    del self.endpoint_ids_by_profile_id[old_prof_id]
+            self.endpoint_ids_by_profile_id[new_prof_id].add(endpoint_id)
 
         _log.info("Endpoint update complete.")
 

@@ -111,8 +111,11 @@ class Config(object):
         section = section.lower()
 
         if section not in self._items:
-            raise ConfigException("Section %s missing from config file" %
-                                  section, self._config_path)
+            if default is not None:
+                return default
+            else:
+                raise ConfigException("Section %s missing from config file" %
+                                      section, self._config_path)
 
         item = self._items[section]
 

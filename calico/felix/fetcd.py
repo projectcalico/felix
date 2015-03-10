@@ -218,6 +218,7 @@ def parse_if_tags(etcd_node):
         return profile_id, tags
     return None, None
 
+
 def load_config(host, port):
     """
     TODO: Add watching of the config.

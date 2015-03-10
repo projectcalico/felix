@@ -74,8 +74,10 @@ class LocalEndpoint(Actor):
                 _log.debug("Acquiring new profile %s", new_profile_id)
                 self._profile = self.profile_mgr.get_profile_and_incref(
                     new_profile_id)
+                _log.debug("Acquired new profile.")
         self.endpoint = endpoint
         self._maybe_update(was_ready)
+        _log.debug("%s finished processing update", self)
 
     @actor_event
     def on_interface_update(self, iface_state):
