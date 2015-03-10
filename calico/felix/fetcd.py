@@ -21,6 +21,7 @@ Etcd polling functions.
 import json
 import logging
 import socket
+from types import StringTypes
 from etcd import EtcdException
 import etcd
 import re
@@ -69,7 +70,7 @@ def watch_etcd(update_sequencer):
             tags_by_id[profile_id] = tags
             continue
         endpoint_id, endpoint = parse_if_endpoint(child)
-        if endpoint_id:
+        if endpoint_id and endpoint:
             endpoints_by_id[endpoint_id] = endpoint
             continue
 
@@ -153,9 +154,14 @@ def parse_if_endpoint(etcd_node):
         else:
             hostname = m.group("hostname")
             endpoint = json_decoder.decode(etcd_node.value)
+            try:
+                validate_endpoint(endpoint)
+            except ValidationFailed as e:
+                _log.warning("Validation failed for endpoint %s, treating as "
+                             "missing: %s", endpoint_id, e.message)
+                return endpoint_id, None
             endpoint["host"] = hostname
             endpoint["id"] = endpoint_id
-            validate_endpoint(endpoint)
         return endpoint_id, endpoint
     return None, None
 
@@ -171,8 +177,9 @@ def validate_endpoint(endpoint):
     for field in ["name", "mac", "profile_id"]:
         if field not in endpoint:
             issues.append("Missing '%s' field." % field)
-        elif not isinstance(endpoint["profile_id"], basestr):
-            issues.append("Expected '%s' to be a string." % field)
+        elif not isinstance(endpoint[field], StringTypes):
+            issues.append("Expected '%s' to be a string; got %r." %
+                          (field, endpoint[field]))
 
     if issues:
         raise ValidationFailed(", ".join(issues))

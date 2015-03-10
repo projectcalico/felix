@@ -45,42 +45,41 @@ class DispatchChains(Actor):
     def __init__(self, iptables_updaters):
         super(DispatchChains, self).__init__()
         self.iptables_updaters = iptables_updaters
-        self.iface_to_chain_suffix = {}
+        self.iface_to_ep_id_suffix = {}
 
     @actor_event
-    def on_endpoint_chains_ready(self, iface_name, chain_suffix):
+    def on_endpoint_chains_ready(self, iface_name, endpoint_id):
         """
         Message sent to us by the LocalEndpoint to tell us its
         endpoint-specific chain is in place and we should add it
         to the dispatch chain.
 
         :param iface_name: name of the linux interface.
-        :param chain_suffix: suffic to the per-endpoint chain names used
-            to form the names of the per-endpoint in/out chain.
+        :param endpoint_id: ID of the endpoint, used to form the chain names.
         """
-        if self.iface_to_chain_suffix.get(iface_name) != chain_suffix:
-            self.iface_to_chain_suffix[iface_name] = chain_suffix
+        if self.iface_to_ep_id_suffix.get(iface_name) != endpoint_id:
+            self.iface_to_ep_id_suffix[iface_name] = endpoint_id
             self._update_chains()
 
     @actor_event
     def remove_dispatch_rule(self, iface_name):
-        if iface_name in self.iface_to_chain_suffix:
-            self.iface_to_chain_suffix.pop(iface_name)
+        if iface_name in self.iface_to_ep_id_suffix:
+            self.iface_to_ep_id_suffix.pop(iface_name)
             self._update_chains()
 
     def _update_chains(self):
         updates = []
-        for iface, chain in self.iface_to_chain_suffix.iteritems():
+        for iface, ep_id in self.iface_to_ep_id_suffix.iteritems():
             # Add rule to global chain to direct traffic to the
             # endpoint-specific one.  Note that we use --goto, which means
             # that, the endpoint-specific chain will return to our parent
             # rather than to this chain.
-            ep_from_chain = CHAIN_FROM_PREFIX + chain
+            from calico.felix.endpoint import chain_names
+            to_chain_name, from_chain_name = chain_names(ep_id)
             updates.append("--append %s --in-interface %s --goto %s" %
-                           (CHAIN_FROM_ENDPOINT, iface, ep_from_chain))
-            ep_to_chain = CHAIN_TO_PREFIX + chain
+                           (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
             updates.append("--append %s --out-interface %s --goto %s" %
-                           (CHAIN_TO_ENDPOINT, iface, ep_to_chain))
+                           (CHAIN_TO_ENDPOINT, iface, to_chain_name))
         for ip_version, updater in self.iptables_updaters.iteritems():
             if ip_version == 6: continue # TODO IPv6
             updater.apply_updates("filter",

@@ -25,14 +25,14 @@ _log = logging.getLogger(__name__)
 
 
 # Chain names
-CHAIN_PREROUTING = "felix-PREROUTING"
-CHAIN_INPUT = "felix-INPUT"
-CHAIN_FORWARD = "felix-FORWARD"
-CHAIN_TO_ENDPOINT = "felix-TO-ENDPOINT"
-CHAIN_FROM_ENDPOINT = "felix-FROM-ENDPOINT"
-CHAIN_TO_PREFIX = "felix-to-"
-CHAIN_FROM_PREFIX = "felix-from-"
-CHAIN_PROFILE_PREFIX = "felix-profile-"
+CHAIN_PREROUTING = "fx-PREROUTING"
+CHAIN_INPUT = "fx-INPUT"
+CHAIN_FORWARD = "fx-FORWARD"
+CHAIN_TO_ENDPOINT = "fx-TO-ENDPOINT"
+CHAIN_FROM_ENDPOINT = "fx-FROM-ENDPOINT"
+CHAIN_TO_PREFIX = "fx-to-"
+CHAIN_FROM_PREFIX = "fx-from-"
+CHAIN_PROFILE_PREFIX = "fx-p-"
 
 
 # Valid keys for a rule JSON dict.
@@ -50,7 +50,8 @@ KNOWN_RULE_KEYS = set([
 
 
 def profile_to_chain_name(inbound_or_outbound, profile_id):
-    return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_id, inbound_or_outbound)
+    return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_id,
+                                             inbound_or_outbound[:1])
 
 
 def install_global_rules(config, iface_prefix, v4_updater, v6_updater):

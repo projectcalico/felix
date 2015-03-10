@@ -59,7 +59,7 @@ class LocalEndpoint(Actor):
     @actor_event
     def on_endpoint_update(self, endpoint):
         _log.debug("Endpoint updated: %s", endpoint)
-        if endpoint and not self._iface_name:
+        if endpoint and (not self._iface_name or not self._endpoint_id):
             self._iface_name = endpoint.get("name")
             self._endpoint_id = endpoint["id"]
         was_ready = self._ready
@@ -155,7 +155,7 @@ class LocalEndpoint(Actor):
             if ip_version == 6:
                 continue # TODO IPv6
             chains, updates = get_endpoint_rules(
-                self.endpoint["id"],
+                self._endpoint_id,
                 self._iface_name,
                 ip_version,
                 self.endpoint.get("ipv%s_nets" % ip_version, []),
@@ -167,8 +167,7 @@ class LocalEndpoint(Actor):
 
     def _remove_chains(self):
         if self._endpoint_id:
-            to_chain_name = CHAIN_TO_PREFIX + self._endpoint_id
-            from_chain_name = CHAIN_FROM_PREFIX + self._endpoint_id
+            to_chain_name, from_chain_name = chain_names(self._endpoint_id)
             futures = []
             for ip_version, updater in self.iptables_updaters.iteritems():
                 f = updater.delete_chain("filter", to_chain_name, async=True)
@@ -202,8 +201,15 @@ class LocalEndpoint(Actor):
                                              self._iface_name or "unknown")
 
 
-def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
-    to_chain_name = CHAIN_TO_PREFIX + suffix
+def chain_names(endpoint_id):
+    # FIXME: Shouldn't truncate chain name, might get clashes!
+    to_chain_name = (CHAIN_TO_PREFIX + endpoint_id)[:28]
+    from_chain_name = (CHAIN_FROM_PREFIX + endpoint_id)[:28]
+    return to_chain_name, from_chain_name
+
+
+def get_endpoint_rules(endpoint_id, iface, ip_version, local_ips, mac, profile_id):
+    to_chain_name, from_chain_name = chain_names(endpoint_id)
 
     to_chain = ["--flush %s" % to_chain_name]
     if ip_version == 6:
@@ -235,7 +241,6 @@ def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     to_chain.append("--append %s --jump DROP" % to_chain_name)
 
     # Now the chain that manages packets from the interface...
-    from_chain_name = CHAIN_FROM_PREFIX + suffix
     from_chain = ["--flush %s" % from_chain_name]
     if ip_version == 6:
         # In ipv6 only, allows all ICMP traffic from this endpoint to anywhere.
