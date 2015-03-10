@@ -7,3 +7,5 @@ tmp/
 *.egg
 /htmlcov
 /.dir-locals.el
+.tox
+
