@@ -36,16 +36,17 @@ _log = logging.getLogger(__name__)
 
 class DispatchChains(Actor):
     """
-    Actor that owns the felix-TO/FROM-ENDPOINT chains, which we use to 
+    Actor that owns the felix-TO/FROM-ENDPOINT chains, which we use to
     dispatch to endpoint-specific chains.
 
     LocalEndpoint Actors give us kicks as they come and go so we can
     add/remove them from the chains.
     """
-    def __init__(self, iptables_updaters):
+    def __init__(self, config, iptables_updaters):
         super(DispatchChains, self).__init__()
+        self.config = config
         self.iptables_updaters = iptables_updaters
-        self.iface_to_ep_id_suffix = {}
+        self.iface_to_ep_id = {}
 
     @actor_event
     def on_endpoint_chains_ready(self, iface_name, endpoint_id):
@@ -57,25 +58,26 @@ class DispatchChains(Actor):
         :param iface_name: name of the linux interface.
         :param endpoint_id: ID of the endpoint, used to form the chain names.
         """
-        if self.iface_to_ep_id_suffix.get(iface_name) != endpoint_id:
-            self.iface_to_ep_id_suffix[iface_name] = endpoint_id
+        if self.iface_to_ep_id.get(iface_name) != endpoint_id:
+            self.iface_to_ep_id[iface_name] = endpoint_id
             self._update_chains()
 
     @actor_event
     def remove_dispatch_rule(self, iface_name):
-        if iface_name in self.iface_to_ep_id_suffix:
-            self.iface_to_ep_id_suffix.pop(iface_name)
+        if iface_name in self.iface_to_ep_id:
+            self.iface_to_ep_id.pop(iface_name)
             self._update_chains()
 
     def _update_chains(self):
         updates = []
-        for iface, ep_id in self.iface_to_ep_id_suffix.iteritems():
+        for iface in self.iface_to_ep_id:
             # Add rule to global chain to direct traffic to the
             # endpoint-specific one.  Note that we use --goto, which means
             # that, the endpoint-specific chain will return to our parent
             # rather than to this chain.
-            from calico.felix.endpoint import chain_names
-            to_chain_name, from_chain_name = chain_names(ep_id)
+            from calico.felix.endpoint import chain_names, interface_to_suffix
+            ep_suffix = interface_to_suffix(self.config, iface)
+            to_chain_name, from_chain_name = chain_names(ep_suffix)
             updates.append("--append %s --in-interface %s --goto %s" %
                            (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
             updates.append("--append %s --out-interface %s --goto %s" %
