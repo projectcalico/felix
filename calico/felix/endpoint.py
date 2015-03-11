@@ -26,8 +26,8 @@ import gevent
 from calico.felix import devices, futils
 from calico.felix.actor import Actor, actor_event, wait_and_check
 from calico.felix.fiptables import DispatchChains, ActiveProfileManager
-from calico.felix.frules import CHAIN_TO_PREFIX, profile_to_chain_name, \
-    CHAIN_FROM_PREFIX
+from calico.felix.frules import (CHAIN_TO_PREFIX, profile_to_chain_name,
+                                 CHAIN_FROM_PREFIX)
 from calico.felix.futils import FailedSystemCall
 
 _log = logging.getLogger(__name__)
@@ -68,11 +68,9 @@ class LocalEndpoint(Actor):
         was_ready = self._ready
         old_profile_id = self.endpoint and self.endpoint["profile_id"]
         new_profile_id = endpoint and endpoint["profile_id"]
+        old_profile = self._profile
         if old_profile_id != new_profile_id:
-            if self._profile:
-                _log.debug("Returning old profile %s", old_profile_id)
-                self.profile_mgr.return_profile(old_profile_id)
-                self._profile = None
+            self._profile = None
             if new_profile_id is not None:
                 _log.debug("Acquiring new profile %s", new_profile_id)
                 self._profile = self.profile_mgr.get_profile_and_incref(
@@ -80,6 +78,12 @@ class LocalEndpoint(Actor):
                 _log.debug("Acquired new profile.")
         self.endpoint = endpoint
         self._maybe_update(was_ready)
+
+        if old_profile_id != new_profile_id and old_profile:
+            # Release the old profile now that we no longer reference it.
+            _log.debug("Returning old profile %s", old_profile_id)
+            self.profile_mgr.return_profile(old_profile_id)
+
         _log.debug("%s finished processing update", self)
 
     @actor_event
@@ -138,22 +142,22 @@ class LocalEndpoint(Actor):
                     # Schedule a retry.
                     gevent.spawn_later(5, self._maybe_update, False)
             else:
-                # We were active but now we're not, withdraw the dispatch rule.
+                # We were active but now we're not, withdraw the dispatch rule
+                # and our chain.  We must do this to allow iptables to remove
+                # the profile chain.
                 _log.info("%s became unready.", self)
                 self._failed = False  # Don't care any more.
                 self.dispatch_chains.remove_dispatch_rule(ifce_name)
-                if not self.endpoint:
-                    # We're being deleted.
-                    try:
-                        self._remove_chains()
-                    except (OSError, FailedSystemCall, CalledProcessError):
-                        # Not much we can do, maybe they were deleted under us?
-                        _log.exception("Failed to remove chains")
-                    try:
-                        self._deconfigure_interface()
-                    except (OSError, FailedSystemCall, CalledProcessError):
-                        # This is likely because the interface was removed.
-                        _log.warning("Failed to remove routes", exc_info=True)
+                try:
+                    self._remove_chains()
+                except (OSError, FailedSystemCall, CalledProcessError):
+                    # Not much we can do, maybe they were deleted under us?
+                    _log.exception("Failed to remove chains")
+                try:
+                    self._deconfigure_interface()
+                except (OSError, FailedSystemCall, CalledProcessError):
+                    # This is likely because the interface was removed.
+                    _log.warning("Failed to remove routes", exc_info=True)
 
     def _update_chains(self):
         futures = []

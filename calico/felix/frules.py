@@ -91,7 +91,7 @@ def install_global_rules(config, v4_updater, v6_updater):
         # assume it wasn't present and insert it.
         pr = ["--delete %s" % rule,
               "--insert %s" % rule]
-        v4_updater.apply_updates("nat", [], pr)
+        v4_updater.apply_updates("nat", [], pr, suppress_exc=True)
     except CalledProcessError:
         _log.info("Failed to detect pre-routing rule, will insert it.")
         pr = ["--insert %s" % rule]
@@ -101,20 +101,12 @@ def install_global_rules(config, v4_updater, v6_updater):
     # calico-filter-INPUT chains, which we must create before adding any
     # rules that send to them.
     for iptables_updater in [v4_updater, v6_updater]:
-        while True:
-            try:
-                iptables_updater.apply_updates("filter", [], [
-                    "--delete INPUT --jump %s" % CHAIN_INPUT
-                ])
-            except CalledProcessError:
-                break
-        while True:
-            try:
-                iptables_updater.apply_updates("filter", [], [
-                    "--delete FORWARD --jump %s" % CHAIN_FORWARD
-                ])
-            except CalledProcessError:
-                break
+        iptables_updater.apply_updates("filter", [], [
+            "--delete INPUT --jump %s" % CHAIN_INPUT
+        ], suppress_exc=True)
+        iptables_updater.apply_updates("filter", [], [
+            "--delete FORWARD --jump %s" % CHAIN_FORWARD
+        ], suppress_exc=True)
 
         # FIXME: This flushes the FROM/TO_ENDPOINT chains.
         req_chains = [CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,

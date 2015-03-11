@@ -22,12 +22,12 @@ from collections import defaultdict
 import functools
 import logging
 from subprocess import CalledProcessError
+import itertools
 from types import StringTypes
 
 from calico.felix.actor import Actor, actor_event, wait_and_check
 from calico.felix.frules import (rules_to_chain_rewrite_lines,
-                                 profile_to_chain_name, CHAIN_TO_PREFIX,
-                                 CHAIN_FROM_PREFIX, CHAIN_TO_ENDPOINT,
+                                 profile_to_chain_name, CHAIN_TO_ENDPOINT,
                                  CHAIN_FROM_ENDPOINT)
 from gevent import subprocess
 
@@ -134,6 +134,7 @@ class ActiveProfile(Actor):
         futures += self._update_chain(profile, "outbound", tag_to_ipset_name)
         wait_and_check(futures)
         self._programmed = True
+        _log.info("Chains for %s programmed", self.id)
 
     @actor_event
     def on_profile_update(self, profile, tag_to_ipset_name):
@@ -159,12 +160,19 @@ class ActiveProfile(Actor):
         of the new profile.
         """
         futures = []
-        for direction in ["inbound", "outbound"]:
-            chain_name = profile_to_chain_name(direction, self.id)
-            for updater in self._iptables_updaters.values():
-                f = updater.delete_chain("filter", chain_name, async=True)
-                futures.append(f)
-        wait_and_check(futures)
+        if self._programmed:
+            _log.debug("Chain was programmed, removing it.")
+            for direction in ["inbound", "outbound"]:
+                for ip_version, updater in self._iptables_updaters.iteritems():
+                    chain_name = profile_to_chain_name(direction,
+                                                       self.id,
+                                                       ip_version)
+                    f = updater.delete_chain("filter", chain_name, async=True)
+                    futures.append(f)
+            wait_and_check(futures)
+            _log.debug("Finished deleting chains.")
+        else:
+            _log.debug("Chain wasn't yet programmed, nothing to do.")
 
         self._programmed = False
         self._profile = None
@@ -188,8 +196,8 @@ class ActiveProfile(Actor):
                 new_rules != self._profile.get(rules_key) or
                 tag_to_ipset_name != self._tag_to_ip_set_name):
             _log.debug("Update to %s affects %s rules.", self.id, direction)
-            chain_name = profile_to_chain_name(direction, self.id)
             for version, ipt in self._iptables_updaters.iteritems():
+                chain_name = profile_to_chain_name(direction, self.id)
                 if version == 6:
                     _log.error("Ignoring v6")
                     continue
@@ -205,6 +213,9 @@ class ActiveProfile(Actor):
             _log.debug("Update to %s didn't affect %s rules.",
                        self.id, direction)
         return futures
+
+
+_correlators = ("ipt-%s" % ii for ii in itertools.count())
 
 
 class IptablesUpdater(Actor):
@@ -225,7 +236,8 @@ class IptablesUpdater(Actor):
             self.cmd_name = "ip6tables-restore"
 
     @actor_event
-    def apply_updates(self, table_name, required_chains, update_calls):
+    def apply_updates(self, table_name, required_chains, update_calls,
+                      suppress_exc=False):
         """
         Atomically apply a set of updates to an iptables table.
 
@@ -252,6 +264,7 @@ class IptablesUpdater(Actor):
         # COMMIT
         #
         # The chains are created if they don't exist.
+        corr = next(_correlators)
         chains = [":%s -" % c if isinstance(c, StringTypes) else ":%s %s" % c
                   for c in required_chains]
         restore_input = "\n".join(
@@ -260,7 +273,7 @@ class IptablesUpdater(Actor):
             update_calls +
             ["COMMIT\n"]
         )
-        _log.debug("iptables-restore input:\n%s", restore_input)
+        _log.debug("%s %s input:\n%s", corr, self.cmd_name, restore_input)
         cmd = [self.cmd_name, "--noflush"]
         # TODO: retry if commit fails (due to concurrent use).
         iptables_proc = subprocess.Popen(cmd,
@@ -269,15 +282,19 @@ class IptablesUpdater(Actor):
                                          stderr=subprocess.PIPE)
         out, err = iptables_proc.communicate(restore_input)
         rc = iptables_proc.wait()
+        _log.debug("%s %s completed with RC=%s", corr, self.cmd_name, rc)
         if rc != 0:
-            _log.error("Failed to run %s.\nOutput:%s\nError: %s",
-                       self.cmd_name, out, err)
-            raise CalledProcessError(cmd=cmd, returncode=rc)
+            _log.error("%s Failed to run %s.\nOutput:%s\nError: %s",
+                       corr, self.cmd_name, out, err)
+            if not suppress_exc:
+                raise CalledProcessError(cmd=cmd, returncode=rc)
 
     @actor_event
     def delete_chain(self, table_name, chain_name):
+        _log.info("Deleting chain %s:%s", table_name, chain_name)
         updates = ["--delete-chain %s" % chain_name]
         self.apply_updates(table_name, [chain_name], updates)  # Skips queue.
+        _log.debug("Finished deleting chain.")
 
 
 class ActiveProfileManager(Actor):
@@ -323,8 +340,8 @@ class ActiveProfileManager(Actor):
         # itself so ask the result to call us back when it's done.  In the
         # meantime we might have revived the profile.
 
-        def callback():
-            self._on_active_profile_removed(dead_profile_id)
+        def callback(greenlet):
+            self._on_active_profile_removed(dead_profile_id, async=True)
         f.rawlink(callback)
 
     @actor_event
