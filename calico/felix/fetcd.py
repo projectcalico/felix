@@ -21,7 +21,6 @@ Etcd polling functions.
 import itertools
 import json
 import logging
-import socket
 from types import StringTypes
 from etcd import EtcdException
 import etcd
@@ -179,13 +178,11 @@ def validate_endpoint(config, endpoint):
 
     if "name" in endpoint:
         if not endpoint["name"].startswith(config.IFACE_PREFIX):
-            issues.append("Interface \"%s\" does not start with \"%s\""
-                          % (iface_name, config.IFACE_PREFIX))
-
-
+            issues.append("Interface %r does not start with %r." %
+                          (endpoint["name"], config.IFACE_PREFIX))
 
     if issues:
-        raise ValidationFailed(", ".join(issues))
+        raise ValidationFailed(" ".join(issues))
 
 
 class ValidationFailed(Exception):
