@@ -86,11 +86,8 @@ def watch_etcd(update_sequencer):
     del tags_by_id
     del endpoints_by_id
 
-    last_etcd_index = initial_dump.etcd_index
+    last_etcd_index = initial_dump.modifiedIndex
     del initial_dump
-
-    last_value = None
-    last_key = None
     while True:
         if f_apply_snap and f_apply_snap.ready():
             # Snapshot application finished, check for exceptions.
@@ -98,7 +95,6 @@ def watch_etcd(update_sequencer):
             f_apply_snap.get_nowait()
             f_apply_snap = None
 
-        # TODO Handle deletions.
         try:
             _log.debug("About to wait for etcd update %s", last_etcd_index + 1)
             response = client.read("/calico/",
@@ -114,12 +110,7 @@ def watch_etcd(update_sequencer):
             _log.exception("Failed to read from etcd. wait_index=%s",
                            last_etcd_index)
             raise
-        last_etcd_index = response.etcd_index
-        if response.value == last_value and response.key == last_key:
-            _log.debug("Skipping duplicate update")
-            continue
-        last_key = response.key
-        last_value = response.value
+        last_etcd_index = response.modifiedIndex
 
         # TODO: we fire-and-forget these messages...
         # TODO: regex parsing getting messy.
