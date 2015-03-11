@@ -74,15 +74,15 @@ class LocalEndpoint(Actor):
             if new_profile_id is not None:
                 _log.debug("Acquiring new profile %s", new_profile_id)
                 self._profile = self.profile_mgr.get_profile_and_incref(
-                    new_profile_id)
+                    new_profile_id, async=False)
                 _log.debug("Acquired new profile.")
         self.endpoint = endpoint
-        self._maybe_update(was_ready)
+        self._maybe_update(was_ready, async=False)  # Bypasses queue.
 
         if old_profile_id != new_profile_id and old_profile:
             # Release the old profile now that we no longer reference it.
             _log.debug("Returning old profile %s", old_profile_id)
-            self.profile_mgr.return_profile(old_profile_id)
+            self.profile_mgr.return_profile(old_profile_id, async=False)
 
         _log.debug("%s finished processing update", self)
 
@@ -94,7 +94,7 @@ class LocalEndpoint(Actor):
             self._suffix = interface_to_suffix(self.config, self._iface_name)
         was_ready = self._ready
         self.iface_state = iface_state
-        self._maybe_update(was_ready)
+        self._maybe_update(was_ready, async=False)  # bypasses queue.
 
     @property
     def _missing_deps(self):
@@ -127,13 +127,14 @@ class LocalEndpoint(Actor):
                 if self._failed:
                     _log.warn("Retrying programming after a failure")
                 self._failed = False  # Ready to try again...
-                self._profile.ensure_chains_programmed()
+                self._profile.ensure_chains_programmed(async=False)
                 ep_id = self.endpoint["id"]
                 _log.info("%s became ready to program.", self)
                 try:
                     self._update_chains()
                     self.dispatch_chains.on_endpoint_chains_ready(ifce_name,
-                                                                  ep_id)
+                                                                  ep_id,
+                                                                  async=True)
                     self._configure_interface()
                 except (OSError, FailedSystemCall, CalledProcessError):
                     _log.exception("Failed to program the dataplane for %s",
@@ -147,7 +148,9 @@ class LocalEndpoint(Actor):
                 # the profile chain.
                 _log.info("%s became unready.", self)
                 self._failed = False  # Don't care any more.
-                self.dispatch_chains.remove_dispatch_rule(ifce_name)
+                # Wait for the referring chain to be updated.
+                self.dispatch_chains.remove_dispatch_rule(ifce_name,
+                                                          async=False)
                 try:
                     self._remove_chains()
                 except (OSError, FailedSystemCall, CalledProcessError):

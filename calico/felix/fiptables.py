@@ -90,7 +90,7 @@ class DispatchChains(Actor):
             updater.apply_updates("filter",
                                   [CHAIN_TO_ENDPOINT,
                                    CHAIN_FROM_ENDPOINT],
-                                  updates)
+                                  updates, async=False)
 
 
 class ActiveProfile(Actor):
@@ -292,7 +292,8 @@ class IptablesUpdater(Actor):
     def delete_chain(self, table_name, chain_name):
         _log.info("Deleting chain %s:%s", table_name, chain_name)
         updates = ["--delete-chain %s" % chain_name]
-        self.apply_updates(table_name, [chain_name], updates)  # Skips queue.
+        self.apply_updates(table_name, [chain_name], updates,
+                           async=False)  # Skips queue.
         _log.debug("Finished deleting chain.")
 
 

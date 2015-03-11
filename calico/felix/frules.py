@@ -82,7 +82,7 @@ def install_global_rules(config, v4_updater, v6_updater):
                       "--destination 169.254.169.254/32 "
                       "--jump DNAT --to-destination %s:%s" %
                       (config.METADATA_IP, config.METADATA_PORT))
-    v4_updater.apply_updates("nat", [CHAIN_PREROUTING], nat_pr)
+    v4_updater.apply_updates("nat", [CHAIN_PREROUTING], nat_pr, async=False)
 
     # Ensure we have a rule that forces us through the chain we just created.
     rule = "PREROUTING --jump %s" % CHAIN_PREROUTING
@@ -91,7 +91,7 @@ def install_global_rules(config, v4_updater, v6_updater):
         # assume it wasn't present and insert it.
         pr = ["--delete %s" % rule,
               "--insert %s" % rule]
-        v4_updater.apply_updates("nat", [], pr, suppress_exc=True)
+        v4_updater.apply_updates("nat", [], pr, suppress_exc=True, async=False)
     except CalledProcessError:
         _log.info("Failed to detect pre-routing rule, will insert it.")
         pr = ["--insert %s" % rule]
@@ -103,10 +103,10 @@ def install_global_rules(config, v4_updater, v6_updater):
     for iptables_updater in [v4_updater, v6_updater]:
         iptables_updater.apply_updates("filter", [], [
             "--delete INPUT --jump %s" % CHAIN_INPUT
-        ], suppress_exc=True)
+        ], suppress_exc=True, async=False)
         iptables_updater.apply_updates("filter", [], [
             "--delete FORWARD --jump %s" % CHAIN_FORWARD
-        ], suppress_exc=True)
+        ], suppress_exc=True, async=False)
 
         # FIXME: This flushes the FROM/TO_ENDPOINT chains.
         req_chains = [CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,
@@ -146,7 +146,8 @@ def install_global_rules(config, v4_updater, v6_updater):
                 (CHAIN_INPUT, iface_match),
         ])
 
-        iptables_updater.apply_updates("filter", req_chains, updates)
+        iptables_updater.apply_updates("filter", req_chains, updates,
+                                       async=False)
 
 def update_chain(name, rule_list, v4_updater, iptable="filter", async=False):
     """

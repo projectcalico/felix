@@ -26,7 +26,6 @@ from calico.felix.fetcd import watch_etcd
 from calico.felix.ipsets import IpsetPool
 from gevent import monkey
 monkey.patch_all()
-from etcd import EtcdException
 
 import os
 

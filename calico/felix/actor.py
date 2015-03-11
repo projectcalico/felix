@@ -44,6 +44,12 @@ class Actor(object):
 def actor_event(fn):
     @functools.wraps(fn)
     def queue_fn(self, *args, **kwargs):
+        assert "async" in kwargs
+        if not kwargs.get("async") and _log.isEnabledFor(logging.DEBUG):
+            import traceback, os
+            calling_file,  line_no, func, _ = traceback.extract_stack()[-2]
+            calling_file = os.path.basename(calling_file)
+            _log.debug("BLOCKING CALL: %s:%s:%s", calling_file, line_no, func)
         async = kwargs.pop("async", False)
         if not async and self.greenlet == gevent.getcurrent():
             # Bypass the queue if we're already on the same greenlet.  This

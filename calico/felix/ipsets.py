@@ -49,7 +49,7 @@ class IpsetPool(Actor):
 
         # TODO: replace this simple version with an actual pool!
         ipset = IpsetUpdater(tag_to_ipset_name(id_tag), "hash:ip").start()
-        ipset.replace_members(set())
+        ipset.replace_members(set(), async=False)
         return ipset
 
     @actor_event

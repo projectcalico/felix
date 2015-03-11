@@ -169,7 +169,8 @@ def watch_interfaces(update_sequencer):
                     _log.debug("Interface ID changed for %s. simulating "
                                "remove then add.", name)
                     update_sequencer.on_interface_update(name, None)
-                update_sequencer.on_interface_update(name, new_state)
+                update_sequencer.on_interface_update(name, new_state,
+                                                     async=True)
         previous_interfaces = set(interfaces.keys())
         for removed_interface in previous_interfaces - seen_interfaces:
             _log.info("Interface %s went away.", removed_interface)

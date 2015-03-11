@@ -114,7 +114,7 @@ class UpdateSequencer(Actor):
                 endpoint = endpoints_by_id[endpoint_id]
                 nets = endpoint.get("ipv4_nets", [])  # FIXME IPv6
                 new_members.update(map(futils.net_to_ip, nets))
-            ipset.replace_members(new_members)
+            ipset.replace_members(new_members, async=True)
 
         # Clean up unused endpoints.
         for endpoint_id in (e for e in self.local_endpoints_by_id if
@@ -198,7 +198,7 @@ class UpdateSequencer(Actor):
             self.interfaces.pop(name)
         if name in self.local_endpoints_by_iface_name:
             ep = self.local_endpoints_by_iface_name[name]
-            ep.on_interface_update(iface_state)
+            ep.on_interface_update(iface_state, async=True)
 
     @actor_event
     def on_endpoint_update(self, endpoint_id, endpoint):
@@ -244,7 +244,7 @@ class UpdateSequencer(Actor):
                 # TODO Remove this blocking call, needed to make sure we
                 # don't recreate the endpoint before it has deleted its
                 # chain.
-                loc_ep.on_endpoint_update(endpoint)
+                loc_ep.on_endpoint_update(endpoint, async=False)
             self.endpoints_by_id.pop(endpoint_id)
         else:
             _log.info("Endpoint %s update received.", endpoint_id)
@@ -271,7 +271,7 @@ class UpdateSequencer(Actor):
                 ep.on_endpoint_update(endpoint, async=True)
                 if iface in self.interfaces:
                     _log.debug("Already have interface state for %s", iface)
-                    ep.on_interface_update(self.interfaces[iface])
+                    ep.on_interface_update(self.interfaces[iface], async=True)
             else:
                 _log.debug("Endpoint is not local.")
 
@@ -314,13 +314,14 @@ class UpdateSequencer(Actor):
         if profile_id in self.active_profiles:
             ap = self.active_profiles[profile_id]
         else:
-            ap = self.profile_mgr.get_profile_and_incref(profile_id)
+            ap = self.profile_mgr.get_profile_and_incref(profile_id,
+                                                         async=False)
             self.active_profiles[profile_id] = ap
         return ap
 
     def _discard_active_profile(self, profile_id):
         del self.active_profiles[profile_id]
-        self.profile_mgr.return_profile(profile_id)
+        self.profile_mgr.return_profile(profile_id, async=False)
 
     def _assign_tag_mapping(self, tags):
         created_tags = set()
@@ -335,7 +336,7 @@ class UpdateSequencer(Actor):
     def _get_or_create_ipset(self, tag):
         created = False
         if tag not in self.active_ipsets_by_tag:
-            ipset = self.ipset_pool.allocate_ipset(tag)
+            ipset = self.ipset_pool.allocate_ipset(tag, async=False)
             self.active_ipsets_by_tag[tag] = ipset
             created = True
         return created, self.active_ipsets_by_tag[tag]
