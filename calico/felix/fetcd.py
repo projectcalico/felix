@@ -40,7 +40,7 @@ ENDPOINT_RE = re.compile(
     r'^/calico/host/(?P<hostname>[^/]+)/.+/endpoint/(?P<endpoint_id>[^/]+)')
 
 
-def watch_etcd(update_sequencer):
+def watch_etcd(config, update_sequencer):
     """
     Loads the snapshot from etcd and then monitors etcd for changes.
     Posts events to the UpdateSequencer.
@@ -52,7 +52,7 @@ def watch_etcd(update_sequencer):
     :raises EtcdException: if a read from etcd fails and we may fall out of
             sync.
     """
-    client = etcd.Client('localhost', 4001)
+    client = etcd.Client('localhost', config.ETCD_PORT)
 
     # Load initial dump from etcd.  First just get all the endpoints and
     # profiles by id.  The response contains a generation ID allowing us
@@ -70,7 +70,7 @@ def watch_etcd(update_sequencer):
         if profile_id:
             tags_by_id[profile_id] = tags
             continue
-        endpoint_id, endpoint = parse_if_endpoint(child)
+        endpoint_id, endpoint = parse_if_endpoint(config, child)
         if endpoint_id and endpoint:
             endpoints_by_id[endpoint_id] = endpoint
             continue
@@ -124,7 +124,7 @@ def watch_etcd(update_sequencer):
             _log.info("Scheduling profile update %s", profile_id)
             update_sequencer.on_tags_update(profile_id, tags, async=True)
             continue
-        endpoint_id, endpoint = parse_if_endpoint(response)
+        endpoint_id, endpoint = parse_if_endpoint(config, response)
         if endpoint_id:
             _log.info("Scheduling endpoint update %s", endpoint_id)
             update_sequencer.on_endpoint_update(endpoint_id, endpoint,
@@ -138,29 +138,31 @@ def intern_dict(d):
 json_decoder = json.JSONDecoder(object_hook=intern_dict)
 
 
-def parse_if_endpoint(etcd_node):
+def parse_if_endpoint(config, etcd_node):
     m = ENDPOINT_RE.match(etcd_node.key)
     if m:
         # Got an endpoint.
         endpoint_id = m.group("endpoint_id")
         if etcd_node.action == "delete":
             endpoint = None
+            _log.debug("Found deleted endpoint %s", endpoint_id)
         else:
             hostname = m.group("hostname")
             endpoint = json_decoder.decode(etcd_node.value)
             try:
-                validate_endpoint(endpoint)
+                validate_endpoint(config, endpoint)
             except ValidationFailed as e:
                 _log.warning("Validation failed for endpoint %s, treating as "
                              "missing: %s", endpoint_id, e.message)
                 return endpoint_id, None
             endpoint["host"] = hostname
             endpoint["id"] = endpoint_id
+            _log.debug("Found endpoint : %s", endpoint)
         return endpoint_id, endpoint
     return None, None
 
 
-def validate_endpoint(endpoint):
+def validate_endpoint(config, endpoint):
     issues = []
 
     if "state" not in endpoint:
@@ -174,6 +176,13 @@ def validate_endpoint(endpoint):
         elif not isinstance(endpoint[field], StringTypes):
             issues.append("Expected '%s' to be a string; got %r." %
                           (field, endpoint[field]))
+
+    if "name" in endpoint:
+        if not endpoint["name"].startswith(config.IFACE_PREFIX):
+            issues.append("Interface \"%s\" does not start with \"%s\""
+                          % (iface_name, config.IFACE_PREFIX))
+
+
 
     if issues:
         raise ValidationFailed(", ".join(issues))

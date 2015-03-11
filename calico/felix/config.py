@@ -68,6 +68,7 @@ class Config(object):
         self._KnownObjects  = set()
 
         self._config_path = config_path
+        self._items = {}
 
         self.read_cfg_file(config_path)
 
@@ -102,9 +103,13 @@ class Config(object):
         self._parser.read(config_file)
 
         # Build up the list of sections.
-        self._items = {}
         for section in self._parser.sections():
             self._items[section] = dict(self._parser.items(section))
+
+        if not self._items:
+            log.warning("Configuration file %s empty or does not exist",
+                        config_file)
+
 
     def get_cfg_entry(self, section, name, default=None):
         name    = name.lower()

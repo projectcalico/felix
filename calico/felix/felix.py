@@ -48,7 +48,6 @@ def _main_greenlet(config):
     The root of our tree of greenlets.  Responsible for restarting
     its children if desired.
     """
-
     ipset_pool = IpsetPool()
     v4_updater = IptablesUpdater(ip_version=4)
     v6_updater = IptablesUpdater(ip_version=6)
@@ -57,8 +56,9 @@ def _main_greenlet(config):
         6: v6_updater,
     }
     profile_manager = ActiveProfileManager(iptables_updaters)
-    dispatch_chains = DispatchChains(iptables_updaters)
-    update_sequencer = UpdateSequencer(ipset_pool, v4_updater, v6_updater,
+    dispatch_chains = DispatchChains(config, iptables_updaters)
+    update_sequencer = UpdateSequencer(config, ipset_pool,
+                                       v4_updater, v6_updater,
                                        dispatch_chains, profile_manager)
 
     profile_manager.start()
@@ -78,7 +78,7 @@ def _main_greenlet(config):
     install_global_rules(config, v4_updater, v6_updater)
 
     # Start polling for updates.
-    greenlets.append(gevent.spawn(watch_etcd, update_sequencer))
+    greenlets.append(gevent.spawn(watch_etcd, config, update_sequencer))
     greenlets.append(gevent.spawn(watch_interfaces, update_sequencer))
 
     # Wait for something to fail.
