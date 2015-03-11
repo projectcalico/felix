@@ -3,7 +3,10 @@
 import logging
 import functools
 import collections
+import weakref
+import sys
 import gevent
+import os
 from gevent.event import AsyncResult
 from gevent.queue import Queue, Full
 
@@ -14,6 +17,51 @@ DEFAULT_QUEUE_SIZE = 10
 
 
 Message = collections.namedtuple("Message", ("function", "result"))
+
+
+_refs = {}
+_ref_idx = 0
+
+
+class ExceptionTrackingRef(weakref.ref):
+    def __init__(self, obj, callback):
+        super(ExceptionTrackingRef, self).__init__(obj, callback)
+        self.exception = None
+        self.tag = None
+        global _ref_idx
+        self.idx = _ref_idx
+        _ref_idx += 1
+        _refs[_ref_idx] = self
+
+
+def _reap_ref(ref):
+    assert isinstance(ref, ExceptionTrackingRef)
+    del _refs[ref.idx]
+    if ref.exception:
+        _log.error("TrackedAsyncResult %s was leaked with exception %r",
+                   ref.tag, ref.exception)
+        print >> sys.stderr, "TrackedAsyncResult %s was leaked with " \
+                             "exception %r" % (ref.tag, ref.exception)
+        # Called from the GC so we can't raise an exception, just die.
+        os._exit(1)
+
+
+class TrackedAsyncResult(AsyncResult):
+    def __init__(self, tag):
+        super(TrackedAsyncResult, self).__init__()
+        self.__ref = ExceptionTrackingRef(self, _reap_ref)
+
+    def set_exception(self, exception):
+        self.__ref.exception = exception
+        return super(TrackedAsyncResult, self).set_exception(exception)
+
+    def get(self, block=True, timeout=None):
+        try:
+            result = super(TrackedAsyncResult, self).get(block=block,
+                                                         timeout=timeout)
+        finally:
+            self.__ref.exception = None
+        return result
 
 
 class Actor(object):
@@ -42,6 +90,7 @@ class Actor(object):
 
 
 def actor_event(fn):
+    method_name = fn.__name__
     @functools.wraps(fn)
     def queue_fn(self, *args, **kwargs):
         assert "async" in kwargs
@@ -55,7 +104,7 @@ def actor_event(fn):
             # Bypass the queue if we're already on the same greenlet.  This
             # is both useful and avoids deadlock.
             return fn(self, *args, **kwargs)
-        result = AsyncResult()
+        result = TrackedAsyncResult(method_name)
         partial = functools.partial(fn, self, *args, **kwargs)
         self._event_queue.put(Message(function=partial, result=result),
                               block=self.greenlet)
