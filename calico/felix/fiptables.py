@@ -165,8 +165,7 @@ class ActiveProfile(Actor):
             for direction in ["inbound", "outbound"]:
                 for ip_version, updater in self._iptables_updaters.iteritems():
                     chain_name = profile_to_chain_name(direction,
-                                                       self.id,
-                                                       ip_version)
+                                                       self.id)
                     f = updater.delete_chain("filter", chain_name, async=True)
                     futures.append(f)
             wait_and_check(futures)
