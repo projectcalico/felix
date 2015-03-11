@@ -85,7 +85,12 @@ def watch_etcd(config, update_sequencer):
     del tags_by_id
     del endpoints_by_id
 
-    last_etcd_index = initial_dump.modifiedIndex
+    # On first call, the etcd_index seems to be the high-water mark for the
+    # data returned whereas the modified index just tells us when the key
+    # was modified.
+    _log.info("Initial etcd index: %s; modifiedIndex: %s",
+              initial_dump.etcd_index, initial_dump.modifiedIndex)
+    last_etcd_index = initial_dump.etcd_index
     del initial_dump
     while True:
         if f_apply_snap and f_apply_snap.ready():
@@ -109,7 +114,11 @@ def watch_etcd(config, update_sequencer):
             _log.exception("Failed to read from etcd. wait_index=%s",
                            last_etcd_index)
             raise
-        last_etcd_index = response.modifiedIndex
+        # Defensive, the etcd_index returned on subsequent requests is the one
+        # that we waited on and the modifiedIndex is the index at which the
+        # key's value was changed. Just in case there's a corner case where
+        # we get an old modifiedIndex, make sure we always increase the index.
+        last_etcd_index = max(response.modifiedIndex, last_etcd_index + 1)
 
         # TODO: we fire-and-forget these messages...
         # TODO: regex parsing getting messy.
