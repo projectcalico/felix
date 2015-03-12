@@ -86,7 +86,6 @@ class DispatchChains(Actor):
         updates.extend(["--append %s --jump DROP" % CHAIN_TO_ENDPOINT,
                         "--append %s --jump DROP" % CHAIN_FROM_ENDPOINT])
         for ip_version, updater in self.iptables_updaters.iteritems():
-            if ip_version == 6: continue # TODO IPv6
             updater.apply_updates("filter",
                                   [CHAIN_TO_ENDPOINT,
                                    CHAIN_FROM_ENDPOINT],
@@ -97,16 +96,16 @@ class ActiveProfile(Actor):
     """
     Actor that owns the per-profile rules chains.
     """
-    def __init__(self, profile_id, iptables_updaters, tag_manager):
+    def __init__(self, profile_id, iptables_updaters, ipset_mgrs):
         super(ActiveProfile, self).__init__()
         assert profile_id is not None
         self.id = profile_id
-        self.tag_manager = tag_manager
+        self.ipset_mgrs = ipset_mgrs
         self._programmed = False
         self._iptables_updaters = iptables_updaters
         self._profile = None
         """:type dict: filled in by first update"""
-        self._tag_to_ip_set_name = {}
+        self._tag_to_ip_set_name = {4: {}, 6: {}}
         """:type dict[str, str]: current mapping from tag name to ipset name."""
 
     @actor_event
@@ -135,13 +134,14 @@ class ActiveProfile(Actor):
         new_tags = extract_tags_from_profile(profile)
 
         removed_tags = old_tags - new_tags
-        for tag in removed_tags:
-            self._tag_to_ip_set_name.pop(tag, None)
-            self.tag_manager.decref(tag)
-        added_tags = new_tags - old_tags
-        for tag in added_tags:
-            ipset = self.tag_manager.get_and_incref(tag, async=False)
-            self._tag_to_ip_set_name[tag] = ipset.name
+        for ip_version, ipset_mgr in self.ipset_mgrs.iteritems():
+            for tag in removed_tags:
+                self._tag_to_ip_set_name[ip_version].pop(tag, None)
+                ipset_mgr.decref(tag)
+            added_tags = new_tags - old_tags
+            for tag in added_tags:
+                ipset = ipset_mgr.get_and_incref(tag, async=False)
+                self._tag_to_ip_set_name[ip_version][tag] = ipset.name
 
         self._profile = profile
         self._update_chains()
@@ -173,9 +173,10 @@ class ActiveProfile(Actor):
 
         self._programmed = False
         self._profile = None
-        for tag in self._tag_to_ip_set_name:
-            self.tag_manager.decref(tag)
-        self._tag_to_ip_set_name = {}
+        for ip_version, ipset_mgr in self.ipset_mgrs.iteritems():
+            for tag in self._tag_to_ip_set_name[ip_version]:
+                ipset_mgr.decref(tag)
+            self._tag_to_ip_set_name[ip_version] = {}
 
     def _update_chains(self):
         """
@@ -203,14 +204,12 @@ class ActiveProfile(Actor):
         _log.debug("Update to %s affects %s rules.", self.id, direction)
         for version, ipt in self._iptables_updaters.iteritems():
             chain_name = profile_to_chain_name(direction, self.id)
-            if version == 6:
-                _log.error("Ignoring v6")
-                continue
-            updates = rules_to_chain_rewrite_lines(chain_name,
-                                                   new_rules,
-                                                   version,
-                                                   self._tag_to_ip_set_name,
-                                                   on_allow="RETURN")
+            updates = rules_to_chain_rewrite_lines(
+                chain_name,
+                new_rules,
+                version,
+                self._tag_to_ip_set_name[version],
+                on_allow="RETURN")
             f = ipt.apply_updates("filter", [chain_name], updates,
                                   async=True)
             futures.append(f)
@@ -287,8 +286,9 @@ class IptablesUpdater(Actor):
         rc = iptables_proc.wait()
         _log.debug("%s %s completed with RC=%s", corr, self.cmd_name, rc)
         if rc != 0:
-            _log.error("%s Failed to run %s.\nOutput:%s\nError: %s",
-                       corr, self.cmd_name, out, err)
+            _log.error("%s Failed to run %s.\nOutput:\n%s\n"
+                       "Error:\n%s\nInput:\n%s",
+                       corr, self.cmd_name, out, err, restore_input)
             if not suppress_exc:
                 raise CalledProcessError(cmd=cmd, returncode=rc)
 
@@ -310,14 +310,15 @@ class ProfileManager(ReferenceManager):
     This class ensures that rules chains are properly quiesced
     before their Actors are deleted.
     """
-    def __init__(self, iptables_updaters, tag_manager):
+    def __init__(self, iptables_updaters, ipset_mgrs):
         super(ProfileManager, self).__init__()
         self.iptables_updaters = iptables_updaters
-        self.tag_mgr = tag_manager
+        self.ipset_mgrs = ipset_mgrs
         self.profiles_by_id = {}
 
     def _create(self, profile_id):
-        return ActiveProfile(profile_id, self.iptables_updaters, self.tag_mgr)
+        return ActiveProfile(profile_id, self.iptables_updaters,
+                             self.ipset_mgrs)
 
     def _on_object_activated(self, profile_id, active_profile):
         profile_or_none = self.profiles_by_id.get(profile_id)

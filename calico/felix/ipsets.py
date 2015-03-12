@@ -32,36 +32,36 @@ import re
 _log = logging.getLogger(__name__)
 
 
-class TagManager(ReferenceManager):
-    def __init__(self, config, v4_updater, v6_updater):
-        super(TagManager, self).__init__()
-
-        # Peers/utility classes.
-        self.config = config
-        self.v4_updater = v4_updater
-        self.v6_updater = v6_updater
-        self.iptables_updaters = {
-            4: v4_updater,
-            6: v6_updater,
-        }
+class IpsetManager(ReferenceManager):
+    def __init__(self, set_type, family="inet"):
+        super(IpsetManager, self).__init__()
 
         # State.
-        self.tags_by_id = {}
-        self.endpoints_by_id = {}
+        self.set_type = set_type
+        self.family = family
+        self.members_by_tag = {}
+        self.endpoints_by_tag = {}
+        self.prefix = "v4_" if family == "inet" else "v6_"
 
         # Indexes.
         self.endpoint_ids_by_tag = defaultdict(set)
         self.endpoint_ids_by_profile_id = defaultdict(set)
 
     def _create(self, tag_id):
-        return IpsetUpdater(tag_id, "hash:ip")
+        return IpsetUpdater(self.prefix + tag_id,
+                            self.set_type, family=self.family)
+
+    @property
+    def nets_key(self):
+        nets = "ipv4_nets" if self.family == "inet" else "ipv6_nets"
+        return nets
 
     def _on_object_activated(self, tag_id, active_tag):
         new_members = set()
         for ep_id in self.endpoint_ids_by_tag.get(tag_id, set()):
-            ep = self.endpoints_by_id.get(ep_id, {})
-            # TODO: IPv6
-            new_members.update(map(futils.net_to_ip, ep["ipv4_nets"]))
+            ep = self.endpoints_by_tag.get(ep_id, {})
+            nets = self.nets_key
+            new_members.update(map(futils.net_to_ip, ep.get(nets, [])))
         # FIXME: Remove blocking call, needed to make sure ipset is created before returning it.
         active_tag.replace_members(new_members, async=False)
 
@@ -73,15 +73,15 @@ class TagManager(ReferenceManager):
             deleted.
         """
         _log.info("Tags for profile %s updated", profile_id)
-        old_tags = self.tags_by_id.get(profile_id, [])
+        old_tags = self.members_by_tag.get(profile_id, [])
         new_tags = tags or []
         self._process_tag_updates(profile_id, set(old_tags), set(new_tags))
 
         if tags is None:
             _log.info("Tags for profile %s deleted", profile_id)
-            self.tags_by_id.pop(profile_id, None)
+            self.members_by_tag.pop(profile_id, None)
         else:
-            self.tags_by_id[profile_id] = tags
+            self.members_by_tag[profile_id] = tags
 
     def _process_tag_updates(self, profile_id, old_tags, new_tags):
         """
@@ -104,10 +104,9 @@ class TagManager(ReferenceManager):
                     # Tag is in-use, update its members.
                     ipset = self.objects_by_id[tag]
                     for endpoint_id in endpoint_ids:
-                        endpoint = self.endpoints_by_id[endpoint_id]
+                        endpoint = self.endpoints_by_tag[endpoint_id]
                         for ip in map(futils.net_to_ip,
-                                      endpoint.get("ipv4_nets", [])):
-                            # TODO: IPv6
+                                      endpoint.get(self.nets_key, [])):
                             if added:
                                 ipset.add_member(ip, async=True)
                             else:
@@ -115,13 +114,13 @@ class TagManager(ReferenceManager):
 
     @actor_event
     def on_endpoint_update(self, endpoint_id, endpoint):
-        old_endpoint = self.endpoints_by_id.get(endpoint_id, {})
+        old_endpoint = self.endpoints_by_tag.get(endpoint_id, {})
         old_prof_id = old_endpoint.get("profile_id")
-        old_tags = set(old_prof_id and self.tags_by_id[old_prof_id] or [])
+        old_tags = set(old_prof_id and self.members_by_tag[old_prof_id] or [])
 
         if endpoint is None:
             _log.info("Endpoint %s deleted", endpoint_id)
-            if endpoint_id not in self.endpoints_by_id:
+            if endpoint_id not in self.endpoints_by_tag:
                 _log.warn("Delete for unknown endpoint %s", endpoint_id)
                 return
             # Update profile index.
@@ -138,21 +137,19 @@ class TagManager(ReferenceManager):
                     del self.endpoint_ids_by_tag[tag]
                 if self._is_active(tag):
                     for ip in map(futils.net_to_ip,
-                                  old_endpoint["ipv4_nets"]):
-                        # TODO: IPv6
+                                  old_endpoint[self.nets_key]):
                         ipset = self.objects_by_id[tag]
                         ipset.remove_member(ip, async=True)
-            self.endpoints_by_id.pop(endpoint_id, None)
+            self.endpoints_by_tag.pop(endpoint_id, None)
         else:
             _log.info("Endpoint %s update received.", endpoint_id)
             new_prof_id = endpoint["profile_id"]
-            new_tags = set(self.tags_by_id.get(new_prof_id, []))
+            new_tags = set(self.members_by_tag.get(new_prof_id, []))
 
             # Calculate impact on tags due to any change of profile or IP
             # address and queue updates to ipsets.
-            # TODO: IPv6
             old_ips = set(map(futils.net_to_ip,
-                              old_endpoint.get("ipv4_nets", [])))
+                              old_endpoint.get(self.nets_key, [])))
             new_ips = set(map(futils.net_to_ip, endpoint.get("ipv4_nets", [])))
             for removed_ip in old_ips - new_ips:
                 for tag in old_tags:
@@ -172,7 +169,7 @@ class TagManager(ReferenceManager):
                     for ip in new_ips:
                         ipset.add_member(ip, async=True)
 
-            self.endpoints_by_id[endpoint_id] = endpoint
+            self.endpoints_by_tag[endpoint_id] = endpoint
             if old_prof_id:
                 ids = self.endpoint_ids_by_profile_id[old_prof_id]
                 ids.discard(endpoint_id)
@@ -190,11 +187,12 @@ def tag_to_ipset_name(tag_name):
 
 class IpsetUpdater(Actor):
 
-    def __init__(self, name, set_type):
+    def __init__(self, name, set_type, family="inet"):
         super(IpsetUpdater, self).__init__()
 
         self.name = name
         self.set_type = set_type
+        self.family = family
         self.members = set()
         """Database state"""
 
@@ -250,8 +248,15 @@ class IpsetUpdater(Actor):
         if self.programmed_members is None:
             # We're only called after _load_from_ipset() so we know that the
             # ipset doesn't exist.
-            subprocess.check_output(
-                ["ipset", "create", self.name, self.set_type])
+            p = subprocess.Popen(["ipset", "create",
+                                  self.name, self.set_type, "family",
+                                  self.family],
+                                 stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+            out, err = p.communicate()
+            if p.wait() != 0:
+                _log.error("Failed to create ipset: Out:\n%sErr:\n%s", out,
+                           err)
             self.programmed_members = set()
         _log.debug("Programmed members: %s", self.programmed_members)
         _log.debug("Desired members: %s", self.members)
