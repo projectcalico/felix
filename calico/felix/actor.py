@@ -95,7 +95,10 @@ class TrackedAsyncResult(AsyncResult):
 
 class Actor(object):
 
-    def __init__(self, queue_size=DEFAULT_QUEUE_SIZE):
+    queue_size = DEFAULT_QUEUE_SIZE
+
+    def __init__(self, queue_size=None):
+        queue_size = queue_size or self.queue_size
         self._event_queue = Queue(maxsize=queue_size)
         self.greenlet = gevent.Greenlet(self._loop)
 
