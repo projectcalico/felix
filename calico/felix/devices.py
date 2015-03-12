@@ -23,7 +23,6 @@ import collections
 import gevent
 from gevent import subprocess
 import os
-import time
 
 from calico import common
 from calico.felix import futils

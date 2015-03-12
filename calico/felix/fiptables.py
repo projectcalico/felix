@@ -18,8 +18,7 @@ felix.fiptables
 
 IP tables management functions.
 """
-from collections import defaultdict
-import functools
+
 import logging
 from subprocess import CalledProcessError
 import itertools
@@ -122,7 +121,7 @@ class ActiveProfile(Actor):
         if self._programmed:
             return
         else:
-            self._update_chains(self._profile, self._tag_to_ip_set_name)
+            self._update_chains()
 
     @actor_event
     def on_profile_update(self, profile):
@@ -181,10 +180,6 @@ class ActiveProfile(Actor):
     def _update_chains(self):
         """
         Updates the chains in the dataplane.
-        :param profile: The profile dict, containing hte inbound and
-            outbound rules.
-        :param tag_to_ipset_name: Dict that maps from name of tag to name of
-            ipset to use i the rules.
         """
         futures = self._update_chain("inbound")
         futures += self._update_chain("outbound")
@@ -198,7 +193,6 @@ class ActiveProfile(Actor):
         the rules in the new_profile dict.
 
         :param direction: "inbound" or "outbound"
-        :param tag_to_ipset_name: dict mapping name of tag to ipset name,
             must contain all tags used in the rules.
         """
         new_profile = self._profile or {}

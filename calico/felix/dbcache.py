@@ -19,7 +19,6 @@ felix.dbcache
 
 Our cache of the etcd database.
 """
-from collections import defaultdict
 import logging
 import socket
 

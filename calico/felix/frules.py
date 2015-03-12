@@ -149,23 +149,6 @@ def install_global_rules(config, v4_updater, v6_updater):
         iptables_updater.apply_updates("filter", req_chains, updates,
                                        async=False)
 
-def update_chain(name, rule_list, v4_updater, iptable="filter", async=False):
-    """
-    Atomically creates/replaces the contents of the named iptables chain
-    with the rules from rule_list.
-    :param list[dict] rule_list: Ordered list of rule dicts.
-    :return: AsyncResult from the IPTABLES_UPDATER.
-    """
-    # Delete all rules int he chain.  This is done atomically with the
-    # appends below so the end result will be a chain with only the new rules
-    # in it.
-    fragments = ["--flush %s" % name]
-    fragments += [rule_to_iptables_fragment(name, r, on_allow="RETURN")
-                  for r in rule_list]
-    # TODO: IPv6 support
-    return v4_updater.apply_updates(iptable, [name], fragments,
-                                             async=async)
-
 
 def rules_to_chain_rewrite_lines(chain_name, rules, ip_version, tag_to_ipset,
                                  on_allow="ACCEPT", on_deny="DROP"):

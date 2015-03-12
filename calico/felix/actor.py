@@ -8,7 +8,7 @@ import sys
 import gevent
 import os
 from gevent.event import AsyncResult
-from gevent.queue import Queue, Full
+from gevent.queue import Queue
 
 _log = logging.getLogger(__name__)
 
