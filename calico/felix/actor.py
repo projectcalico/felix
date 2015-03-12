@@ -24,10 +24,21 @@ _ref_idx = 0
 
 
 class ExceptionTrackingRef(weakref.ref):
+    """
+    Specialised weak reference with a slot to hold an exception
+    that was leaked.
+    """
+
+    # Note: superclass implements __new__ so we have to mimic its args
+    # and have the callback passed in.
     def __init__(self, obj, callback):
         super(ExceptionTrackingRef, self).__init__(obj, callback)
         self.exception = None
         self.tag = None
+
+        # Callback won't get triggered if we die before the object we reference
+        # so stash a reference to this object, which we clean up when the
+        # TrackedAsyncResult is GCed.
         global _ref_idx
         self.idx = _ref_idx
         _ref_idx += 1
@@ -35,6 +46,11 @@ class ExceptionTrackingRef(weakref.ref):
 
 
 def _reap_ref(ref):
+    """
+    Called when a TrackedAsyncResult gets GCed.
+    :param ExceptionTrackingRef ref: The ref that may contain a leaked
+        exception.
+    """
     assert isinstance(ref, ExceptionTrackingRef)
     del _refs[ref.idx]
     if ref.exception:
@@ -47,6 +63,9 @@ def _reap_ref(ref):
 
 
 class TrackedAsyncResult(AsyncResult):
+    """
+    An AsyncResult that tracks if any exceptions are leaked.
+    """
     def __init__(self, tag):
         super(TrackedAsyncResult, self).__init__()
         self.__ref = ExceptionTrackingRef(self, _reap_ref)
@@ -60,6 +79,7 @@ class TrackedAsyncResult(AsyncResult):
             result = super(TrackedAsyncResult, self).get(block=block,
                                                          timeout=timeout)
         finally:
+            # Someone called get so any exception can't be leaked.  Discard it.
             self.__ref.exception = None
         return result
 
@@ -93,17 +113,20 @@ def actor_event(fn):
     method_name = fn.__name__
     @functools.wraps(fn)
     def queue_fn(self, *args, **kwargs):
-        assert "async" in kwargs
-        if not kwargs.get("async") and _log.isEnabledFor(logging.DEBUG):
+        async_set = "async" in kwargs
+        async = kwargs.pop("async", False)
+        local_call = not async and self.greenlet == gevent.getcurrent()
+        if not local_call and not async and _log.isEnabledFor(logging.DEBUG):
             import traceback, os
             calling_file,  line_no, func, _ = traceback.extract_stack()[-2]
             calling_file = os.path.basename(calling_file)
             _log.debug("BLOCKING CALL: %s:%s:%s", calling_file, line_no, func)
-        async = kwargs.pop("async", False)
-        if not async and self.greenlet == gevent.getcurrent():
+        if local_call:
             # Bypass the queue if we're already on the same greenlet.  This
             # is both useful and avoids deadlock.
             return fn(self, *args, **kwargs)
+        else:
+            assert async_set, "Cross-actor calls must specify async arg."
         result = TrackedAsyncResult(method_name)
         partial = functools.partial(fn, self, *args, **kwargs)
         self._event_queue.put(Message(function=partial, result=result),

@@ -20,6 +20,7 @@ Utility functions for managing devices in Felix.
 """
 import logging
 import collections
+from calico.felix.actor import Actor, actor_event
 import gevent
 from gevent import subprocess
 import os
@@ -136,15 +137,20 @@ InterfaceState = collections.namedtuple("Interface",
                                         ["name", "iface_id", "up"])
 
 
-def watch_interfaces(update_sequencer):
-    """
-    Greenlet: watches linux interfaces come and go and fires events
-    into the update sequencer.
-    """
-    # TODO: use netlink socket to monitor rather than poll?
-    # FIXME: this doesn't detect if an interface quickly flaps down/up
-    interfaces = {}
-    while True:
+class InterfaceWatcher(Actor):
+    def __init__(self, update_sequencer):
+        super(InterfaceWatcher, self).__init__()
+        self.update_sequencer = update_sequencer
+        self.interfaces = {}
+
+    @actor_event
+    def poll_interfaces(self):
+        """
+        Issues a single poll of the interfaces and sends updates to the
+        update sequencer.
+        """
+        # TODO: use netlink socket to monitor rather than poll?
+        # FIXME: this doesn't detect if an interface quickly flaps down/up
         # Use "ip link" to get the list of interfaces and their kernel IDs.
         # The kernel ID should change if an interface with a particular ID
         # is removed and then added back in-between polls.
@@ -157,22 +163,34 @@ def watch_interfaces(update_sequencer):
                                            output, flags=re.MULTILINE):
             seen_interfaces.add(name)
             is_up = "UP" in attrs.split(",")
-            old_state = interfaces.get(name)
+            old_state = self.interfaces.get(name)
             new_state = InterfaceState(name=name, iface_id=int(num), up=is_up)
             if old_state != new_state:
                 _log.info("Interface %s changed state: %s", name, new_state)
-                interfaces[name] = new_state
+                self.interfaces[name] = new_state
                 if old_state and old_state.iface_id != new_state.iface_id:
                     # Interface ID has changed, indicates the interface
                     # was deleted and then re-added.
                     _log.debug("Interface ID changed for %s. simulating "
                                "remove then add.", name)
-                    update_sequencer.on_interface_update(name, None)
-                update_sequencer.on_interface_update(name, new_state,
-                                                     async=True)
-        previous_interfaces = set(interfaces.keys())
+                    self.update_sequencer.on_interface_update(name, None)
+                self.update_sequencer.on_interface_update(name, new_state,
+                                                          async=True)
+        previous_interfaces = set(self.interfaces.keys())
         for removed_interface in previous_interfaces - seen_interfaces:
             _log.info("Interface %s went away.", removed_interface)
-            del interfaces[removed_interface]
-            update_sequencer.on_interface_update(removed_interface, None)
-        gevent.sleep(0.5)
+            del self.interfaces[removed_interface]
+            self.update_sequencer.on_interface_update(removed_interface,
+                                                      None)
+            
+    @actor_event
+    def watch_interfaces(self):
+        """
+        Watches linux interfaces come and go and fires events
+        into the update sequencer.
+
+        :returns: Never returns.
+        """
+        while True:
+            self.poll_interfaces(async=False)  # Skips queue
+            gevent.sleep(0.5)

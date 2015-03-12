@@ -21,7 +21,7 @@ The main logic for Felix.
 """
 
 # Monkey-patch before we do anything else...
-from calico.felix.devices import watch_interfaces
+from calico.felix.devices import InterfaceWatcher
 from calico.felix.endpoint import EndpointManager
 from calico.felix.fetcd import watch_etcd
 from calico.felix.ipsets import TagManager
@@ -65,6 +65,7 @@ def _main_greenlet(config):
                                        v4_updater, v6_updater,
                                        dispatch_chains, profile_manager,
                                        endpoint_manager)
+    iface_watcher = InterfaceWatcher(update_sequencer)
 
     profile_manager.start()
     dispatch_chains.start()
@@ -73,20 +74,26 @@ def _main_greenlet(config):
     update_sequencer.start()
     v4_updater.start()
     v6_updater.start()
+    iface_watcher.start()
     greenlets = [profile_manager.greenlet,
                  dispatch_chains.greenlet,
                  update_sequencer.greenlet,
                  tag_mgr.greenlet,
                  endpoint_manager.greenlet,
                  v4_updater.greenlet,
-                 v6_updater.greenlet]
+                 v6_updater.greenlet,
+                 iface_watcher.greenlet]
 
     # Install the global rules before we start polling for updates.
     install_global_rules(config, v4_updater, v6_updater)
 
+    # Make sure we queue an initial update of the interfaces before the etcd
+    # update.
+    iface_watcher.poll_interfaces(async=False)
+
     # Start polling for updates.
+    iface_watcher.watch_interfaces(async=True)  # Never returns, must be async!
     greenlets.append(gevent.spawn(watch_etcd, config, update_sequencer))
-    greenlets.append(gevent.spawn(watch_interfaces, update_sequencer))
 
     # Wait for something to fail.
     # TODO: Maybe restart failed greenlets.
