@@ -44,18 +44,26 @@ class ExceptionTrackingRef(weakref.ref):
         _ref_idx += 1
         _refs[_ref_idx] = self
 
+    def __str__(self):
+        return (self.__class__.__name__ + "<%s/%s,exc=%s>" %
+                (self.tag, self.idx, self.exception))
+
 
 def _reap_ref(ref):
     """
     Called when a TrackedAsyncResult gets GCed.
+
+    Looks for leaked exceptions.
+
     :param ExceptionTrackingRef ref: The ref that may contain a leaked
         exception.
     """
+    _log.debug("Reaping %s", ref)
     assert isinstance(ref, ExceptionTrackingRef)
     del _refs[ref.idx]
     if ref.exception:
-        _log.error("TrackedAsyncResult %s was leaked with exception %r",
-                   ref.tag, ref.exception)
+        _log.critical("TrackedAsyncResult %s was leaked with exception %r",
+                      ref.tag, ref.exception)
         print >> sys.stderr, "TrackedAsyncResult %s was leaked with " \
                              "exception %r" % (ref.tag, ref.exception)
         # Called from the GC so we can't raise an exception, just die.
@@ -69,6 +77,7 @@ class TrackedAsyncResult(AsyncResult):
     def __init__(self, tag):
         super(TrackedAsyncResult, self).__init__()
         self.__ref = ExceptionTrackingRef(self, _reap_ref)
+        self.__ref.tag = tag
 
     def set_exception(self, exception):
         self.__ref.exception = exception

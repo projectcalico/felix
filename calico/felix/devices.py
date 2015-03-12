@@ -181,8 +181,8 @@ class InterfaceWatcher(Actor):
             _log.info("Interface %s went away.", removed_interface)
             del self.interfaces[removed_interface]
             self.update_sequencer.on_interface_update(removed_interface,
-                                                      None)
-            
+                                                      None, async=True)
+
     @actor_event
     def watch_interfaces(self):
         """

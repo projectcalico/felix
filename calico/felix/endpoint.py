@@ -206,12 +206,15 @@ class LocalEndpoint(Actor):
                                                                   ep_id,
                                                                   async=True)
                     self._configure_interface()
+                    # TODO: remove routes to removed IPs.
                 except (OSError, FailedSystemCall, CalledProcessError):
                     _log.exception("Failed to program the dataplane for %s",
                                    self)
                     self._failed = True  # Force retry next time.
                     # Schedule a retry.
                     gevent.spawn_later(5, self._maybe_update, False)
+                else:
+                    _log.info("Programmed %s", self)
             else:
                 # We were active but now we're not, withdraw the dispatch rule
                 # and our chain.  We must do this to allow iptables to remove
@@ -226,11 +229,15 @@ class LocalEndpoint(Actor):
                 except (OSError, FailedSystemCall, CalledProcessError):
                     # Not much we can do, maybe they were deleted under us?
                     _log.exception("Failed to remove chains")
+                else:
+                    _log.info("Removed chains for %s", self)
                 try:
                     self._deconfigure_interface()
                 except (OSError, FailedSystemCall, CalledProcessError):
                     # This is likely because the interface was removed.
                     _log.warning("Failed to remove routes", exc_info=True)
+                else:
+                    _log.info("Removed interface config for %s", self)
 
     def _update_chains(self):
         futures = []

@@ -58,20 +58,26 @@ class UpdateSequencer(Actor):
 
         # Step 1: fire in data update events to the profile and tag managers
         # so they can build their indexes before we activate anything.
+        _log.info("Applying snapshot. STAGE 1a: rules.")
         for profile_id, rules in rules_by_prof_id.iteritems():
             self.profile_mgr.on_rules_update(profile_id, rules, async=True)
+        _log.info("Applying snapshot. STAGE 1b: tags.")
         for profile_id, tags in tags_by_prof_id.iteritems():
             self.tag_mgr.on_tags_update(profile_id, tags, async=True)
+        _log.info("Applying snapshot. STAGE 1c: endpoints->tag mgr.")
         for endpoint_id, endpoint in endpoints_by_id.iteritems():
             self.tag_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)
 
         # Step 2: fire in update events into the endpoint manager, which will
         # recursively trigger activation of profiles and tags.
+        _log.info("Applying snapshot. STAGE 2: endpoints->endpoint mgr.")
         for endpoint_id, endpoint in endpoints_by_id.iteritems():
             self.endpoint_mgr.on_endpoint_update(endpoint_id, endpoint,
                                                  async=True)
         # TODO: clean up unused chains.
-        _log.info("Finished applying snapshot.")
+        _log.info("Applying snapshot. DONE. %s rules, %s tags, "
+                  "%s endpoints", len(rules_by_prof_id), len(tags_by_prof_id),
+                  len(endpoints_by_id))
 
     @actor_event
     def on_rules_update(self, profile_id, rules):
