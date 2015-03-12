@@ -96,6 +96,7 @@ class TrackedAsyncResult(AsyncResult):
 class Actor(object):
 
     queue_size = DEFAULT_QUEUE_SIZE
+    batch_delay = None
 
     def __init__(self, queue_size=None):
         queue_size = queue_size or self.queue_size
@@ -109,38 +110,44 @@ class Actor(object):
         return self
 
     def _loop(self):
-        while True:
-            msg = self._event_queue.get()
-            batch = [msg]
-            while not self._event_queue.empty():
-                # We're the only ones getting from the queue so this should
-                # never fail.
-                batch.append(self._event_queue.get_nowait())
+        try:
+            while True:
+                msg = self._event_queue.get()
+                batch = [msg]
+                if self.batch_delay and not self._event_queue.full():
+                    gevent.sleep(self.batch_delay)
+                while not self._event_queue.empty():
+                    # We're the only ones getting from the queue so this should
+                    # never fail.
+                    batch.append(self._event_queue.get_nowait())
 
-            results = []
-            for msg in self._filter_message_batch(batch):
-                assert isinstance(msg.result, AsyncResult)
-                try:
-                    result = msg.partial()
-                except BaseException as e:
-                    _log.exception("Exception processing %s", msg)
-                    results.append((None, e))
-                else:
-                    results.append((result, None))
-            try:
-                self._on_batch_processed(batch, results)
-            except BaseException as e:
-                # Take over the final result.
-                # FIXME: Better approach?
-                _log.exception("_on_batch_processed failed.")
-                results[-1] = (None, e)
-
-            for msg, (result, exc) in zip(batch, results):
-                for future in msg.results:
-                    if exc is not None:
-                        future.set_exception(exc)
+                results = []
+                filtered_batch = self._filter_message_batch(batch)
+                for msg in filtered_batch:
+                    try:
+                        result = msg.partial()
+                    except BaseException as e:
+                        _log.exception("Exception processing %s", msg)
+                        results.append((None, e))
                     else:
-                        future.set(result)
+                        results.append((result, None))
+                try:
+                    self._on_batch_processed(batch, results)
+                except BaseException as e:
+                    # Take over the final result.
+                    # FIXME: Better approach?
+                    _log.exception("_on_batch_processed failed.")
+                    results[-1] = (None, e)
+
+                for msg, (result, exc) in zip(batch, results):
+                    for future in msg.results:
+                        if exc is not None:
+                            future.set_exception(exc)
+                        else:
+                            future.set(result)
+        except:
+            _log.exception("Exception killed %s", self)
+            raise
 
     def _filter_message_batch(self, batch):
         """
@@ -156,7 +163,7 @@ class Actor(object):
         """
         return batch
 
-    def _on_batch_processed(self, batch):
+    def _on_batch_processed(self, batch, results):
         """
         Called after a batch of events have been processed from the queue
         before results are set.

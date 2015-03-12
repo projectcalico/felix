@@ -282,7 +282,7 @@ class IpsetUpdater(Actor):
                     len(load_msgs)
                 return load_msgs + replace_and_following_msgs
 
-    def _on_batch_processed(self):
+    def _on_batch_processed(self, batch, results):
         if self.dirty:
             self._sync_to_ipset()
             self.dirty = False

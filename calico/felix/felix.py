@@ -48,65 +48,76 @@ def _main_greenlet(config):
     The root of our tree of greenlets.  Responsible for restarting
     its children if desired.
     """
-    v4_updater = IptablesUpdater(ip_version=4)
-    v6_updater = IptablesUpdater(ip_version=6)
-    iptables_updaters = {
-        4: v4_updater,
-        6: v6_updater,
-    }
-    tag_mgr = TagManager(config, v4_updater, v6_updater)
-    profile_manager = ProfileManager(iptables_updaters,
-                                     tag_mgr)
-    dispatch_chains = DispatchChains(config, iptables_updaters)
-    endpoint_manager = EndpointManager(config, tag_mgr,
-                                       v4_updater, v6_updater,
-                                       dispatch_chains, profile_manager)
-    update_sequencer = UpdateSequencer(config, tag_mgr,
-                                       v4_updater, v6_updater,
-                                       dispatch_chains, profile_manager,
-                                       endpoint_manager)
-    iface_watcher = InterfaceWatcher(update_sequencer)
-
-    profile_manager.start()
-    dispatch_chains.start()
-    tag_mgr.start()
-    endpoint_manager.start()
-    update_sequencer.start()
-    v4_updater.start()
-    v6_updater.start()
-    iface_watcher.start()
-    greenlets = [profile_manager.greenlet,
-                 dispatch_chains.greenlet,
-                 update_sequencer.greenlet,
-                 tag_mgr.greenlet,
-                 endpoint_manager.greenlet,
-                 v4_updater.greenlet,
-                 v6_updater.greenlet,
-                 iface_watcher.greenlet]
-
-    # Install the global rules before we start polling for updates.
-    install_global_rules(config, v4_updater, v6_updater)
-
-    # Make sure we queue an initial update of the interfaces before the etcd
-    # update.
-    iface_watcher.poll_interfaces(async=False)
-
-    # Start polling for updates.
-    iface_watcher.watch_interfaces(async=True)  # Never returns, must be async!
-    greenlets.append(gevent.spawn(watch_etcd, config, update_sequencer))
-
-    # Wait for something to fail.
-    # TODO: Maybe restart failed greenlets.
-    stopped_greenlets_iter = gevent.iwait(greenlets)
-    stopped_greenlet = next(stopped_greenlets_iter)
     try:
-        stopped_greenlet.get()
-    except Exception:
-        _log.exception("Greenlet failed: %s", stopped_greenlet)
+        _log.info("Creating actors.")
+        v4_updater = IptablesUpdater(ip_version=4)
+        v6_updater = IptablesUpdater(ip_version=6)
+        iptables_updaters = {
+            4: v4_updater,
+            6: v6_updater,
+        }
+        tag_mgr = TagManager(config, v4_updater, v6_updater)
+        profile_manager = ProfileManager(iptables_updaters,
+                                         tag_mgr)
+        dispatch_chains = DispatchChains(config, iptables_updaters)
+        endpoint_manager = EndpointManager(config, tag_mgr,
+                                           v4_updater, v6_updater,
+                                           dispatch_chains, profile_manager)
+        update_sequencer = UpdateSequencer(config, tag_mgr,
+                                           v4_updater, v6_updater,
+                                           dispatch_chains, profile_manager,
+                                           endpoint_manager)
+        iface_watcher = InterfaceWatcher(update_sequencer)
+
+        _log.info("Starting actors.")
+        profile_manager.start()
+        dispatch_chains.start()
+        tag_mgr.start()
+        endpoint_manager.start()
+        update_sequencer.start()
+        v4_updater.start()
+        v6_updater.start()
+        iface_watcher.start()
+        greenlets = [profile_manager.greenlet,
+                     dispatch_chains.greenlet,
+                     update_sequencer.greenlet,
+                     tag_mgr.greenlet,
+                     endpoint_manager.greenlet,
+                     v4_updater.greenlet,
+                     v6_updater.greenlet,
+                     iface_watcher.greenlet]
+
+        # Install the global rules before we start polling for updates.
+        _log.info("Installing global rules.")
+        install_global_rules(config, v4_updater, v6_updater)
+
+        # Make sure we queue an initial update of the interfaces before the
+        # etcd update.
+        _log.info("Triggering initial interface poll..")
+        iface_watcher.poll_interfaces(async=False)
+
+        # Start polling for updates.
+        _log.info("Starting polling for interface and etcd updates.")
+        iface_watcher.watch_interfaces(async=True)  # Never returns, must be
+                                                    # async!
+        greenlets.append(gevent.spawn(watch_etcd, config, update_sequencer))
+
+        # Wait for something to fail.
+        # TODO: Maybe restart failed greenlets.
+        _log.info("Waiting for something to fail...")
+        stopped_greenlets_iter = gevent.iwait(greenlets)
+        stopped_greenlet = next(stopped_greenlets_iter)
+        try:
+            stopped_greenlet.get()
+        except Exception:
+            _log.exception("Greenlet failed: %s", stopped_greenlet)
+            raise
+        else:
+            _log.error("Greenlet %s unexpectedly returned.", stopped_greenlet)
+            raise AssertionError("Greenlet unexpectedly returned")
+    except:
+        _log.exception("Exception killing main greenlet")
         raise
-    else:
-        _log.error("Greenlet %s unexpectedly returned.", stopped_greenlet)
-        raise AssertionError("Greenlet unexpectedly returned")
 
 
 def watchdog():
