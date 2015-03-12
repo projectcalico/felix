@@ -20,45 +20,167 @@ felix.ipsets
 
 IP sets management functions.
 """
+from collections import defaultdict
 
 import logging
 from subprocess import CalledProcessError
-from calico.felix.actor import Actor, actor_event
+from calico.felix import futils
+from calico.felix.actor import Actor, actor_event, ReferenceManager
 from gevent import subprocess
 import re
 
 _log = logging.getLogger(__name__)
 
 
-class IpsetPool(Actor):
+class TagManager(ReferenceManager):
+    def __init__(self, config, v4_updater, v6_updater):
+        super(TagManager, self).__init__()
+
+        # Peers/utility classes.
+        self.config = config
+        self.v4_updater = v4_updater
+        self.v6_updater = v6_updater
+        self.iptables_updaters = {
+            4: v4_updater,
+            6: v6_updater,
+        }
+
+        # State.
+        self.tags_by_id = {}
+        self.endpoints_by_id = {}
+
+        # Indexes.
+        self.endpoint_ids_by_tag = defaultdict(set)
+        self.endpoint_ids_by_profile_id = defaultdict(set)
+
+    def _create(self, tag_id):
+        return IpsetUpdater(tag_id, "hash:ip")
+
+    def _on_object_activated(self, tag_id, active_tag):
+        new_members = set()
+        for ep_id in self.endpoint_ids_by_tag.get(tag_id, set()):
+            ep = self.endpoints_by_id.get(ep_id, {})
+            # TODO: IPv6
+            new_members.update(map(futils.net_to_ip, ep["ipv4_nets"]))
+        # FIXME: Remove blocking call
+        active_tag.replace_members(new_members, async=True)
+
     @actor_event
-    def allocate_ipset(self, id_tag):
+    def on_tags_update(self, profile_id, tags):
         """
-        Allocate an ipset from the pool.  If an existing ipset exists with
-        the name provided, will return that set with its members as-loaded
-        from the kernel.  Otherwise, queues a flush on the returned ipset.
-
-        Guarantees that the ipset returned already exists in the kernel by the
-        time it is returned.
-
-        :param id_tag: Name to associate with this ipset.  Used to retrieve the
-               same underlying ipset across process invocations.  Note: this
-               may not be the name of the ipset itself.
-        :return: an IpsetUpdater.
+        Called when the given tag list has changed or been deleted.
+        :param list[str] tags: List of tags for the given profile or None if
+            deleted.
         """
+        _log.info("Tags for profile %s updated", profile_id)
+        old_tags = self.tags_by_id.get(profile_id, [])
+        new_tags = tags or []
+        self._process_tag_updates(profile_id, set(old_tags), set(new_tags))
 
-        # TODO: replace this simple version with an actual pool!
-        ipset = IpsetUpdater(tag_to_ipset_name(id_tag), "hash:ip").start()
-        ipset.replace_members(set(), async=False)
-        return ipset
+        if tags is None:
+            _log.info("Tags for profile %s deleted", profile_id)
+            self.tags_by_id.pop(profile_id)
+        else:
+            self.tags_by_id[profile_id] = tags
+
+    def _process_tag_updates(self, profile_id, old_tags, new_tags):
+        """
+        Updates the active ipsets associated with the change in tags
+        of the given profile ID.
+        """
+        endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id, set())
+        _log.debug("Endpoint IDs with this profile: %s", endpoint_ids)
+        added_tags = new_tags - old_tags
+        _log.debug("Profile %s added tags: %s", profile_id, added_tags)
+        removed_tags = old_tags - new_tags
+        _log.debug("Profile %s removed tags: %s", profile_id, removed_tags)
+        for added, upd_tags in [(True, added_tags), (False, removed_tags)]:
+            for tag in upd_tags:
+                if added:
+                    self.endpoint_ids_by_tag[tag] |= endpoint_ids
+                else:
+                    self.endpoint_ids_by_tag[tag] -= endpoint_ids
+                if self._is_active(tag):
+                    # Tag is in-use, update its members.
+                    ipset = self.objects_by_id[tag]
+                    for endpoint_id in endpoint_ids:
+                        endpoint = self.endpoints_by_id[endpoint_id]
+                        for ip in map(futils.net_to_ip,
+                                      endpoint.get("ipv4_nets", [])):
+                            # TODO: IPv6
+                            if added:
+                                ipset.add_member(ip, async=True)
+                            else:
+                                ipset.remove_member(ip, async=True)
 
     @actor_event
-    def return_ipset(self, ipset):
-        """
-        Returns an ipset ot the pool so that it may be reused.
-        :param IpsetUpdater ipset:
-        """
-        pass
+    def on_endpoint_update(self, endpoint_id, endpoint):
+        old_endpoint = self.endpoints_by_id.get(endpoint_id, {})
+        old_prof_id = old_endpoint.get("profile_id")
+        old_tags = set(old_prof_id and self.tags_by_id[old_prof_id] or [])
+
+        if endpoint is None:
+            _log.info("Endpoint %s deleted", endpoint_id)
+            if endpoint_id not in self.endpoints_by_id:
+                _log.warn("Delete for unknown endpoint %s", endpoint_id)
+                return
+            # Update profile index.
+            eps_for_profile = self.endpoint_ids_by_profile_id[old_prof_id]
+            eps_for_profile.discard(endpoint_id)
+            if not eps_for_profile:
+                # Profile no longer has any endpoints using it, clean up
+                # the index.
+                _log.debug("Profile %s now unused", old_prof_id)
+                del self.endpoint_ids_by_profile_id[old_prof_id]
+            for tag in old_tags:
+                self.endpoint_ids_by_tag[tag].discard(endpoint_id)
+                if not self.endpoint_ids_by_tag[tag]:
+                    del self.endpoint_ids_by_tag[tag]
+                if self._is_active(tag):
+                    for ip in map(futils.net_to_ip,
+                                  old_endpoint["ipv4_nets"]):
+                        # TODO: IPv6
+                        ipset = self.objects_by_id[tag]
+                        ipset.remove_member(ip, async=True)
+            self.endpoints_by_id.pop(endpoint_id)
+        else:
+            _log.info("Endpoint %s update received.", endpoint_id)
+            new_prof_id = endpoint["profile_id"]
+            new_tags = set(self.tags_by_id.get(new_prof_id, []))
+
+            # Calculate impact on tags due to any change of profile or IP
+            # address and queue updates to ipsets.
+            # TODO: IPv6
+            old_ips = set(map(futils.net_to_ip,
+                              old_endpoint.get("ipv4_nets", [])))
+            new_ips = set(map(futils.net_to_ip, endpoint.get("ipv4_nets", [])))
+            for removed_ip in old_ips - new_ips:
+                for tag in old_tags:
+                    if self._is_active(tag):
+                        ipset = self.objects_by_id[tag]
+                        ipset.remove_member(removed_ip, async=True)
+            for tag in old_tags - new_tags:
+                self.endpoint_ids_by_tag[tag].discard(endpoint_id)
+                if self._is_active(tag):
+                    ipset = self.objects_by_id[tag]
+                    for ip in old_ips:
+                        ipset.remove_member(ip, async=True)
+            for tag in new_tags:
+                self.endpoint_ids_by_tag[tag].add(endpoint_id)
+                if self._is_active(tag):
+                    ipset = self.objects_by_id[tag]
+                    for ip in new_ips:
+                        ipset.add_member(ip, async=True)
+
+            self.endpoints_by_id[endpoint_id] = endpoint
+            if old_prof_id:
+                ids = self.endpoint_ids_by_profile_id[old_prof_id]
+                ids.discard(endpoint_id)
+                if not ids:
+                    del self.endpoint_ids_by_profile_id[old_prof_id]
+            self.endpoint_ids_by_profile_id[new_prof_id].add(endpoint_id)
+
+        _log.info("Endpoint update complete.")
 
 
 def tag_to_ipset_name(tag_name):

@@ -22,8 +22,9 @@ The main logic for Felix.
 
 # Monkey-patch before we do anything else...
 from calico.felix.devices import watch_interfaces
+from calico.felix.endpoint import EndpointManager
 from calico.felix.fetcd import watch_etcd
-from calico.felix.ipsets import IpsetPool
+from calico.felix.ipsets import TagManager
 from gevent import monkey
 monkey.patch_all()
 
@@ -34,7 +35,7 @@ import gevent
 
 from calico import common
 from calico.felix.fiptables import IptablesUpdater, DispatchChains, \
-    ActiveProfileManager
+    ProfileManager
 from calico.felix.frules import install_global_rules
 from calico.felix.dbcache import UpdateSequencer
 from calico.felix.config import Config
@@ -47,29 +48,36 @@ def _main_greenlet(config):
     The root of our tree of greenlets.  Responsible for restarting
     its children if desired.
     """
-    ipset_pool = IpsetPool()
     v4_updater = IptablesUpdater(ip_version=4)
     v6_updater = IptablesUpdater(ip_version=6)
     iptables_updaters = {
         4: v4_updater,
         6: v6_updater,
     }
-    profile_manager = ActiveProfileManager(iptables_updaters)
+    tag_mgr = TagManager(config, v4_updater, v6_updater)
+    profile_manager = ProfileManager(iptables_updaters,
+                                     tag_mgr)
     dispatch_chains = DispatchChains(config, iptables_updaters)
-    update_sequencer = UpdateSequencer(config, ipset_pool,
+    endpoint_manager = EndpointManager(config, tag_mgr,
                                        v4_updater, v6_updater,
                                        dispatch_chains, profile_manager)
+    update_sequencer = UpdateSequencer(config, tag_mgr,
+                                       v4_updater, v6_updater,
+                                       dispatch_chains, profile_manager,
+                                       endpoint_manager)
 
     profile_manager.start()
     dispatch_chains.start()
-    ipset_pool.start()
+    tag_mgr.start()
+    endpoint_manager.start()
     update_sequencer.start()
     v4_updater.start()
     v6_updater.start()
     greenlets = [profile_manager.greenlet,
                  dispatch_chains.greenlet,
                  update_sequencer.greenlet,
-                 ipset_pool.greenlet,
+                 tag_mgr.greenlet,
+                 endpoint_manager.greenlet,
                  v4_updater.greenlet,
                  v6_updater.greenlet]
 

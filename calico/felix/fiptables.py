@@ -25,7 +25,8 @@ from subprocess import CalledProcessError
 import itertools
 from types import StringTypes
 
-from calico.felix.actor import Actor, actor_event, wait_and_check
+from calico.felix.actor import Actor, actor_event, wait_and_check, \
+    ReferenceManager
 from calico.felix.frules import (rules_to_chain_rewrite_lines,
                                  profile_to_chain_name, CHAIN_TO_ENDPOINT,
                                  CHAIN_FROM_ENDPOINT)
@@ -97,15 +98,16 @@ class ActiveProfile(Actor):
     """
     Actor that owns the per-profile rules chains.
     """
-    def __init__(self, profile_id, iptables_updaters):
+    def __init__(self, profile_id, iptables_updaters, tag_manager):
         super(ActiveProfile, self).__init__()
         assert profile_id is not None
         self.id = profile_id
+        self.tag_manager = tag_manager
         self._programmed = False
         self._iptables_updaters = iptables_updaters
         self._profile = None
         """:type dict: filled in by first update"""
-        self._tag_to_ip_set_name = None
+        self._tag_to_ip_set_name = {}
         """:type dict[str, str]: current mapping from tag name to ipset name."""
 
     @actor_event
@@ -122,34 +124,31 @@ class ActiveProfile(Actor):
         else:
             self._update_chains(self._profile, self._tag_to_ip_set_name)
 
-    def _update_chains(self, profile, tag_to_ipset_name):
-        """
-        Updates the chains in the dataplane.
-        :param profile: The profile dict, containing hte inbound and
-            outbound rules.
-        :param tag_to_ipset_name: Dict that maps from name of tag to name of
-            ipset to use i the rules.
-        """
-        futures = self._update_chain(profile, "inbound", tag_to_ipset_name)
-        futures += self._update_chain(profile, "outbound", tag_to_ipset_name)
-        wait_and_check(futures)
-        self._programmed = True
-        _log.info("Chains for %s programmed", self.id)
-
     @actor_event
-    def on_profile_update(self, profile, tag_to_ipset_name):
+    def on_profile_update(self, profile):
         """
         Update the programmed iptables configuration with the new
         profile.  Returns after the update is present in the dataplane.
         """
         assert profile is None or profile["id"] == self.id
 
-        self._update_chains(profile, tag_to_ipset_name)
+        old_tags = extract_tags_from_profile(self._profile)
+        new_tags = extract_tags_from_profile(profile)
+
+        removed_tags = old_tags - new_tags
+        for tag in removed_tags:
+            self._tag_to_ip_set_name.pop(tag)
+            self.tag_manager.decref(tag)
+        added_tags = new_tags - old_tags
+        for tag in added_tags:
+            ipset = self.tag_manager.get_and_incref(tag, async=False)
+            self._tag_to_ip_set_name[tag] = ipset.name
+
         self._profile = profile
-        self._tag_to_ip_set_name = tag_to_ipset_name
+        self._update_chains()
 
     @actor_event
-    def remove(self):
+    def on_unreferenced(self):
         """
         Called to tell us that this profile is no longer needed.  Removes
         our iptables configuration.
@@ -175,9 +174,25 @@ class ActiveProfile(Actor):
 
         self._programmed = False
         self._profile = None
-        self._tag_to_ip_set_name = None
+        for tag in self._tag_to_ip_set_name:
+            self.tag_manager.decref(tag)
+        self._tag_to_ip_set_name = {}
 
-    def _update_chain(self, new_profile, direction, tag_to_ipset_name):
+    def _update_chains(self):
+        """
+        Updates the chains in the dataplane.
+        :param profile: The profile dict, containing hte inbound and
+            outbound rules.
+        :param tag_to_ipset_name: Dict that maps from name of tag to name of
+            ipset to use i the rules.
+        """
+        futures = self._update_chain("inbound")
+        futures += self._update_chain("outbound")
+        wait_and_check(futures)
+        self._programmed = True
+        _log.info("Chains for %s programmed", self.id)
+
+    def _update_chain(self, direction):
         """
         Updates one of our individual inbound/outbound chains from
         the rules in the new_profile dict.
@@ -186,31 +201,26 @@ class ActiveProfile(Actor):
         :param tag_to_ipset_name: dict mapping name of tag to ipset name,
             must contain all tags used in the rules.
         """
-        new_profile = new_profile or {}
+        new_profile = self._profile or {}
         rules_key = "%s_rules" % direction
         new_rules = new_profile.get(rules_key, [])
         futures = []
-        if (not self._programmed or
-                self._profile is None or
-                new_rules != self._profile.get(rules_key) or
-                tag_to_ipset_name != self._tag_to_ip_set_name):
-            _log.debug("Update to %s affects %s rules.", self.id, direction)
-            for version, ipt in self._iptables_updaters.iteritems():
-                chain_name = profile_to_chain_name(direction, self.id)
-                if version == 6:
-                    _log.error("Ignoring v6")
-                    continue
-                updates = rules_to_chain_rewrite_lines(chain_name,
-                                                       new_rules,
-                                                       version,
-                                                       tag_to_ipset_name,
-                                                       on_allow="RETURN")
-                f = ipt.apply_updates("filter", [chain_name], updates,
-                                      async=True)
-                futures.append(f)
-        else:
-            _log.debug("Update to %s didn't affect %s rules.",
-                       self.id, direction)
+
+        _log.debug("Update to %s affects %s rules.", self.id, direction)
+        for version, ipt in self._iptables_updaters.iteritems():
+            chain_name = profile_to_chain_name(direction, self.id)
+            if version == 6:
+                _log.error("Ignoring v6")
+                continue
+            updates = rules_to_chain_rewrite_lines(chain_name,
+                                                   new_rules,
+                                                   version,
+                                                   self._tag_to_ip_set_name,
+                                                   on_allow="RETURN")
+            f = ipt.apply_updates("filter", [chain_name], updates,
+                                  async=True)
+            futures.append(f)
+
         return futures
 
 
@@ -297,65 +307,49 @@ class IptablesUpdater(Actor):
         _log.debug("Finished deleting chain.")
 
 
-class ActiveProfileManager(Actor):
+class ProfileManager(ReferenceManager):
     """
     Actor that manages the life cycle of ActiveProfile objects.
     Users must ensure that they correctly pair calls to
-    get_profile_and_incref() and return_profile().
+    get_and_incref() and decref().
 
     This class ensures that rules chains are properly quiesced
-    before thier Actors are deleted.
+    before their Actors are deleted.
     """
-    def __init__(self, iptables_updaters):
-        super(ActiveProfileManager, self).__init__()
-        self.profiles_by_id = {}
-        self.profile_counts_by_id = defaultdict(lambda: 0)
+    def __init__(self, iptables_updaters, tag_manager):
+        super(ProfileManager, self).__init__()
         self.iptables_updaters = iptables_updaters
+        self.tag_mgr = tag_manager
+        self.profiles_by_id = {}
+
+    def _create(self, profile_id):
+        return ActiveProfile(profile_id, self.iptables_updaters, self.tag_mgr)
+
+    def _on_object_activated(self, profile_id, active_profile):
+        profile_or_none = self.profiles_by_id.get(profile_id)
+        active_profile.on_profile_update(profile_or_none, async=True)
 
     @actor_event
-    def get_profile_and_incref(self, profile_id):
-        assert profile_id is not None
-        if profile_id not in self.profiles_by_id:
-            ap = ActiveProfile(profile_id, self.iptables_updaters).start()
-            self.profiles_by_id[profile_id] = ap
-        self.profile_counts_by_id[profile_id] += 1
-        return self.profiles_by_id[profile_id]
-
-    @actor_event
-    def return_profile(self, profile_id):
-        self.profile_counts_by_id[profile_id] -= 1
-        if self.profile_counts_by_id[profile_id] == 0:
-            _log.debug("No more references to profile %s", profile_id)
-            self._queue_profile_reap(profile_id)
-
-    def _queue_profile_reap(self, dead_profile_id):
-        """
-        Asks the profile to remove itself from the dataplane and
-        queues a callback to tell us that that work is complete.
-        """
-        ap = self.profiles_by_id[dead_profile_id]
-        f = ap.remove(async=True)
-
-        # We can't delete the profile Actor until it's finished removing
-        # itself so ask the result to call us back when it's done.  In the
-        # meantime we might have revived the profile.
-
-        def callback(greenlet):
-            self._on_active_profile_removed(dead_profile_id, async=True)
-        f.rawlink(callback)
-
-    @actor_event
-    def _on_active_profile_removed(self, profile_id):
-        """
-        Callback we queue when deleting an ActiveProfile Actor.
-        checks that the Actor is still unreferenced before cleaning
-        it up.
-        """
-        if self.profile_counts_by_id[profile_id] == 0:
-            # Profile is still dead, clean it up.  Note: if the profile
-            # was revived and then removed again, we might get multiple
-            # calls to this method so we're defensive and use pop() to
-            # delete the profile/counter (in case we already did so).
-            _log.debug("Reaping profile %s", profile_id)
+    def on_rules_update(self, profile_id, profile):
+        if profile_id is not None:
+            self.profiles_by_id[profile_id] = profile
+        else:
             self.profiles_by_id.pop(profile_id)
-            self.profile_counts_by_id.pop(profile_id)
+        if self._is_active(profile_id):
+            ap = self.objects_by_id[profile_id]
+            ap.on_profile_update(profile, async=True)
+
+
+
+def extract_tags_from_profile(profile):
+    if profile is None:
+        return set()
+    tags = set()
+    for in_or_out in ["inbound_rules", "outbound_rules"]:
+        for rule in profile.get(in_or_out, []):
+            tags.update(extract_tags_from_rule(rule))
+    return tags
+
+
+def extract_tags_from_rule(rule):
+    return set([rule[key] for key in ["src_tag", "dst_tag"] if key in rule])

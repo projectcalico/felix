@@ -21,16 +21,86 @@ Endpoint management.
 """
 
 import logging
+import socket
 from subprocess import CalledProcessError
 import gevent
 from calico.felix import devices, futils
-from calico.felix.actor import Actor, actor_event, wait_and_check
-from calico.felix.fiptables import DispatchChains, ActiveProfileManager
+from calico.felix.actor import (Actor, actor_event, wait_and_check,
+                                ReferenceManager)
+from calico.felix.fiptables import DispatchChains, ProfileManager
 from calico.felix.frules import (CHAIN_TO_PREFIX, profile_to_chain_name,
                                  CHAIN_FROM_PREFIX)
 from calico.felix.futils import FailedSystemCall
 
 _log = logging.getLogger(__name__)
+
+OUR_HOSTNAME = socket.gethostname()
+
+
+class EndpointManager(ReferenceManager):
+    def __init__(self, config, tag_mgr, v4_updater, v6_updater,
+                 dispatch_chains, profile_manager):
+        super(EndpointManager, self).__init__()
+
+        # Peers/utility classes.
+        self.config = config
+        self.tag_mgr = tag_mgr
+        self.v4_updater = v4_updater
+        self.v6_updater = v6_updater
+        self.iptables_updaters = {
+            4: v4_updater,
+            6: v6_updater,
+        }
+        self.dispatch_chains = dispatch_chains
+        self.profile_mgr = profile_manager
+
+        # State
+        self.endpoints_by_id = {}
+        self.endpoint_id_by_iface_name = {}
+        self.interfaces = {}
+
+    def _create(self, object_id):
+        return LocalEndpoint(self.config,
+                             self.iptables_updaters,
+                             self.dispatch_chains,
+                             self.profile_mgr)
+
+    def _on_object_activated(self, object_id, obj):
+        ep = self.endpoints_by_id.get(object_id)
+        obj.on_endpoint_update(ep, async=True)
+        if ep:
+            iface_name = ep["name"]
+            obj.on_interface_update(self.interfaces.get(iface_name),
+                                    async=True)
+
+    @actor_event
+    def on_endpoint_update(self, endpoint_id, endpoint):
+        if self._is_active(endpoint_id):
+            self.objects_by_id[endpoint_id].on_endpoint_update(endpoint)
+        if endpoint is None:
+            # Deletion.
+            self.endpoints_by_id.pop(endpoint_id)
+            if self._is_active(endpoint_id):
+                self.decref(endpoint_id)
+        else:
+            self.endpoints_by_id[endpoint_id] = endpoint
+        if endpoint and endpoint["host"] == OUR_HOSTNAME:
+            _log.debug("Endpoint is local, ensuring it is active.")
+            if not self._is_active(endpoint_id):
+                # This will trigger _on_object_activated to pass the profile
+                # we just saved off to the endpoint.
+                self.get_and_incref(endpoint_id, async=False)
+
+    @actor_event
+    def on_interface_update(self, name, iface_state):
+        if iface_state:
+            self.interfaces[name] = iface_state
+        else:
+            self.interfaces.pop(name)
+        endpoint_id = self.endpoint_id_by_iface_name.get(name)
+        if endpoint_id and self._is_active(endpoint_id):
+            ep = self.objects_by_id[endpoint_id]
+            ep.on_interface_update(iface_state, async=True)
 
 
 class LocalEndpoint(Actor):
@@ -38,7 +108,7 @@ class LocalEndpoint(Actor):
     def __init__(self, config, iptables_updaters, dispatch_chains, profile_manager):
         super(LocalEndpoint, self).__init__()
         assert isinstance(dispatch_chains, DispatchChains)
-        assert isinstance(profile_manager, ActiveProfileManager)
+        assert isinstance(profile_manager, ProfileManager)
         self.config = config
         self.iptables_updaters = iptables_updaters
         self.dispatch_chains = dispatch_chains
@@ -73,7 +143,7 @@ class LocalEndpoint(Actor):
             self._profile = None
             if new_profile_id is not None:
                 _log.debug("Acquiring new profile %s", new_profile_id)
-                self._profile = self.profile_mgr.get_profile_and_incref(
+                self._profile = self.profile_mgr.get_and_incref(
                     new_profile_id, async=False)
                 _log.debug("Acquired new profile.")
         self.endpoint = endpoint
@@ -82,7 +152,7 @@ class LocalEndpoint(Actor):
         if old_profile_id != new_profile_id and old_profile:
             # Release the old profile now that we no longer reference it.
             _log.debug("Returning old profile %s", old_profile_id)
-            self.profile_mgr.return_profile(old_profile_id, async=False)
+            self.profile_mgr.decref(old_profile_id, async=False)
 
         _log.debug("%s finished processing update", self)
 
