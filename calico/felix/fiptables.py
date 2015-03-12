@@ -67,7 +67,7 @@ class DispatchChains(Actor):
     @actor_event
     def remove_dispatch_rule(self, iface_name):
         if iface_name in self.iface_to_ep_id:
-            self.iface_to_ep_id.pop(iface_name)
+            self.iface_to_ep_id.pop(iface_name, None)
             self._update_chains()
 
     def _update_chains(self):
@@ -137,7 +137,7 @@ class ActiveProfile(Actor):
 
         removed_tags = old_tags - new_tags
         for tag in removed_tags:
-            self._tag_to_ip_set_name.pop(tag)
+            self._tag_to_ip_set_name.pop(tag, None)
             self.tag_manager.decref(tag)
         added_tags = new_tags - old_tags
         for tag in added_tags:
@@ -334,7 +334,7 @@ class ProfileManager(ReferenceManager):
         if profile_id is not None:
             self.profiles_by_id[profile_id] = profile
         else:
-            self.profiles_by_id.pop(profile_id)
+            self.profiles_by_id.pop(profile_id, None)
         if self._is_active(profile_id):
             ap = self.objects_by_id[profile_id]
             ap.on_profile_update(profile, async=True)

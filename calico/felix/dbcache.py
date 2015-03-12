@@ -73,7 +73,7 @@ class UpdateSequencer(Actor):
         for endpoint_id, endpoint in endpoints_by_id.iteritems():
             self.endpoint_mgr.on_endpoint_update(endpoint_id, endpoint,
                                                  async=True)
-
+        # TODO: clean up unused chains.
         _log.info("Finished applying snapshot.")
 
     @actor_event
@@ -108,6 +108,5 @@ class UpdateSequencer(Actor):
         the endpoint was deleted.
         """
         _log.info("Endpoint update for %s.", endpoint_id)
-
-        self.tag_mgr.on_endpoint_update(endpoint_id, endpoint)
-        self.endpoint_mgr.on_endpoint_update(endpoint_id, endpoint)
+        self.tag_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)
+        self.endpoint_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)

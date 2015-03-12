@@ -79,7 +79,7 @@ class EndpointManager(ReferenceManager):
             self.objects_by_id[endpoint_id].on_endpoint_update(endpoint)
         if endpoint is None:
             # Deletion.
-            self.endpoints_by_id.pop(endpoint_id)
+            self.endpoints_by_id.pop(endpoint_id, None)
             if self._is_active(endpoint_id):
                 self.decref(endpoint_id)
         else:
@@ -96,7 +96,7 @@ class EndpointManager(ReferenceManager):
         if iface_state:
             self.interfaces[name] = iface_state
         else:
-            self.interfaces.pop(name)
+            self.interfaces.pop(name, None)
         endpoint_id = self.endpoint_id_by_iface_name.get(name)
         if endpoint_id and self._is_active(endpoint_id):
             ep = self.objects_by_id[endpoint_id]

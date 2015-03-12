@@ -170,7 +170,7 @@ class ReferenceManager(Actor):
         Asks the object to remove itself.  Queues a callback to
         do our cleanup.
         """
-        obj = self.objects_by_id.pop(dead_object_id)
+        obj = self.objects_by_id.pop(dead_object_id, None)
         self.ref_counts_by_id.pop(dead_object_id)
         f = obj.on_unreferenced(async=True)
         self.cleanup_futures[dead_object_id] = f

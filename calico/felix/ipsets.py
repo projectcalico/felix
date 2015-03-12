@@ -79,7 +79,7 @@ class TagManager(ReferenceManager):
 
         if tags is None:
             _log.info("Tags for profile %s deleted", profile_id)
-            self.tags_by_id.pop(profile_id)
+            self.tags_by_id.pop(profile_id, None)
         else:
             self.tags_by_id[profile_id] = tags
 
@@ -142,7 +142,7 @@ class TagManager(ReferenceManager):
                         # TODO: IPv6
                         ipset = self.objects_by_id[tag]
                         ipset.remove_member(ip, async=True)
-            self.endpoints_by_id.pop(endpoint_id)
+            self.endpoints_by_id.pop(endpoint_id, None)
         else:
             _log.info("Endpoint %s update received.", endpoint_id)
             new_prof_id = endpoint["profile_id"]
