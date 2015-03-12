@@ -203,6 +203,10 @@ class IpsetUpdater(Actor):
         State loaded from ipset command.  None if we haven't loaded
         yet or the set doesn't exist.
         """
+        self.dirty = True
+        """
+        Flag to tell the _on_batch_processed method that a sync is reuired.
+        """
 
         self._load_from_ipset(async=True)
 
@@ -210,14 +214,16 @@ class IpsetUpdater(Actor):
     def replace_members(self, members):
         _log.info("Replacing members of ipset %s", self.name)
         assert isinstance(members, set), "Expected members to be a set"
-        self.members = members
-        self._sync_to_ipset()
+        if self.programmed_members != members:
+            self.members = members
+            self.dirty = True
 
     @actor_event
     def add_member(self, member):
         _log.info("Adding member %s to ipset %s", member, self.name)
-        self.members.add(member)
-        self._sync_to_ipset()
+        if member not in self.members:
+            self.members.add(member)
+            self.dirty = True
 
     @actor_event
     def remove_member(self, member):
@@ -227,7 +233,7 @@ class IpsetUpdater(Actor):
         except KeyError:
             _log.info("%s was not in ipset %s", member, self.name)
         else:
-            self._sync_to_ipset()
+            self.dirty = True
 
     @actor_event
     def _load_from_ipset(self):
@@ -245,6 +251,41 @@ class IpsetUpdater(Actor):
             # <one member per line>
             lines = output.splitlines()
             self.programmed_members = set(lines[lines.index("Members:") + 1:])
+
+    def _filter_message_batch(self, batch):
+        # Look backwards in the batch for a replace_members call, which trumps
+        # any other add/remove calls.
+        for pos in xrange(len(batch)-1, -1, -1):
+            msg = batch[pos]
+            if msg.partial.func == self.replace_members.func:
+                _log.debug("Batch had a replace_members call, combining.")
+                # Calls after the replace can't be combined.
+                replace_and_following_msgs = batch[pos:]
+                # Look for any _load_from_ipset calls; those can't be combined.
+                msgs_before_replace = batch[:pos]
+                load_msgs = []
+                non_load_msgs = []
+                for msg in msgs_before_replace:
+                    if msg.partial.func == self._load_from_ipset.func:
+                        load_msgs.append(msg)
+                    else:
+                        non_load_msgs.append(msg)
+                # Insert the async results for the calls that we're combining
+                # into the replace msg's list.
+                replace_results = msg.results
+                previous_results = []
+                for msg in non_load_msgs:
+                    previous_results.extend(msg.results)
+                replace_results[:0] = previous_results
+                assert len(batch) == len(replace_results) + \
+                    (len(replace_and_following_msgs) - 1) + \
+                    len(load_msgs)
+                return load_msgs + replace_and_following_msgs
+
+    def _on_batch_processed(self):
+        if self.dirty:
+            self._sync_to_ipset()
+            self.dirty = False
 
     def _sync_to_ipset(self):
         if self.programmed_members is None:
