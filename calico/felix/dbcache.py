@@ -23,9 +23,7 @@ from collections import defaultdict
 import logging
 import socket
 
-from calico.felix import futils
 from calico.felix.actor import actor_event, Actor
-from calico.felix.endpoint import LocalEndpoint
 
 _log = logging.getLogger(__name__)
 

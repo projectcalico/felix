@@ -62,8 +62,8 @@ class TagManager(ReferenceManager):
             ep = self.endpoints_by_id.get(ep_id, {})
             # TODO: IPv6
             new_members.update(map(futils.net_to_ip, ep["ipv4_nets"]))
-        # FIXME: Remove blocking call
-        active_tag.replace_members(new_members, async=True)
+        # FIXME: Remove blocking call, needed to make sure ipset is created before returning it.
+        active_tag.replace_members(new_members, async=False)
 
     @actor_event
     def on_tags_update(self, profile_id, tags):
