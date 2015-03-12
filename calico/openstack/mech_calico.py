@@ -34,7 +34,7 @@ from neutron import context as ctx
 from neutron import manager
 
 # Calico imports.
-from calico.openstack.t_zmq import CalicoTransport0MQ
+from calico.openstack.t_etcd import CalicoTransportEtcd
 
 LOG = log.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self.db = None
 
         # Use 0MQ-based transport.
-        self.transport = CalicoTransport0MQ(self, LOG)
+        self.transport = CalicoTransportEtcd(self, LOG)
 
     def initialize(self):
         self.transport.initialize()
