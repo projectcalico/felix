@@ -24,7 +24,7 @@ The main logic for Felix.
 from calico.felix.devices import InterfaceWatcher
 from calico.felix.endpoint import EndpointManager
 from calico.felix.fetcd import watch_etcd
-from calico.felix.ipsets import TagManager
+from calico.felix.ipsets import IpsetManager
 from gevent import monkey
 monkey.patch_all()
 
@@ -56,14 +56,18 @@ def _main_greenlet(config):
             4: v4_updater,
             6: v6_updater,
         }
-        tag_mgr = TagManager(config, v4_updater, v6_updater)
+        v4_ipset_mgr = IpsetManager("hash:ip", family="inet")
+        v6_ipset_mgr = IpsetManager("hash:ip", family="inet6")
+        ipset_mgrs = {
+            4: v4_ipset_mgr,
+            6: v6_ipset_mgr,
+        }
         profile_manager = ProfileManager(iptables_updaters,
-                                         tag_mgr)
+                                         ipset_mgrs)
         dispatch_chains = DispatchChains(config, iptables_updaters)
-        endpoint_manager = EndpointManager(config, tag_mgr,
-                                           v4_updater, v6_updater,
+        endpoint_manager = EndpointManager(config, iptables_updaters,
                                            dispatch_chains, profile_manager)
-        update_sequencer = UpdateSequencer(config, tag_mgr,
+        update_sequencer = UpdateSequencer(config, ipset_mgrs,
                                            v4_updater, v6_updater,
                                            dispatch_chains, profile_manager,
                                            endpoint_manager)
@@ -72,7 +76,8 @@ def _main_greenlet(config):
         _log.info("Starting actors.")
         profile_manager.start()
         dispatch_chains.start()
-        tag_mgr.start()
+        v4_ipset_mgr.start()
+        v6_ipset_mgr.start()
         endpoint_manager.start()
         update_sequencer.start()
         v4_updater.start()
@@ -81,7 +86,8 @@ def _main_greenlet(config):
         greenlets = [profile_manager.greenlet,
                      dispatch_chains.greenlet,
                      update_sequencer.greenlet,
-                     tag_mgr.greenlet,
+                     v4_ipset_mgr.greenlet,
+                     v6_ipset_mgr.greenlet,
                      endpoint_manager.greenlet,
                      v4_updater.greenlet,
                      v6_updater.greenlet,
@@ -98,13 +104,11 @@ def _main_greenlet(config):
 
         # Start polling for updates.
         _log.info("Starting polling for interface and etcd updates.")
-        iface_watcher.watch_interfaces(async=True)  # Never returns, must be
-                                                    # async!
+        iface_watcher.watch_interfaces(async=True)  # Never returns, async!
         greenlets.append(gevent.spawn(watch_etcd, config, update_sequencer))
 
         # Wait for something to fail.
         # TODO: Maybe restart failed greenlets.
-        _log.info("Waiting for something to fail...")
         stopped_greenlets_iter = gevent.iwait(greenlets)
         stopped_greenlet = next(stopped_greenlets_iter)
         try:

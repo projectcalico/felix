@@ -31,13 +31,13 @@ OUR_HOSTNAME = socket.gethostname()
 
 
 class UpdateSequencer(Actor):
-    def __init__(self, config, tag_mgr, v4_updater, v6_updater,
+    def __init__(self, config, ipsets_mgrs, v4_updater, v6_updater,
                  dispatch_chains, profile_manager, endpoint_manager):
         super(UpdateSequencer, self).__init__()
 
         # Peers/utility classes.
         self.config = config
-        self.tag_mgr = tag_mgr
+        self.ipsets_mgrs = ipsets_mgrs
         self.endpoint_mgr = endpoint_manager
         self.v4_updater = v4_updater
         self.v6_updater = v6_updater
@@ -63,10 +63,12 @@ class UpdateSequencer(Actor):
             self.profile_mgr.on_rules_update(profile_id, rules, async=True)
         _log.info("Applying snapshot. STAGE 1b: tags.")
         for profile_id, tags in tags_by_prof_id.iteritems():
-            self.tag_mgr.on_tags_update(profile_id, tags, async=True)
+            for ipset_mgr in self.ipsets_mgrs.values():
+                ipset_mgr.on_tags_update(profile_id, tags, async=True)
         _log.info("Applying snapshot. STAGE 1c: endpoints->tag mgr.")
         for endpoint_id, endpoint in endpoints_by_id.iteritems():
-            self.tag_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)
+            for ipset_mgr in self.ipsets_mgrs.values():
+                ipset_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)
 
         # Step 2: fire in update events into the endpoint manager, which will
         # recursively trigger activation of profiles and tags.

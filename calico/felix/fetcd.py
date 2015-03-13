@@ -120,7 +120,6 @@ def watch_etcd(config, update_sequencer):
         # we get an old modifiedIndex, make sure we always increase the index.
         last_etcd_index = max(response.modifiedIndex, last_etcd_index + 1)
 
-        # TODO: we fire-and-forget these messages...
         # TODO: regex parsing getting messy.
         profile_id, rules = parse_if_rules(response)
         if profile_id:

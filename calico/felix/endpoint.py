@@ -38,19 +38,13 @@ OUR_HOSTNAME = socket.gethostname()
 
 
 class EndpointManager(ReferenceManager):
-    def __init__(self, config, tag_mgr, v4_updater, v6_updater,
-                 dispatch_chains, profile_manager):
+    def __init__(self, config, iptables_updaters, dispatch_chains,
+                 profile_manager):
         super(EndpointManager, self).__init__()
 
         # Peers/utility classes.
         self.config = config
-        self.tag_mgr = tag_mgr
-        self.v4_updater = v4_updater
-        self.v6_updater = v6_updater
-        self.iptables_updaters = {
-            4: v4_updater,
-            6: v6_updater,
-        }
+        self.iptables_updaters = iptables_updaters
         self.dispatch_chains = dispatch_chains
         self.profile_mgr = profile_manager
 
@@ -242,8 +236,6 @@ class LocalEndpoint(Actor):
     def _update_chains(self):
         futures = []
         for ip_version, updater in self.iptables_updaters.iteritems():
-            if ip_version == 6:
-                continue # TODO IPv6
             chains, updates = get_endpoint_rules(
                 self._suffix,
                 self._iface_name,
@@ -335,7 +327,7 @@ def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     from_chain = ["--flush %s" % from_chain_name]
     if ip_version == 6:
         # In ipv6 only, allows all ICMP traffic from this endpoint to anywhere.
-        from_chain.append("--append %s --protocol ipv6-icmp")
+        from_chain.append("--append %s --protocol ipv6-icmp" % from_chain_name)
 
     # Conntrack rules.
     from_chain.append("--append %s --match conntrack --ctstate INVALID "
