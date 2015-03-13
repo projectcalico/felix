@@ -21,6 +21,7 @@ Our cache of the etcd database.
 """
 import logging
 import socket
+import gevent
 
 from calico.felix.actor import actor_event, Actor
 
@@ -47,6 +48,7 @@ class UpdateSequencer(Actor):
         }
         self.dispatch_chains = dispatch_chains
         self.profile_mgr = profile_manager
+        self._op_count = 0
 
     @actor_event
     def apply_snapshot(self, rules_by_prof_id, tags_by_prof_id,
@@ -61,14 +63,17 @@ class UpdateSequencer(Actor):
         _log.info("Applying snapshot. STAGE 1a: rules.")
         for profile_id, rules in rules_by_prof_id.iteritems():
             self.profile_mgr.on_rules_update(profile_id, rules, async=True)
+            self._maybe_yield()
         _log.info("Applying snapshot. STAGE 1b: tags.")
         for profile_id, tags in tags_by_prof_id.iteritems():
             for ipset_mgr in self.ipsets_mgrs.values():
                 ipset_mgr.on_tags_update(profile_id, tags, async=True)
+                self._maybe_yield()
         _log.info("Applying snapshot. STAGE 1c: endpoints->tag mgr.")
         for endpoint_id, endpoint in endpoints_by_id.iteritems():
             for ipset_mgr in self.ipsets_mgrs.values():
                 ipset_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)
+                self._maybe_yield()
 
         # Step 2: fire in update events into the endpoint manager, which will
         # recursively trigger activation of profiles and tags.
@@ -80,6 +85,12 @@ class UpdateSequencer(Actor):
         _log.info("Applying snapshot. DONE. %s rules, %s tags, "
                   "%s endpoints", len(rules_by_prof_id), len(tags_by_prof_id),
                   len(endpoints_by_id))
+
+    def _maybe_yield(self):
+        self._op_count += 1
+        if self._op_count >= 10000:
+            gevent.sleep()
+            self._op_count = 0
 
     @actor_event
     def on_rules_update(self, profile_id, rules):

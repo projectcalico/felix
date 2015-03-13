@@ -100,6 +100,7 @@ class DispatchChains(Actor):
         updates.extend(["--append %s --jump DROP" % CHAIN_TO_ENDPOINT,
                         "--append %s --jump DROP" % CHAIN_FROM_ENDPOINT])
         for ip_version, updater in self.iptables_updaters.iteritems():
+            # TODO Handle failure to program chain
             updater.apply_updates("filter",
                                   [CHAIN_TO_ENDPOINT,
                                    CHAIN_FROM_ENDPOINT],
@@ -134,6 +135,7 @@ class ActiveProfile(Actor):
         if self._programmed:
             return
         else:
+            # TODO Handle failure to program chain
             self._update_chains()
 
     @actor_event
@@ -158,6 +160,7 @@ class ActiveProfile(Actor):
                 self._tag_to_ip_set_name[ip_version][tag] = ipset.name
 
         self._profile = profile
+        # TODO Handle failure to program chain
         self._update_chains()
 
     @actor_event
