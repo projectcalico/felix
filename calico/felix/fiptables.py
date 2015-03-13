@@ -24,11 +24,13 @@ import logging
 from subprocess import CalledProcessError
 import itertools
 import time
+import random
+import gevent
 import re
 from types import StringTypes
 
 from calico.felix.actor import Actor, actor_event, wait_and_check, \
-    ReferenceManager
+    ReferenceManager, ResultOrExc
 from calico.felix.frules import (rules_to_chain_rewrite_lines,
                                  profile_to_chain_name, CHAIN_TO_ENDPOINT,
                                  CHAIN_FROM_ENDPOINT)
@@ -230,6 +232,8 @@ class ActiveProfile(Actor):
 
 
 _correlators = ("ipt-%s" % ii for ii in itertools.count())
+MAX_IPT_RETRIES = 10
+MAX_IPT_BACKOFF = 0.2
 
 
 class IptablesUpdater(Actor):
@@ -242,7 +246,7 @@ class IptablesUpdater(Actor):
     each other.  Use one instance of this class.
     """
 
-    queue_size = 1000
+    queue_size = 40
     batch_delay = 0.1
 
     def __init__(self, ip_version=4):
@@ -254,7 +258,7 @@ class IptablesUpdater(Actor):
             self.cmd_name = "ip6tables-restore"
 
         self.chains_to_flush = defaultdict(set)
-        self.next_update_by_table_chain = defaultdict(dict)
+        self.batched_updates_by_table_chain = defaultdict(dict)
 
     @actor_event
     def apply_updates(self, table_name, chains_to_flush, update_calls,
@@ -269,32 +273,85 @@ class IptablesUpdater(Actor):
                e.g. ["-A chain_name -j ACCEPT"] If rewriting a
                whole chain, start with "-F chain_name" to flush
                the chain.
-        :returns an AsyncResult that may raise CalledProcessError
-                 if a problem occurred.
+        :returns CalledProcessError if a problem occurred.
         """
-
+        # We actually apply the changes in _finish_msg_batch().  Index the
+        # changes by table and chain.
         self.chains_to_flush[table_name].update(chains_to_flush)
         for chain in chains_to_flush:
-            self.next_update_by_table_chain[table_name][chain] = []
+            # Even if a previous update in this batch added some updates to
+            # this chain, this new update flushes the chain so we discard the
+            # updates.
+            self.batched_updates_by_table_chain[table_name][chain] = []
         for call in update_calls:
             # FIXME: extracting chain name is ugly.
             chain_name = re.findall(r'^\s*\S+\s+(\S+)', call)[0]
-            chains = self.next_update_by_table_chain[table_name]
-            if not chains.get(chain_name):
+            chains = self.batched_updates_by_table_chain[table_name]
+            if chains.get(chain_name) is None:
+                # Note: chain may be explicitly set to None to indicate
+                # deletion.  This will resurrect it if so.
                 chains[chain_name] = []
             chains[chain_name].append(call)
 
     @actor_event
     def delete_chain(self, table_name, chain_name):
+        # We actually apply the changes in _finish_msg_batch().  Index the
+        # changes by table and chain.
         _log.info("Deleting chain %s:%s", table_name, chain_name)
-        self.next_update_by_table_chain[table_name][chain_name] = None
+        # Put an explicit None in the index to mark it for deletion.
         self.chains_to_flush.add(chain_name)
+        self.batched_updates_by_table_chain[table_name][chain_name] = None
+
+    def _execute_current_batch(self):
+
+        updates_by_table_chain = self.batched_updates_by_table_chain
+        input_lines = self._calculate_ipt_input(updates_by_table_chain)
+        self._execute_iptables(input_lines)
+
+    def _start_msg_batch(self, batch):
+        self._reset_batched_work()
 
     def _finish_msg_batch(self, batch, results):
+        start = time.time()
 
-        # Run iptables-restore in noflush mode so that it doesn't
-        # blow away all the tables we're not touching.
+        try:
+            # Fast path: try executing the whole batch as one transaction.
+            self._execute_current_batch()
+        except CalledProcessError:
+            _log.error("Combined iptables batch commit failed, running "
+                       "updates sequentially to distribute errors.")
+            for idx, msg in enumerate(batch):
+                # Execute each message in its own batch.
+                _log.debug("Executing message %s: %s.", idx, msg.partial)
+                self._reset_batched_work()
+                try:
+                    # Re-execute the message, which will apply only its work
+                    # to the current batch.
+                    result = msg.partial()
+                    try:
+                        self._execute_current_batch()
+                    except CalledProcessError:
+                        if not msg.partial.keywords.get("suppress_exc", False):
+                            raise
+                except BaseException as e:
+                    _log.exception("Retry of message %s failed: %s", idx,
+                                   msg.partial)
+                    results[idx] = ResultOrExc(None, e)
+                else:
+                    _log.debug("Retry of message %s succeeded: %s", idx)
+                    results[idx] = ResultOrExc(result, None)
+        finally:
+            # Always leave the batch clean.
+            self._reset_batched_work()
 
+        end = time.time()
+        _log.debug("Batch time: %.2f %s", end - start, len(batch))
+
+    def _reset_batched_work(self):
+        self.chains_to_flush = defaultdict(set)
+        self.batched_updates_by_table_chain = defaultdict(dict)
+
+    def _calculate_ipt_input(self, updates_by_table_chain):
         # Valid input looks like this.
         #
         # *table
@@ -305,46 +362,80 @@ class IptablesUpdater(Actor):
         # COMMIT
         #
         # The chains are created if they don't exist.
-
-        start = time.time()
-        updates = []
-        for table, chains in self.next_update_by_table_chain.iteritems():
-            updates.append("*%s" % table)
+        input_lines = []
+        for table, chains in updates_by_table_chain.iteritems():
+            input_lines.append("*%s" % table)
             for c in self.chains_to_flush[table]:
-                updates.append(":%s -" % c if isinstance(c, StringTypes)
-                                           else ":%s %s" % c)
+                input_lines.append(":%s -" % c if isinstance(c, StringTypes)
+                               else ":%s %s" % c)
             for chain_name, chain_updates in chains.iteritems():
                 if chain_updates is None:
                     # Delete the chain
-                    updates.append("--delete-chain %s" % chain_name)
+                    input_lines.append("--delete-chain %s" % chain_name)
                 else:
-                    updates.extend(chain_updates)
-            updates.append("COMMIT\n")
+                    input_lines.extend(chain_updates)
+            input_lines.append("COMMIT\n")
+        return input_lines
 
-        restore_input = "\n".join(updates)
+    def _execute_iptables(self, input_lines):
+        """
+        Runs ip(6)tables-restore with the given input.  Retries iff
+        the COMMIT fails.
 
-        _log.debug("%s input:\n%s", self.cmd_name, restore_input)
-        cmd = [self.cmd_name, "--noflush"]
-        # TODO: retry if commit fails (due to concurrent use).
-        iptables_proc = subprocess.Popen(cmd,
-                                         stdin=subprocess.PIPE,
-                                         stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE)
-        out, err = iptables_proc.communicate(restore_input)
-        rc = iptables_proc.wait()
-        _log.debug("%s completed with RC=%s", self.cmd_name, rc)
-        if rc != 0:
-            _log.error("Failed to run %s.\nOutput:\n%s\n"
-                       "Error:\n%s\nInput was:\n%s",
-                       self.cmd_name, out, err, restore_input)
-            # if not suppress_exc:
-            #     raise CalledProcessError(cmd=cmd, returncode=rc)
+        :raises CalledProcessError: if the command fails on a non-commit
+            line or if it repeatedly fails and retries are exhausted.
+        """
+        backoff = 0.01
+        num_tries = 0
+        success = False
+        while not success:
+            input_str = "\n".join(input_lines)
+            _log.debug("%s input:\n%s", self.cmd_name, input_str)
 
-        end = time.time()
-        _log.debug("Batch time: %.2f %s", end - start, len(batch))
-        self.chains_to_flush = defaultdict(set)
-        self.next_update_by_table_chain = defaultdict(dict)
-
+            # Run iptables-restore in noflush mode so that it doesn't
+            # blow away all the tables we're not touching.
+            cmd = [self.cmd_name, "--noflush"]
+            iptables_proc = subprocess.Popen(cmd,
+                                             stdin=subprocess.PIPE,
+                                             stdout=subprocess.PIPE,
+                                             stderr=subprocess.PIPE)
+            out, err = iptables_proc.communicate(input_str)
+            rc = iptables_proc.wait()
+            _log.debug("%s completed with RC=%s", self.cmd_name, rc)
+            num_tries += 1
+            if rc == 0:
+                success = True
+            else:
+                # Parse the output to determine if error is retryable.
+                _log.error("Failed to run %s.\nOutput:\n%s\n"
+                           "Error:\n%s\nInput was:\n%s",
+                           self.cmd_name, out, err, input_str)
+                match = re.search(r"line (\d+) failed", err)
+                if match:
+                    # Have a line number, work out if this was a commit
+                    # failure, which is caused by concurrent access and is
+                    # retryable.
+                    line_number = int(match.group(1))
+                    _log.debug("%s failure on line %s", self.cmd_name,
+                               line_number)
+                    line_index = line_number - 1
+                    offending_line = input_lines[line_index]
+                    if (num_tries < MAX_IPT_RETRIES and
+                            offending_line.strip() == "COMMIT"):
+                        _log.info("Failure occurred on COMMIT line, error is "
+                                  "retryable. Retry in %.2fs", backoff)
+                        gevent.sleep(backoff)
+                        if backoff > MAX_IPT_BACKOFF:
+                            backoff = MAX_IPT_BACKOFF
+                        backoff *= (1.5 + random.random())
+                    elif num_tries >= MAX_IPT_RETRIES:
+                        _log.error("Out of retries.  Error occurred on line "
+                                   "%s: %r", line_number, offending_line)
+                        raise CalledProcessError(cmd=cmd, returncode=rc)
+                    else:
+                        _log.error("Unrecoverable error on line %s: %r",
+                                   line_number, offending_line)
+                        raise CalledProcessError(cmd=cmd, returncode=rc)
 
 
 class ProfileManager(ReferenceManager):

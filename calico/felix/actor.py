@@ -17,6 +17,7 @@ DEFAULT_QUEUE_SIZE = 10
 
 
 Message = collections.namedtuple("Message", ("partial", "results"))
+ResultOrExc = collections.namedtuple("ResultOrExc", ("result", "exception"))
 
 
 _refs = {}
@@ -134,9 +135,9 @@ class Actor(object):
                         result = msg.partial()
                     except BaseException as e:
                         _log.exception("Exception processing %s", msg)
-                        results.append((None, e))
+                        results.append(ResultOrExc(None, e))
                     else:
-                        results.append((result, None))
+                        results.append(ResultOrExc(result, None))
                 try:
                     self._finish_msg_batch(batch, results)
                 except BaseException as e:
@@ -180,11 +181,14 @@ class Actor(object):
         Intended to be overridden.  This implementation does nothing.
 
         Exceptions raised by this method are propagated to all messages in the
-        batch, overriding the existing results.
+        batch, overriding the existing results.  It is recommended that the
+        implementation catches appropriate exceptions and maps them back
+        to the correct entry in results.
 
-        :param list[tuple] results: Pairs of (result, exception) representing
-            the result of each message-processing function.  Only one of the
-            values is set.
+        :param list[ResultOrExc] results: Pairs of (result, exception)
+            representing the result of each message-processing function.
+            Only one of the values is set.  Updates to the list alter the
+            result send to any waiting listeners.
         :param list[Message] batch: The input batch, always the same length as
             results.
         """
