@@ -250,7 +250,7 @@ class IpsetUpdater(Actor):
             lines = output.splitlines()
             self.programmed_members = set(lines[lines.index("Members:") + 1:])
 
-    def _filter_message_batch(self, batch):
+    def _pre_filter_msg_batch(self, batch):
         # Look backwards in the batch for a replace_members call, which trumps
         # any other add/remove calls.
         for pos in xrange(len(batch)-1, -1, -1):
@@ -280,7 +280,7 @@ class IpsetUpdater(Actor):
                     len(load_msgs)
                 return load_msgs + replace_and_following_msgs
 
-    def _on_batch_processed(self, batch, results):
+    def _post_process_msg_batch(self, batch, results):
         if self.dirty:
             self._sync_to_ipset()
             self.dirty = False

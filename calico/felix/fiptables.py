@@ -77,7 +77,7 @@ class DispatchChains(Actor):
             self.iface_to_ep_id.pop(iface_name, None)
             self.dirty = True
 
-    def _on_batch_processed(self, batch, results):
+    def _post_process_msg_batch(self, batch, results):
         self._update_chains()
         self.dirty = False
 
@@ -290,7 +290,7 @@ class IptablesUpdater(Actor):
         self.next_update_by_table_chain[table_name][chain_name] = None
         self.chains_to_flush.add(chain_name)
 
-    def _on_batch_processed(self, batch, results):
+    def _post_process_msg_batch(self, batch, results):
 
         # Run iptables-restore in noflush mode so that it doesn't
         # blow away all the tables we're not touching.

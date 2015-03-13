@@ -122,7 +122,7 @@ class Actor(object):
                     batch.append(self._event_queue.get_nowait())
 
                 results = []
-                filtered_batch = self._filter_message_batch(batch)
+                filtered_batch = self._pre_filter_msg_batch(batch)
                 for msg in filtered_batch:
                     try:
                         result = msg.partial()
@@ -132,12 +132,11 @@ class Actor(object):
                     else:
                         results.append((result, None))
                 try:
-                    self._on_batch_processed(batch, results)
+                    self._post_process_msg_batch(batch, results)
                 except BaseException as e:
-                    # Take over the final result.
-                    # FIXME: Better approach?
+                    # Report failure to all.
                     _log.exception("_on_batch_processed failed.")
-                    results[-1] = (None, e)
+                    results = [(None, e)] * len(results)
 
                 for msg, (result, exc) in zip(batch, results):
                     for future in msg.results:
@@ -149,12 +148,16 @@ class Actor(object):
             _log.exception("Exception killed %s", self)
             raise
 
-    def _filter_message_batch(self, batch):
+    def _pre_filter_msg_batch(self, batch):
         """
         Called before processing a batch of messages to give subclasses
         a chance to filter the batch.  Implementations must ensure that
         every AsyncResult in the batch is correctly set.  Usually, that
         means combining them into one list.
+
+        It is usually easier to build up a batch of changes to make in the
+        @actor_event-decorated methods and then process them in
+        _post_process_msg_batch().
 
         Intended to be overridden.  This implementation simply returns the
         input batch.
@@ -163,12 +166,21 @@ class Actor(object):
         """
         return batch
 
-    def _on_batch_processed(self, batch, results):
+    def _post_process_msg_batch(self, batch, results):
         """
         Called after a batch of events have been processed from the queue
         before results are set.
 
         Intended to be overridden.  This implementation does nothing.
+
+        Exceptions raised by this method are propagated to all messages in the
+        batch, overriding the existing results.
+
+        :param list[tuple] results: Pairs of (result, exception) representing
+            the result of each message-processing function.  Only one of the
+            values is set.
+        :param list[Message] batch: The input batch, always the same length as
+            results.
         """
         pass
 
