@@ -108,7 +108,7 @@ def install_global_rules(config, v4_updater, v6_updater):
             "--delete FORWARD --jump %s" % CHAIN_FORWARD
         ], suppress_exc=True, async=False)
 
-        # FIXME: This flushes the FROM/TO_ENDPOINT chains.
+        # FIXME: This flushes the FROM/TO_ENDPOINT chains. (Breaks graceful.)
         req_chains = [CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,
                       CHAIN_INPUT, CHAIN_FORWARD]
 
