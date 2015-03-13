@@ -30,7 +30,7 @@ import re
 from types import StringTypes
 
 from calico.felix.actor import Actor, actor_event, wait_and_check, \
-    ReferenceManager, ResultOrExc
+    ReferenceManager, ResultOrExc, SplitBatchAndRetry
 from calico.felix.frules import (rules_to_chain_rewrite_lines,
                                  profile_to_chain_name, CHAIN_TO_ENDPOINT,
                                  CHAIN_FROM_ENDPOINT)
@@ -246,7 +246,7 @@ class IptablesUpdater(Actor):
     each other.  Use one instance of this class.
     """
 
-    queue_size = 40
+    queue_size = 1000
     batch_delay = 0.1
 
     def __init__(self, ip_version=4):
@@ -310,38 +310,27 @@ class IptablesUpdater(Actor):
 
     def _start_msg_batch(self, batch):
         self._reset_batched_work()
+        return batch
 
     def _finish_msg_batch(self, batch, results):
         start = time.time()
 
         try:
-            # Fast path: try executing the whole batch as one transaction.
             self._execute_current_batch()
-        except CalledProcessError:
-            _log.error("Combined iptables batch commit failed, running "
-                       "updates sequentially to distribute errors.")
-            for idx, msg in enumerate(batch):
-                # Execute each message in its own batch.
-                _log.debug("Executing message %s: %s.", idx, msg.partial)
-                self._reset_batched_work()
-                try:
-                    # Re-execute the message, which will apply only its work
-                    # to the current batch.
-                    result = msg.partial()
-                    try:
-                        self._execute_current_batch()
-                    except CalledProcessError:
-                        if not msg.partial.keywords.get("suppress_exc", False):
-                            raise
-                except BaseException as e:
-                    _log.exception("Retry of message %s failed: %s", idx,
-                                   msg.partial)
-                    results[idx] = ResultOrExc(None, e)
+        except CalledProcessError as e:
+            if len(batch) == 1:
+                _log.error("Unrecoverable %s failure. RC=%s", self.cmd_name,
+                           e.returncode)
+                if batch[0].partial.keywords.get("suppress_exc"):
+                    final_result = ResultOrExc(None, None)
                 else:
-                    _log.debug("Retry of message %s succeeded: %s", idx)
-                    results[idx] = ResultOrExc(result, None)
+                    final_result = ResultOrExc(None, e)
+                results[0] = final_result
+            else:
+                _log.error("Unrecoverable error from a combined batch, "
+                           "splitting the batch to narrow down culprit.")
+                raise SplitBatchAndRetry()
         finally:
-            # Always leave the batch clean.
             self._reset_batched_work()
 
         end = time.time()
@@ -431,11 +420,10 @@ class IptablesUpdater(Actor):
                     elif num_tries >= MAX_IPT_RETRIES:
                         _log.error("Out of retries.  Error occurred on line "
                                    "%s: %r", line_number, offending_line)
-                        raise CalledProcessError(cmd=cmd, returncode=rc)
                     else:
                         _log.error("Unrecoverable error on line %s: %r",
                                    line_number, offending_line)
-                        raise CalledProcessError(cmd=cmd, returncode=rc)
+                raise CalledProcessError(cmd=cmd, returncode=rc)
 
 
 class ProfileManager(ReferenceManager):

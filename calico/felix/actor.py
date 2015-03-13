@@ -128,34 +128,60 @@ class Actor(object):
                     # never fail.
                     batch.append(self._event_queue.get_nowait())
 
-                results = []
-                filtered_batch = self._pre_filter_msg_batch(batch)
-                for msg in filtered_batch:
-                    try:
-                        result = msg.partial()
-                    except BaseException as e:
-                        _log.exception("Exception processing %s", msg)
-                        results.append(ResultOrExc(None, e))
-                    else:
-                        results.append(ResultOrExc(result, None))
-                try:
-                    self._finish_msg_batch(batch, results)
-                except BaseException as e:
-                    # Report failure to all.
-                    _log.exception("_on_batch_processed failed.")
-                    results = [(None, e)] * len(results)
-
-                for msg, (result, exc) in zip(batch, results):
-                    for future in msg.results:
-                        if exc is not None:
-                            future.set_exception(exc)
+                # Start with one batch but we may get asked to split it if
+                # an error occurs.
+                assert batch
+                batches = [batch]
+                num_splits = 0
+                while batches:
+                    batch = batches.pop(0)
+                    batch = self._start_msg_batch(batch)
+                    results = []
+                    for msg in batch:
+                        try:
+                            result = msg.partial()
+                        except BaseException as e:
+                            _log.exception("Exception processing %s", msg)
+                            results.append(ResultOrExc(None, e))
                         else:
-                            future.set(result)
+                            results.append(ResultOrExc(result, None))
+                    try:
+                        self._finish_msg_batch(batch, results)
+                    except SplitBatchAndRetry:
+                        _log.warn("Splitting batch to retry.")
+                        if len(batch) <= 1:
+                            # Could cause infinite loop.
+                            raise AssertionError("Batch too small to split")
+                        split_point = len(batch) // 2
+                        batch_a = batch[:split_point]
+                        batch_b = batch[split_point:]
+                        if batches:
+                            next_batch = batches[0]
+                            next_batch[:0] = batch_b
+                        else:
+                            batches[:0] = [batch_b]
+                        batches[:0] = [batch_a]
+                        num_splits += 1
+                        continue
+                    except BaseException as e:
+                        # Report failure to all.
+                        _log.exception("_on_batch_processed failed.")
+                        results = [(None, e)] * len(results)
+
+                    for msg, (result, exc) in zip(batch, results):
+                        for future in msg.results:
+                            if exc is not None:
+                                future.set_exception(exc)
+                            else:
+                                future.set(result)
+                if num_splits > 0:
+                    _log.warn("Split batches complete. Number of splits: %s",
+                              num_splits)
         except:
             _log.exception("Exception killed %s", self)
             raise
 
-    def _pre_filter_msg_batch(self, batch):
+    def _start_msg_batch(self, batch):
         """
         Called before processing a batch of messages to give subclasses
         a chance to filter the batch.  Implementations must ensure that
@@ -193,6 +219,15 @@ class Actor(object):
             results.
         """
         pass
+
+
+class SplitBatchAndRetry(Exception):
+    """
+    Exception that may be raised by _finish_msg_batch to cause the
+    batch of messages to be split, each message to be re-executed and
+    then the smaller batches delivered to _finish_msg_batch() again.
+    """
+    pass
 
 
 def actor_event(fn):
