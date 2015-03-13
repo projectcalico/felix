@@ -96,7 +96,13 @@ class TrackedAsyncResult(AsyncResult):
 class Actor(object):
 
     queue_size = DEFAULT_QUEUE_SIZE
+    """Maximum length of the event queue before caller will be blocked."""
+
     batch_delay = None
+    """
+    Delay in seconds imposed after receiving first message before processing
+    the messages in a batch.  Higher values encourage batching.
+    """
 
     def __init__(self, queue_size=None):
         queue_size = queue_size or self.queue_size
@@ -132,7 +138,7 @@ class Actor(object):
                     else:
                         results.append((result, None))
                 try:
-                    self._post_process_msg_batch(batch, results)
+                    self._finish_msg_batch(batch, results)
                 except BaseException as e:
                     # Report failure to all.
                     _log.exception("_on_batch_processed failed.")
@@ -166,7 +172,7 @@ class Actor(object):
         """
         return batch
 
-    def _post_process_msg_batch(self, batch, results):
+    def _finish_msg_batch(self, batch, results):
         """
         Called after a batch of events have been processed from the queue
         before results are set.
