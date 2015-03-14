@@ -7,6 +7,7 @@ import weakref
 import sys
 import gevent
 import os
+import traceback
 from gevent.event import AsyncResult
 from gevent.queue import Queue
 
@@ -109,6 +110,8 @@ class Actor(object):
         queue_size = queue_size or self.queue_size
         self._event_queue = Queue(maxsize=queue_size)
         self.greenlet = gevent.Greenlet(self._loop)
+        self._op_count = 0
+        self._current_msg_name = None
 
     def start(self):
         assert not self.greenlet, "Already running"
@@ -138,6 +141,7 @@ class Actor(object):
                     batch = self._start_msg_batch(batch)
                     results = []
                     for msg in batch:
+                        self._current_msg_name = msg.partial.func.__name__
                         try:
                             result = msg.partial()
                         except BaseException as e:
@@ -145,6 +149,8 @@ class Actor(object):
                             results.append(ResultOrExc(None, e))
                         else:
                             results.append(ResultOrExc(result, None))
+                        finally:
+                            self._current_msg_name = None
                     try:
                         self._finish_msg_batch(batch, results)
                     except SplitBatchAndRetry:
@@ -220,6 +226,19 @@ class Actor(object):
         """
         pass
 
+    def _maybe_yield(self):
+        self._op_count += 1
+        if self._op_count >= 10000:
+            gevent.sleep()
+            self._op_count = 0
+
+    def __str__(self):
+        return self.__class__.__name__ + "<queue_len=%s,live=%s,msg=%s>" % (
+            self._event_queue.qsize(),
+            bool(self.greenlet),
+            self._current_msg_name
+        )
+
 
 class SplitBatchAndRetry(Exception):
     """
@@ -234,15 +253,19 @@ def actor_event(fn):
     method_name = fn.__name__
     @functools.wraps(fn)
     def queue_fn(self, *args, **kwargs):
+        # Police that cross-actor calls must be explicit about blocking.
+        on_same_greenlet = self.greenlet == gevent.getcurrent()
         async_set = "async" in kwargs
         async = kwargs.pop("async", False)
-        local_call = not async and self.greenlet == gevent.getcurrent()
-        if not local_call and not async and _log.isEnabledFor(logging.DEBUG):
-            import traceback, os
+        assert not (on_same_greenlet and async), \
+            "Async call to own queue, deadlocks if queue full."
+        if (not on_same_greenlet and
+                not async and
+                _log.isEnabledFor(logging.DEBUG)):
             calling_file,  line_no, func, _ = traceback.extract_stack()[-2]
             calling_file = os.path.basename(calling_file)
             _log.debug("BLOCKING CALL: %s:%s:%s", calling_file, line_no, func)
-        if local_call:
+        if on_same_greenlet:
             # Bypass the queue if we're already on the same greenlet.  This
             # is both useful and avoids deadlock.
             return fn(self, *args, **kwargs)
@@ -250,8 +273,12 @@ def actor_event(fn):
             assert async_set, "Cross-actor calls must specify async arg."
         result = TrackedAsyncResult(method_name)
         partial = functools.partial(fn, self, *args, **kwargs)
+
+        if self._event_queue.full():
+            _log.warn("Queue for %s full, this greenlet will block", self)
+        greenlet_running = bool(self.greenlet)
         self._event_queue.put(Message(partial=partial, results=[result]),
-                              block=self.greenlet)
+                              block=greenlet_running)
         if async:
             return result
         else:

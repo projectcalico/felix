@@ -39,8 +39,8 @@ class IpsetManager(ReferenceManager):
         # State.
         self.set_type = set_type
         self.family = family
-        self.members_by_tag = {}
-        self.endpoints_by_tag = {}
+        self.tags_by_prof_id = {}
+        self.endpoints_by_ep_id = {}
         self.prefix = "v4_" if family == "inet" else "v6_"
 
         # Indexes.
@@ -59,29 +59,50 @@ class IpsetManager(ReferenceManager):
     def _on_object_activated(self, tag_id, active_tag):
         new_members = set()
         for ep_id in self.endpoint_ids_by_tag.get(tag_id, set()):
-            ep = self.endpoints_by_tag.get(ep_id, {})
+            ep = self.endpoints_by_ep_id.get(ep_id, {})
             nets = self.nets_key
             new_members.update(map(futils.net_to_ip, ep.get(nets, [])))
         # FIXME: Remove blocking call, needed to make sure ipset is created before returning it.
         active_tag.replace_members(new_members, async=False)
 
     @actor_event
+    def apply_snapshot(self, tags_by_prof_id, endpoints_by_id):
+        missing_profile_ids = set(self.tags_by_prof_id.keys())
+        for profile_id, tags in tags_by_prof_id.iteritems():
+            self.on_tags_update(profile_id, tags)
+            missing_profile_ids.discard(profile_id)
+            self._maybe_yield()
+        for profile_id in missing_profile_ids:
+            self.on_tags_update(profile_id, None)
+            self._maybe_yield()
+        del missing_profile_ids
+        missing_endpoints = set(self.endpoints_by_ep_id.keys())
+        for endpoint_id, endpoint in endpoints_by_id.iteritems():
+            self.on_endpoint_update(endpoint_id, endpoint)
+            missing_endpoints.discard(endpoint_id)
+            self._maybe_yield()
+        for ep_id in missing_endpoints:
+            self.on_endpoint_update(ep_id, None)
+            self._maybe_yield()
+
+
+    @actor_event
     def on_tags_update(self, profile_id, tags):
         """
         Called when the given tag list has changed or been deleted.
-        :param list[str] tags: List of tags for the given profile or None if
-            deleted.
+        :param list[str]|NoneType tags: List of tags for the given profile or
+            None if deleted.
         """
         _log.info("Tags for profile %s updated", profile_id)
-        old_tags = self.members_by_tag.get(profile_id, [])
+        old_tags = self.tags_by_prof_id.get(profile_id, [])
         new_tags = tags or []
         self._process_tag_updates(profile_id, set(old_tags), set(new_tags))
 
         if tags is None:
             _log.info("Tags for profile %s deleted", profile_id)
-            self.members_by_tag.pop(profile_id, None)
+            self.tags_by_prof_id.pop(profile_id, None)
         else:
-            self.members_by_tag[profile_id] = tags
+            self.tags_by_prof_id[profile_id] = tags
 
     def _process_tag_updates(self, profile_id, old_tags, new_tags):
         """
@@ -104,7 +125,7 @@ class IpsetManager(ReferenceManager):
                     # Tag is in-use, update its members.
                     ipset = self.objects_by_id[tag]
                     for endpoint_id in endpoint_ids:
-                        endpoint = self.endpoints_by_tag[endpoint_id]
+                        endpoint = self.endpoints_by_ep_id[endpoint_id]
                         for ip in map(futils.net_to_ip,
                                       endpoint.get(self.nets_key, [])):
                             if added:
@@ -114,13 +135,13 @@ class IpsetManager(ReferenceManager):
 
     @actor_event
     def on_endpoint_update(self, endpoint_id, endpoint):
-        old_endpoint = self.endpoints_by_tag.get(endpoint_id, {})
+        old_endpoint = self.endpoints_by_ep_id.get(endpoint_id, {})
         old_prof_id = old_endpoint.get("profile_id")
-        old_tags = set(old_prof_id and self.members_by_tag[old_prof_id] or [])
+        old_tags = set(old_prof_id and self.tags_by_prof_id[old_prof_id] or [])
 
         if endpoint is None:
             _log.info("Endpoint %s deleted", endpoint_id)
-            if endpoint_id not in self.endpoints_by_tag:
+            if endpoint_id not in self.endpoints_by_ep_id:
                 _log.warn("Delete for unknown endpoint %s", endpoint_id)
                 return
             # Update profile index.
@@ -140,11 +161,11 @@ class IpsetManager(ReferenceManager):
                                   old_endpoint[self.nets_key]):
                         ipset = self.objects_by_id[tag]
                         ipset.remove_member(ip, async=True)
-            self.endpoints_by_tag.pop(endpoint_id, None)
+            self.endpoints_by_ep_id.pop(endpoint_id, None)
         else:
             _log.info("Endpoint %s update received.", endpoint_id)
             new_prof_id = endpoint["profile_id"]
-            new_tags = set(self.members_by_tag.get(new_prof_id, []))
+            new_tags = set(self.tags_by_prof_id.get(new_prof_id, []))
 
             # Calculate impact on tags due to any change of profile or IP
             # address and queue updates to ipsets.
@@ -169,7 +190,7 @@ class IpsetManager(ReferenceManager):
                     for ip in new_ips:
                         ipset.add_member(ip, async=True)
 
-            self.endpoints_by_tag[endpoint_id] = endpoint
+            self.endpoints_by_ep_id[endpoint_id] = endpoint
             if old_prof_id:
                 ids = self.endpoint_ids_by_profile_id[old_prof_id]
                 ids.discard(endpoint_id)

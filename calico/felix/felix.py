@@ -34,8 +34,8 @@ import logging
 import gevent
 
 from calico import common
-from calico.felix.fiptables import IptablesUpdater, DispatchChains, \
-    ProfileManager
+from calico.felix.fiptables import (IptablesUpdater, DispatchChains,
+                                    RulesManager)
 from calico.felix.frules import install_global_rules
 from calico.felix.dbcache import UpdateSequencer
 from calico.felix.config import Config
@@ -62,7 +62,7 @@ def _main_greenlet(config):
             4: v4_ipset_mgr,
             6: v6_ipset_mgr,
         }
-        profile_manager = ProfileManager(iptables_updaters,
+        profile_manager = RulesManager(iptables_updaters,
                                          ipset_mgrs)
         dispatch_chains = DispatchChains(config, iptables_updaters)
         endpoint_manager = EndpointManager(config, iptables_updaters,

@@ -21,7 +21,6 @@ Our cache of the etcd database.
 """
 import logging
 import socket
-import gevent
 
 from calico.felix.actor import actor_event, Actor
 
@@ -33,7 +32,7 @@ OUR_HOSTNAME = socket.gethostname()
 
 class UpdateSequencer(Actor):
     def __init__(self, config, ipsets_mgrs, v4_updater, v6_updater,
-                 dispatch_chains, profile_manager, endpoint_manager):
+                 dispatch_chains, rules_manager, endpoint_manager):
         super(UpdateSequencer, self).__init__()
 
         # Peers/utility classes.
@@ -47,8 +46,7 @@ class UpdateSequencer(Actor):
             6: v6_updater,
         }
         self.dispatch_chains = dispatch_chains
-        self.profile_mgr = profile_manager
-        self._op_count = 0
+        self.rules_mgr = rules_manager
 
     @actor_event
     def apply_snapshot(self, rules_by_prof_id, tags_by_prof_id,
@@ -61,36 +59,21 @@ class UpdateSequencer(Actor):
         # Step 1: fire in data update events to the profile and tag managers
         # so they can build their indexes before we activate anything.
         _log.info("Applying snapshot. STAGE 1a: rules.")
-        for profile_id, rules in rules_by_prof_id.iteritems():
-            self.profile_mgr.on_rules_update(profile_id, rules, async=True)
-            self._maybe_yield()
+        self.rules_mgr.apply_snapshot(rules_by_prof_id, async=True)
         _log.info("Applying snapshot. STAGE 1b: tags.")
-        for profile_id, tags in tags_by_prof_id.iteritems():
-            for ipset_mgr in self.ipsets_mgrs.values():
-                ipset_mgr.on_tags_update(profile_id, tags, async=True)
-                self._maybe_yield()
-        _log.info("Applying snapshot. STAGE 1c: endpoints->tag mgr.")
-        for endpoint_id, endpoint in endpoints_by_id.iteritems():
-            for ipset_mgr in self.ipsets_mgrs.values():
-                ipset_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)
-                self._maybe_yield()
+        for ipset_mgr in self.ipsets_mgrs.values():
+            ipset_mgr.apply_snapshot(tags_by_prof_id, endpoints_by_id,
+                                     async=True)
 
         # Step 2: fire in update events into the endpoint manager, which will
         # recursively trigger activation of profiles and tags.
         _log.info("Applying snapshot. STAGE 2: endpoints->endpoint mgr.")
-        for endpoint_id, endpoint in endpoints_by_id.iteritems():
-            self.endpoint_mgr.on_endpoint_update(endpoint_id, endpoint,
-                                                 async=True)
-        # TODO: clean up unused chains.
+        self.endpoint_mgr.apply_snapshot(endpoints_by_id, async=True)
+
+        # TODO: Start of day mark and sweep.
         _log.info("Applying snapshot. DONE. %s rules, %s tags, "
                   "%s endpoints", len(rules_by_prof_id), len(tags_by_prof_id),
                   len(endpoints_by_id))
-
-    def _maybe_yield(self):
-        self._op_count += 1
-        if self._op_count >= 10000:
-            gevent.sleep()
-            self._op_count = 0
 
     @actor_event
     def on_rules_update(self, profile_id, rules):
@@ -100,7 +83,7 @@ class UpdateSequencer(Actor):
             or None if the rules have been deleted.
         """
         _log.info("Profile update: %s", profile_id)
-        self.profile_mgr.on_rules_update(profile_id, rules, async=True)
+        self.rules_mgr.on_rules_update(profile_id, rules, async=True)
 
     @actor_event
     def on_tags_update(self, profile_id, tags):
@@ -110,7 +93,8 @@ class UpdateSequencer(Actor):
             deleted.
         """
         _log.info("Tags for profile %s updated", profile_id)
-        self.tag_mgr.on_tags_update(profile_id, tags, async=True)
+        for ipset_mgr in self.ipsets_mgrs.values():
+            ipset_mgr.on_tags_update(profile_id, tags, async=True)
 
     @actor_event
     def on_interface_update(self, name, iface_state):
@@ -124,5 +108,6 @@ class UpdateSequencer(Actor):
         the endpoint was deleted.
         """
         _log.info("Endpoint update for %s.", endpoint_id)
-        self.tag_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)
+        for ipset_mgr in self.ipsets_mgrs.values():
+            ipset_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)
         self.endpoint_mgr.on_endpoint_update(endpoint_id, endpoint, async=True)

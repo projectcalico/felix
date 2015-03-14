@@ -156,7 +156,9 @@ class ActiveProfile(Actor):
                 ipset_mgr.decref(tag)
             added_tags = new_tags - old_tags
             for tag in added_tags:
+                _log.debug("Waiting for tag %s...", tag)
                 ipset = ipset_mgr.get_and_incref(tag, async=False)
+                _log.debug("got tag %s", tag)
                 self._tag_to_ip_set_name[ip_version][tag] = ipset.name
 
         self._profile = profile
@@ -213,6 +215,7 @@ class ActiveProfile(Actor):
         :param direction: "inbound" or "outbound"
             must contain all tags used in the rules.
         """
+        _log.debug("Updating %s chain", direction)
         new_profile = self._profile or {}
         rules_key = "%s_rules" % direction
         new_rules = new_profile.get(rules_key, [])
@@ -429,7 +432,7 @@ class IptablesUpdater(Actor):
                 raise CalledProcessError(cmd=cmd, returncode=rc)
 
 
-class ProfileManager(ReferenceManager):
+class RulesManager(ReferenceManager):
     """
     Actor that manages the life cycle of ActiveProfile objects.
     Users must ensure that they correctly pair calls to
@@ -439,25 +442,36 @@ class ProfileManager(ReferenceManager):
     before their Actors are deleted.
     """
     def __init__(self, iptables_updaters, ipset_mgrs):
-        super(ProfileManager, self).__init__()
+        super(RulesManager, self).__init__()
         self.iptables_updaters = iptables_updaters
         self.ipset_mgrs = ipset_mgrs
-        self.profiles_by_id = {}
+        self.rules_by_profile_id = {}
 
     def _create(self, profile_id):
         return ActiveProfile(profile_id, self.iptables_updaters,
                              self.ipset_mgrs)
 
     def _on_object_activated(self, profile_id, active_profile):
-        profile_or_none = self.profiles_by_id.get(profile_id)
+        profile_or_none = self.rules_by_profile_id.get(profile_id)
         active_profile.on_profile_update(profile_or_none, async=True)
 
     @actor_event
+    def apply_snapshot(self, rules_by_profile_id):
+        missing_ids = set(self.rules_by_profile_id.keys())
+        for profile_id, profile in rules_by_profile_id.iteritems():
+            self.on_rules_update(profile_id, profile)  # Skips queue
+            missing_ids.discard(profile_id)
+            self._maybe_yield()
+        for dead_profile_id in missing_ids:
+            self.on_rules_update(dead_profile_id, None)
+
+    @actor_event
     def on_rules_update(self, profile_id, profile):
+        _log.debug("Processing update to %s", profile_id)
         if profile_id is not None:
-            self.profiles_by_id[profile_id] = profile
+            self.rules_by_profile_id[profile_id] = profile
         else:
-            self.profiles_by_id.pop(profile_id, None)
+            self.rules_by_profile_id.pop(profile_id, None)
         if self._is_active(profile_id):
             ap = self.objects_by_id[profile_id]
             ap.on_profile_update(profile, async=True)

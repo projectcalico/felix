@@ -27,7 +27,7 @@ import gevent
 from calico.felix import devices, futils
 from calico.felix.actor import (Actor, actor_event, wait_and_check,
                                 ReferenceManager)
-from calico.felix.fiptables import DispatchChains, ProfileManager
+from calico.felix.fiptables import DispatchChains, RulesManager
 from calico.felix.frules import (CHAIN_TO_PREFIX, profile_to_chain_name,
                                  CHAIN_FROM_PREFIX)
 from calico.felix.futils import FailedSystemCall
@@ -68,11 +68,23 @@ class EndpointManager(ReferenceManager):
                                     async=True)
 
     @actor_event
+    def apply_snapshot(self, endpoints_by_id):
+        missing_endpoints = set(self.endpoints_by_id.keys())
+        for endpoint_id, endpoint in endpoints_by_id.iteritems():
+            self.on_endpoint_update(endpoint_id, endpoint)
+            missing_endpoints.discard(endpoint_id)
+            self._maybe_yield()
+        for endpoint_id in missing_endpoints:
+            self.on_endpoint_update(endpoint_id, None)
+            self._maybe_yield()
+
+    @actor_event
     def on_endpoint_update(self, endpoint_id, endpoint):
         if self._is_active(endpoint_id):
             self.objects_by_id[endpoint_id].on_endpoint_update(endpoint)
         if endpoint is None:
             # Deletion.
+            _log.info("Endpoint %s deleted", endpoint_id)
             self.endpoints_by_id.pop(endpoint_id, None)
             if self._is_active(endpoint_id):
                 self.decref(endpoint_id)
@@ -102,7 +114,7 @@ class LocalEndpoint(Actor):
     def __init__(self, config, iptables_updaters, dispatch_chains, profile_manager):
         super(LocalEndpoint, self).__init__()
         assert isinstance(dispatch_chains, DispatchChains)
-        assert isinstance(profile_manager, ProfileManager)
+        assert isinstance(profile_manager, RulesManager)
         self.config = config
         self.iptables_updaters = iptables_updaters
         self.dispatch_chains = dispatch_chains
@@ -191,7 +203,9 @@ class LocalEndpoint(Actor):
                 if self._failed:
                     _log.warn("Retrying programming after a failure")
                 self._failed = False  # Ready to try again...
+                _log.debug("Waiting for profile chain...")
                 self._profile.ensure_chains_programmed(async=False)
+                _log.debug("...profile chain ready.")
                 ep_id = self.endpoint["id"]
                 _log.info("%s became ready to program.", self)
                 try:
