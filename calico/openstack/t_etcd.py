@@ -35,6 +35,8 @@ OPENSTACK_POLICY_RE = re.compile(
 
 json_decoder = json.JSONDecoder()
 
+PERIODIC_RESYNC_INTERVAL_SECS = 30
+
 
 class CalicoTransportEtcd(CalicoTransport):
     """Calico transport implementation based on etcd."""
