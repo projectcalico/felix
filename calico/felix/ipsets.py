@@ -163,7 +163,7 @@ class IpsetManager(ReferenceManager):
                         ipset.remove_member(ip, async=True)
             self.endpoints_by_ep_id.pop(endpoint_id, None)
         else:
-            _log.info("Endpoint %s update received.", endpoint_id)
+            _log.info("Endpoint %s update received", endpoint_id)
             new_prof_id = endpoint["profile_id"]
             new_tags = set(self.tags_by_prof_id.get(new_prof_id, []))
 
@@ -191,14 +191,14 @@ class IpsetManager(ReferenceManager):
                         ipset.add_member(ip, async=True)
 
             self.endpoints_by_ep_id[endpoint_id] = endpoint
-            if old_prof_id:
+            if old_prof_id and old_prof_id != new_prof_id:
                 ids = self.endpoint_ids_by_profile_id[old_prof_id]
                 ids.discard(endpoint_id)
                 if not ids:
                     del self.endpoint_ids_by_profile_id[old_prof_id]
             self.endpoint_ids_by_profile_id[new_prof_id].add(endpoint_id)
 
-        _log.info("Endpoint update complete.")
+        _log.info("Endpoint update complete")
 
 
 def tag_to_ipset_name(tag_name):
@@ -333,5 +333,3 @@ class IpsetUpdater(Actor):
             subprocess.check_output(["ipset", "del", self.name, member])
             self.programmed_members.remove(member)
         assert self.programmed_members == self.members
-
-

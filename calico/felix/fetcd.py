@@ -207,6 +207,9 @@ def parse_if_rules(etcd_node):
         else:
             rules = json_decoder.decode(etcd_node.value)
             rules["id"] = profile_id
+
+        _log.debug("Found rules for profile %s : %s", profile_id, rules)
+
         return profile_id, rules
     return None, None
 
@@ -220,6 +223,9 @@ def parse_if_tags(etcd_node):
             tags = None
         else:
             tags = json_decoder.decode(etcd_node.value)
+
+        _log.debug("Found tags for profile %s : %s", profile_id, tags)
+
         return profile_id, tags
     return None, None
 
