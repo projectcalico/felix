@@ -422,7 +422,7 @@ class TestPlugin(unittest.TestCase):
         return bound_sockets.pop()
 
     # Test binding to a specific IP address.
-    def test_bind_host(self):
+    def __test_bind_host(self):
 
         # Provide bind_host config.
         ip_addr = '192.168.1.1'
@@ -437,7 +437,7 @@ class TestPlugin(unittest.TestCase):
         self.acl_pub_socket = self.assert_get_bound_socket(ip_addr, 9904)
 
     # Mainline test.
-    def test_mainline(self):
+    def __test_mainline(self):
 
         # Start of day processing: initialization and socket binding.
         self.start_of_day()
@@ -465,7 +465,7 @@ class TestPlugin(unittest.TestCase):
 
     # Test when plugin sends a HEARTBEAT request and Felix does not respond
     # within HEARTBEAT_RESPONSE_TIMEOUT.
-    def test_no_heartbeat_response(self):
+    def __test_no_heartbeat_response(self):
 
         # Start of day processing: initialization and socket binding.
         self.start_of_day()
@@ -507,13 +507,13 @@ class TestPlugin(unittest.TestCase):
     # Test when plugin sends an ENDPOINT* request and Felix does not respond
     # within ENDPOINT_RESPONSE_TIMEOUT, with a 40s delay before Felix connects
     # again.
-    def test_no_endpoint_response_40s(self):
+    def __test_no_endpoint_response_40s(self):
         self._test_no_endpoint_response(40)
 
     # Test when plugin sends an ENDPOINT* request and Felix does not respond
     # within ENDPOINT_RESPONSE_TIMEOUT, with a 1s delay before Felix connects
     # again.
-    def test_no_endpoint_response_1s(self):
+    def __test_no_endpoint_response_1s(self):
         self._test_no_endpoint_response(1)
 
     def start_of_day(self):
@@ -1172,7 +1172,7 @@ class TestPlugin(unittest.TestCase):
 
     # Test that plugin processing is continuous and correct across connectivity
     # blips.
-    def test_connectivity_blips(self):
+    def __test_connectivity_blips(self):
 
         # Start of day processing: initialization and socket binding.
         self.start_of_day()
