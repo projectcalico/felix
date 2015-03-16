@@ -21,23 +21,18 @@ Tests of the Actor framework.
 
 import logging
 import itertools
+
+import mock
+
 from calico.felix.actor import actor_event, ResultOrExc, SplitBatchAndRetry
 from calico.felix.test.base import BaseTestCase
-import gevent
-from calico.felix import config
-import mock
-import sys
-import time
-import unittest
-
-import calico.felix.futils as futils
-import calico.felix.felix as felix
 from calico.felix import actor
 
 # Logger
 log = logging.getLogger(__name__)
 
 
+# noinspection PyUnresolvedReferences
 class TestActor(BaseTestCase):
     def setUp(self):
         super(TestActor, self).setUp()
@@ -101,6 +96,8 @@ class TestActor(BaseTestCase):
         self.assertEqual("a", f_a.get())
         self.assertEqual("b", f_b.get())
         self.assertRaises(ExpectedException, f_exc.get)
+        self.assertRaises(ExpectedException, actor.wait_and_check,
+                          [f_a, f_b, f_exc])
         self.assertEqual(self._actor.actions, ["sb", "a", "exc", "b", "fb"])
         self._actor._finish_msg_batch.assert_called_once_with(mock.ANY, [
             ResultOrExc(result='a', exception=None),
@@ -187,11 +184,13 @@ class ActorForTesting(actor.Actor):
         raise EXPECTED_EXCEPTION
 
     def _start_msg_batch(self, batch):
+        batch = super(ActorForTesting, self)._start_msg_batch(batch)
         self._batch_actions = []
         self._batch_actions.append("sb")
         return batch
 
     def _finish_msg_batch(self, batch, results):
+        super(ActorForTesting, self)._finish_msg_batch(batch, results)
         assert self._current_msg_name is None
         self._batch_actions.append("fb")
         self.actions.extend(self._batch_actions)

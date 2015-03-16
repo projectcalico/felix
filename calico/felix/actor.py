@@ -167,28 +167,59 @@ class Actor(object):
         self.greenlet.start()
         return self
 
+    def _loop(self):
+        """
+        Main greenlet loop, repeatedly runs _step().  Doesn't return normally.
+        """
+        try:
+            while True:
+                self._step()
+        except:
+            _log.exception("Exception killed %s", self)
+            raise
+
     def _step(self):
+        """
+        Run one iteration of the event loop for this actor.  Mainly
+        broken out to allow the UTs to single-step an Actor.
+
+        It also has the subtle side effect of introducing a new local
+        scope so that our variables die before we block next time.
+        """
+        # Block waiting for work.
         msg = self._event_queue.get()
+        # Then, once we get some, opportunistically pull as much work off the
+        # queue as possible.  We call this a batch.
         batch = [msg]
         if self.batch_delay and not self._event_queue.full():
+            # If requested by our subclass, delay the start of the batch to
+            # allow more work to accumulate.
             gevent.sleep(self.batch_delay)
         while not self._event_queue.empty():
             # We're the only ones getting from the queue so this should
             # never fail.
             batch.append(self._event_queue.get_nowait())
 
-        # Start with one batch but we may get asked to split it if
-        # an error occurs.
-        assert batch
+        # Start with one batch ont he queue but we may get asked to split it
+        # if an error occurs.
         batches = [batch]
         num_splits = 0
         while batches:
+            # Process the first batch on our queue of batches.  Invariant:
+            # we'll either process this batch to completion and discard it or
+            # we'll put all the messages back into the batch queue in the same
+            # order but batched differently.
             batch = batches.pop(0)
+            # Give subclass a chance to filter the batch/update its state.
             batch = self._start_msg_batch(batch)
-            results = []
+            assert batch is not None, "_start_msg_batch() should return batch."
+            results = []  # Will end up same length as batch.
             for msg in batch:
+                # Save off name of function for diags.
                 self._current_msg_name = msg.partial.func.__name__
                 try:
+                    # Actually execute the per-message method and record its
+                    # result.
                     result = msg.partial()
                 except BaseException as e:
                     _log.exception("Exception processing %s", msg)
@@ -198,22 +229,16 @@ class Actor(object):
                 finally:
                     self._current_msg_name = None
             try:
+                # Give subclass a chance to post-process the batch.
                 self._finish_msg_batch(batch, results)
             except SplitBatchAndRetry:
+                # The subclass couldn't process the batch as is (probably
+                # because a failure occurred and it couldn't figure out which
+                # message caused the problem.  Split the batch into two and
+                # re-run it.
                 _log.warn("Splitting batch to retry.")
-                if len(batch) <= 1:
-                    # Could cause infinite loop.
-                    raise AssertionError("Batch too small to split")
-                split_point = len(batch) // 2
-                _log.debug("Split-point = %s", split_point)
-                batch_a = batch[:split_point]
-                batch_b = batch[split_point:]
-                if batches:
-                    next_batch = batches[0]
-                    next_batch[:0] = batch_b
-                else:
-                    batches[:0] = [batch_b]
-                batches[:0] = [batch_a]
+                self._split_batch(batch, batches)
+
                 num_splits += 1
                 continue
             except BaseException as e:
@@ -221,6 +246,8 @@ class Actor(object):
                 _log.exception("_on_batch_processed failed.")
                 results = [(None, e)] * len(results)
 
+            # Batch complete and finalized, set all the results.
+            assert len(batch) == len(results)
             for msg, (result, exc) in zip(batch, results):
                 for future in msg.results:
                     if exc is not None:
@@ -231,13 +258,28 @@ class Actor(object):
             _log.warn("Split batches complete. Number of splits: %s",
                       num_splits)
 
-    def _loop(self):
-        try:
-            while True:
-                self._step()
-        except:
-            _log.exception("Exception killed %s", self)
-            raise
+    @staticmethod
+    def _split_batch(batch, batches):
+        if len(batch) <= 1:
+            # Could cause infinite loop.
+            raise AssertionError("Batch too small to split")
+        # Split the batch.
+        split_point = len(batch) // 2
+        _log.debug("Split-point = %s", split_point)
+        batch_a = batch[:split_point]
+        batch_b = batch[split_point:]
+        if batches:
+            # Optimization: there's another batch already queued,
+            # push the second half of this batch onto the front of
+            # that one.
+            _log.debug("Split batch but found a subsequent batch, "
+                       "coalescing with that.")
+            next_batch = batches[0]
+            next_batch[:0] = batch_b
+        else:
+            _log.debug("Split batch but no more batches in queue.")
+            batches[:0] = [batch_b]
+        batches[:0] = [batch_a]
 
     def _start_msg_batch(self, batch):
         """
@@ -294,7 +336,7 @@ class Actor(object):
 
 class SplitBatchAndRetry(Exception):
     """
-    Exception that may be raised by _finish_msg_batch to cause the
+    Exception that may be raised by _finish_msg_batch() to cause the
     batch of messages to be split, each message to be re-executed and
     then the smaller batches delivered to _finish_msg_batch() again.
     """
