@@ -362,6 +362,7 @@ class ReferenceManager(Actor):
             # Keep it clean: Always create a new object even if we've got a
             # pending deletion...
             obj = self._create(object_id)
+            assert hasattr(obj, "on_unreferenced")
             if object_id in self.cleanup_futures:
                 # ...but, if we have a pending deletion, queue the new actor's
                 # start up behind it.
@@ -385,7 +386,7 @@ class ReferenceManager(Actor):
         assert ref_count >= 0, "Ref count dropped below 0: %s" % ref_count
         if ref_count == 0:
             _log.debug("No more references to object with id %s", object_id)
-            self._queue_reap(object_id)
+            self._queue_cleanup(object_id)
 
     def _create(self, object_id):
         raise NotImplementedError()
@@ -393,7 +394,7 @@ class ReferenceManager(Actor):
     def _on_object_activated(self, object_id, obj):
         raise NotImplementedError()
 
-    def _queue_reap(self, dead_object_id):
+    def _queue_cleanup(self, dead_object_id):
         """
         Asks the object to remove itself.  Queues a callback to
         do our cleanup.
