@@ -79,7 +79,7 @@ def _exit(rc):
 
     This function is mainly here to be mocked out in UTs.
     """
-    os._exit(rc)
+    os._exit(rc)  # pragma nocover
 
 
 class TrackedAsyncResult(AsyncResult):
@@ -131,10 +131,13 @@ def actor_event(fn):
         partial = functools.partial(fn, self, *args, **kwargs)
 
         if self._event_queue.full():
-            _log.warn("Queue for %s full, this greenlet will block", self)
+            _log.warn("Queue for %s full, this greenlet may block", self)
+        # Only block on the queue if the greenlet is running or we could block
+        # forever.
         greenlet_running = bool(self.greenlet)
+        allow_block = greenlet_running or self.skip_running_check
         self._event_queue.put(Message(partial=partial, results=[result]),
-                              block=greenlet_running)
+                              block=allow_block)
         if async:
             return result
         else:
@@ -154,12 +157,16 @@ class Actor(object):
     the messages in a batch.  Higher values encourage batching.
     """
 
+    max_ops_before_yield = 10000
+    """Number of calls to self._maybe_yield before it yield.s"""
+
     def __init__(self, queue_size=None):
         queue_size = queue_size or self.queue_size
         self._event_queue = Queue(maxsize=queue_size)
         self.greenlet = gevent.Greenlet(self._loop)
         self._op_count = 0
         self._current_msg_name = None
+        self.skip_running_check = False
 
     def start(self):
         assert not self.greenlet, "Already running"
@@ -260,9 +267,7 @@ class Actor(object):
 
     @staticmethod
     def _split_batch(batch, batches):
-        if len(batch) <= 1:
-            # Could cause infinite loop.
-            raise AssertionError("Batch too small to split")
+        assert len(batch) > 1, "Batch too small to split"
         # Split the batch.
         split_point = len(batch) // 2
         _log.debug("Split-point = %s", split_point)
@@ -322,7 +327,7 @@ class Actor(object):
 
     def _maybe_yield(self):
         self._op_count += 1
-        if self._op_count >= 10000:
+        if self._op_count >= self.max_ops_before_yield:
             gevent.sleep()
             self._op_count = 0
 
@@ -368,6 +373,9 @@ class ReferenceManager(Actor):
                 # start up behind it.
                 _log.warn("Pending cleanup for %s; queueing start of "
                           "new object.", object_id)
+                # Hint ot he actor that it'll start running eventually so it
+                # doesn't assert if its queue gets full.
+                obj.skip_running_check = True
                 self.cleanup_futures[object_id].rawlink(obj.start)
             else:
                 obj.start()
@@ -389,10 +397,10 @@ class ReferenceManager(Actor):
             self._queue_cleanup(object_id)
 
     def _create(self, object_id):
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma nocover
 
     def _on_object_activated(self, object_id, obj):
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma nocover
 
     def _queue_cleanup(self, dead_object_id):
         """

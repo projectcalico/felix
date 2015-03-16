@@ -21,6 +21,7 @@ Tests of the Actor framework.
 
 import logging
 import itertools
+from contextlib import nested
 from gevent.event import AsyncResult
 
 import mock
@@ -158,6 +159,52 @@ class TestActor(BaseTestCase):
         self.assertRaises(FinishException, f_a.get)
         self.assertRaises(FinishException, f_exc.get)
 
+    def test_blocking_call(self):
+        self._actor.start()  # Really start it.
+        self._actor.do_a(async=False)
+        self.assertRaises(ExpectedException, self._actor.do_exc,  async=False)
+
+    def test_same_actor_call(self):
+        """
+        Test events can call each other as normal methods, bypassing the
+        queue.
+        """
+        self._actor.start()  # really start it.
+        self.assertEqual("c1c2",  self._actor.do_c(async=False))
+
+    def test_full_queue(self):
+        eq = self._actor._event_queue
+        with nested(mock.patch.object(eq, "full", autospec=True),
+                    mock.patch.object(eq, "put", autospec=True)) as \
+                (m_full, m_put):
+            m_full.return_value = True
+            self._actor.do_a(async=True)
+            self.assertFalse(m_put.call_args[1]["block"])
+
+    def test_loop_coverage(self):
+        with mock.patch.object(self._actor, "_step", autospec=True) as m_step:
+            m_step.side_effect = ExpectedException()
+            self.assertRaises(ExpectedException, self._actor._loop)
+
+    def test_batch_delay(self):
+        self._actor.batch_delay = 1
+        with mock.patch("gevent.sleep", autospec=True) as m_sleep:
+            self._actor.do_a(async=True)
+            self.step_actor(self._actor)
+            m_sleep.assert_called_once_with(1)
+
+    @mock.patch("gevent.sleep", autospec=True)
+    def test_yield(self, m_sleep):
+        self._actor.max_ops_before_yield = 2
+        self._actor.start()  # Really start it.
+        self._actor.do_a(async=False)
+        self._actor.do_a(async=False)
+        self._actor.do_a(async=False)
+        m_sleep.assert_called_once_with()
+
+    def test_wait_and_check_no_input(self):
+        actor.wait_and_check([])
+
 
 class TestReferenceManager(BaseTestCase):
     def setUp(self):
@@ -259,6 +306,86 @@ class TestReferenceManager(BaseTestCase):
         self.assertTrue("foo" in self._rm.ref_counts_by_id)
         self.assertTrue("foo" in self._rm.objects_by_id)
 
+    @mock.patch("gevent.Greenlet.start", autospec=True)
+    def test_double_recreate_while_cleaning_up(self, m_start):
+        """
+        Test creating an actor while the previous one for that ID is still
+        cleaning itself up.  The new actor should be created as normal but
+        its start method should be queued up behind the old one via rawlink.
+        """
+        # Create an actor...
+        f1 = self._rm.get_and_incref("foo", async=True)
+        self.step_actor(self._rm)
+        actor_1 = f1.get_nowait()
+        self.assertTrue(actor_1.started)  # Should be started immediately.
+
+        # Then decref it....
+        f2 = self._rm.decref("foo", async=True)
+        self.step_actor(self._rm)
+        f2.get_nowait()
+        # Then recreate it before we clean up the first one...
+        f3 = self._rm.get_and_incref("foo", async=True)
+        self.step_actor(self._rm)
+        actor_2 = f3.get_nowait()
+
+        # Then decref it....
+        f4 = self._rm.decref("foo", async=True)
+        self.step_actor(self._rm)
+        f4.get_nowait()
+        # Then recreate it before we clean up the second one...
+        f5 = self._rm.get_and_incref("foo", async=True)
+        self.step_actor(self._rm)
+        actor_3 = f5.get_nowait()
+
+        # Should get a new actor each time:
+        self.assertFalse(actor_1 is actor_2)
+        self.assertFalse(actor_2 is actor_3)
+        self.assertEqual(self._rm.ref_counts_by_id["foo"], 1)
+
+        # Should still have a future logged in cleanup_futures:
+        self.assertTrue("foo" in self._rm.cleanup_futures)
+
+        # New actors shouldn't be started yet.
+        self.assertFalse(actor_2.started)
+        self.assertFalse(actor_3.started)
+
+        # The start for the 2nd actor should be queued behind the cleanup of
+        # the second.
+        m_rawlink = actor_1.on_unref_result.rawlink
+        cleanup_call, start_call = m_rawlink.call_args_list
+        cleanup_partial = cleanup_call[0][0]
+        cleanup_partial()
+        self.step_actor(self._rm)  # Will fail if the callback didn't work.
+
+        # The start for the newest actor should be queued behind the cleanup of
+        # the second.
+        m_rawlink = actor_2.on_unref_result.rawlink
+        cleanup_call, start_call = m_rawlink.call_args_list
+        cleanup_partial = cleanup_call[0][0]
+        cleanup_partial()
+        self.step_actor(self._rm)  # Will fail if the callback didn't work.
+
+        start_fn = start_call[0][0]
+        self.assertEqual(start_fn, actor_3.start)
+        self.assertTrue("foo" not in self._rm.cleanup_futures)
+        self.assertTrue("foo" in self._rm.ref_counts_by_id)
+        self.assertTrue("foo" in self._rm.objects_by_id)
+
+
+class TestExcpetionTracking(BaseTestCase):
+    def test_exception(self):
+        ar = actor.TrackedAsyncResult("foo")
+        ar.set_exception(Exception())
+        del ar  # Enough to trigger cleanup in CPython, with exact ref counts.
+        self._m_exit.assert_called_once_with(1)
+        self._m_exit.reset_mock()
+
+    def test_no_exception(self):
+        ar = actor.TrackedAsyncResult("foo")
+        ar.set("foo")
+        del ar  # Enough to trigger cleanup in CPython, with exact ref counts.
+        self.assertFalse(self._m_exit.called)
+
 
 class RefMgrForTesting(actor.ReferenceManager):
     def _create(self, object_id):
@@ -287,6 +414,7 @@ class ActorForTesting(actor.Actor):
     def do_a(self):
         self._batch_actions.append("a")
         assert self._current_msg_name == "do_a"
+        self._maybe_yield()
         return "a"
 
     @actor_event
@@ -294,6 +422,18 @@ class ActorForTesting(actor.Actor):
         self._batch_actions.append("b")
         assert self._current_msg_name == "do_b"
         return "b"
+
+    @actor_event
+    def do_c(self):
+        return self.do_c1() + self.do_c2()  # Same-actor calls skip queue.
+
+    @actor_event
+    def do_c1(self):
+        return "c1"
+
+    @actor_event
+    def do_c2(self):
+        return "c2"
 
     @actor_event
     def do_exc(self):
