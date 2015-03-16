@@ -19,6 +19,8 @@ felix.test.test_felix
 Top level tests for Felix.
 """
 import logging
+import gevent
+from calico.felix import config
 import mock
 import sys
 import time
@@ -29,10 +31,30 @@ sys.modules['etcd'] = stub_etcd
 
 import calico.felix.futils as futils
 import calico.felix.felix as felix
+from calico.felix.test.base import BaseTestCase
 
 # Logger
 log = logging.getLogger(__name__)
 
-class TestBasic(unittest.TestCase):
-    def test_nothing(self):
-        pass
+
+class TestException(Exception):
+    pass
+
+
+class TestBasic(BaseTestCase):
+
+    @mock.patch("gevent.Greenlet.start", autospec=True)
+    @mock.patch("calico.felix.devices.InterfaceWatcher.poll_interfaces",
+                autospec=True)
+    @mock.patch("calico.felix.felix.watch_etcd", autospec=True)
+    @mock.patch("calico.felix.felix.IptablesUpdater", autospec=True)
+    @mock.patch("gevent.iwait", autospec=True, side_effect=TestException())
+    def test_main_greenlet(self, m_iwait, m_IptablesUpdater, m_watch_etcd,
+                           m_poll_interfaces, m_start):
+        m_IptablesUpdater.return_value.greenlet = mock.Mock()
+        m_config = mock.Mock(spec=config.Config)
+        m_config.IFACE_PREFIX = "tap"
+        m_config.METADATA_IP = None
+        self.assertRaises(TestException,
+                          felix._main_greenlet, m_config)
+

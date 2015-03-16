@@ -44,7 +44,7 @@ class ExceptionTrackingRef(weakref.ref):
         global _ref_idx
         self.idx = _ref_idx
         _ref_idx += 1
-        _refs[_ref_idx] = self
+        _refs[self.idx] = self
 
     def __str__(self):
         return (self.__class__.__name__ + "<%s/%s,exc=%s>" %
@@ -68,8 +68,18 @@ def _reap_ref(ref):
                       ref.tag, ref.exception)
         print >> sys.stderr, "TrackedAsyncResult %s was leaked with " \
                              "exception %r" % (ref.tag, ref.exception)
+
         # Called from the GC so we can't raise an exception, just die.
-        os._exit(1)
+        _exit(1)
+
+
+def _exit(rc):
+    """
+    Immediately terminates this process with the given return code.
+
+    This function is mainly here to be mocked out in UTs.
+    """
+    os._exit(rc)
 
 
 class TrackedAsyncResult(AsyncResult):
@@ -93,6 +103,44 @@ class TrackedAsyncResult(AsyncResult):
             # Someone called get so any exception can't be leaked.  Discard it.
             self.__ref.exception = None
         return result
+
+
+def actor_event(fn):
+    method_name = fn.__name__
+    @functools.wraps(fn)
+    def queue_fn(self, *args, **kwargs):
+        # Police that cross-actor calls must be explicit about blocking.
+        on_same_greenlet = self.greenlet == gevent.getcurrent()
+        async_set = "async" in kwargs
+        async = kwargs.pop("async", False)
+        assert not (on_same_greenlet and async), \
+            "Async call to own queue, deadlocks if queue full."
+        if (not on_same_greenlet and
+                not async and
+                _log.isEnabledFor(logging.DEBUG)):
+            calling_file,  line_no, func, _ = traceback.extract_stack()[-2]
+            calling_file = os.path.basename(calling_file)
+            _log.debug("BLOCKING CALL: %s:%s:%s", calling_file, line_no, func)
+        if on_same_greenlet:
+            # Bypass the queue if we're already on the same greenlet.  This
+            # is both useful and avoids deadlock.
+            return fn(self, *args, **kwargs)
+        else:
+            assert async_set, "Cross-actor calls must specify async arg."
+        result = TrackedAsyncResult(method_name)
+        partial = functools.partial(fn, self, *args, **kwargs)
+
+        if self._event_queue.full():
+            _log.warn("Queue for %s full, this greenlet will block", self)
+        greenlet_running = bool(self.greenlet)
+        self._event_queue.put(Message(partial=partial, results=[result]),
+                              block=greenlet_running)
+        if async:
+            return result
+        else:
+            return result.get()
+    queue_fn.func = fn
+    return queue_fn
 
 
 class Actor(object):
@@ -119,70 +167,74 @@ class Actor(object):
         self.greenlet.start()
         return self
 
+    def _step(self):
+        msg = self._event_queue.get()
+        batch = [msg]
+        if self.batch_delay and not self._event_queue.full():
+            gevent.sleep(self.batch_delay)
+        while not self._event_queue.empty():
+            # We're the only ones getting from the queue so this should
+            # never fail.
+            batch.append(self._event_queue.get_nowait())
+
+        # Start with one batch but we may get asked to split it if
+        # an error occurs.
+        assert batch
+        batches = [batch]
+        num_splits = 0
+        while batches:
+            batch = batches.pop(0)
+            batch = self._start_msg_batch(batch)
+            results = []
+            for msg in batch:
+                self._current_msg_name = msg.partial.func.__name__
+                try:
+                    result = msg.partial()
+                except BaseException as e:
+                    _log.exception("Exception processing %s", msg)
+                    results.append(ResultOrExc(None, e))
+                else:
+                    results.append(ResultOrExc(result, None))
+                finally:
+                    self._current_msg_name = None
+            try:
+                self._finish_msg_batch(batch, results)
+            except SplitBatchAndRetry:
+                _log.warn("Splitting batch to retry.")
+                if len(batch) <= 1:
+                    # Could cause infinite loop.
+                    raise AssertionError("Batch too small to split")
+                split_point = len(batch) // 2
+                _log.debug("Split-point = %s", split_point)
+                batch_a = batch[:split_point]
+                batch_b = batch[split_point:]
+                if batches:
+                    next_batch = batches[0]
+                    next_batch[:0] = batch_b
+                else:
+                    batches[:0] = [batch_b]
+                batches[:0] = [batch_a]
+                num_splits += 1
+                continue
+            except BaseException as e:
+                # Report failure to all.
+                _log.exception("_on_batch_processed failed.")
+                results = [(None, e)] * len(results)
+
+            for msg, (result, exc) in zip(batch, results):
+                for future in msg.results:
+                    if exc is not None:
+                        future.set_exception(exc)
+                    else:
+                        future.set(result)
+        if num_splits > 0:
+            _log.warn("Split batches complete. Number of splits: %s",
+                      num_splits)
+
     def _loop(self):
         try:
             while True:
-                msg = self._event_queue.get()
-                batch = [msg]
-                if self.batch_delay and not self._event_queue.full():
-                    gevent.sleep(self.batch_delay)
-                while not self._event_queue.empty():
-                    # We're the only ones getting from the queue so this should
-                    # never fail.
-                    batch.append(self._event_queue.get_nowait())
-
-                # Start with one batch but we may get asked to split it if
-                # an error occurs.
-                assert batch
-                batches = [batch]
-                num_splits = 0
-                while batches:
-                    batch = batches.pop(0)
-                    batch = self._start_msg_batch(batch)
-                    results = []
-                    for msg in batch:
-                        self._current_msg_name = msg.partial.func.__name__
-                        try:
-                            result = msg.partial()
-                        except BaseException as e:
-                            _log.exception("Exception processing %s", msg)
-                            results.append(ResultOrExc(None, e))
-                        else:
-                            results.append(ResultOrExc(result, None))
-                        finally:
-                            self._current_msg_name = None
-                    try:
-                        self._finish_msg_batch(batch, results)
-                    except SplitBatchAndRetry:
-                        _log.warn("Splitting batch to retry.")
-                        if len(batch) <= 1:
-                            # Could cause infinite loop.
-                            raise AssertionError("Batch too small to split")
-                        split_point = len(batch) // 2
-                        batch_a = batch[:split_point]
-                        batch_b = batch[split_point:]
-                        if batches:
-                            next_batch = batches[0]
-                            next_batch[:0] = batch_b
-                        else:
-                            batches[:0] = [batch_b]
-                        batches[:0] = [batch_a]
-                        num_splits += 1
-                        continue
-                    except BaseException as e:
-                        # Report failure to all.
-                        _log.exception("_on_batch_processed failed.")
-                        results = [(None, e)] * len(results)
-
-                    for msg, (result, exc) in zip(batch, results):
-                        for future in msg.results:
-                            if exc is not None:
-                                future.set_exception(exc)
-                            else:
-                                future.set(result)
-                if num_splits > 0:
-                    _log.warn("Split batches complete. Number of splits: %s",
-                              num_splits)
+                self._step()
         except:
             _log.exception("Exception killed %s", self)
             raise
@@ -247,44 +299,6 @@ class SplitBatchAndRetry(Exception):
     then the smaller batches delivered to _finish_msg_batch() again.
     """
     pass
-
-
-def actor_event(fn):
-    method_name = fn.__name__
-    @functools.wraps(fn)
-    def queue_fn(self, *args, **kwargs):
-        # Police that cross-actor calls must be explicit about blocking.
-        on_same_greenlet = self.greenlet == gevent.getcurrent()
-        async_set = "async" in kwargs
-        async = kwargs.pop("async", False)
-        assert not (on_same_greenlet and async), \
-            "Async call to own queue, deadlocks if queue full."
-        if (not on_same_greenlet and
-                not async and
-                _log.isEnabledFor(logging.DEBUG)):
-            calling_file,  line_no, func, _ = traceback.extract_stack()[-2]
-            calling_file = os.path.basename(calling_file)
-            _log.debug("BLOCKING CALL: %s:%s:%s", calling_file, line_no, func)
-        if on_same_greenlet:
-            # Bypass the queue if we're already on the same greenlet.  This
-            # is both useful and avoids deadlock.
-            return fn(self, *args, **kwargs)
-        else:
-            assert async_set, "Cross-actor calls must specify async arg."
-        result = TrackedAsyncResult(method_name)
-        partial = functools.partial(fn, self, *args, **kwargs)
-
-        if self._event_queue.full():
-            _log.warn("Queue for %s full, this greenlet will block", self)
-        greenlet_running = bool(self.greenlet)
-        self._event_queue.put(Message(partial=partial, results=[result]),
-                              block=greenlet_running)
-        if async:
-            return result
-        else:
-            return result.get()
-    queue_fn.func = fn
-    return queue_fn
 
 
 def wait_and_check(async_results):

@@ -63,7 +63,7 @@ def _main_greenlet(config):
             6: v6_ipset_mgr,
         }
         profile_manager = RulesManager(iptables_updaters,
-                                         ipset_mgrs)
+                                       ipset_mgrs)
         dispatch_chains = DispatchChains(config, iptables_updaters)
         endpoint_manager = EndpointManager(config, iptables_updaters,
                                            dispatch_chains, profile_manager)
