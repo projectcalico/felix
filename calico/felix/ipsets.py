@@ -25,7 +25,8 @@ from collections import defaultdict
 import logging
 from subprocess import CalledProcessError
 from calico.felix import futils
-from calico.felix.actor import Actor, actor_event, ReferenceManager
+from calico.felix.actor import Actor, actor_event
+from calico.felix.refcount import ReferenceManager
 from gevent import subprocess
 import re
 

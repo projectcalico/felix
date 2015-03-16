@@ -34,8 +34,8 @@ import logging
 import gevent
 
 from calico import common
-from calico.felix.fiptables import (IptablesUpdater, DispatchChains,
-                                    RulesManager)
+from calico.felix.fiptables import (IptablesUpdater, DispatchChains)
+from calico.felix.profilerules import RulesManager
 from calico.felix.frules import install_global_rules
 from calico.felix.dbcache import UpdateSequencer
 from calico.felix.config import Config

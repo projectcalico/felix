@@ -25,9 +25,10 @@ import socket
 from subprocess import CalledProcessError
 import gevent
 from calico.felix import devices, futils
-from calico.felix.actor import (Actor, actor_event, wait_and_check,
-                                ReferenceManager)
-from calico.felix.fiptables import DispatchChains, RulesManager
+from calico.felix.actor import (Actor, actor_event, wait_and_check)
+from calico.felix.refcount import ReferenceManager
+from calico.felix.fiptables import DispatchChains
+from calico.felix.profilerules import RulesManager
 from calico.felix.frules import (CHAIN_TO_PREFIX, profile_to_chain_name,
                                  CHAIN_FROM_PREFIX)
 from calico.felix.futils import FailedSystemCall
@@ -39,14 +40,14 @@ OUR_HOSTNAME = socket.gethostname()
 
 class EndpointManager(ReferenceManager):
     def __init__(self, config, iptables_updaters, dispatch_chains,
-                 profile_manager):
+                 rules_manager):
         super(EndpointManager, self).__init__()
 
         # Peers/utility classes.
         self.config = config
         self.iptables_updaters = iptables_updaters
         self.dispatch_chains = dispatch_chains
-        self.profile_mgr = profile_manager
+        self.rules_mgr = rules_manager
 
         # State
         self.endpoints_by_id = {}
@@ -57,7 +58,7 @@ class EndpointManager(ReferenceManager):
         return LocalEndpoint(self.config,
                              self.iptables_updaters,
                              self.dispatch_chains,
-                             self.profile_mgr)
+                             self.rules_mgr)
 
     def _on_object_activated(self, object_id, obj):
         ep = self.endpoints_by_id.get(object_id)
