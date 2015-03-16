@@ -21,6 +21,7 @@ felix.futils
 
 Felix utilities.
 """
+import hashlib
 import logging
 import os
 from gevent import subprocess
@@ -66,7 +67,7 @@ def call_silent(args):
         return 0
     except FailedSystemCall as e:
         return e.retcode
-        
+
 def check_call(args):
     """
     Substitute for the subprocess.check_call funtion. It has the following useful
@@ -125,3 +126,19 @@ def time_ms():
 
 def net_to_ip(net_or_ip):
     return net_or_ip.split("/")[0]
+
+def uniquely_shorten(string, length):
+    """
+    Take a string and uniquely truncate it to at most length characters. We do
+    this by either using it directly (if it is no more than length characters
+    long), or else by hashing it and taking the first length characters of the
+    hash.
+    """
+    if len(string) <= length:
+        return string
+
+    h = hashlib.md5()
+    h.update(string)
+    hash_text = h.hexdigest()
+
+    return hash_text[:length]

@@ -20,6 +20,7 @@ Felix rule management, including iptables and ipsets.
 """
 import logging
 from subprocess import CalledProcessError
+from calico.felix import futils
 
 _log = logging.getLogger(__name__)
 
@@ -50,7 +51,15 @@ KNOWN_RULE_KEYS = set([
 
 
 def profile_to_chain_name(inbound_or_outbound, profile_id):
-    return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_id,
+    """
+    Returns the name of the chain to use for a given profile. The profile ID
+    that we are supplied might be (far) too long for us to use, but truncating
+    it is dangerous (for example, in OpenStack the profile is the ID of each
+    security group in use, joined with underscores). Hence we make a unique
+    string out of it and use that.
+    """
+    profile_string = futils.uniquely_shorten(profile_id, 16)
+    return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_string,
                                              inbound_or_outbound[:1])
 
 
