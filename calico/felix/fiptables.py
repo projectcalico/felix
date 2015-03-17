@@ -207,7 +207,7 @@ class IptablesUpdater(Actor):
         # changes by table and chain.
         _log.info("Deleting chains %s:%s", table_name, chain_names)
         # Put an explicit None in the index to mark it for deletion.
-        self.chains_to_flush.extend(chain_names)
+        self.chains_to_flush[table_name].update(chain_names)
         for chain_name in chain_names:
             self.batched_updates_by_table_chain[table_name][chain_name] = None
         self.completion_callbacks.append(callback)

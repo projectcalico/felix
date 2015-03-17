@@ -26,6 +26,7 @@ import itertools
 import functools
 from calico.felix import devices, futils
 from calico.felix.actor import Actor, actor_event
+from calico.felix.futils import FailedSystemCall
 from calico.felix.refcount import ReferenceManager, RefCountedActor
 from calico.felix.fiptables import DispatchChains
 from calico.felix.profilerules import RulesManager
@@ -87,11 +88,14 @@ class EndpointManager(ReferenceManager):
         if endpoint is None:
             # Deletion.
             _log.info("Endpoint %s deleted", endpoint_id)
-            self.endpoints_by_id.pop(endpoint_id, None)
+            old_ep = self.endpoints_by_id.pop(endpoint_id, {})
+            if old_ep.get("name") in self.endpoint_id_by_iface_name:
+                self.endpoint_id_by_iface_name.pop(old_ep.get("name"))
             if self._is_starting_or_live(endpoint_id):
                 self.decref(endpoint_id)
         else:
             self.endpoints_by_id[endpoint_id] = endpoint
+            self.endpoint_id_by_iface_name[endpoint["name"]] = endpoint_id
         if endpoint and endpoint["host"] == OUR_HOSTNAME:
             _log.debug("Endpoint is local, ensuring it is active.")
             if not self._is_starting_or_live(endpoint_id):
@@ -105,11 +109,13 @@ class EndpointManager(ReferenceManager):
 
     @actor_event
     def on_interface_update(self, name, iface_state):
+        _log.info("EndpointManager received interface update")
         if iface_state:
             self.interfaces[name] = iface_state
         else:
             self.interfaces.pop(name, None)
         endpoint_id = self.endpoint_id_by_iface_name.get(name)
+        _log.info("Matching endpoint: %s", endpoint_id)
         if endpoint_id and self._is_starting_or_live(endpoint_id):
             ep = self.objects_by_id[endpoint_id]
             ep.on_interface_update(iface_state, async=True)
@@ -202,7 +208,7 @@ class LocalEndpoint(RefCountedActor):
 
     @actor_event
     def on_interface_update(self, iface_state):
-        _log.debug("Endpoint received new interface state: %s", iface_state)
+        _log.info("Endpoint received new interface state: %s", iface_state)
         if iface_state and not self._iface_name:
             self._iface_name = iface_state.name
             self._suffix = interface_to_suffix(self.config, self._iface_name)
@@ -260,7 +266,8 @@ class LocalEndpoint(RefCountedActor):
                                                           async=True)
                 self._remove_chains()
 
-    def _on_dispatch_chain_entry_removed(self, disp_chain_epoch):
+    @actor_event
+    def _on_dispatch_chain_entry_removed(self, disp_chain_epoch, error):
         if disp_chain_epoch == self._disp_chain_req_epoch:
             _log.debug("Dispatch chain entry removed, removing chains.")
             self._remove_chains()
@@ -296,7 +303,12 @@ class LocalEndpoint(RefCountedActor):
                 _log.debug("No intervening updates, adding to dispatch chain.")
                 self.dispatch_chains.on_endpoint_chains_ready(
                     self._iface_name, self._endpoint_id, async=True)
-                self._configure_interface()
+                try:
+                    self._configure_interface()
+                except FailedSystemCall:
+                    _log.exception("Failed to configure interface, will retry"
+                                   "when we next get an update.")
+                    self._failed = True
         else:
             _log.error("Programming for %s failed: %r", self, error)
             # TODO: Queue retry?
@@ -304,6 +316,7 @@ class LocalEndpoint(RefCountedActor):
     def _remove_chains(self):
         cb = functools.partial(self.on_chains_deleted, self._ipt_req_epoch,
                                async=True)
+        self._ipt_req_epoch += 1
         self.iptables_updater.delete_chains("filter",
                                             chain_names(self._suffix),
                                             callback=cb, async=True)

@@ -121,7 +121,8 @@ class ReferenceManager(Actor):
 
     def _is_starting_or_live(self, obj_id):
         return (obj_id in self.objects_by_id
-                and self.objects_by_id[obj_id] in (STARTING, LIVE))
+                and self.objects_by_id[obj_id].ref_mgmt_state in
+                    (STARTING, LIVE))
 
 
 class RefCountedActor(Actor):
