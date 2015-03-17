@@ -44,7 +44,7 @@ class ExceptionTrackingRef(weakref.ref):
         global _ref_idx
         self.idx = _ref_idx
         _ref_idx += 1
-        _refs[_ref_idx] = self
+        _refs[self.idx] = self
 
     def __str__(self):
         return (self.__class__.__name__ + "<%s/%s,exc=%s>" %
@@ -68,8 +68,18 @@ def _reap_ref(ref):
                       ref.tag, ref.exception)
         print >> sys.stderr, "TrackedAsyncResult %s was leaked with " \
                              "exception %r" % (ref.tag, ref.exception)
+
         # Called from the GC so we can't raise an exception, just die.
-        os._exit(1)
+        _exit(1)
+
+
+def _exit(rc):
+    """
+    Immediately terminates this process with the given return code.
+
+    This function is mainly here to be mocked out in UTs.
+    """
+    os._exit(rc)  # pragma nocover
 
 
 class TrackedAsyncResult(AsyncResult):
@@ -95,6 +105,47 @@ class TrackedAsyncResult(AsyncResult):
         return result
 
 
+def actor_event(fn):
+    method_name = fn.__name__
+    @functools.wraps(fn)
+    def queue_fn(self, *args, **kwargs):
+        # Police that cross-actor calls must be explicit about blocking.
+        on_same_greenlet = self.greenlet == gevent.getcurrent()
+        async_set = "async" in kwargs
+        async = kwargs.pop("async", False)
+        assert not (on_same_greenlet and async), \
+            "Async call to own queue, deadlocks if queue full."
+        if (not on_same_greenlet and
+                not async and
+                _log.isEnabledFor(logging.DEBUG)):
+            calling_file,  line_no, func, _ = traceback.extract_stack()[-2]
+            calling_file = os.path.basename(calling_file)
+            _log.debug("BLOCKING CALL: %s:%s:%s", calling_file, line_no, func)
+        if on_same_greenlet:
+            # Bypass the queue if we're already on the same greenlet.  This
+            # is both useful and avoids deadlock.
+            return fn(self, *args, **kwargs)
+        else:
+            assert async_set, "Cross-actor calls must specify async arg."
+        result = TrackedAsyncResult(method_name)
+        partial = functools.partial(fn, self, *args, **kwargs)
+
+        if self._event_queue.full():
+            _log.warn("Queue for %s full, this greenlet may block", self)
+        # Only block on the queue if the greenlet is running or we could block
+        # forever.
+        greenlet_running = bool(self.greenlet)
+        allow_block = greenlet_running or self.skip_running_check
+        self._event_queue.put(Message(partial=partial, results=[result]),
+                              block=allow_block)
+        if async:
+            return result
+        else:
+            return result.get()
+    queue_fn.func = fn
+    return queue_fn
+
+
 class Actor(object):
 
     queue_size = DEFAULT_QUEUE_SIZE
@@ -106,12 +157,16 @@ class Actor(object):
     the messages in a batch.  Higher values encourage batching.
     """
 
+    max_ops_before_yield = 10000
+    """Number of calls to self._maybe_yield before it yield.s"""
+
     def __init__(self, queue_size=None):
         queue_size = queue_size or self.queue_size
         self._event_queue = Queue(maxsize=queue_size)
         self.greenlet = gevent.Greenlet(self._loop)
         self._op_count = 0
         self._current_msg_name = None
+        self.skip_running_check = False
 
     def start(self):
         assert not self.greenlet, "Already running"
@@ -120,72 +175,116 @@ class Actor(object):
         return self
 
     def _loop(self):
+        """
+        Main greenlet loop, repeatedly runs _step().  Doesn't return normally.
+        """
         try:
             while True:
-                msg = self._event_queue.get()
-                batch = [msg]
-                if self.batch_delay and not self._event_queue.full():
-                    gevent.sleep(self.batch_delay)
-                while not self._event_queue.empty():
-                    # We're the only ones getting from the queue so this should
-                    # never fail.
-                    batch.append(self._event_queue.get_nowait())
-
-                # Start with one batch but we may get asked to split it if
-                # an error occurs.
-                assert batch
-                batches = [batch]
-                num_splits = 0
-                while batches:
-                    batch = batches.pop(0)
-                    batch = self._start_msg_batch(batch)
-                    results = []
-                    for msg in batch:
-                        self._current_msg_name = msg.partial.func.__name__
-                        try:
-                            result = msg.partial()
-                        except BaseException as e:
-                            _log.exception("Exception processing %s", msg)
-                            results.append(ResultOrExc(None, e))
-                        else:
-                            results.append(ResultOrExc(result, None))
-                        finally:
-                            self._current_msg_name = None
-                    try:
-                        self._finish_msg_batch(batch, results)
-                    except SplitBatchAndRetry:
-                        _log.warn("Splitting batch to retry.")
-                        if len(batch) <= 1:
-                            # Could cause infinite loop.
-                            raise AssertionError("Batch too small to split")
-                        split_point = len(batch) // 2
-                        batch_a = batch[:split_point]
-                        batch_b = batch[split_point:]
-                        if batches:
-                            next_batch = batches[0]
-                            next_batch[:0] = batch_b
-                        else:
-                            batches[:0] = [batch_b]
-                        batches[:0] = [batch_a]
-                        num_splits += 1
-                        continue
-                    except BaseException as e:
-                        # Report failure to all.
-                        _log.exception("_on_batch_processed failed.")
-                        results = [(None, e)] * len(results)
-
-                    for msg, (result, exc) in zip(batch, results):
-                        for future in msg.results:
-                            if exc is not None:
-                                future.set_exception(exc)
-                            else:
-                                future.set(result)
-                if num_splits > 0:
-                    _log.warn("Split batches complete. Number of splits: %s",
-                              num_splits)
+                self._step()
         except:
             _log.exception("Exception killed %s", self)
             raise
+
+    def _step(self):
+        """
+        Run one iteration of the event loop for this actor.  Mainly
+        broken out to allow the UTs to single-step an Actor.
+
+        It also has the subtle side effect of introducing a new local
+        scope so that our variables die before we block next time.
+        """
+        # Block waiting for work.
+        msg = self._event_queue.get()
+        # Then, once we get some, opportunistically pull as much work off the
+        # queue as possible.  We call this a batch.
+        batch = [msg]
+        if self.batch_delay and not self._event_queue.full():
+            # If requested by our subclass, delay the start of the batch to
+            # allow more work to accumulate.
+            gevent.sleep(self.batch_delay)
+        while not self._event_queue.empty():
+            # We're the only ones getting from the queue so this should
+            # never fail.
+            batch.append(self._event_queue.get_nowait())
+
+        # Start with one batch ont he queue but we may get asked to split it
+        # if an error occurs.
+        batches = [batch]
+        num_splits = 0
+        while batches:
+            # Process the first batch on our queue of batches.  Invariant:
+            # we'll either process this batch to completion and discard it or
+            # we'll put all the messages back into the batch queue in the same
+            # order but batched differently.
+            batch = batches.pop(0)
+            # Give subclass a chance to filter the batch/update its state.
+            batch = self._start_msg_batch(batch)
+            assert batch is not None, "_start_msg_batch() should return batch."
+            results = []  # Will end up same length as batch.
+            for msg in batch:
+                # Save off name of function for diags.
+                self._current_msg_name = msg.partial.func.__name__
+                try:
+                    # Actually execute the per-message method and record its
+                    # result.
+                    result = msg.partial()
+                except BaseException as e:
+                    _log.exception("Exception processing %s", msg)
+                    results.append(ResultOrExc(None, e))
+                else:
+                    results.append(ResultOrExc(result, None))
+                finally:
+                    self._current_msg_name = None
+            try:
+                # Give subclass a chance to post-process the batch.
+                self._finish_msg_batch(batch, results)
+            except SplitBatchAndRetry:
+                # The subclass couldn't process the batch as is (probably
+                # because a failure occurred and it couldn't figure out which
+                # message caused the problem.  Split the batch into two and
+                # re-run it.
+                _log.warn("Splitting batch to retry.")
+                self._split_batch(batch, batches)
+
+                num_splits += 1
+                continue
+            except BaseException as e:
+                # Report failure to all.
+                _log.exception("_on_batch_processed failed.")
+                results = [(None, e)] * len(results)
+
+            # Batch complete and finalized, set all the results.
+            assert len(batch) == len(results)
+            for msg, (result, exc) in zip(batch, results):
+                for future in msg.results:
+                    if exc is not None:
+                        future.set_exception(exc)
+                    else:
+                        future.set(result)
+        if num_splits > 0:
+            _log.warn("Split batches complete. Number of splits: %s",
+                      num_splits)
+
+    @staticmethod
+    def _split_batch(batch, batches):
+        assert len(batch) > 1, "Batch too small to split"
+        # Split the batch.
+        split_point = len(batch) // 2
+        _log.debug("Split-point = %s", split_point)
+        batch_a = batch[:split_point]
+        batch_b = batch[split_point:]
+        if batches:
+            # Optimization: there's another batch already queued,
+            # push the second half of this batch onto the front of
+            # that one.
+            _log.debug("Split batch but found a subsequent batch, "
+                       "coalescing with that.")
+            next_batch = batches[0]
+            next_batch[:0] = batch_b
+        else:
+            _log.debug("Split batch but no more batches in queue.")
+            batches[:0] = [batch_b]
+        batches[:0] = [batch_a]
 
     def _start_msg_batch(self, batch):
         """
@@ -228,7 +327,7 @@ class Actor(object):
 
     def _maybe_yield(self):
         self._op_count += 1
-        if self._op_count >= 10000:
+        if self._op_count >= self.max_ops_before_yield:
             gevent.sleep()
             self._op_count = 0
 
@@ -242,49 +341,11 @@ class Actor(object):
 
 class SplitBatchAndRetry(Exception):
     """
-    Exception that may be raised by _finish_msg_batch to cause the
+    Exception that may be raised by _finish_msg_batch() to cause the
     batch of messages to be split, each message to be re-executed and
     then the smaller batches delivered to _finish_msg_batch() again.
     """
     pass
-
-
-def actor_event(fn):
-    method_name = fn.__name__
-    @functools.wraps(fn)
-    def queue_fn(self, *args, **kwargs):
-        # Police that cross-actor calls must be explicit about blocking.
-        on_same_greenlet = self.greenlet == gevent.getcurrent()
-        async_set = "async" in kwargs
-        async = kwargs.pop("async", False)
-        assert not (on_same_greenlet and async), \
-            "Async call to own queue, deadlocks if queue full."
-        if (not on_same_greenlet and
-                not async and
-                _log.isEnabledFor(logging.DEBUG)):
-            calling_file,  line_no, func, _ = traceback.extract_stack()[-2]
-            calling_file = os.path.basename(calling_file)
-            _log.debug("BLOCKING CALL: %s:%s:%s", calling_file, line_no, func)
-        if on_same_greenlet:
-            # Bypass the queue if we're already on the same greenlet.  This
-            # is both useful and avoids deadlock.
-            return fn(self, *args, **kwargs)
-        else:
-            assert async_set, "Cross-actor calls must specify async arg."
-        result = TrackedAsyncResult(method_name)
-        partial = functools.partial(fn, self, *args, **kwargs)
-
-        if self._event_queue.full():
-            _log.warn("Queue for %s full, this greenlet will block", self)
-        greenlet_running = bool(self.greenlet)
-        self._event_queue.put(Message(partial=partial, results=[result]),
-                              block=greenlet_running)
-        if async:
-            return result
-        else:
-            return result.get()
-    queue_fn.func = fn
-    return queue_fn
 
 
 def wait_and_check(async_results):
@@ -306,11 +367,15 @@ class ReferenceManager(Actor):
             # Keep it clean: Always create a new object even if we've got a
             # pending deletion...
             obj = self._create(object_id)
+            assert hasattr(obj, "on_unreferenced")
             if object_id in self.cleanup_futures:
                 # ...but, if we have a pending deletion, queue the new actor's
                 # start up behind it.
                 _log.warn("Pending cleanup for %s; queueing start of "
                           "new object.", object_id)
+                # Hint ot he actor that it'll start running eventually so it
+                # doesn't assert if its queue gets full.
+                obj.skip_running_check = True
                 self.cleanup_futures[object_id].rawlink(obj.start)
             else:
                 obj.start()
@@ -329,15 +394,15 @@ class ReferenceManager(Actor):
         assert ref_count >= 0, "Ref count dropped below 0: %s" % ref_count
         if ref_count == 0:
             _log.debug("No more references to object with id %s", object_id)
-            self._queue_reap(object_id)
+            self._queue_cleanup(object_id)
 
     def _create(self, object_id):
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma nocover
 
     def _on_object_activated(self, object_id, obj):
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma nocover
 
-    def _queue_reap(self, dead_object_id):
+    def _queue_cleanup(self, dead_object_id):
         """
         Asks the object to remove itself.  Queues a callback to
         do our cleanup.
