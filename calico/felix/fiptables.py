@@ -59,7 +59,7 @@ class DispatchChains(Actor):
         self.ip_version = ip_version
         self.iptables_updater = iptables_updater
         self.iface_to_ep_id = {}
-        self.dirty = False
+        self._dirty = False
         self.removal_callback_queue = []
 
     @actor_event
@@ -75,21 +75,25 @@ class DispatchChains(Actor):
         _log.debug("Endpoint chain ready: %s/%s", iface_name, endpoint_id)
         if self.iface_to_ep_id.get(iface_name) != endpoint_id:
             self.iface_to_ep_id[iface_name] = endpoint_id
-            self.dirty = True
+            self._dirty = True
 
     @actor_event
     def remove_dispatch_rule(self, iface_name, callback=None):
         _log.debug("Asked to remove dispatch rule %s", iface_name)
         self.removal_callback_queue.append((self.request_epoch, callback))
-        if iface_name in self.iface_to_ep_id:
-            self.iface_to_ep_id.pop(iface_name, None)
-            self.dirty = True
+        # It should be present but be defensive and reprogram the chain
+        # just in case if not.
+        self.iface_to_ep_id.pop(iface_name, None)
+        self._dirty = True
 
     def _finish_msg_batch(self, batch, results):
-        self._update_chains()
-        self.dirty = False
+        if self._dirty:
+            self._update_chains()
+            self._dirty = False
 
     def _update_chains(self):
+        _log.info("Updating dispatch chain, num entries: %s",
+                  len(self.iface_to_ep_id))
         updates = []
         for iface in self.iface_to_ep_id:
             # Add rule to global chain to direct traffic to the
@@ -111,13 +115,14 @@ class DispatchChains(Actor):
         self.iptables_updater.apply_updates("filter",
                                             [CHAIN_TO_ENDPOINT,
                                              CHAIN_FROM_ENDPOINT],
-                                            updates, callback=cb, async=False)
+                                            updates, callback=cb, async=True)
 
     @actor_event
     def on_ipt_update_complete(self, request_epoch, error):
         assert request_epoch > self.response_epoch
         if not error:
             # Dataplane is now programmed up to at least this epoch...
+            _log.info("Dispatch chain update %s complete", request_epoch)
             self.response_epoch = request_epoch
             self._fire_pending_callbacks()
         else:

@@ -98,7 +98,7 @@ class EndpointManager(ReferenceManager):
                 # This will trigger _on_object_activated to pass the profile
                 # we just saved off to the endpoint.
                 cb = self.on_endpoint_increffed
-                self.get_and_incref(endpoint_id, callback=cb, async=False)
+                self.get_and_incref(endpoint_id, callback=cb)
 
     def on_endpoint_increffed(self, ep_id, ep):
         _log.debug("Got reference to %s", ep_id)
@@ -178,7 +178,7 @@ class LocalEndpoint(RefCountedActor):
                                        self._prof_rules_req_epoch,
                                        async=True)
                 self.rules_mgr.get_and_incref(new_profile_id,
-                                              callback=cb, async=False)
+                                              callback=cb, async=True)
                 _log.debug("Requested new profile.")
         self.endpoint = endpoint
 
@@ -257,7 +257,7 @@ class LocalEndpoint(RefCountedActor):
                 self._disp_chain_req_epoch += 1
                 self.dispatch_chains.remove_dispatch_rule(ifce_name,
                                                           callback=cb,
-                                                          async=False)
+                                                          async=True)
                 self._remove_chains()
 
     def _on_dispatch_chain_entry_removed(self, disp_chain_epoch):
