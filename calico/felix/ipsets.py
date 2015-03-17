@@ -49,7 +49,7 @@ class IpsetManager(ReferenceManager):
         self.endpoint_ids_by_profile_id = defaultdict(set)
 
     def _create(self, tag_id):
-        return IpsetUpdater(self.prefix + tag_id,
+        return ActiveIpset(self.prefix + tag_id,
                             self.set_type, family=self.family)
 
     @property
@@ -207,10 +207,10 @@ def tag_to_ipset_name(tag_name):
     return "calico-tag-" + tag_name
 
 
-class IpsetUpdater(Actor):
+class ActiveIpset(Actor):
 
     def __init__(self, name, set_type, family="inet"):
-        super(IpsetUpdater, self).__init__()
+        super(ActiveIpset, self).__init__()
 
         self.name = name
         self.set_type = set_type
@@ -225,7 +225,7 @@ class IpsetUpdater(Actor):
         """
         self.dirty = True
         """
-        Flag to tell the _on_batch_processed method that a sync is reuired.
+        Flag to tell the _on_batch_processed method that a sync is required.
         """
 
         self._load_from_ipset(async=True)
@@ -301,6 +301,7 @@ class IpsetUpdater(Actor):
                     (len(replace_and_following_msgs) - 1) + \
                     len(load_msgs)
                 return load_msgs + replace_and_following_msgs
+        return batch
 
     def _finish_msg_batch(self, batch, results):
         if self.dirty:

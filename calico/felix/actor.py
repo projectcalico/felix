@@ -169,10 +169,12 @@ class Actor(object):
         self._op_count = 0
         self._current_msg_name = None
         self.skip_running_check = False
+        self.started = False
 
     def start(self):
         assert not self.greenlet, "Already running"
         _log.debug("Starting %s", self)
+        self.started = True
         self.greenlet.start()
         return self
 

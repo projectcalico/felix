@@ -18,13 +18,18 @@ felix.profilerules
 
 ProfileRules actor, handles local profile chains.
 """
+import functools
 import logging
+import itertools
 from calico.felix.actor import Actor, actor_event, wait_and_check
 from calico.felix.frules import (profile_to_chain_name,
                                  rules_to_chain_rewrite_lines)
-from calico.felix.refcount import ReferenceManager
+from calico.felix.refcount import ReferenceManager, RefCountedActor
 
 _log = logging.getLogger(__name__)
+
+
+_correlators = ("prof-%s" % i for  i in itertools.count())
 
 
 class RulesManager(ReferenceManager):
@@ -71,8 +76,8 @@ class RulesManager(ReferenceManager):
             ap = self.objects_by_id[profile_id]
             ap.on_profile_update(profile, async=True)
 
-            
-class ProfileRules(Actor):
+
+class ProfileRules(RefCountedActor):
     """
     Actor that owns the per-profile rules chains.
     """
@@ -87,6 +92,9 @@ class ProfileRules(Actor):
         """:type dict: filled in by first update"""
         self._tag_to_ip_set_name = {4: {}, 6: {}}
         """:type dict[str, str]: current mapping from tag name to ipset name."""
+        self.pending_ipset_correlators = {4: {}, 6: {}}
+        self.pending_updates = {4: {}, 6: {}}
+        self.pending_deletes = {4: {}, 6: {}}
 
     @actor_event
     def ensure_chains_programmed(self):
@@ -103,6 +111,17 @@ class ProfileRules(Actor):
             # TODO Handle failure to program chain
             self._update_chains()
 
+    def _acquire_ipset(self, ip_version, ipset_mgr, tag):
+        corr = next(_correlators)
+        cb = functools.partial(self.on_ipset_ready, ip_version, corr)
+        ipset_mgr.get_and_incref(tag, callback=cb, async=True)
+
+    def _release_ipset(self, ip_version, tag):
+
+        self._tag_to_ip_set_name[ip_version].pop(tag, None)
+        self.pending_ipset_correlators[ip_version].pop(tag, None)
+        self.ipset_mgrs[ip_version].decref(tag, async=True)
+
     @actor_event
     def on_profile_update(self, profile):
         """
@@ -115,62 +134,72 @@ class ProfileRules(Actor):
         new_tags = extract_tags_from_profile(profile)
 
         removed_tags = old_tags - new_tags
+        added_tags = new_tags - old_tags
         for ip_version, ipset_mgr in self.ipset_mgrs.iteritems():
             for tag in removed_tags:
-                self._tag_to_ip_set_name[ip_version].pop(tag, None)
-                ipset_mgr.decref(tag)
-            added_tags = new_tags - old_tags
+                self._release_ipset(ip_version, tag)
             for tag in added_tags:
                 _log.debug("Waiting for tag %s...", tag)
-                ipset = ipset_mgr.get_and_incref(tag, async=False)
-                _log.debug("got tag %s", tag)
-                self._tag_to_ip_set_name[ip_version][tag] = ipset.name
+                self._acquire_ipset(ip_version, ipset_mgr, tag)
+        self._maybe_update()
 
-        self._profile = profile
-        # TODO Handle failure to program chain
-        self._update_chains()
+    @actor_event
+    def on_ipset_ready(self, ip_version, corr, tag, ipset):
+        current_corr = self.pending_ipset_correlators[ip_version].get(tag)
+        if current_corr == corr:
+            _log.debug("ipset ready for current correlator.")
+            self.pending_ipset_correlators[ip_version].pop(tag)
+            self._tag_to_ip_set_name[ip_version][tag] = ipset.name
+        self._maybe_update()
+
+    def _maybe_update(self):
+        if (len(self.pending_ipset_correlators[4]) == 0 and
+                len(self.pending_ipset_correlators[6]) == 0):
+            _log.debug("Ready to program rules for %s", self.id)
+            self._update_chains()
 
     @actor_event
     def on_unreferenced(self):
         """
         Called to tell us that this profile is no longer needed.  Removes
         our iptables configuration.
-
-        Thread safety: Caller should wait on the result of this method before
-        creating a new ProfileRules with the same name.  Otherwise, the
-        delete calls in this method could be issued after the initialization
-        of the new profile.
         """
-        futures = []
-        if self._programmed:
-            _log.debug("Chain was programmed, removing it.")
-            for direction in ["inbound", "outbound"]:
-                for ip_version, updater in self._iptables_updaters.iteritems():
-                    chain_name = profile_to_chain_name(direction,
-                                                       self.id)
-                    f = updater.delete_chain("filter", chain_name, async=True)
-                    futures.append(f)
-            wait_and_check(futures)
-            _log.debug("Finished deleting chains.")
-        else:
-            _log.debug("Chain wasn't yet programmed, nothing to do.")
 
-        self._programmed = False
-        self._profile = None
-        for ip_version, ipset_mgr in self.ipset_mgrs.iteritems():
-            for tag in self._tag_to_ip_set_name[ip_version]:
-                ipset_mgr.decref(tag)
-            self._tag_to_ip_set_name[ip_version] = {}
+        for direction in ["inbound", "outbound"]:
+            for ip_version, updater in self._iptables_updaters.iteritems():
+                chain_name = profile_to_chain_name(direction, self.id)
+                corr = next(_correlators)
+                cb = functools.partial(self.on_chain_delete_complete,
+                                       ip_version, direction, corr)
+                self.pending_deletes[ip_version][direction] = corr
+                updater.delete_chain("filter", chain_name, callback=cb,
+                                     async=True)
+
+        super(ProfileRules, self).on_unreferenced()
+
+    def on_chain_delete_complete(self, ip_version, direction, corr, error):
+        if self.pending_deletes[ip_version].get(direction) == corr:
+            self.pending_deletes[ip_version].pop(direction)
+            if error:
+                _log.error("Failed to delete rules for profile %s.  "
+                           "Giving up.", error)
+            if (len(self.pending_deletes[4]) == 0 and
+                    len(self.pending_deletes[6]) == 0):
+                self._programmed = False
+                self._profile = None
+                for ip_version in (4, 6):
+                    for tag in (self._tag_to_ip_set_name[ip_version] +
+                                self.pending_ipset_correlators[ip_version]):
+                        self._release_ipset(ip_version, tag)
+                self._notify_cleanup_complete()
+
 
     def _update_chains(self):
         """
         Updates the chains in the dataplane.
         """
-        futures = self._update_chain("inbound")
-        futures += self._update_chain("outbound")
-        wait_and_check(futures)
-        self._programmed = True
-        _log.info("Chains for %s programmed", self.id)
+        self._update_chain("inbound")
+        self._update_chain("outbound")
 
     def _update_chain(self, direction):
         """
@@ -184,7 +213,6 @@ class ProfileRules(Actor):
         new_profile = self._profile or {}
         rules_key = "%s_rules" % direction
         new_rules = new_profile.get(rules_key, [])
-        futures = []
 
         _log.debug("Update to %s affects %s rules.", self.id, direction)
         for version, ipt in self._iptables_updaters.iteritems():
@@ -195,11 +223,26 @@ class ProfileRules(Actor):
                 version,
                 self._tag_to_ip_set_name[version],
                 on_allow="RETURN")
-            f = ipt.apply_updates("filter", [chain_name], updates,
-                                  async=True)
-            futures.append(f)
+            corr = next(_correlators)
+            cb = functools.partial(self._on_iptables_update_complete,
+                                   version, direction, corr)
+            ipt.apply_updates("filter", [chain_name], updates, callback=cb,
+                              async=True)
 
-        return futures
+    def _on_iptables_update_complete(self, ip_version, direction, corr, error):
+        if self.pending_updates[ip_version].get(direction) == corr:
+            if error:
+                _log.error("failed to program rules for profile %s", self.id)
+            else:
+                self.pending_updates[ip_version].pop(direction)
+                self._maybe_notify_ready()
+
+    def _maybe_notify_ready(self):
+        if (len(self.pending_updates[4]) == 0 and
+                len(self.pending_updates[6]) == 0):
+            self._notify_ready()
+            self._programmed = True
+            _log.info("Chains for %s programmed", self.id)
 
 
 def extract_tags_from_profile(profile):

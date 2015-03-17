@@ -133,10 +133,11 @@ class IptablesUpdater(Actor):
 
         self.chains_to_flush = defaultdict(set)
         self.batched_updates_by_table_chain = defaultdict(dict)
+        self.completion_callbacks = []
 
     @actor_event
     def apply_updates(self, table_name, chains_to_flush, update_calls,
-                      suppress_exc=False):
+                      callback=None):
         """
         Atomically apply a set of updates to an iptables table.
 
@@ -166,18 +167,19 @@ class IptablesUpdater(Actor):
                 # deletion.  This will resurrect it if so.
                 chains[chain_name] = []
             chains[chain_name].append(call)
+        self.completion_callbacks.append(callback)
 
     @actor_event
-    def delete_chain(self, table_name, chain_name):
+    def delete_chain(self, table_name, chain_name, callback=None):
         # We actually apply the changes in _finish_msg_batch().  Index the
         # changes by table and chain.
         _log.info("Deleting chain %s:%s", table_name, chain_name)
         # Put an explicit None in the index to mark it for deletion.
         self.chains_to_flush.add(chain_name)
         self.batched_updates_by_table_chain[table_name][chain_name] = None
+        self.completion_callbacks.append(callback)
 
     def _execute_current_batch(self):
-
         updates_by_table_chain = self.batched_updates_by_table_chain
         input_lines = self._calculate_ipt_input(updates_by_table_chain)
         self._execute_iptables(input_lines)
@@ -193,17 +195,23 @@ class IptablesUpdater(Actor):
             self._execute_current_batch()
         except CalledProcessError as e:
             if len(batch) == 1:
-                _log.error("Unrecoverable %s failure. RC=%s", self.cmd_name,
+                _log.error("Non-retryable %s failure. RC=%s", self.cmd_name,
                            e.returncode)
+                cb = self.completion_callbacks[0]
                 if batch[0].partial.keywords.get("suppress_exc"):
                     final_result = ResultOrExc(None, None)
+                    cb(None)
                 else:
                     final_result = ResultOrExc(None, e)
+                    cb(e)
                 results[0] = final_result
             else:
                 _log.error("Unrecoverable error from a combined batch, "
                            "splitting the batch to narrow down culprit.")
                 raise SplitBatchAndRetry()
+        else:
+            for c in self.completion_callbacks:
+                c(None)
         finally:
             self._reset_batched_work()
 
@@ -213,6 +221,7 @@ class IptablesUpdater(Actor):
     def _reset_batched_work(self):
         self.chains_to_flush = defaultdict(set)
         self.batched_updates_by_table_chain = defaultdict(dict)
+        self.completion_callbacks = []
 
     def _calculate_ipt_input(self, updates_by_table_chain):
         # Valid input looks like this.
