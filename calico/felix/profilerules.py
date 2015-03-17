@@ -87,24 +87,38 @@ class ProfileRules(RefCountedActor):
         super(ProfileRules, self).__init__()
         assert profile_id is not None
 
+        self.id = profile_id
+        self.ip_version = ip_version
+        self.ipset_mgr = ipset_mgr
+        self._iptables_updater = iptables_updater
+
         self.request_epoch = 1
         """Incremented each time we try to program the dataplane."""
         self.response_epoch = 0
         """Epoch of the last response we got from the dataplane."""
 
-        self.id = profile_id
-
-        self.ip_version = ip_version
-        self.ipset_mgr = ipset_mgr
-        self._iptables_updater = iptables_updater
+        self.pending_ipset_req_epochs = {}
+        """
+        Map from tag name to request epoch at which we requested that tag.
+        Cleaned out when we get the response.
+        """
+        self.pending_ipset_decrefs = []
+        """
+        List of tuples of (req_epoch, tag name).  Added to when we want to
+        discard a tag but have to wait for the ipchain to be updated before
+        we can do so.  May contain the same tag multiple times if we've been
+        adding and removing the tag a lot.  That's OK; we'll have increffed
+        the tag the correct number of times as we requested it.
+        """
 
         self._profile = None
-        """:type dict: filled in by first update"""
+        """
+        :type dict|None: filled in by first update.  Reset to None on delete.
+        """
         self._tag_to_ip_set_name = {}
-        """:type dict[str, str]: current mapping from tag name to ipset name."""
-
-        self.pending_ipset_req_epochs = {}
-        self.pending_ipset_decrefs = []
+        """
+        :type dict[str, str]: current mapping from tag name to ipset name.
+        """
 
     @actor_event
     def on_profile_update(self, profile):
@@ -147,6 +161,9 @@ class ProfileRules(RefCountedActor):
         for tag in (self._tag_to_ip_set_name.keys() +
                     self.pending_ipset_req_epochs.keys()):
             self._queue_ipset_decref(tag)
+        self._tag_to_ip_set_name = {}
+        self.pending_ipset_req_epochs = {}
+        self._profile = None
 
         chains = []
         for direction in ["inbound", "outbound"]:
@@ -157,8 +174,6 @@ class ProfileRules(RefCountedActor):
         self.request_epoch += 1
         self._iptables_updater.delete_chains("filter", chains,
                                              callback=cb, async=True)
-
-        super(ProfileRules, self).on_unreferenced()
 
     def _request_ipset(self, tag):
         cb = functools.partial(self.on_ipset_ready, self.request_epoch,
@@ -236,11 +251,11 @@ class ProfileRules(RefCountedActor):
             self.response_epoch = request_epoch
             self._profile = None
             self._clean_up_pending_decrefs()
-            self._notify_cleanup_complete()
         else:
             # FIXME: What to do when we fail?
             _log.error("Failed to delete chains, epoch %s: %r",
                        request_epoch, error)
+        self._notify_cleanup_complete()
 
     def _maybe_notify_ready(self):
         if self.response_epoch > 0:

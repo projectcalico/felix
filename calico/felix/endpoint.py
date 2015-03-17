@@ -161,6 +161,7 @@ class LocalEndpoint(RefCountedActor):
         self._prof_rules = None
         self._queued_prof_rules_decrefs = []
 
+        self._dead = False
 
     @actor_event
     def on_endpoint_update(self, endpoint):
@@ -193,6 +194,17 @@ class LocalEndpoint(RefCountedActor):
 
         self._maybe_update(was_ready)  # Bypasses queue.
         _log.debug("%s finished processing update", self)
+
+    @actor_event
+    def on_unreferenced(self):
+        _log.info("%s now unreferenced, cleaning up", self)
+        assert not self._ready, "Should be deleted before being unreffed."
+        self._dead = True
+        if self._ipt_last_req == self._ipt_resp_epoch:
+            _log.debug("No pending requests, must be removed from dataplane")
+            self._notify_cleanup_complete()
+        else:
+            _log.info("Waiting for cleanup of %s before notifying", self)
 
     @actor_event
     def on_prof_rules_ready(self, req_epoch, profile_id, prof_rules):
@@ -267,7 +279,6 @@ class LocalEndpoint(RefCountedActor):
                 self.dispatch_chains.remove_dispatch_rule(ifce_name,
                                                           callback=cb,
                                                           async=True)
-                self._remove_chains()
 
     @actor_event
     def _on_dispatch_chain_entry_removed(self, disp_chain_epoch, error):
@@ -330,6 +341,8 @@ class LocalEndpoint(RefCountedActor):
         if not error:
             self._ipt_resp_epoch = req_epoch
             self._cleanup_queued_decrefs()
+        if self._dead and req_epoch == self._ipt_last_req:
+            self._notify_cleanup_complete()
 
     def _configure_interface(self):
         """
