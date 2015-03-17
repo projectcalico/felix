@@ -91,7 +91,7 @@ class ReferenceManager(Actor):
 
     def _maybe_start(self, obj_id):
         _log.debug("Checking whether we can start object %s", obj_id)
-        obj = self.objects_by_id[obj_id]
+        obj = self.objects_by_id.get(obj_id)
         if (obj and
                 obj.ref_mgmt_state == CREATED and
                 obj_id not in self.stopping_objects_by_id):

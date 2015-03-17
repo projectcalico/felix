@@ -24,6 +24,7 @@ import logging
 import socket
 import itertools
 import functools
+from subprocess import CalledProcessError
 from calico.felix import devices, futils
 from calico.felix.actor import Actor, actor_event
 from calico.felix.futils import FailedSystemCall
@@ -84,7 +85,8 @@ class EndpointManager(ReferenceManager):
     @actor_event
     def on_endpoint_update(self, endpoint_id, endpoint):
         if self._is_starting_or_live(endpoint_id):
-            self.objects_by_id[endpoint_id].on_endpoint_update(endpoint)
+            self.objects_by_id[endpoint_id].on_endpoint_update(endpoint,
+                                                               async=True)
         if endpoint is None:
             # Deletion.
             _log.info("Endpoint %s deleted", endpoint_id)
@@ -305,8 +307,8 @@ class LocalEndpoint(RefCountedActor):
                     self._iface_name, self._endpoint_id, async=True)
                 try:
                     self._configure_interface()
-                except FailedSystemCall:
-                    _log.exception("Failed to configure interface, will retry"
+                except (IOError, FailedSystemCall, CalledProcessError):
+                    _log.exception("Failed to configure interface, will retry "
                                    "when we next get an update.")
                     self._failed = True
         else:
@@ -350,8 +352,9 @@ class LocalEndpoint(RefCountedActor):
         pass
 
     def __str__(self):
-        return "Endpoint<id=%s,iface=%s>" % (self._endpoint_id or "unknown",
-                                             self._iface_name or "unknown")
+        return ("Endpoint<ipv%s,id=%s,iface=%s>" %
+                (self.ip_version, self._endpoint_id or "unknown",
+                 self._iface_name or "unknown"))
 
     def _cleanup_queued_decrefs(self):
         decrefs = self._queued_prof_rules_decrefs

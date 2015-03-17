@@ -47,7 +47,7 @@ class DispatchChains(Actor):
     add/remove them from the chains.
     """
 
-    queue_size = 100
+    queue_size = 1000
     batch_delay = 0.1
 
     def __init__(self, config, ip_version, iptables_updater):
@@ -72,14 +72,14 @@ class DispatchChains(Actor):
         :param iface_name: name of the linux interface.
         :param endpoint_id: ID of the endpoint, used to form the chain names.
         """
-        _log.debug("Endpoint chain ready: %s/%s", iface_name, endpoint_id)
+        _log.debug("%s ready: %s/%s", self, iface_name, endpoint_id)
         if self.iface_to_ep_id.get(iface_name) != endpoint_id:
             self.iface_to_ep_id[iface_name] = endpoint_id
             self._dirty = True
 
     @actor_event
     def remove_dispatch_rule(self, iface_name, callback=None):
-        _log.debug("Asked to remove dispatch rule %s", iface_name)
+        _log.debug("%s asked to remove dispatch rule %s", self, iface_name)
         self.removal_callback_queue.append((self.request_epoch, callback))
         # It should be present but be defensive and reprogram the chain
         # just in case if not.
@@ -92,7 +92,7 @@ class DispatchChains(Actor):
             self._dirty = False
 
     def _update_chains(self):
-        _log.info("Updating dispatch chain, num entries: %s",
+        _log.info("%s Updating dispatch chain, num entries: %s", self,
                   len(self.iface_to_ep_id))
         updates = []
         for iface in self.iface_to_ep_id:
@@ -122,19 +122,23 @@ class DispatchChains(Actor):
         assert request_epoch > self.response_epoch
         if not error:
             # Dataplane is now programmed up to at least this epoch...
-            _log.info("Dispatch chain update %s complete", request_epoch)
+            _log.info("%s update %s complete", self, request_epoch)
             self.response_epoch = request_epoch
             self._fire_pending_callbacks()
         else:
             # FIXME: What to do when we fail?
-            _log.error("Failed to program dataplane for epoch %s: %r",
-                       request_epoch, error)
+            _log.error("%s failed to program dataplane for epoch %s: %r",
+                       self, request_epoch, error)
 
     def _fire_pending_callbacks(self):
         pending_cbs = self.removal_callback_queue
         while pending_cbs and pending_cbs[0][0] <= self.response_epoch:
             _, cb = pending_cbs.pop(0)
             cb(None)
+
+    def __str__(self):
+        return self.__class__.__name__ + "<ipv%s,entries=%s>" % \
+            (self.ip_version, len(self.iface_to_ep_id))
 
 _correlators = ("ipt-%s" % ii for ii in itertools.count())
 MAX_IPT_RETRIES = 10

@@ -171,7 +171,8 @@ class IpsetManager(ReferenceManager):
             # address and queue updates to ipsets.
             old_ips = set(map(futils.net_to_ip,
                               old_endpoint.get(self.nets_key, [])))
-            new_ips = set(map(futils.net_to_ip, endpoint.get("ipv4_nets", [])))
+            new_ips = set(map(futils.net_to_ip,
+                              endpoint.get(self.nets_key, [])))
             for removed_ip in old_ips - new_ips:
                 for tag in old_tags:
                     if self._is_starting_or_live(tag):
