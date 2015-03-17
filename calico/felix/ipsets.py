@@ -300,6 +300,7 @@ class IpsetUpdater(Actor):
                     (len(replace_and_following_msgs) - 1) + \
                     len(load_msgs)
                 return load_msgs + replace_and_following_msgs
+        return batch
 
     def _finish_msg_batch(self, batch, results):
         if self.dirty:
