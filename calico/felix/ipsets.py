@@ -57,7 +57,7 @@ class IpsetManager(ReferenceManager):
             ep = self.endpoints_by_ep_id.get(ep_id, {})
             nets = self.nets_key
             new_members.update(map(futils.net_to_ip, ep.get(nets, [])))
-        # This call will force the ipset to be prgrammed, triggering a kick
+        # This call will force the ipset to be programmed, triggering a kick
         # to the reference manager's on_object_startup_complete().
         ipset.replace_members(new_members, async=True)
 

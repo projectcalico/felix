@@ -84,6 +84,9 @@ class ProfileRules(RefCountedActor):
     def __init__(self, profile_id, iptables_updaters, ipset_mgrs):
         super(ProfileRules, self).__init__()
         assert profile_id is not None
+        self.epoch = 0
+        """Incremented each time we successfully program the dataplane."""
+
         self.id = profile_id
         self.ipset_mgrs = ipset_mgrs
         self._programmed = False
@@ -93,6 +96,7 @@ class ProfileRules(RefCountedActor):
         self._tag_to_ip_set_name = {4: {}, 6: {}}
         """:type dict[str, str]: current mapping from tag name to ipset name."""
         self.pending_ipset_correlators = {4: {}, 6: {}}
+        self.queued_ipset_decrefs = {4: [], 6: []}
         self.pending_updates = {4: {}, 6: {}}
         self.pending_deletes = {4: {}, 6: {}}
 
@@ -111,9 +115,10 @@ class ProfileRules(RefCountedActor):
         added_tags = new_tags - old_tags
         for ip_version, ipset_mgr in self.ipset_mgrs.iteritems():
             for tag in removed_tags:
-                self._release_ipset(ip_version, tag)
+                _log.debug("Queueing ipset for tag %s for decref", tag)
+                self._queue_ipset_decref(ip_version, tag)
             for tag in added_tags:
-                _log.debug("Waiting for tag %s...", tag)
+                _log.debug("Requesting ipset for tag %s", tag)
                 self._acquire_ipset(ip_version, ipset_mgr, tag)
         self._maybe_update()
 
@@ -141,32 +146,15 @@ class ProfileRules(RefCountedActor):
 
         super(ProfileRules, self).on_unreferenced()
 
-    @actor_event
-    def on_chain_delete_complete(self, ip_version, direction, corr, error):
-        if self.pending_deletes[ip_version].get(direction) == corr:
-            self.pending_deletes[ip_version].pop(direction)
-            if error:
-                _log.error("Failed to delete rules for profile %s.  "
-                           "Giving up.", error)
-            if (len(self.pending_deletes[4]) == 0 and
-                    len(self.pending_deletes[6]) == 0):
-                self._programmed = False
-                self._profile = None
-                for ip_version in (4, 6):
-                    for tag in (self._tag_to_ip_set_name[ip_version] +
-                                self.pending_ipset_correlators[ip_version]):
-                        self._release_ipset(ip_version, tag)
-                self._notify_cleanup_complete()
-
     def _acquire_ipset(self, ip_version, ipset_mgr, tag):
         corr = next(_correlators)
         cb = functools.partial(self.on_ipset_ready, ip_version, corr)
         ipset_mgr.get_and_incref(tag, callback=cb, async=True)
 
-    def _release_ipset(self, ip_version, tag):
+    def _queue_ipset_decref(self, ip_version, tag):
         self._tag_to_ip_set_name[ip_version].pop(tag, None)
         self.pending_ipset_correlators[ip_version].pop(tag, None)
-        self.ipset_mgrs[ip_version].decref(tag, async=True)
+        self.queued_ipset_decrefs[ip_version].append((self.epoch, tag))
 
     @actor_event
     def on_ipset_ready(self, ip_version, corr, tag, ipset):
@@ -212,22 +200,53 @@ class ProfileRules(RefCountedActor):
             ipt.apply_updates("filter", [chain_name], updates, callback=cb,
                               async=True)
 
+    @actor_event
     def _on_iptables_update_complete(self, ip_version, direction, corr, error):
         if self.pending_updates[ip_version].get(direction) == corr:
             if error:
                 _log.error("failed to program rules for profile %s", self.id)
             else:
                 self.pending_updates[ip_version].pop(direction)
+                if not self.updates_pending():
+                    self.epoch += 1
+                    self._clean_up_pending_decrefs()
                 self._maybe_notify_ready()
 
+    @actor_event
+    def on_chain_delete_complete(self, ip_version, direction, corr, error):
+        if self.pending_deletes[ip_version].get(direction) == corr:
+            self.pending_deletes[ip_version].pop(direction)
+            if error:
+                _log.error("Failed to delete rules for profile %s.  "
+                           "Giving up. %r", self.id, error)
+            if (len(self.pending_deletes[4]) == 0 and
+                    len(self.pending_deletes[6]) == 0):
+                self._programmed = False
+                self._profile = None
+                for ip_version in (4, 6):
+                    for tag in (self._tag_to_ip_set_name[ip_version] +
+                                self.pending_ipset_correlators[ip_version]):
+                        self._queue_ipset_decref(ip_version, tag)
+                        self.epoch += 1
+                        self._clean_up_pending_decrefs()
+                self._notify_cleanup_complete()
+
     def _maybe_notify_ready(self):
-        if (not self._programmed and
-                len(self.pending_updates[4]) == 0 and
-                len(self.pending_updates[6]) == 0):
+        if not self._programmed and not self.updates_pending():
             self._notify_ready()
             self._programmed = True
             _log.info("Chains for %s programmed", self.id)
 
+    def _clean_up_pending_decrefs(self):
+        for ip_version in (4, 6):
+            decrefs = self.queued_ipset_decrefs[ip_version]
+            while decrefs and decrefs[0][0] < self.epoch:
+                _, tag = decrefs.pop(0)
+                self.ipset_mgrs[ip_version].decref(tag, async=True)
+
+    def updates_pending(self):
+        return (len(self.pending_updates[4]) > 0 or
+                len(self.pending_updates[6]) > 0)
 
 def extract_tags_from_profile(profile):
     if profile is None:
