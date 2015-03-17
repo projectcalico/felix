@@ -137,6 +137,7 @@ class LocalEndpoint(RefCountedActor):
         self._ipt_req_epoch = 1
         self._ipt_resp_epoch = 0
         self._ipt_last_req = None
+        self._curr_disp_chain_req = 0
 
         self.config = config
         self.ip_version = ip_version
@@ -159,7 +160,7 @@ class LocalEndpoint(RefCountedActor):
         self._prof_rules_req_epoch = 1
         self._prof_rules = None
         self._queued_prof_rules_decrefs = []
-        self._disp_chain_req_epoch = 1
+
 
     @actor_event
     def on_endpoint_update(self, endpoint):
@@ -259,10 +260,10 @@ class LocalEndpoint(RefCountedActor):
                 _log.info("%s became unready.", self)
                 self._failed = False  # Don't care any more.
                 # Wait for the referring chain to be updated.
+                self._curr_disp_chain_req += 1
                 cb = functools.partial(self._on_dispatch_chain_entry_removed,
-                                       self._disp_chain_req_epoch,
+                                       self._curr_disp_chain_req,
                                        async=True)
-                self._disp_chain_req_epoch += 1
                 self.dispatch_chains.remove_dispatch_rule(ifce_name,
                                                           callback=cb,
                                                           async=True)
@@ -270,7 +271,7 @@ class LocalEndpoint(RefCountedActor):
 
     @actor_event
     def _on_dispatch_chain_entry_removed(self, disp_chain_epoch, error):
-        if disp_chain_epoch == self._disp_chain_req_epoch:
+        if disp_chain_epoch == self._curr_disp_chain_req:
             _log.debug("Dispatch chain entry removed, removing chains.")
             self._remove_chains()
 
