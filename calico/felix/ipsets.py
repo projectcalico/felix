@@ -13,7 +13,6 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-
 """
 felix.ipsets
 ~~~~~~~~~~~~
@@ -41,14 +40,14 @@ class IpsetManager(ReferenceManager):
         self.family = family
         self.tags_by_prof_id = {}
         self.endpoints_by_ep_id = {}
-        self.prefix = "v4_" if family == "inet" else "v6_"
+        self.prefix = "fx-v4-" if family == "inet" else "fx-v6-"
 
         # Indexes.
         self.endpoint_ids_by_tag = defaultdict(set)
         self.endpoint_ids_by_profile_id = defaultdict(set)
 
     def _create(self, tag_id):
-        return IpsetUpdater(self.prefix + tag_id,
+        return IpsetUpdater(self.prefix + futils.uniquely_shorten(tag_id, 16),
                             self.set_type, family=self.family)
 
     @property
