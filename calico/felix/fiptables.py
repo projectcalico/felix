@@ -150,11 +150,12 @@ class ActiveProfile(Actor):
         new_tags = extract_tags_from_profile(profile)
 
         removed_tags = old_tags - new_tags
+        added_tags = new_tags - old_tags
+
         for ip_version, ipset_mgr in self.ipset_mgrs.iteritems():
             for tag in removed_tags:
                 self._tag_to_ip_set_name[ip_version].pop(tag, None)
                 ipset_mgr.decref(tag)
-            added_tags = new_tags - old_tags
             for tag in added_tags:
                 _log.debug("Waiting for tag %s...", tag)
                 ipset = ipset_mgr.get_and_incref(tag, async=False)
@@ -489,4 +490,5 @@ def extract_tags_from_profile(profile):
 
 
 def extract_tags_from_rule(rule):
-    return set([rule[key] for key in ["src_tag", "dst_tag"] if key in rule])
+    return set(rule[key] for key in ["src_tag", "dst_tag"]
+               if key in rule and rule[key] is not None)
