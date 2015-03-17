@@ -25,8 +25,8 @@ from collections import defaultdict
 import logging
 from subprocess import CalledProcessError
 from calico.felix import futils
-from calico.felix.actor import Actor, actor_event
-from calico.felix.refcount import ReferenceManager
+from calico.felix.actor import actor_event
+from calico.felix.refcount import ReferenceManager, RefCountedActor
 from gevent import subprocess
 import re
 
@@ -49,22 +49,24 @@ class IpsetManager(ReferenceManager):
         self.endpoint_ids_by_profile_id = defaultdict(set)
 
     def _create(self, tag_id):
-        return ActiveIpset(self.prefix + tag_id,
+        ipset = ActiveIpset(self.prefix + tag_id,
                             self.set_type, family=self.family)
+        return ipset
 
-    @property
-    def nets_key(self):
-        nets = "ipv4_nets" if self.family == "inet" else "ipv6_nets"
-        return nets
-
-    def _on_object_activated(self, tag_id, active_tag):
+    def _on_object_started(self, tag_id, ipset):
         new_members = set()
         for ep_id in self.endpoint_ids_by_tag.get(tag_id, set()):
             ep = self.endpoints_by_ep_id.get(ep_id, {})
             nets = self.nets_key
             new_members.update(map(futils.net_to_ip, ep.get(nets, [])))
-        # FIXME: Remove blocking call, needed to make sure ipset is created before returning it.
-        active_tag.replace_members(new_members, async=False)
+        # This call will force the ipset to be prgrammed, triggering a kick
+        # to the reference manager's on_object_startup_complete().
+        ipset.replace_members(new_members, async=True)
+
+    @property
+    def nets_key(self):
+        nets = "ipv4_nets" if self.family == "inet" else "ipv6_nets"
+        return nets
 
     @actor_event
     def apply_snapshot(self, tags_by_prof_id, endpoints_by_id):
@@ -85,7 +87,6 @@ class IpsetManager(ReferenceManager):
         for ep_id in missing_endpoints:
             self.on_endpoint_update(ep_id, None)
             self._maybe_yield()
-
 
     @actor_event
     def on_tags_update(self, profile_id, tags):
@@ -122,7 +123,7 @@ class IpsetManager(ReferenceManager):
                     self.endpoint_ids_by_tag[tag] |= endpoint_ids
                 else:
                     self.endpoint_ids_by_tag[tag] -= endpoint_ids
-                if self._is_active(tag):
+                if self._is_starting_or_live(tag):
                     # Tag is in-use, update its members.
                     ipset = self.objects_by_id[tag]
                     for endpoint_id in endpoint_ids:
@@ -157,7 +158,7 @@ class IpsetManager(ReferenceManager):
                 self.endpoint_ids_by_tag[tag].discard(endpoint_id)
                 if not self.endpoint_ids_by_tag[tag]:
                     del self.endpoint_ids_by_tag[tag]
-                if self._is_active(tag):
+                if self._is_starting_or_live(tag):
                     for ip in map(futils.net_to_ip,
                                   old_endpoint[self.nets_key]):
                         ipset = self.objects_by_id[tag]
@@ -175,18 +176,18 @@ class IpsetManager(ReferenceManager):
             new_ips = set(map(futils.net_to_ip, endpoint.get("ipv4_nets", [])))
             for removed_ip in old_ips - new_ips:
                 for tag in old_tags:
-                    if self._is_active(tag):
+                    if self._is_starting_or_live(tag):
                         ipset = self.objects_by_id[tag]
                         ipset.remove_member(removed_ip, async=True)
             for tag in old_tags - new_tags:
                 self.endpoint_ids_by_tag[tag].discard(endpoint_id)
-                if self._is_active(tag):
+                if self._is_starting_or_live(tag):
                     ipset = self.objects_by_id[tag]
                     for ip in old_ips:
                         ipset.remove_member(ip, async=True)
             for tag in new_tags:
                 self.endpoint_ids_by_tag[tag].add(endpoint_id)
-                if self._is_active(tag):
+                if self._is_starting_or_live(tag):
                     ipset = self.objects_by_id[tag]
                     for ip in new_ips:
                         ipset.add_member(ip, async=True)
@@ -207,7 +208,7 @@ def tag_to_ipset_name(tag_name):
     return "calico-tag-" + tag_name
 
 
-class ActiveIpset(Actor):
+class ActiveIpset(RefCountedActor):
 
     def __init__(self, name, set_type, family="inet"):
         super(ActiveIpset, self).__init__()
@@ -256,6 +257,19 @@ class ActiveIpset(Actor):
             self.dirty = True
 
     @actor_event
+    def on_unreferenced(self):
+        try:
+            if self.programmed_members is not None:
+                try:
+                    subprocess.check_call(["ipset", "del", self.name])
+                except CalledProcessError:
+                    _log.exception("Failed to delete ipset %s", self.name)
+                    raise
+                self.programmed_members = None
+        finally:
+            self._notify_cleanup_complete()
+
+    @actor_event
     def _load_from_ipset(self):
         try:
             output = subprocess.check_output(["ipset", "list", self.name])
@@ -271,6 +285,7 @@ class ActiveIpset(Actor):
             # <one member per line>
             lines = output.splitlines()
             self.programmed_members = set(lines[lines.index("Members:") + 1:])
+            self._notify_ready()
 
     def _start_msg_batch(self, batch):
         # Look backwards in the batch for a replace_members call, which trumps
@@ -322,6 +337,8 @@ class ActiveIpset(Actor):
                 _log.error("Failed to create ipset: Out:\n%sErr:\n%s", out,
                            err)
             self.programmed_members = set()
+            self.programmed = True
+            self._notify_ready()
         _log.debug("Programmed members: %s", self.programmed_members)
         _log.debug("Desired members: %s", self.members)
         members_to_add = self.members - self.programmed_members

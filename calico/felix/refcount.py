@@ -8,6 +8,11 @@ from calico.felix.actor import Actor, actor_event
 
 _log = logging.getLogger(__name__)
 
+CREATED = "created"
+STARTING = "starting"
+LIVE = "live"
+STOPPING = "stopping"
+
 
 class ReferenceManager(Actor):
     """
@@ -25,9 +30,8 @@ class ReferenceManager(Actor):
     def __init__(self):
         super(ReferenceManager, self).__init__()
         self.objects_by_id = {}
+        self.stopping_objects_by_id = collections.defaultdict(set)
         self.pending_ref_callbacks = collections.defaultdict(set)
-        self.pending_cleanups = collections.defaultdict(set)
-        self.ref_counts_by_id = collections.defaultdict(lambda: 0)
 
     @actor_event
     def get_and_incref(self, object_id, callback):
@@ -35,27 +39,32 @@ class ReferenceManager(Actor):
         assert callback is not None
 
         if object_id not in self.objects_by_id:
-            # Keep it clean: Always create a new object even if we've got a
-            # pending deletion...
+            _log.debug("Object for id %s didn't exist", object_id)
             obj = self._create(object_id)
+            obj._manager = weakref.proxy(self)
+            obj._id = object_id
             self.objects_by_id[object_id] = obj
-            self.pending_ref_callbacks[object_id].add(callback)
-            self._maybe_start(object_id)
-        else:
-            obj = self.objects_by_id[object_id]
 
-        self.ref_counts_by_id[object_id] += 1
+        self.pending_ref_callbacks[object_id].add(callback)
+        self.objects_by_id[object_id].ref_count += 1
+
+        # Depending on state of object, may need to start it or immediately
+        # call back.
+        self._maybe_start(object_id)
+        self._maybe_notify_referrers(object_id)
 
     @actor_event
     def decref(self, object_id):
-        self.ref_counts_by_id[object_id] -= 1
-        ref_count = self.ref_counts_by_id[object_id]
-        assert ref_count >= 0, "Ref count dropped below 0: %s" % ref_count
-        if ref_count == 0:
+        assert object_id in self.objects_by_id
+        obj = self.objects_by_id[object_id]
+        obj.ref_count -= 1
+        assert obj.ref_count >= 0, "Ref count dropped below 0.s"
+        if obj.ref_count == 0:
             _log.debug("No more references to object with id %s", object_id)
-            obj = self.objects_by_id.pop(object_id)
+            obj.ref_mgmt_state = STOPPING
             obj.on_unreferenced(async=True)
-            self.pending_cleanups[object_id].add(obj)
+            self.objects_by_id.pop(object_id)
+            self.stopping_objects_by_id[object_id].add(obj)
             self.pending_ref_callbacks.pop(object_id, None)
 
     @actor_event
@@ -63,40 +72,57 @@ class ReferenceManager(Actor):
         if self.objects_by_id.get(object_id) is not obj:
             _log.debug("Ignoring on_object_startup_complete for old instance")
             return
-        for cb in self.pending_ref_callbacks[object_id]:
-            cb(object_id, obj)
-        del self.pending_ref_callbacks[object_id]
+        if obj.ref_mgmt_state != STARTING:
+            _log.debug("Ignoring on_object_startup_complete for isntance "
+                       "in state %s", obj.ref_mgmt_state)
+            return
+        obj.ref_mgmt_state = LIVE
+        self._maybe_notify_referrers(object_id)
 
     @actor_event
     def on_object_cleanup_complete(self, object_id, obj):
-        self.pending_cleanups[object_id].discard(obj)
-        if not self.pending_cleanups[object_id]:
-            del self.pending_cleanups[object_id]
+        self.stopping_objects_by_id[object_id].discard(obj)
+        if not self.stopping_objects_by_id[object_id]:
+            del self.stopping_objects_by_id[object_id]
+            # May have unblocked start of new object...
             self._maybe_start(object_id)
 
     def _maybe_start(self, obj_id):
-        if (obj_id in self.pending_ref_callbacks and
-                obj_id in self.objects_by_id and
-                obj_id not in self.pending_cleanups):
-            _log.debug("Object %s is still requested and there are no "
-                       "outstanding cleanups.  Starting it.")
-            self.objects_by_id[obj_id].start()
+        obj = self.objects_by_id[obj_id]
+        if (obj and
+                obj.ref_mgmt_state == CREATED and
+                obj_id not in self.stopping_objects_by_id):
+            obj.ref_mgmt_state = STARTING
+            obj.start()
+            self._on_object_started(obj_id, obj)
+
+    def _maybe_notify_referrers(self, object_id):
+        obj = self.objects_by_id.get(object_id)
+        if obj and obj.ref_mgmt_state == LIVE:
+            for cb in self.pending_ref_callbacks[object_id]:
+                cb(object_id, obj)
+            self.pending_ref_callbacks.pop(object_id)
+
+    def _on_object_started(self, obj_id, obj):
+        pass
 
     def _create(self, object_id):
         raise NotImplementedError()  # pragma nocover
 
-    def _on_object_activated(self, object_id, obj):
-        raise NotImplementedError()  # pragma nocover
-
-    def _is_active(self, object_id):
-        return self.ref_counts_by_id.get(object_id, 0) > 0
+    def _is_starting_or_live(self, obj_id):
+        return (obj_id in self.objects_by_id
+                and self.objects_by_id[obj_id] in (STARTING, LIVE))
 
 
 class RefCountedActor(Actor):
-    def __init__(self, manager, obj_id):
+    def __init__(self):
         super(RefCountedActor, self).__init__()
-        self._manager = weakref.proxy(manager)
-        self._id = obj_id
+
+        # These fields are owned by the ReferenceManager.
+        self._manager = None
+        self._id = None
+        self.ref_mgmt_state = CREATED
+        self.ref_count = 0
 
     def _notify_ready(self):
         self._manager.on_object_startup_complete(self._id,
@@ -105,10 +131,6 @@ class RefCountedActor(Actor):
     def _notify_cleanup_complete(self):
         self._manager.on_object_cleanup_complete(self._id,
                                                  self, async=True)
-
-    @actor_event
-    def on_referenced(self):
-        self._notify_ready()
 
     @actor_event
     def on_unreferenced(self):

@@ -72,7 +72,7 @@ class RulesManager(ReferenceManager):
             self.rules_by_profile_id[profile_id] = profile
         else:
             self.rules_by_profile_id.pop(profile_id, None)
-        if self._is_active(profile_id):
+        if self._is_starting_or_live(profile_id):
             ap = self.objects_by_id[profile_id]
             ap.on_profile_update(profile, async=True)
 
@@ -97,32 +97,6 @@ class ProfileRules(RefCountedActor):
         self.pending_deletes = {4: {}, 6: {}}
 
     @actor_event
-    def ensure_chains_programmed(self):
-        """
-        Waits until the chains are actually programmed into the dataplane.
-
-        Used by the endpoint actor to make sure that it doesn't program its
-        chains, which reference the profile chain, until the profile chain
-        is present.
-        """
-        if self._programmed:
-            return
-        else:
-            # TODO Handle failure to program chain
-            self._update_chains()
-
-    def _acquire_ipset(self, ip_version, ipset_mgr, tag):
-        corr = next(_correlators)
-        cb = functools.partial(self.on_ipset_ready, ip_version, corr)
-        ipset_mgr.get_and_incref(tag, callback=cb, async=True)
-
-    def _release_ipset(self, ip_version, tag):
-
-        self._tag_to_ip_set_name[ip_version].pop(tag, None)
-        self.pending_ipset_correlators[ip_version].pop(tag, None)
-        self.ipset_mgrs[ip_version].decref(tag, async=True)
-
-    @actor_event
     def on_profile_update(self, profile):
         """
         Update the programmed iptables configuration with the new
@@ -143,15 +117,6 @@ class ProfileRules(RefCountedActor):
                 self._acquire_ipset(ip_version, ipset_mgr, tag)
         self._maybe_update()
 
-    @actor_event
-    def on_ipset_ready(self, ip_version, corr, tag, ipset):
-        current_corr = self.pending_ipset_correlators[ip_version].get(tag)
-        if current_corr == corr:
-            _log.debug("ipset ready for current correlator.")
-            self.pending_ipset_correlators[ip_version].pop(tag)
-            self._tag_to_ip_set_name[ip_version][tag] = ipset.name
-        self._maybe_update()
-
     def _maybe_update(self):
         if (len(self.pending_ipset_correlators[4]) == 0 and
                 len(self.pending_ipset_correlators[6]) == 0):
@@ -164,7 +129,6 @@ class ProfileRules(RefCountedActor):
         Called to tell us that this profile is no longer needed.  Removes
         our iptables configuration.
         """
-
         for direction in ["inbound", "outbound"]:
             for ip_version, updater in self._iptables_updaters.iteritems():
                 chain_name = profile_to_chain_name(direction, self.id)
@@ -177,6 +141,7 @@ class ProfileRules(RefCountedActor):
 
         super(ProfileRules, self).on_unreferenced()
 
+    @actor_event
     def on_chain_delete_complete(self, ip_version, direction, corr, error):
         if self.pending_deletes[ip_version].get(direction) == corr:
             self.pending_deletes[ip_version].pop(direction)
@@ -193,6 +158,24 @@ class ProfileRules(RefCountedActor):
                         self._release_ipset(ip_version, tag)
                 self._notify_cleanup_complete()
 
+    def _acquire_ipset(self, ip_version, ipset_mgr, tag):
+        corr = next(_correlators)
+        cb = functools.partial(self.on_ipset_ready, ip_version, corr)
+        ipset_mgr.get_and_incref(tag, callback=cb, async=True)
+
+    def _release_ipset(self, ip_version, tag):
+        self._tag_to_ip_set_name[ip_version].pop(tag, None)
+        self.pending_ipset_correlators[ip_version].pop(tag, None)
+        self.ipset_mgrs[ip_version].decref(tag, async=True)
+
+    @actor_event
+    def on_ipset_ready(self, ip_version, corr, tag, ipset):
+        current_corr = self.pending_ipset_correlators[ip_version].get(tag)
+        if current_corr == corr:
+            _log.debug("ipset ready for current correlator.")
+            self.pending_ipset_correlators[ip_version].pop(tag)
+            self._tag_to_ip_set_name[ip_version][tag] = ipset.name
+        self._maybe_update()
 
     def _update_chains(self):
         """
@@ -238,7 +221,8 @@ class ProfileRules(RefCountedActor):
                 self._maybe_notify_ready()
 
     def _maybe_notify_ready(self):
-        if (len(self.pending_updates[4]) == 0 and
+        if (not self._programmed and
+                len(self.pending_updates[4]) == 0 and
                 len(self.pending_updates[6]) == 0):
             self._notify_ready()
             self._programmed = True
