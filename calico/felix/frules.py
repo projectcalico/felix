@@ -20,6 +20,7 @@ Felix rule management, including iptables and ipsets.
 """
 import logging
 from subprocess import CalledProcessError
+from calico.felix import futils
 
 _log = logging.getLogger(__name__)
 
@@ -50,7 +51,15 @@ KNOWN_RULE_KEYS = set([
 
 
 def profile_to_chain_name(inbound_or_outbound, profile_id):
-    return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_id,
+    """
+    Returns the name of the chain to use for a given profile. The profile ID
+    that we are supplied might be (far) too long for us to use, but truncating
+    it is dangerous (for example, in OpenStack the profile is the ID of each
+    security group in use, joined with underscores). Hence we make a unique
+    string out of it and use that.
+    """
+    profile_string = futils.uniquely_shorten(profile_id, 16)
+    return CHAIN_PROFILE_PREFIX + "%s-%s" % (profile_string,
                                              inbound_or_outbound[:1])
 
 
@@ -197,29 +206,30 @@ def rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,
 
         # Network (CIDR).
         net_key = dirn + "_net"
-        if net_key in rule:
+        if net_key in rule and rule[net_key] is not None:
             ip_or_cidr = rule[net_key]
             if (":" in ip_or_cidr) == (ip_version == 6):
                 append("--%s" % direction, ip_or_cidr)
 
         # Tag, which maps to an ipset.
         tag_key = dirn + "_tag"
-        if tag_key in rule:
+        if tag_key in rule and rule[tag_key] is not None:
             ipset_name = tag_to_ipset[rule[tag_key]]
             append("--match set", "--match-set", ipset_name, dirn)
 
-        # Port lists/ranges, which we map to multiport.
+        # Port lists/ranges, which we map to multiport. Ignore not just "None"
+        # but also an empty list.
         ports_key = dirn + "_ports"
-        if ports_key in rule:
+        if ports_key in rule and rule[ports_key]:
             assert proto in ["tcp", "udp"], "Protocol %s not supported with " \
-                                            "%s" % (proto, ports_key)
+                                            "%s (%s)" % (proto, ports_key, rule)
             ports = ','.join([str(p) for p in rule[ports_key]])
             # multiport only supports 15 ports.
             # TODO: return multiple rules if we have more than one port
             assert ports.count(",") + ports.count(":") < 15, "Too many ports"
             append("--match multiport", "--%s-ports" % direction, ports)
 
-    if "icmp_type" in rule:
+    if "icmp_type" in rule and rule["icmp_type"] is not None:
         icmp_type = rule["icmp_type"]
         assert isinstance(icmp_type, int), "ICMP type should be an int"
         if proto == "icmp" and ip_version == 4:

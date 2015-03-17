@@ -240,4 +240,5 @@ def extract_tags_from_profile(profile):
 
 
 def extract_tags_from_rule(rule):
-    return set([rule[key] for key in ["src_tag", "dst_tag"] if key in rule])
+    return set(rule[key] for key in ["src_tag", "dst_tag"]
+               if key in rule and rule[key] is not None)

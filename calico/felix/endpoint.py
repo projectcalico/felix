@@ -321,7 +321,10 @@ class LocalEndpoint(Actor):
                                              self._iface_name or "unknown")
 
 def interface_to_suffix(config, iface_name):
-    return iface_name.replace(config.IFACE_PREFIX, "", 1)
+    suffix = iface_name.replace(config.IFACE_PREFIX, "", 1)
+    # The suffix is surely not very long, but make sure.
+    suffix = futils.uniquely_shorten(suffix, 16)
+    return suffix
 
 def chain_names(endpoint_suffix):
     to_chain_name = (CHAIN_TO_PREFIX + endpoint_suffix)
