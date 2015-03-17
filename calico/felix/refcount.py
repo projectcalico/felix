@@ -35,11 +35,12 @@ class ReferenceManager(Actor):
 
     @actor_event
     def get_and_incref(self, object_id, callback):
+        _log.debug("Request for object %s", object_id)
         assert object_id is not None
         assert callback is not None
 
         if object_id not in self.objects_by_id:
-            _log.debug("Object for id %s didn't exist", object_id)
+            _log.debug("%s Object for id %s didn't exist", self, object_id)
             obj = self._create(object_id)
             obj._manager = weakref.proxy(self)
             obj._id = object_id
@@ -69,11 +70,12 @@ class ReferenceManager(Actor):
 
     @actor_event
     def on_object_startup_complete(self, object_id, obj):
+        _log.debug("Object startup complete for %s", object_id)
         if self.objects_by_id.get(object_id) is not obj:
-            _log.debug("Ignoring on_object_startup_complete for old instance")
+            _log.info("Ignoring on_object_startup_complete for old instance")
             return
         if obj.ref_mgmt_state != STARTING:
-            _log.debug("Ignoring on_object_startup_complete for isntance "
+            _log.info("Ignoring on_object_startup_complete for instance "
                        "in state %s", obj.ref_mgmt_state)
             return
         obj.ref_mgmt_state = LIVE
@@ -88,20 +90,28 @@ class ReferenceManager(Actor):
             self._maybe_start(object_id)
 
     def _maybe_start(self, obj_id):
+        _log.debug("Checking whether we can start object %s", obj_id)
         obj = self.objects_by_id[obj_id]
         if (obj and
                 obj.ref_mgmt_state == CREATED and
                 obj_id not in self.stopping_objects_by_id):
+            _log.debug("Starting object %s", obj_id)
             obj.ref_mgmt_state = STARTING
             obj.start()
             self._on_object_started(obj_id, obj)
 
     def _maybe_notify_referrers(self, object_id):
+        _log.debug("Checking whether we can notify referrers for %s",
+                   object_id)
         obj = self.objects_by_id.get(object_id)
         if obj and obj.ref_mgmt_state == LIVE:
+            _log.debug("Object %s is LIVE, notifying referrers", object_id)
             for cb in self.pending_ref_callbacks[object_id]:
                 cb(object_id, obj)
             self.pending_ref_callbacks.pop(object_id)
+        else:
+            _log.debug("Cannot notify referrers for %s; object state: %s",
+                       object_id, obj.ref_mgmt_state)
 
     def _on_object_started(self, obj_id, obj):
         pass

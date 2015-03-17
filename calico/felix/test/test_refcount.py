@@ -179,5 +179,5 @@ class RefMgrForTesting(ReferenceManager):
     def _create(self, object_id):
         return ActorForTesting()
 
-    def _on_object_activated(self, object_id, obj):
+    def _on_object_started(self, object_id, obj):
         obj.active = True

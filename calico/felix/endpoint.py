@@ -22,18 +22,15 @@ Endpoint management.
 import collections
 import logging
 import socket
-from subprocess import CalledProcessError
 import itertools
 import functools
-import gevent
 from calico.felix import devices, futils
-from calico.felix.actor import (Actor, actor_event, wait_and_check)
-from calico.felix.refcount import ReferenceManager
+from calico.felix.actor import Actor, actor_event
+from calico.felix.refcount import ReferenceManager, RefCountedActor
 from calico.felix.fiptables import DispatchChains
 from calico.felix.profilerules import RulesManager
 from calico.felix.frules import (CHAIN_TO_PREFIX, profile_to_chain_name,
                                  CHAIN_FROM_PREFIX)
-from calico.felix.futils import FailedSystemCall
 
 _log = logging.getLogger(__name__)
 
@@ -41,13 +38,14 @@ OUR_HOSTNAME = socket.gethostname()
 
 
 class EndpointManager(ReferenceManager):
-    def __init__(self, config, iptables_updaters, dispatch_chains,
+    def __init__(self, config, ip_version, iptables_updater, dispatch_chains,
                  rules_manager):
         super(EndpointManager, self).__init__()
 
         # Peers/utility classes.
+        self.ip_version = ip_version
         self.config = config
-        self.iptables_updaters = iptables_updaters
+        self.iptables_updater = iptables_updater
         self.dispatch_chains = dispatch_chains
         self.rules_mgr = rules_manager
 
@@ -58,7 +56,8 @@ class EndpointManager(ReferenceManager):
 
     def _create(self, object_id):
         return LocalEndpoint(self.config,
-                             self.iptables_updaters,
+                             self.ip_version,
+                             self.iptables_updater,
                              self.dispatch_chains,
                              self.rules_mgr)
 
@@ -98,7 +97,11 @@ class EndpointManager(ReferenceManager):
             if not self._is_starting_or_live(endpoint_id):
                 # This will trigger _on_object_activated to pass the profile
                 # we just saved off to the endpoint.
-                self.get_and_incref(endpoint_id, async=False)
+                cb = self.on_endpoint_increffed
+                self.get_and_incref(endpoint_id, callback=cb, async=False)
+
+    def on_endpoint_increffed(self, ep_id, ep):
+        _log.debug("Got reference to %s", ep_id)
 
     @actor_event
     def on_interface_update(self, name, iface_state):
@@ -115,15 +118,21 @@ class EndpointManager(ReferenceManager):
 _correlators = ("le-%s" % ii for ii in itertools.count())
 
 
-class LocalEndpoint(Actor):
+class LocalEndpoint(RefCountedActor):
 
-    def __init__(self, config, iptables_updaters, dispatch_chains,
+    def __init__(self, config, ip_version, iptables_updater, dispatch_chains,
                  rules_manager):
         super(LocalEndpoint, self).__init__()
         assert isinstance(dispatch_chains, DispatchChains)
         assert isinstance(rules_manager, RulesManager)
+
+        self._ipt_req_epoch = 1
+        self._ipt_resp_epoch = 0
+        self._ipt_last_req = None
+
         self.config = config
-        self.iptables_updaters = iptables_updaters
+        self.ip_version = ip_version
+        self.iptables_updater = iptables_updater
         self.dispatch_chains = dispatch_chains
         self.rules_mgr = rules_manager
 
@@ -139,9 +148,10 @@ class LocalEndpoint(Actor):
         # We'll force a reprogram next time we get a kick.
         self._failed = False
 
-        self._prof_rules_corr = None
+        self._prof_rules_req_epoch = 1
         self._prof_rules = None
         self._queued_prof_rules_decrefs = []
+        self._disp_chain_req_epoch = 1
 
     @actor_event
     def on_endpoint_update(self, endpoint):
@@ -158,12 +168,15 @@ class LocalEndpoint(Actor):
         if old_profile_id != new_profile_id:
             if old_profile_id:
                 # Queue profile for decref after we reprogram our chains.
-                self._queued_prof_rules_decrefs.append(old_profile_id)
+                self._queued_prof_rules_decrefs.append((self._ipt_req_epoch,
+                                                        old_profile_id))
             self._prof_rules = None
             if new_profile_id is not None:
                 _log.debug("Acquiring new profile %s", new_profile_id)
-                corr = next(_correlators)
-                cb = functools.partial(self.on_prof_rules_ready, corr)
+                self._prof_rules_req_epoch += 1
+                cb = functools.partial(self.on_prof_rules_ready,
+                                       self._prof_rules_req_epoch,
+                                       async=True)
                 self.rules_mgr.get_and_incref(new_profile_id,
                                               callback=cb, async=False)
                 _log.debug("Requested new profile.")
@@ -173,14 +186,19 @@ class LocalEndpoint(Actor):
         _log.debug("%s finished processing update", self)
 
     @actor_event
-    def on_prof_rules_ready(self, corr, profile_id, prof_rules):
-        if corr == self._prof_rules_corr:
+    def on_prof_rules_ready(self, req_epoch, profile_id, prof_rules):
+        _log.debug("Profile rules ready for profile %s @ epoch %s",
+                   profile_id, req_epoch)
+        if self._prof_rules_req_epoch == req_epoch:
             # This is our most recent request, save off the result.
             _log.debug("Got profile %s, most recent request", profile_id)
             assert self._prof_rules is None
             was_ready = self._ready
             self._prof_rules = prof_rules
             self._maybe_update(was_ready)
+        else:
+            _log.debug("Profile update for %s is out-of-date, our epoch: %s",
+                       profile_id, self._prof_rules_req_epoch)
 
     @actor_event
     def on_interface_update(self, iface_state):
@@ -225,21 +243,7 @@ class LocalEndpoint(Actor):
                 self._failed = False  # Ready to try again...
                 ep_id = self.endpoint["id"]
                 _log.info("%s became ready to program.", self)
-                try:
-                    self._update_chains()
-                    self.dispatch_chains.on_endpoint_chains_ready(ifce_name,
-                                                                  ep_id,
-                                                                  async=True)
-                    self._configure_interface()
-                    # TODO: remove routes to removed IPs.
-                except (OSError, FailedSystemCall, CalledProcessError):
-                    _log.exception("Failed to program the dataplane for %s",
-                                   self)
-                    self._failed = True  # Force retry next time.
-                    # Schedule a retry.
-                    gevent.spawn_later(5, self._maybe_update, False)
-                else:
-                    _log.info("Programmed %s", self)
+                self._update_chains()
             else:
                 # We were active but now we're not, withdraw the dispatch rule
                 # and our chain.  We must do this to allow iptables to remove
@@ -247,53 +251,69 @@ class LocalEndpoint(Actor):
                 _log.info("%s became unready.", self)
                 self._failed = False  # Don't care any more.
                 # Wait for the referring chain to be updated.
+                cb = functools.partial(self._on_dispatch_chain_entry_removed,
+                                       self._disp_chain_req_epoch,
+                                       async=True)
+                self._disp_chain_req_epoch += 1
                 self.dispatch_chains.remove_dispatch_rule(ifce_name,
+                                                          callback=cb,
                                                           async=False)
-                try:
-                    self._remove_chains()
-                except (OSError, FailedSystemCall, CalledProcessError):
-                    # Not much we can do, maybe they were deleted under us?
-                    _log.exception("Failed to remove chains")
-                else:
-                    _log.info("Removed chains for %s", self)
-                try:
-                    self._deconfigure_interface()
-                except (OSError, FailedSystemCall, CalledProcessError):
-                    # This is likely because the interface was removed.
-                    _log.warning("Failed to remove routes", exc_info=True)
-                else:
-                    _log.info("Removed interface config for %s", self)
+                self._remove_chains()
+
+    def _on_dispatch_chain_entry_removed(self, disp_chain_epoch):
+        if disp_chain_epoch == self._disp_chain_req_epoch:
+            _log.debug("Dispatch chain entry removed, removing chains.")
+            self._remove_chains()
 
     def _update_chains(self):
-        futures = []
-        for ip_version, updater in self.iptables_updaters.iteritems():
-            chains, updates = get_endpoint_rules(
-                self._suffix,
-                self._iface_name,
-                ip_version,
-                self.endpoint.get("ipv%s_nets" % ip_version, []),
-                self.endpoint["mac"],
-                self.endpoint["profile_id"])
-            corr = next(_correlators)
-            cb = functools.partial(self.on_iptables_update_complete,
-                                   corr, ip_version)
-            updater.apply_updates("filter", chains, updates, callback=cb,
-                                  async=True)
-        wait_and_check(futures)
+        chains, updates = get_endpoint_rules(
+            self._suffix,
+            self._iface_name,
+            self.ip_version,
+            self.endpoint.get("ipv%s_nets" % self.ip_version, []),
+            self.endpoint["mac"],
+            self.endpoint["profile_id"])
 
-    def on_iptables_update_complete(self, corr, ip_version):
+        cb = functools.partial(self.on_iptables_update_complete,
+                               self._ipt_req_epoch,
+                               async=True)
+        self._ipt_last_req = self._ipt_req_epoch
+        self._ipt_req_epoch += 1
+        self.iptables_updater.apply_updates("filter",
+                                            chains, updates,
+                                            callback=cb, async=True)
 
+    @actor_event
+    def on_iptables_update_complete(self, req_epoch, error):
+        _log.debug("iptables update complete on endpoint %s", self._id)
+        assert req_epoch > self._ipt_resp_epoch
+        if not error:
+            _log.info("Programming for %s succeeded", self)
+            self._ipt_resp_epoch = req_epoch
+            self._cleanup_queued_decrefs()
+            if req_epoch == self._ipt_last_req:
+                # Up to date, tell the dispatch chain/configure iface.
+                _log.debug("No intervening updates, adding to dispatch chain.")
+                self.dispatch_chains.on_endpoint_chains_ready(
+                    self._iface_name, self._endpoint_id, async=True)
+                self._configure_interface()
+        else:
+            _log.error("Programming for %s failed: %r", self, error)
+            # TODO: Queue retry?
 
     def _remove_chains(self):
-        if self._endpoint_id:
-            to_chain_name, from_chain_name = chain_names(self._suffix)
-            futures = []
-            for ip_version, updater in self.iptables_updaters.iteritems():
-                f = updater.delete_chain("filter", to_chain_name, async=True)
-                futures.append(f)
-                f = updater.delete_chain("filter", from_chain_name, async=True)
-                futures.append(f)
-            wait_and_check(futures)
+        cb = functools.partial(self.on_chains_deleted, self._ipt_req_epoch,
+                               async=True)
+        self.iptables_updater.delete_chains("filter",
+                                            chain_names(self._suffix),
+                                            callback=cb, async=True)
+
+    @actor_event
+    def on_chains_deleted(self, req_epoch, error):
+        assert self._ipt_resp_epoch < req_epoch
+        if not error:
+            self._ipt_resp_epoch = req_epoch
+            self._cleanup_queued_decrefs()
 
     def _configure_interface(self):
         """
@@ -319,6 +339,13 @@ class LocalEndpoint(Actor):
     def __str__(self):
         return "Endpoint<id=%s,iface=%s>" % (self._endpoint_id or "unknown",
                                              self._iface_name or "unknown")
+
+    def _cleanup_queued_decrefs(self):
+        decrefs = self._queued_prof_rules_decrefs
+        while decrefs and decrefs[0][0] <= self._ipt_resp_epoch:
+            _, profile_id = decrefs.pop(0)
+            self.rules_mgr.decref(profile_id, async=True)
+
 
 def interface_to_suffix(config, iface_name):
     suffix = iface_name.replace(config.IFACE_PREFIX, "", 1)

@@ -29,9 +29,6 @@ from calico.felix.refcount import ReferenceManager, RefCountedActor
 _log = logging.getLogger(__name__)
 
 
-_correlators = ("prof-%s" % i for  i in itertools.count())
-
-
 class RulesManager(ReferenceManager):
     """
     Actor that manages the life cycle of ProfileRules objects.
@@ -41,18 +38,23 @@ class RulesManager(ReferenceManager):
     This class ensures that rules chains are properly quiesced
     before their Actors are deleted.
     """
-    def __init__(self, iptables_updaters, ipset_mgrs):
+    def __init__(self, ip_version, iptables_updater, ipset_manager):
         super(RulesManager, self).__init__()
-        self.iptables_updaters = iptables_updaters
-        self.ipset_mgrs = ipset_mgrs
+        self.ip_version = ip_version
+        self.iptables_updater = iptables_updater
+        self.ipset_manager = ipset_manager
         self.rules_by_profile_id = {}
 
     def _create(self, profile_id):
-        return ProfileRules(profile_id, self.iptables_updaters,
-                             self.ipset_mgrs)
+        return ProfileRules(profile_id,
+                            self.ip_version,
+                            self.iptables_updater,
+                            self.ipset_manager)
 
-    def _on_object_activated(self, profile_id, active_profile):
+    def _on_object_started(self, profile_id, active_profile):
         profile_or_none = self.rules_by_profile_id.get(profile_id)
+        _log.debug("Applying initial update to rules %s: %s", profile_id,
+                   profile_or_none)
         active_profile.on_profile_update(profile_or_none, async=True)
 
     @actor_event
@@ -81,31 +83,36 @@ class ProfileRules(RefCountedActor):
     """
     Actor that owns the per-profile rules chains.
     """
-    def __init__(self, profile_id, iptables_updaters, ipset_mgrs):
+    def __init__(self, profile_id, ip_version, iptables_updater, ipset_mgr):
         super(ProfileRules, self).__init__()
         assert profile_id is not None
-        self.epoch = 0
-        """Incremented each time we successfully program the dataplane."""
+
+        self.request_epoch = 1
+        """Incremented each time we try to program the dataplane."""
+        self.response_epoch = 0
+        """Epoch of the last response we got from the dataplane."""
 
         self.id = profile_id
-        self.ipset_mgrs = ipset_mgrs
-        self._programmed = False
-        self._iptables_updaters = iptables_updaters
+
+        self.ip_version = ip_version
+        self.ipset_mgr = ipset_mgr
+        self._iptables_updater = iptables_updater
+
         self._profile = None
         """:type dict: filled in by first update"""
-        self._tag_to_ip_set_name = {4: {}, 6: {}}
+        self._tag_to_ip_set_name = {}
         """:type dict[str, str]: current mapping from tag name to ipset name."""
-        self.pending_ipset_correlators = {4: {}, 6: {}}
-        self.queued_ipset_decrefs = {4: [], 6: []}
-        self.pending_updates = {4: {}, 6: {}}
-        self.pending_deletes = {4: {}, 6: {}}
+
+        self.pending_ipset_req_epochs = {}
+        self.pending_ipset_decrefs = []
 
     @actor_event
     def on_profile_update(self, profile):
         """
         Update the programmed iptables configuration with the new
-        profile.  Returns after the update is present in the dataplane.
+        profile.
         """
+        _log.debug("Profile update to %s: %s", self.id, profile)
         assert profile is None or profile["id"] == self.id
 
         old_tags = extract_tags_from_profile(self._profile)
@@ -113,20 +120,23 @@ class ProfileRules(RefCountedActor):
 
         removed_tags = old_tags - new_tags
         added_tags = new_tags - old_tags
-        for ip_version, ipset_mgr in self.ipset_mgrs.iteritems():
-            for tag in removed_tags:
-                _log.debug("Queueing ipset for tag %s for decref", tag)
-                self._queue_ipset_decref(ip_version, tag)
-            for tag in added_tags:
-                _log.debug("Requesting ipset for tag %s", tag)
-                self._acquire_ipset(ip_version, ipset_mgr, tag)
+        for tag in removed_tags:
+            _log.debug("Queueing ipset for tag %s for decref", tag)
+            self._queue_ipset_decref(tag)
+        for tag in added_tags:
+            _log.debug("Requesting ipset for tag %s", tag)
+            self._request_ipset(tag)
+
+        self._profile = profile
         self._maybe_update()
 
     def _maybe_update(self):
-        if (len(self.pending_ipset_correlators[4]) == 0 and
-                len(self.pending_ipset_correlators[6]) == 0):
+        if len(self.pending_ipset_req_epochs) == 0:
             _log.debug("Ready to program rules for %s", self.id)
             self._update_chains()
+        else:
+            _log.debug("Can't program rules %s yet, waiting on %s ipsets",
+                       self.id, len(self.pending_ipset_req_epochs))
 
     @actor_event
     def on_unreferenced(self):
@@ -134,119 +144,115 @@ class ProfileRules(RefCountedActor):
         Called to tell us that this profile is no longer needed.  Removes
         our iptables configuration.
         """
+        for tag in (self._tag_to_ip_set_name.keys() +
+                    self.pending_ipset_req_epochs.keys()):
+            self._queue_ipset_decref(tag)
+
+        chains = []
         for direction in ["inbound", "outbound"]:
-            for ip_version, updater in self._iptables_updaters.iteritems():
-                chain_name = profile_to_chain_name(direction, self.id)
-                corr = next(_correlators)
-                cb = functools.partial(self.on_chain_delete_complete,
-                                       ip_version, direction, corr)
-                self.pending_deletes[ip_version][direction] = corr
-                updater.delete_chain("filter", chain_name, callback=cb,
-                                     async=True)
+            chain_name = profile_to_chain_name(direction, self.id)
+            chains.append(chain_name)
+        cb = functools.partial(self._on_chain_delete_complete,
+                               self.request_epoch, async=True)
+        self.request_epoch += 1
+        self._iptables_updater.delete_chains("filter", chains,
+                                             callback=cb, async=True)
 
         super(ProfileRules, self).on_unreferenced()
 
-    def _acquire_ipset(self, ip_version, ipset_mgr, tag):
-        corr = next(_correlators)
-        cb = functools.partial(self.on_ipset_ready, ip_version, corr)
-        ipset_mgr.get_and_incref(tag, callback=cb, async=True)
+    def _request_ipset(self, tag):
+        cb = functools.partial(self.on_ipset_ready, self.request_epoch,
+                               async=True)
+        self.pending_ipset_req_epochs[tag] = self.request_epoch
+        self.ipset_mgr.get_and_incref(tag, callback=cb, async=True)
 
-    def _queue_ipset_decref(self, ip_version, tag):
-        self._tag_to_ip_set_name[ip_version].pop(tag, None)
-        self.pending_ipset_correlators[ip_version].pop(tag, None)
-        self.queued_ipset_decrefs[ip_version].append((self.epoch, tag))
+    def _queue_ipset_decref(self, tag):
+        self._tag_to_ip_set_name.pop(tag, None)
+        self.pending_ipset_req_epochs.pop(tag, None)
+        self.pending_ipset_decrefs.append((self.request_epoch, tag))
 
     @actor_event
-    def on_ipset_ready(self, ip_version, corr, tag, ipset):
-        current_corr = self.pending_ipset_correlators[ip_version].get(tag)
-        if current_corr == corr:
-            _log.debug("ipset ready for current correlator.")
-            self.pending_ipset_correlators[ip_version].pop(tag)
-            self._tag_to_ip_set_name[ip_version][tag] = ipset.name
+    def on_ipset_ready(self, request_epoch, tag, ipset):
+        if self.pending_ipset_req_epochs.get(tag) == request_epoch:
+            _log.debug("ipset ready for current epoch.")
+            self.pending_ipset_req_epochs.pop(tag)
+            self._tag_to_ip_set_name[tag] = ipset.name
+        else:
+            _log.debug("Ignoring ipset update for old epoch. Out epoch: %s,"
+                       "update: %s", self.pending_ipset_req_epochs.get(tag),
+                       request_epoch)
         self._maybe_update()
 
     def _update_chains(self):
         """
         Updates the chains in the dataplane.
         """
-        self._update_chain("inbound")
-        self._update_chain("outbound")
-
-    def _update_chain(self, direction):
-        """
-        Updates one of our individual inbound/outbound chains from
-        the rules in the new_profile dict.
-
-        :param direction: "inbound" or "outbound"
-            must contain all tags used in the rules.
-        """
-        _log.debug("Updating %s chain", direction)
-        new_profile = self._profile or {}
-        rules_key = "%s_rules" % direction
-        new_rules = new_profile.get(rules_key, [])
-
-        _log.debug("Update to %s affects %s rules.", self.id, direction)
-        for version, ipt in self._iptables_updaters.iteritems():
+        chains = []
+        updates = []
+        for direction in ("inbound", "outbound"):
+            _log.debug("Updating %s chain for profile %s", direction,
+                       self.id)
+            new_profile = self._profile or {}
+            _log.debug("Profile %s: %s", self.id, self._profile)
+            rules_key = "%s_rules" % direction
+            new_rules = new_profile.get(rules_key, [])
             chain_name = profile_to_chain_name(direction, self.id)
-            updates = rules_to_chain_rewrite_lines(
+            chains.append(chain_name)
+            updates.extend(rules_to_chain_rewrite_lines(
                 chain_name,
                 new_rules,
-                version,
-                self._tag_to_ip_set_name[version],
-                on_allow="RETURN")
-            corr = next(_correlators)
-            cb = functools.partial(self._on_iptables_update_complete,
-                                   version, direction, corr)
-            ipt.apply_updates("filter", [chain_name], updates, callback=cb,
-                              async=True)
+                self.ip_version,
+                self._tag_to_ip_set_name,
+                on_allow="RETURN"))
+        _log.debug("Queueing programming for rules %s: %s", self.id,
+                   updates)
+        cb = functools.partial(self._on_iptables_update_complete,
+                               self.request_epoch, async=True)
+        self._iptables_updater.apply_updates("filter", chains, updates,
+                                             callback=cb, async=True)
+        self.request_epoch += 1
 
     @actor_event
-    def _on_iptables_update_complete(self, ip_version, direction, corr, error):
-        if self.pending_updates[ip_version].get(direction) == corr:
-            if error:
-                _log.error("failed to program rules for profile %s", self.id)
-            else:
-                self.pending_updates[ip_version].pop(direction)
-                if not self.updates_pending():
-                    self.epoch += 1
-                    self._clean_up_pending_decrefs()
-                self._maybe_notify_ready()
+    def _on_iptables_update_complete(self, request_epoch, error):
+        assert request_epoch > self.response_epoch
+        if not error:
+            # Dataplane is now programmed up to at least this epoch...
+            _log.info("Completed programming %s chains for epoch %s, "
+                      "next req epoch: %s",
+                      self.id, request_epoch, self.request_epoch)
+            self.response_epoch = request_epoch
+            self._clean_up_pending_decrefs()
+            self._maybe_notify_ready()
+        else:
+            # FIXME: What to do when we fail?
+            _log.error("Failed to program dataplane for epoch %s: %r",
+                       request_epoch, error)
 
     @actor_event
-    def on_chain_delete_complete(self, ip_version, direction, corr, error):
-        if self.pending_deletes[ip_version].get(direction) == corr:
-            self.pending_deletes[ip_version].pop(direction)
-            if error:
-                _log.error("Failed to delete rules for profile %s.  "
-                           "Giving up. %r", self.id, error)
-            if (len(self.pending_deletes[4]) == 0 and
-                    len(self.pending_deletes[6]) == 0):
-                self._programmed = False
-                self._profile = None
-                for ip_version in (4, 6):
-                    for tag in (self._tag_to_ip_set_name[ip_version] +
-                                self.pending_ipset_correlators[ip_version]):
-                        self._queue_ipset_decref(ip_version, tag)
-                        self.epoch += 1
-                        self._clean_up_pending_decrefs()
-                self._notify_cleanup_complete()
+    def _on_chain_delete_complete(self, request_epoch, error):
+        assert request_epoch > self.response_epoch
+        if not error:
+            # Dataplane is now programmed up to at least this epoch...
+            self.response_epoch = request_epoch
+            self._profile = None
+            self._clean_up_pending_decrefs()
+            self._notify_cleanup_complete()
+        else:
+            # FIXME: What to do when we fail?
+            _log.error("Failed to delete chains, epoch %s: %r",
+                       request_epoch, error)
 
     def _maybe_notify_ready(self):
-        if not self._programmed and not self.updates_pending():
+        if self.response_epoch > 0:
             self._notify_ready()
-            self._programmed = True
             _log.info("Chains for %s programmed", self.id)
 
     def _clean_up_pending_decrefs(self):
-        for ip_version in (4, 6):
-            decrefs = self.queued_ipset_decrefs[ip_version]
-            while decrefs and decrefs[0][0] < self.epoch:
-                _, tag = decrefs.pop(0)
-                self.ipset_mgrs[ip_version].decref(tag, async=True)
+        decrefs = self.pending_ipset_decrefs
+        while decrefs and decrefs[0][0] <= self.response_epoch:
+            _, tag = decrefs.pop(0)
+            self.ipset_mgr.decref(tag, async=True)
 
-    def updates_pending(self):
-        return (len(self.pending_updates[4]) > 0 or
-                len(self.pending_updates[6]) > 0)
 
 def extract_tags_from_profile(profile):
     if profile is None:
