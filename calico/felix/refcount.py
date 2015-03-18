@@ -27,10 +27,10 @@ STOPPING = "stopping"
 class ReferenceManager(Actor):
     """
     Actor that manages the life cycle of a collection of other Actors
-    by name.  Users can request a reference to an actor by name using
-    get_ind_incref() and then (they must) return it by calling decref().
+    by name. Users can request a reference to an actor by name using
+    get_and_incref() and then they must return it by calling decref().
 
-    Consecutive calls to incref return the same actor.  Actors are only
+    Consecutive calls to incref return the same actor. Actors are only
     cleaned up when their reference count hits zero.
 
     Users who obtain a reference through get_and_incref() must stop
@@ -77,7 +77,7 @@ class ReferenceManager(Actor):
 
         The ref-counted actor must make this callback once it is ready to
         be referenced unless it receives an on_unreferenced() message,
-        after which, calls to this method from that actor are allowed but
+        after which calls to this method from that actor are allowed but
         ignored.
         """
         _log.debug("Object startup complete for %s", object_id)

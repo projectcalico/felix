@@ -147,12 +147,12 @@ MAX_IPT_BACKOFF = 0.2
 
 class IptablesUpdater(Actor):
     """
-    Actor that maintains an iptables-restore subprocess for
-    injecting rules into iptables.
+    Actor that maintains an iptables-restore subprocess for injecting rules
+    into iptables.
 
-    Note: due to the internal architecture of iptables,
-    multiple concurrent calls to iptables-restore can clobber
-    each other.  Use one instance of this class.
+    Note: due to the internal architecture of iptables, multiple concurrent
+    calls to iptables-restore can clobber each other.  Use one instance of this
+    class for IP v4 and one for IP v6.
     """
 
     queue_size = 1000

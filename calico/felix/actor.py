@@ -1,5 +1,24 @@
-# Copyright (c) Metaswitch Networks 2015. All rights reserved.
+# -*- coding: utf-8 -*-
+# Copyright (c) 2015 Metaswitch Networks
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+"""
+felix.actor
+~~~~~~~~~~~
 
+Actor infrastructure used in Felix.
+"""
 import logging
 import functools
 import collections
@@ -149,6 +168,9 @@ def actor_event(fn):
 
 
 class Actor(object):
+    """
+    Class that contains a queue and a greenlet serving that queue.
+    """
 
     queue_size = DEFAULT_QUEUE_SIZE
     """Maximum length of the event queue before caller will be blocked."""
@@ -160,7 +182,7 @@ class Actor(object):
     """
 
     max_ops_before_yield = 10000
-    """Number of calls to self._maybe_yield before it yield.s"""
+    """Number of calls to self._maybe_yield before it yields"""
 
     def __init__(self, queue_size=None):
         queue_size = queue_size or self.queue_size
@@ -211,7 +233,7 @@ class Actor(object):
             # never fail.
             batch.append(self._event_queue.get_nowait())
 
-        # Start with one batch ont he queue but we may get asked to split it
+        # Start with one batch on the queue but we may get asked to split it
         # if an error occurs.
         batches = [batch]
         num_splits = 0
@@ -245,7 +267,7 @@ class Actor(object):
             except SplitBatchAndRetry:
                 # The subclass couldn't process the batch as is (probably
                 # because a failure occurred and it couldn't figure out which
-                # message caused the problem.  Split the batch into two and
+                # message caused the problem).  Split the batch into two and
                 # re-run it.
                 _log.warn("Splitting batch to retry.")
                 self._split_batch(batch, batches)
@@ -355,5 +377,3 @@ class SplitBatchAndRetry(Exception):
 def wait_and_check(async_results):
     for r in async_results:
         r.get()
-
-
