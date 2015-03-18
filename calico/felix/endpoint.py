@@ -349,7 +349,7 @@ class LocalEndpoint(RefCountedActor):
         Applies sysctls and routes to the interface.
         """
         devices.configure_interface_ipv4(self._iface_name)
-        ipv6_gw = self.endpoint.get("ipv6_gateway", [])
+        ipv6_gw = self.endpoint.get("ipv6_gateway", None)
         devices.configure_interface_ipv6(self._iface_name, ipv6_gw)
         for ip_type in futils.IP_VERSIONS:
             nets_key = "ipv4_nets" if ip_type == futils.IPV4 else "ipv6_nets"
