@@ -77,6 +77,8 @@ class TestReferenceManager(BaseTestCase):
         self._rm.decref("foo", async=True)
         self._rm.get_and_incref("foo", callback=record_get, async=True)
         self._rm.decref("foo", async=True)
+        self._rm.get_and_incref("foo", callback=record_get, async=True)
+        self._rm.decref("foo", async=True)
         # Drain the queue
         _, obj = self.call_via_cb(self._rm.get_and_incref, "foo", async=True)
 
@@ -86,13 +88,13 @@ class TestReferenceManager(BaseTestCase):
             (0, 'on_referenced'),
             # Then gets removed again.  No callbacks to record_get because
             # the decref is ahead of the startup_complete callback.
-            # Actor 1 is created and deleted without ever being started because
-            # it's blocked behind the cleanup of 0.
+            # Actor 1-2 is created and deleted without ever being started
+            # because it's blocked behind the cleanup of 0.
             (0, 'on_unreferenced'),
             # Actor 2 gets created.
             ('rm', 'recv cleanup complete'),
-            ("rm", "activate 2"),
-            (2, 'on_referenced')
+            ("rm", "activate 3"),
+            (3, 'on_referenced')
         ])
 
 
