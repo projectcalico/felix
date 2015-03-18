@@ -34,8 +34,8 @@ import logging
 import gevent
 
 from calico import common
-from calico.felix.fiptables import (IptablesUpdater, DispatchChains,
-                                    RulesManager)
+from calico.felix.fiptables import (IptablesUpdater, DispatchChains)
+from calico.felix.profilerules import RulesManager
 from calico.felix.frules import install_global_rules
 from calico.felix.dbcache import UpdateSequencer
 from calico.felix.config import Config
@@ -51,47 +51,64 @@ def _main_greenlet(config):
     try:
         _log.info("Creating actors.")
         v4_updater = IptablesUpdater(ip_version=4)
-        v6_updater = IptablesUpdater(ip_version=6)
-        iptables_updaters = {
-            4: v4_updater,
-            6: v6_updater,
-        }
         v4_ipset_mgr = IpsetManager("hash:ip", family="inet")
+        v4_rules_manager = RulesManager(4, v4_updater, v4_ipset_mgr)
+        v4_dispatch_chains = DispatchChains(config, 4, v4_updater)
+        v4_ep_manager = EndpointManager(config,
+                                        4,
+                                        v4_updater,
+                                        v4_dispatch_chains,
+                                        v4_rules_manager)
+
+        v6_updater = IptablesUpdater(ip_version=6)
         v6_ipset_mgr = IpsetManager("hash:ip", family="inet6")
-        ipset_mgrs = {
-            4: v4_ipset_mgr,
-            6: v6_ipset_mgr,
-        }
-        profile_manager = RulesManager(iptables_updaters,
-                                       ipset_mgrs)
-        dispatch_chains = DispatchChains(config, iptables_updaters)
-        endpoint_manager = EndpointManager(config, iptables_updaters,
-                                           dispatch_chains, profile_manager)
-        update_sequencer = UpdateSequencer(config, ipset_mgrs,
-                                           v4_updater, v6_updater,
-                                           dispatch_chains, profile_manager,
-                                           endpoint_manager)
+        v6_rules_manager = RulesManager(6, v6_updater, v6_ipset_mgr)
+        v6_dispatch_chains = DispatchChains(config, 6, v6_updater)
+        v6_ep_manager = EndpointManager(config,
+                                        6,
+                                        v6_updater,
+                                        v6_dispatch_chains,
+                                        v6_rules_manager)
+
+        update_sequencer = UpdateSequencer(config,
+                                           [v4_ipset_mgr, v6_ipset_mgr],
+                                           [v4_rules_manager,
+                                            v6_rules_manager],
+                                           [v4_ep_manager, v6_ep_manager])
         iface_watcher = InterfaceWatcher(update_sequencer)
 
         _log.info("Starting actors.")
-        profile_manager.start()
-        dispatch_chains.start()
-        v4_ipset_mgr.start()
-        v6_ipset_mgr.start()
-        endpoint_manager.start()
-        update_sequencer.start()
         v4_updater.start()
+        v4_ipset_mgr.start()
+        v4_rules_manager.start()
+        v4_dispatch_chains.start()
+        v4_ep_manager.start()
+
         v6_updater.start()
+        v6_ipset_mgr.start()
+        v6_rules_manager.start()
+        v6_dispatch_chains.start()
+        v6_ep_manager.start()
+
+        update_sequencer.start()
+
         iface_watcher.start()
-        greenlets = [profile_manager.greenlet,
-                     dispatch_chains.greenlet,
-                     update_sequencer.greenlet,
-                     v4_ipset_mgr.greenlet,
-                     v6_ipset_mgr.greenlet,
-                     endpoint_manager.greenlet,
-                     v4_updater.greenlet,
-                     v6_updater.greenlet,
-                     iface_watcher.greenlet]
+        greenlets = [
+            v4_updater.greenlet,
+            v4_ipset_mgr.greenlet,
+            v4_rules_manager.greenlet,
+            v4_dispatch_chains.greenlet,
+            v4_ep_manager.greenlet,
+
+            v6_updater.greenlet,
+            v6_ipset_mgr.greenlet,
+            v6_rules_manager.greenlet,
+            v6_dispatch_chains.greenlet,
+            v6_ep_manager.greenlet,
+
+            update_sequencer.greenlet,
+            iface_watcher.greenlet
+        ]
 
         # Install the global rules before we start polling for updates.
         _log.info("Installing global rules.")

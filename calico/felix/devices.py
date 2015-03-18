@@ -192,5 +192,5 @@ class InterfaceWatcher(Actor):
         :returns: Never returns.
         """
         while True:
-            self.poll_interfaces(async=False)  # Skips queue
+            self.poll_interfaces()  # Skips queue
             gevent.sleep(0.5)

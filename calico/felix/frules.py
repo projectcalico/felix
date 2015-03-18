@@ -244,3 +244,4 @@ def rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,
                               else on_deny)
 
     return " ".join(str(x) for x in update_fragments)
+
