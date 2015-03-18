@@ -62,10 +62,14 @@ class ReferenceManager(Actor):
         assert obj.ref_count >= 0, "Ref count dropped below 0.s"
         if obj.ref_count == 0:
             _log.debug("No more references to object with id %s", object_id)
-            obj.ref_mgmt_state = STOPPING
-            obj.on_unreferenced(async=True)
+            if obj.ref_mgmt_state == CREATED:
+                _log.debug("%s was never started, discarding", obj)
+            else:
+                _log.debug("%s is running, cleaning it up")
+                obj.ref_mgmt_state = STOPPING
+                obj.on_unreferenced(async=True)
+                self.stopping_objects_by_id[object_id].add(obj)
             self.objects_by_id.pop(object_id)
-            self.stopping_objects_by_id[object_id].add(obj)
             self.pending_ref_callbacks.pop(object_id, None)
 
     @actor_event
@@ -76,13 +80,14 @@ class ReferenceManager(Actor):
             return
         if obj.ref_mgmt_state != STARTING:
             _log.info("Ignoring on_object_startup_complete for instance "
-                       "in state %s", obj.ref_mgmt_state)
+                      "in state %s", obj.ref_mgmt_state)
             return
         obj.ref_mgmt_state = LIVE
         self._maybe_notify_referrers(object_id)
 
     @actor_event
     def on_object_cleanup_complete(self, object_id, obj):
+        _log.debug("Cleanup complete for %s, removing it from map", obj)
         self.stopping_objects_by_id[object_id].discard(obj)
         if not self.stopping_objects_by_id[object_id]:
             del self.stopping_objects_by_id[object_id]
@@ -136,13 +141,16 @@ class RefCountedActor(Actor):
         self.ref_count = 0
 
     def _notify_ready(self):
+        _log.debug("Notifying manager that %s is ready", self)
         self._manager.on_object_startup_complete(self._id,
                                                  self, async=True)
 
     def _notify_cleanup_complete(self):
+        _log.debug("Notifying manager that %s is done cleaning up", self)
         self._manager.on_object_cleanup_complete(self._id,
                                                  self, async=True)
 
     @actor_event
     def on_unreferenced(self):
+        _log.debug("Default on_unreferenced() call, notifying cleanup done")
         self._notify_cleanup_complete()
