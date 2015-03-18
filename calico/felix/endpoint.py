@@ -123,9 +123,6 @@ class EndpointManager(ReferenceManager):
             ep.on_interface_update(iface_state, async=True)
 
 
-_correlators = ("le-%s" % ii for ii in itertools.count())
-
-
 class LocalEndpoint(RefCountedActor):
 
     def __init__(self, config, ip_version, iptables_updater, dispatch_chains,
@@ -325,6 +322,7 @@ class LocalEndpoint(RefCountedActor):
                     self._failed = True
         else:
             _log.error("Programming for %s failed: %r", self, error)
+            self._failed = True
             # TODO: Queue retry?
 
     def _remove_chains(self):
