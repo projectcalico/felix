@@ -26,6 +26,7 @@ from etcd import EtcdException
 import etcd
 import re
 from urllib3.exceptions import ReadTimeoutError
+from netaddr import IPAddress, AddrFormatError
 
 _log = logging.getLogger(__name__)
 
@@ -188,6 +189,19 @@ def validate_endpoint(config, endpoint):
         if not endpoint["name"].startswith(config.IFACE_PREFIX):
             issues.append("Interface %r does not start with %r." %
                           (endpoint["name"], config.IFACE_PREFIX))
+
+    for version in (4, 6):
+        gw_key = "ipv%d_gateway" % version
+        try:
+            gw_str = endpoint[gw_key]
+            if gw_str is not None:
+                _ = IPAddress(gw_str)
+        except KeyError:
+            # Gateway not included for this version.
+            pass
+        except AddrFormatError:
+            issues.append("%s is not a valid IPv%d address." %
+                          (gw_key, version))
 
     if issues:
         raise ValidationFailed(" ".join(issues))
