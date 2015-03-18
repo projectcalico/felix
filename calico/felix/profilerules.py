@@ -255,6 +255,8 @@ class ProfileRules(RefCountedActor):
             # FIXME: What to do when we fail?
             _log.error("Failed to delete chains, epoch %s: %r",
                        request_epoch, error)
+        # FIXME: notifying that we're cleaned up before we've succeeded.
+        # Not clear what else we can do?
         self._notify_cleanup_complete()
 
     def _maybe_notify_ready(self):
