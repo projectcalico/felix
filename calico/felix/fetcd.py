@@ -193,7 +193,9 @@ def validate_endpoint(config, endpoint):
     for version in (4, 6):
         gw_key = "ipv%d_gateway" % version
         try:
-            _ = IPAddress(endpoint[gw_key])
+            gw_str = endpoint[gw_key]
+            if gw_str is not None:
+                _ = IPAddress(gw_str)
         except KeyError:
             # Gateway not included for this version.
             pass
