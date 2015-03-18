@@ -26,6 +26,7 @@ from etcd import EtcdException
 import etcd
 import re
 from urllib3.exceptions import ReadTimeoutError
+from netaddr import IPAddress, AddrFormatError
 
 _log = logging.getLogger(__name__)
 
