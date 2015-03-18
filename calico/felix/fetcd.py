@@ -189,6 +189,17 @@ def validate_endpoint(config, endpoint):
             issues.append("Interface %r does not start with %r." %
                           (endpoint["name"], config.IFACE_PREFIX))
 
+    for version in (4, 6):
+        gw_key = "ipv%d_gateway" % version
+        try:
+            _ = IPAddress(endpoint[gw_key])
+        except KeyError:
+            # Gateway not included for this version.
+            pass
+        except AddrFormatError:
+            issues.append("%s is not a valid IPv%d address." %
+                          (gw_key, version))
+
     if issues:
         raise ValidationFailed(" ".join(issues))
 
