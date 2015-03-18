@@ -260,9 +260,9 @@ class ActiveIpset(RefCountedActor):
         try:
             if self.programmed_members is not None:
                 try:
-                    subprocess.check_call(["ipset", "del", self.name])
+                    subprocess.check_call(["ipset", "destroy", self.name])
                 except CalledProcessError:
-                    _log.exception("Failed to delete ipset %s", self.name)
+                    _log.exception("Failed to destroy ipset %s", self.name)
                     raise
                 self.programmed_members = None
         finally:
