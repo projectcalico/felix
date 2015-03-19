@@ -30,7 +30,6 @@ from calico.felix.test.base import BaseTestCase
 from calico.felix import actor
 
 
-
 # Logger
 log = logging.getLogger(__name__)
 
@@ -223,8 +222,9 @@ class TestExcpetionTracking(BaseTestCase):
 
 
 class ActorForTesting(actor.Actor):
-    def __init__(self):
-        super(ActorForTesting, self).__init__()
+    def __init__(self, queue_size=None, qualifier=None):
+        super(ActorForTesting, self).__init__(queue_size=queue_size,
+                                              qualifier=qualifier)
         self.actions = []
         self._batch_actions = []
         self.batches = []
@@ -240,14 +240,14 @@ class ActorForTesting(actor.Actor):
     @actor_event
     def do_a(self):
         self._batch_actions.append("a")
-        assert self._current_msg_name == "do_a"
+        assert self._current_msg.name == "do_a"
         self._maybe_yield()
         return "a"
 
     @actor_event
     def do_b(self):
         self._batch_actions.append("b")
-        assert self._current_msg_name == "do_b"
+        assert self._current_msg.name == "do_b"
         return "b"
 
     @actor_event
@@ -275,7 +275,7 @@ class ActorForTesting(actor.Actor):
 
     def _finish_msg_batch(self, batch, results):
         super(ActorForTesting, self)._finish_msg_batch(batch, results)
-        assert self._current_msg_name is None
+        assert self._current_msg is None
         self._batch_actions.append("fb")
         self.actions.extend(self._batch_actions)
         self.batches.append(list(self._batch_actions))
@@ -284,7 +284,7 @@ class ActorForTesting(actor.Actor):
         if isinstance(result, Exception):
             raise result
 
-    # Note: this would mnormally be an actor_event but we bypass that and
+    # Note: this would normally be an actor_event but we bypass that and
     # return our own future.
     def on_unreferenced(self, async=None):
         assert not self.unreferenced

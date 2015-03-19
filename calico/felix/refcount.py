@@ -37,8 +37,8 @@ class ReferenceManager(Actor):
     using the reference before calling decref().
     """
 
-    def __init__(self):
-        super(ReferenceManager, self).__init__()
+    def __init__(self, qualifier=None):
+        super(ReferenceManager, self).__init__(qualifier=qualifier)
         self.objects_by_id = {}
         self.stopping_objects_by_id = collections.defaultdict(set)
         self.pending_ref_callbacks = collections.defaultdict(set)
@@ -186,8 +186,8 @@ class ReferenceManager(Actor):
 
 
 class RefCountedActor(Actor):
-    def __init__(self):
-        super(RefCountedActor, self).__init__()
+    def __init__(self, qualifier=None):
+        super(RefCountedActor, self).__init__(qualifier=qualifier)
 
         # These fields are owned by the ReferenceManager.
         self._manager = None

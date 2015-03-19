@@ -37,14 +37,25 @@ _log = logging.getLogger(__name__)
 
 DEFAULT_QUEUE_SIZE = 10
 
-
-Message = collections.namedtuple("Message", ("partial", "results"))
 ResultOrExc = collections.namedtuple("ResultOrExc", ("result", "exception"))
 
 
 _refs = {}
 _ref_idx = 0
 
+class Message(object):
+    """
+    Message passed to an actor.
+    """
+    def __init__(self, method, results, recipient):
+        self.method = method
+        self.results = results
+        self.name = method.func.__name__
+        self.recipient = recipient
+
+    def __str__(self):
+        data = "%s to %s" % (self.name, self.recipient)
+        return data
 
 class ExceptionTrackingRef(weakref.ref):
     """
@@ -92,6 +103,7 @@ def _reap_ref(ref):
 
         # Called from the GC so we can't raise an exception, just die.
         _exit(1)
+        # TODO: We don't actually die, just hang. Need to fix this.
 
 
 def _exit(rc):
@@ -131,9 +143,10 @@ def actor_event(fn):
     @functools.wraps(fn)
     def queue_fn(self, *args, **kwargs):
         # Police that cross-actor calls must be explicit about blocking.
-        on_same_greenlet = self.greenlet == gevent.getcurrent()
+        on_same_greenlet = (self.greenlet == gevent.getcurrent())
         async_set = "async" in kwargs
         async = kwargs.pop("async", False)
+        # TODO: Why do we disallow async messages to same greenlet?
         assert not (on_same_greenlet and async), \
             "Async call to own queue, deadlocks if queue full."
         if (not on_same_greenlet and
@@ -145,6 +158,9 @@ def actor_event(fn):
         if on_same_greenlet:
             # Bypass the queue if we're already on the same greenlet.  This
             # is both useful and avoids deadlock.
+            # TODO: if we remove the "no async to same greenlet" only do if
+            # this is asynchronous.
+            _log.debug("Message processed locally : %s", method_name)
             return fn(self, *args, **kwargs)
         else:
             assert async_set, "Cross-actor calls must specify async arg."
@@ -155,9 +171,15 @@ def actor_event(fn):
             _log.warn("Queue for %s full, this greenlet may block", self)
         # Only block on the queue if the greenlet is running or we could block
         # forever.
+        # TODO: But if we allow blocking, then we can hit deadlock if enough work
+        # comes in. Hence we can never allow blocking, surely, which in the process
+        # means that the logic about disallowing async messages to same greenlet
+        # above is not right.
         greenlet_running = bool(self.greenlet)
         allow_block = greenlet_running or self.skip_running_check
-        self._event_queue.put(Message(partial=partial, results=[result]),
+        msg = Message(partial, [result], self.name)
+        _log.debug("Message sent : %s", msg)
+        self._event_queue.put(msg,
                               block=allow_block)
         if async:
             return result
@@ -184,15 +206,25 @@ class Actor(object):
     max_ops_before_yield = 10000
     """Number of calls to self._maybe_yield before it yields"""
 
-    def __init__(self, queue_size=None):
+    def __init__(self, queue_size=None, qualifier=None):
         queue_size = queue_size or self.queue_size
         self._event_queue = Queue(maxsize=queue_size)
         self.greenlet = gevent.Greenlet(self._loop)
         self._op_count = 0
-        self._current_msg_name = None
+        self._current_msg = None
         self.skip_running_check = False
         self.started = False
 
+        # Logging parameters
+        self.qualifier = qualifier
+        if qualifier:
+            self.name = "%s(%s)" % (self.__class__.__name__, qualifier)
+        else:
+            self.name = self.__class__.__name__
+
+    # TODO: Can we just start the greenlet always?
+    # There is some craziness about actors that are in CREATED state, where
+    # pending a previous iteration shutting down.
     def start(self):
         assert not self.greenlet, "Already running"
         _log.debug("Starting %s", self)
@@ -248,19 +280,19 @@ class Actor(object):
             assert batch is not None, "_start_msg_batch() should return batch."
             results = []  # Will end up same length as batch.
             for msg in batch:
-                # Save off name of function for diags.
-                self._current_msg_name = msg.partial.func.__name__
+                _log.debug("Message recd : %s", msg)
+                self._current_msg = msg
                 try:
                     # Actually execute the per-message method and record its
                     # result.
-                    result = msg.partial()
+                    result = msg.method()
                 except BaseException as e:
                     _log.exception("Exception processing %s", msg)
                     results.append(ResultOrExc(None, e))
                 else:
                     results.append(ResultOrExc(result, None))
                 finally:
-                    self._current_msg_name = None
+                    self._current_msg = None
             try:
                 # Give subclass a chance to post-process the batch.
                 self._finish_msg_batch(batch, results)
@@ -361,7 +393,7 @@ class Actor(object):
         return self.__class__.__name__ + "<queue_len=%s,live=%s,msg=%s>" % (
             self._event_queue.qsize(),
             bool(self.greenlet),
-            self._current_msg_name
+            self._current_msg
         )
 
 

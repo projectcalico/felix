@@ -39,7 +39,7 @@ class RulesManager(ReferenceManager):
     before their Actors are deleted.
     """
     def __init__(self, ip_version, iptables_updater, ipset_manager):
-        super(RulesManager, self).__init__()
+        super(RulesManager, self).__init__(qualifier="v%d" % ip_version)
         self.ip_version = ip_version
         self.iptables_updater = iptables_updater
         self.ipset_manager = ipset_manager
@@ -84,7 +84,7 @@ class ProfileRules(RefCountedActor):
     Actor that owns the per-profile rules chains.
     """
     def __init__(self, profile_id, ip_version, iptables_updater, ipset_mgr):
-        super(ProfileRules, self).__init__()
+        super(ProfileRules, self).__init__(qualifier=profile_id)
         assert profile_id is not None
 
         self.id = profile_id

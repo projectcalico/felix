@@ -31,10 +31,11 @@ import re
 
 _log = logging.getLogger(__name__)
 
-
+#TODO: We pass round whether something is IPv4 or v6 in three different ways.
+# need to sort that out.
 class IpsetManager(ReferenceManager):
     def __init__(self, set_type, family="inet"):
-        super(IpsetManager, self).__init__()
+        super(IpsetManager, self).__init__(qualifier=family)
 
         # State.
         self.set_type = set_type
@@ -210,7 +211,7 @@ def tag_to_ipset_name(tag_name):
 class ActiveIpset(RefCountedActor):
 
     def __init__(self, name, set_type, family="inet"):
-        super(ActiveIpset, self).__init__()
+        super(ActiveIpset, self).__init__(qualifier=name)
 
         self.name = name
         self.set_type = set_type
@@ -291,7 +292,7 @@ class ActiveIpset(RefCountedActor):
         # any other add/remove calls.
         for pos in xrange(len(batch)-1, -1, -1):
             msg = batch[pos]
-            if msg.partial.func == self.replace_members.func:
+            if msg.method.func == self.replace_members.func:
                 _log.debug("Batch had a replace_members call, combining.")
                 # Calls after the replace can't be combined.
                 replace_and_following_msgs = batch[pos:]
@@ -300,7 +301,7 @@ class ActiveIpset(RefCountedActor):
                 load_msgs = []
                 non_load_msgs = []
                 for msg in msgs_before_replace:
-                    if msg.partial.func == self._load_from_ipset.func:
+                    if msg.method.func == self._load_from_ipset.func:
                         load_msgs.append(msg)
                     else:
                         non_load_msgs.append(msg)

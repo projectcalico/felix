@@ -51,7 +51,7 @@ class DispatchChains(Actor):
     batch_delay = 0.1
 
     def __init__(self, config, ip_version, iptables_updater):
-        super(DispatchChains, self).__init__()
+        super(DispatchChains, self).__init__(qualifier="v%d" % ip_version)
         self.request_epoch = 1
         self.response_epoch = 0
 
@@ -159,7 +159,7 @@ class IptablesUpdater(Actor):
     batch_delay = 0.1
 
     def __init__(self, ip_version=4):
-        super(IptablesUpdater, self).__init__()
+        super(IptablesUpdater, self).__init__(qualifier="v%d" % ip_version)
         if ip_version == 4:
             self.cmd_name = "iptables-restore"
         else:
@@ -235,12 +235,12 @@ class IptablesUpdater(Actor):
                 _log.error("Non-retryable %s failure. RC=%s", self.cmd_name,
                            e.returncode)
                 cb = self.completion_callbacks[0]
-                if batch[0].partial.keywords.get("suppress_exc"):
+                if batch[0].method.keywords.get("suppress_exc"):
                     final_result = ResultOrExc(None, None)
                 else:
                     final_result = ResultOrExc(None, e)
                 if cb:
-                    if batch[0].partial.keywords.get("suppress_exc"):
+                    if batch[0].method.keywords.get("suppress_exc"):
                         cb(None)
                     else:
                         cb(e)

@@ -42,7 +42,7 @@ OUR_HOSTNAME = socket.gethostname()
 class EndpointManager(ReferenceManager):
     def __init__(self, config, ip_version, iptables_updater, dispatch_chains,
                  rules_manager):
-        super(EndpointManager, self).__init__()
+        super(EndpointManager, self).__init__(qualifier="v%d" % ip_version)
 
         # Peers/utility classes.
         self.ip_version = ip_version
@@ -58,6 +58,7 @@ class EndpointManager(ReferenceManager):
 
     def _create(self, object_id):
         return LocalEndpoint(self.config,
+                             object_id,
                              self.ip_version,
                              self.iptables_updater,
                              self.dispatch_chains,
@@ -123,14 +124,17 @@ class EndpointManager(ReferenceManager):
             ep.on_interface_update(iface_state, async=True)
 
 
+# TODO:CHECK Why on earth do we have v4 and v6 version of LocalEndpoint?
 class LocalEndpoint(RefCountedActor):
 
-    def __init__(self, config, ip_version, iptables_updater, dispatch_chains,
-                 rules_manager):
-        super(LocalEndpoint, self).__init__()
+    def __init__(self, config, endpoint_id, ip_version, iptables_updater,
+                 dispatch_chains, rules_manager):
+        super(LocalEndpoint, self).__init__(qualifier="%s(v%d)" %
+                                            (endpoint_id, ip_version))
         assert isinstance(dispatch_chains, DispatchChains)
         assert isinstance(rules_manager, RulesManager)
 
+        self.endpoint_id = endpoint_id
         self._ipt_req_epoch = 1
         self._ipt_resp_epoch = 0
         self._ipt_last_req = None
