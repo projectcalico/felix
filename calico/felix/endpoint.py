@@ -124,7 +124,7 @@ class EndpointManager(ReferenceManager):
             ep.on_interface_update(iface_state, async=True)
 
 
-# TODO:CHECK Why on earth do we have v4 and v6 version of LocalEndpoint?
+# TODO:CHECK Why do we have v4 and v6 version of LocalEndpoint?
 class LocalEndpoint(RefCountedActor):
 
     def __init__(self, config, endpoint_id, ip_version, iptables_updater,

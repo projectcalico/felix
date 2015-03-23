@@ -47,14 +47,15 @@ class Message(object):
     """
     Message passed to an actor.
     """
-    def __init__(self, method, results, recipient):
+    def __init__(self, method, results, caller_path, recipient):
         self.method = method
         self.results = results
+        self.caller = caller_path
         self.name = method.func.__name__
         self.recipient = recipient
 
     def __str__(self):
-        data = "%s to %s" % (self.name, self.recipient)
+        data = "%s by %s to %s" % (self.name, self.caller, self.recipient)
         return data
 
 class ExceptionTrackingRef(weakref.ref):
@@ -103,7 +104,6 @@ def _reap_ref(ref):
 
         # Called from the GC so we can't raise an exception, just die.
         _exit(1)
-        # TODO: We don't actually die, just hang. Need to fix this.
 
 
 def _exit(rc):
@@ -143,6 +143,10 @@ def actor_event(fn):
     @functools.wraps(fn)
     def queue_fn(self, *args, **kwargs):
         # Police that cross-actor calls must be explicit about blocking.
+        calling_file, line_no, func, _ = traceback.extract_stack()[-2]
+        calling_file = os.path.basename(calling_file)
+        calling_path = "%s:%s:%s" % (calling_file, line_no, func)
+
         on_same_greenlet = (self.greenlet == gevent.getcurrent())
         async_set = "async" in kwargs
         async = kwargs.pop("async", False)
@@ -152,15 +156,13 @@ def actor_event(fn):
         if (not on_same_greenlet and
                 not async and
                 _log.isEnabledFor(logging.DEBUG)):
-            calling_file,  line_no, func, _ = traceback.extract_stack()[-2]
-            calling_file = os.path.basename(calling_file)
-            _log.debug("BLOCKING CALL: %s:%s:%s", calling_file, line_no, func)
+            _log.debug("BLOCKING CALL: %s", calling_path)
         if on_same_greenlet:
             # Bypass the queue if we're already on the same greenlet.  This
             # is both useful and avoids deadlock.
             # TODO: if we remove the "no async to same greenlet" only do if
             # this is asynchronous.
-            _log.debug("Message processed locally : %s", method_name)
+            #_log.debug("Message processed locally : %s", method_name)
             return fn(self, *args, **kwargs)
         else:
             assert async_set, "Cross-actor calls must specify async arg."
@@ -177,7 +179,7 @@ def actor_event(fn):
         # above is not right.
         greenlet_running = bool(self.greenlet)
         allow_block = greenlet_running or self.skip_running_check
-        msg = Message(partial, [result], self.name)
+        msg = Message(partial, [result], calling_path, self.name)
         _log.debug("Message sent : %s", msg)
         self._event_queue.put(msg,
                               block=allow_block)

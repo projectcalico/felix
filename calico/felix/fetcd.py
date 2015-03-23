@@ -111,7 +111,7 @@ def watch_etcd(config, update_sequencer):
         except ReadTimeoutError:
             _log.warning("Read from etcd timed out, retrying.")
             # TODO: We are timing out after 60 seconds, perhaps because we
-            # should be using "read_timeout" not "timeout". However, we a
+            # should be using "read_timeout" not "timeout". However, a
             # timeout of 0 is probably wrong if that does not reestablish
             # connections periodically. Needs a bit more thought.
             continue
