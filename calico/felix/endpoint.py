@@ -415,8 +415,6 @@ def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
                             "--icmpv6-type %s" % (to_chain_name, icmp_type))
     to_chain.append("--append %s --match conntrack --ctstate INVALID "
                     "--jump DROP" % to_chain_name)
-
-    # FIXME: Do we want conntrack RELATED,ESTABLISHED?
     to_chain.append("--append %s --match conntrack "
                     "--ctstate RELATED,ESTABLISHED --jump RETURN" %
                     to_chain_name)
@@ -433,7 +431,6 @@ def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     # Conntrack rules.
     from_chain.append("--append %s --match conntrack --ctstate INVALID "
                       "--jump DROP" % from_chain_name)
-    # FIXME: Do we want conntrack RELATED,ESTABLISHED?
     from_chain.append("--append %s --match conntrack "
                       "--ctstate RELATED,ESTABLISHED --jump RETURN" %
                       from_chain_name)
