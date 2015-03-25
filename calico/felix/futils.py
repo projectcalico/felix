@@ -117,6 +117,11 @@ def multi_call(ops):
     check_call(["bash", name])
     os.remove(name)
 
+def hex(string):
+    """
+    Convert a string to hex.
+    """
+    return "".join(x.encode('hex') for x in string)
 
 def time_ms():
     """

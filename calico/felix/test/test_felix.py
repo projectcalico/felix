@@ -44,17 +44,14 @@ class TestException(Exception):
 class TestBasic(BaseTestCase):
 
     @mock.patch("gevent.Greenlet.start", autospec=True)
-    @mock.patch("calico.felix.devices.InterfaceWatcher.poll_interfaces",
-                autospec=True)
     @mock.patch("calico.felix.felix.watch_etcd", autospec=True)
     @mock.patch("calico.felix.felix.IptablesUpdater", autospec=True)
     @mock.patch("gevent.iwait", autospec=True, side_effect=TestException())
     def test_main_greenlet(self, m_iwait, m_IptablesUpdater, m_watch_etcd,
-                           m_poll_interfaces, m_start):
+                           m_start):
         m_IptablesUpdater.return_value.greenlet = mock.Mock()
         m_config = mock.Mock(spec=config.Config)
         m_config.IFACE_PREFIX = "tap"
         m_config.METADATA_IP = None
         self.assertRaises(TestException,
                           felix._main_greenlet, m_config)
-

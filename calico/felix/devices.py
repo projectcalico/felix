@@ -24,6 +24,8 @@ from calico.felix.actor import Actor, actor_event
 import gevent
 from gevent import subprocess
 import os
+import socket
+import struct
 
 from calico import common
 from calico.felix import futils
@@ -191,9 +193,23 @@ def interface_up(if_name):
     return 'up' in state
 
 
-InterfaceState = collections.namedtuple("Interface",
-                                        ["name", "iface_id", "up"])
+# These constants map to constants in the Linux kernel. This is a bit poor, but
+# the kernel can never change them, so live with it for now.
+RTMGRP_LINK = 1
 
+NLMSG_NOOP = 1
+NLMSG_ERROR = 2
+
+RTM_NEWLINK = 16
+RTM_DELLINK = 17
+
+IFLA_IFNAME = 3
+
+class RTNetlinkError(Exception):
+    """
+    How we report an error message.
+    """
+    pass
 
 class InterfaceWatcher(Actor):
     def __init__(self, update_splitter):
@@ -202,44 +218,69 @@ class InterfaceWatcher(Actor):
         self.interfaces = {}
 
     @actor_event
-    def poll_interfaces(self):
-        """
-        Issues a single poll of the interfaces and sends updates to the
-        update sequencer.
-        """
-        # TODO: use netlink socket to monitor rather than poll?
-        # FIXME: this doesn't detect if an interface quickly flaps down/up
-        # Use "ip link" to get the list of interfaces and their kernel IDs.
-        # The kernel ID should change if an interface with a particular ID
-        # is removed and then added back in-between polls.
-        output = subprocess.check_output(["ip", "link"])
-        # Lines we care about look like this:
-        # 1234: iface_name: <UP,SOME_FLAG,LOWER_UP> ...
-        # Regex extracts "1234", "iface_name" and "UP,SOME_FLAG,LOWER_UP".
-        seen_interfaces = set()
-        for num, name, attrs in re.findall(r"^(\d+): ([^:]+): <([^>]+)>",
-                                           output, flags=re.MULTILINE):
-            seen_interfaces.add(name)
-            is_up = "UP" in attrs.split(",")
-            old_state = self.interfaces.get(name)
-            new_state = InterfaceState(name=name, iface_id=int(num), up=is_up)
-            if old_state != new_state:
-                _log.info("Interface %s changed state: %s", name, new_state)
-                self.interfaces[name] = new_state
-                if old_state and old_state.iface_id != new_state.iface_id:
-                    # Interface ID has changed, indicates the interface
-                    # was deleted and then re-added.
-                    _log.debug("Interface ID changed for %s", name)
-                self.update_splitter.on_interface_update(name)
-
-    @actor_event
     def watch_interfaces(self):
         """
-        Watches linux interfaces come and go and fires events
-        into the update sequencer.
+        Detects when interfaces appear, sending notifications to the update
+        splitter.
 
         :returns: Never returns.
         """
+        # Create the netlink socket and bind to RTMGRP_LINK,
+        s = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, socket.NETLINK_ROUTE)
+        s.bind((os.getpid(), RTMGRP_LINK))
+
         while True:
-            self.poll_interfaces()  # Skips queue
-            gevent.sleep(0.5)
+            # Get the next set of data.
+            data = s.recv(65535)
+
+            # First 16 bytes is the message header; unpack it.
+            hdr = data[:16]
+            data = data[16:]
+            msg_len, msg_type, flags, seq, pid = struct.unpack("=LHHLL", hdr)
+
+            if msg_type == NLMSG_NOOP:
+                # Noop - get some more data.
+                continue
+            elif msg_type == NLMSG_ERROR:
+                # We have got an error. Raise an exception which brings the
+                # process down.
+                raise RTNetlinkError("Netlink error message, header : %s",
+                                     futils.hex(hdr))
+
+            # Now 16 bytes of netlink header.
+            hdr = data[:16]
+            data = data[16:]
+            family, _, if_type, index, flags, change = struct.unpack("=BBHiII", hdr)
+
+            # Bytes left is the message length minus the two headers of 16 bytes each.
+            remaining = msg_len - 32
+
+            while remaining:
+                # The data content is an array of RTA objects, each of which
+                # has a 4 byte header and some data.
+                rta_len, rta_type = struct.unpack("=HH", data[:4])
+
+                # This check comes from RTA_OK, and terminates a string of routing
+                # attributes.
+                if rta_len < 4:
+                    break
+
+                rta_data = data[4:rta_len]
+
+                # Remove the RTA object from the data. The length to jump is
+                # the rta_len rounded up to the nearest 4 byte boundary.
+                increment = int((rta_len + 3) / 4) * 4
+                data = data[increment:]
+                remaining -= increment
+
+                if rta_type == IFLA_IFNAME:
+                    # We only really care about NEWLINK messages; if an
+                    # interface goes away, we don't need to care (since it
+                    # takes its routes with it, and the interface will
+                    # presumably go away too). We do log though, just in case.
+                    rta_data = rta_data[:-1]
+                    if msg_type == RTM_NEWLINK:
+                        _log.debug("Detected new network interface : %s", rta_data)
+                        self.update_splitter.on_interface_update(rta_data)
+                    else:
+                        _log.debug("Network interface has gone away : %s", rta_data)

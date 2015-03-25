@@ -113,9 +113,11 @@ class EndpointManager(ReferenceManager):
                 # Local endpoint is running, so remove our reference.
                 self.decref(endpoint_id)
         else:
-            # Creation or
+            # Creation or modification
+            _log.info("Endpoint %s modified or created", endpoint_id)
             self.endpoints_by_id[endpoint_id] = endpoint
             self.endpoint_id_by_iface_name[endpoint["name"]] = endpoint_id
+
         if endpoint and endpoint["host"] == self.config.HOSTNAME:
             _log.debug("Endpoint is local, ensuring it is active.")
             if not self._is_starting_or_live(endpoint_id):

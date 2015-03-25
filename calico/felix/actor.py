@@ -22,6 +22,7 @@ Actor infrastructure used in Felix.
 import collections
 import functools
 import gevent
+import gevent.local
 import logging
 import os
 import sys
@@ -40,6 +41,8 @@ DEFAULT_QUEUE_SIZE = 10
 
 ResultOrExc = collections.namedtuple("ResultOrExc", ("result", "exception"))
 
+# Local storage to allow diagnostics.
+actor_storage = gevent.local.local()
 
 _refs = {}
 _ref_idx = 0
@@ -57,8 +60,7 @@ class Message(object):
         self.recipient = recipient
 
     def __str__(self):
-        data = ("%s (%s by %s to %s)" %
-                (self.uuid, self.name, self.caller, self.recipient))
+        data = ("%s (%s)" % (self.uuid, self.name))
         return data
 
 class ExceptionTrackingRef(weakref.ref):
@@ -182,8 +184,15 @@ def actor_event(fn):
         # above is not right.
         greenlet_running = bool(self.greenlet)
         allow_block = greenlet_running or self.skip_running_check
-        msg = Message(partial, [result], calling_path, self.name)
-        _log.debug("Message sent : %s", msg)
+
+        try:
+            caller = "%s (processing %s)" % (actor_storage.name, actor_storage.msg_uuid)
+        except AttributeError:
+            caller = calling_path
+
+        msg = Message(partial, [result], caller, self.name)
+        _log.debug("Message %s sent by %s to %s",
+                   msg, caller, self.name)
         self._event_queue.put(msg,
                               block=allow_block)
         if async:
@@ -220,6 +229,9 @@ class Actor(object):
         self.skip_running_check = False
         self.started = False
 
+        # Message being processed; purely for logging.
+        self.msg_uuid = None
+
         # Logging parameters
         self.qualifier = qualifier
         if qualifier:
@@ -241,6 +253,9 @@ class Actor(object):
         """
         Main greenlet loop, repeatedly runs _step().  Doesn't return normally.
         """
+        actor_storage.name = self.name
+        actor_storage.msg_uuid = None
+
         try:
             while True:
                 self._step()
@@ -258,6 +273,8 @@ class Actor(object):
         """
         # Block waiting for work.
         msg = self._event_queue.get()
+        actor_storage.msg_uuid = msg.uuid
+
         # Then, once we get some, opportunistically pull as much work off the
         # queue as possible.  We call this a batch.
         batch = [msg]
@@ -285,7 +302,8 @@ class Actor(object):
             assert batch is not None, "_start_msg_batch() should return batch."
             results = []  # Will end up same length as batch.
             for msg in batch:
-                _log.debug("Message recd : %s", msg)
+                _log.debug("Message %s recd by %s from %s",
+                           msg, msg.recipient, msg.caller)
                 self._current_msg = msg
                 try:
                     # Actually execute the per-message method and record its
