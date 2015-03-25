@@ -40,10 +40,10 @@ ENDPOINT_RE = re.compile(
     r'^/calico/host/(?P<hostname>[^/]+)/.+/endpoint/(?P<endpoint_id>[^/]+)')
 
 
-def watch_etcd(config, update_sequencer):
+def watch_etcd(config, update_splitter):
     """
     Loads the snapshot from etcd and then monitors etcd for changes.
-    Posts events to the UpdateSequencer.
+    Posts events to the UpdateSplitter.
 
     Intended to be used as a greenlet.  Intended to be restarted if
     it raises an exception.
@@ -75,13 +75,12 @@ def watch_etcd(config, update_sequencer):
             endpoints_by_id[endpoint_id] = endpoint
             continue
 
-    # Actually apply the snapshot.  The UpdateSequencer will apply deltas as
-    # appropriate.  Grab the future in case it raises an error.
-    f_apply_snap = update_sequencer.apply_snapshot(rules_by_id,
-                                                   tags_by_id,
-                                                   endpoints_by_id,
-                                                   async=True)
-    # Now owned by the update sequencer...
+    # Actually apply the snapshot, grabbing the future in case it raises an error.
+    f_apply_snap = update_splitter.apply_snapshot(rules_by_id,
+                                                  tags_by_id,
+                                                  endpoints_by_id)
+
+    # These read only objects are no longer required, so tidy them up.
     del rules_by_id
     del tags_by_id
     del endpoints_by_id
@@ -129,18 +128,17 @@ def watch_etcd(config, update_sequencer):
         profile_id, rules = parse_if_rules(response)
         if profile_id:
             _log.info("Scheduling profile update %s", profile_id)
-            update_sequencer.on_rules_update(profile_id, rules, async=True)
+            update_splitter.on_rules_update(profile_id, rules)
             continue
         profile_id, tags = parse_if_tags(response)
         if profile_id:
             _log.info("Scheduling profile update %s", profile_id)
-            update_sequencer.on_tags_update(profile_id, tags, async=True)
+            update_splitter.on_tags_update(profile_id, tags)
             continue
         endpoint_id, endpoint = parse_if_endpoint(config, response)
         if endpoint_id:
             _log.info("Scheduling endpoint update %s", endpoint_id)
-            update_sequencer.on_endpoint_update(endpoint_id, endpoint,
-                                                async=True)
+            update_splitter.on_endpoint_update(endpoint_id, endpoint)
             continue
 
 

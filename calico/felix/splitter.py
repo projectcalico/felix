@@ -14,38 +14,29 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 """
-felix.dbcache
+felix.splitter
 ~~~~~~~~~~~~~
 
-Our cache of the etcd database.
+Simple object that just splits notifications out for IPv4 and IPv6.
 """
 import logging
-import socket
-
-from calico.felix.actor import actor_event, Actor
 
 _log = logging.getLogger(__name__)
 
 
-class UpdateSequencer(Actor):
-    def __init__(self, config, ipsets_mgrs, rules_managers, endpoint_managers):
-        super(UpdateSequencer, self).__init__()
-
-        # Peers/utility classes.
-        self.config = config
+class UpdateSplitter(object):
+    def __init__(self, ipsets_mgrs, rules_managers, endpoint_managers):
 
         self.ipsets_mgrs = ipsets_mgrs
         self.rules_mgrs = rules_managers
         self.endpoint_mgrs = endpoint_managers
 
-    @actor_event
     def apply_snapshot(self, rules_by_prof_id, tags_by_prof_id,
                        endpoints_by_id):
         """
         Replaces the whole cache state with the input.  Applies deltas vs the
         current active state.
         """
-
         # Step 1: fire in data update events to the profile and tag managers
         # so they can build their indexes before we activate anything.
         _log.info("Applying snapshot. STAGE 1a: rules.")
@@ -67,7 +58,6 @@ class UpdateSequencer(Actor):
                   "%s endpoints", len(rules_by_prof_id), len(tags_by_prof_id),
                   len(endpoints_by_id))
 
-    @actor_event
     def on_rules_update(self, profile_id, rules):
         """
         Process an update to the rules of the given profile.
@@ -78,7 +68,6 @@ class UpdateSequencer(Actor):
         for rules_mgr in self.rules_mgrs:
             rules_mgr.on_rules_update(profile_id, rules, async=True)
 
-    @actor_event
     def on_tags_update(self, profile_id, tags):
         """
         Called when the given tag list has changed or been deleted.
@@ -89,13 +78,11 @@ class UpdateSequencer(Actor):
         for ipset_mgr in self.ipsets_mgrs:
             ipset_mgr.on_tags_update(profile_id, tags, async=True)
 
-    @actor_event
     def on_interface_update(self, name):
         _log.info("Interface %s up", name)
         for endpoint_mgr in self.endpoint_mgrs:
             endpoint_mgr.on_interface_update(name, async=True)
 
-    @actor_event
     def on_endpoint_update(self, endpoint_id, endpoint):
         """
         Process an update to the given endpoint.  endpoint may be None if

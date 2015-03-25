@@ -196,9 +196,9 @@ InterfaceState = collections.namedtuple("Interface",
 
 
 class InterfaceWatcher(Actor):
-    def __init__(self, update_sequencer):
+    def __init__(self, update_splitter):
         super(InterfaceWatcher, self).__init__()
-        self.update_sequencer = update_sequencer
+        self.update_splitter = update_splitter
         self.interfaces = {}
 
     @actor_event
@@ -229,11 +229,8 @@ class InterfaceWatcher(Actor):
                 if old_state and old_state.iface_id != new_state.iface_id:
                     # Interface ID has changed, indicates the interface
                     # was deleted and then re-added.
-                    _log.debug("Interface ID changed for %s. simulating "
-                               "remove then add.", name)
-                    self.update_sequencer.on_interface_update(name, None)
-                self.update_sequencer.on_interface_update(name,
-                                                          async=True)
+                    _log.debug("Interface ID changed for %s", name)
+                self.update_splitter.on_interface_update(name)
 
     @actor_event
     def watch_interfaces(self):

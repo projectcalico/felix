@@ -37,7 +37,7 @@ from calico import common
 from calico.felix.fiptables import (IptablesUpdater, DispatchChains)
 from calico.felix.profilerules import RulesManager
 from calico.felix.frules import install_global_rules
-from calico.felix.dbcache import UpdateSequencer
+from calico.felix.splitter import UpdateSplitter
 from calico.felix.config import Config
 from calico.felix.futils import IPV4, IPV6
 
@@ -71,12 +71,11 @@ def _main_greenlet(config):
                                         v6_dispatch_chains,
                                         v6_rules_manager)
 
-        update_sequencer = UpdateSequencer(config,
-                                           [v4_ipset_mgr, v6_ipset_mgr],
-                                           [v4_rules_manager,
-                                            v6_rules_manager],
-                                           [v4_ep_manager, v6_ep_manager])
-        iface_watcher = InterfaceWatcher(update_sequencer)
+        update_splitter = UpdateSplitter([v4_ipset_mgr, v6_ipset_mgr],
+                                         [v4_rules_manager,
+                                          v6_rules_manager],
+                                         [v4_ep_manager, v6_ep_manager])
+        iface_watcher = InterfaceWatcher(update_splitter)
 
         _log.info("Starting actors.")
         v4_updater.start()
@@ -90,8 +89,6 @@ def _main_greenlet(config):
         v6_rules_manager.start()
         v6_dispatch_chains.start()
         v6_ep_manager.start()
-
-        update_sequencer.start()
 
         iface_watcher.start()
         greenlets = [
@@ -107,7 +104,6 @@ def _main_greenlet(config):
             v6_dispatch_chains.greenlet,
             v6_ep_manager.greenlet,
 
-            update_sequencer.greenlet,
             iface_watcher.greenlet
         ]
 
@@ -118,7 +114,7 @@ def _main_greenlet(config):
         # Start polling for updates.
         _log.info("Starting polling for interface and etcd updates.")
         iface_watcher.watch_interfaces(async=True)  # Never returns, async!
-        greenlets.append(gevent.spawn(watch_etcd, config, update_sequencer))
+        greenlets.append(gevent.spawn(watch_etcd, config, update_splitter))
 
         # Wait for something to fail.
         # TODO: Maybe restart failed greenlets.
