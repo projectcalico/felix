@@ -41,14 +41,14 @@ def interface_exists(interface):
     return os.path.exists("/sys/class/net/" + interface)
 
 
-def list_interface_ips(type, interface):
+def list_interface_ips(ip_type, interface):
     """
     List IP addresses for which there are routes to a given interface.
     Returns a set with all addresses for which there is a route to the device.
     """
     ips = set()
 
-    if type == futils.IPV4:
+    if ip_type == futils.IPV4:
         data = futils.check_call(
             ["ip", "route", "list", "dev", interface]).stdout
     else:
@@ -69,7 +69,7 @@ def list_interface_ips(type, interface):
 
         if len(words) > 1:
             ip = words[0]
-            if common.validate_ip_addr(ip, None):
+            if common.validate_ip_addr(ip, futils.IP_TYPE_TO_VERSION[ip_type]):
                 # Looks like an IP address. Note that we here are ignoring
                 # routes to networks configured when the interface is created.
                 ips.add(words[0])
@@ -121,31 +121,63 @@ def configure_interface_ipv6(if_name, proxy_target):
                            "proxy", str(proxy_target), "dev", if_name])
 
 
-def add_route(type, ip, interface, mac):
+def add_route(ip_type, ip, interface, mac):
     """
     Add a route to a given interface (including arp config).
     Errors lead to exceptions that are not handled here.
 
     Note that we use "ip route replace", since that overrides any imported
     routes to the same IP, which might exist in the middle of a migration.
+
+    :param ip_type: Type of IP (IPV4 or IPV6)
+    :param str ip: IP address
+    :param str interface: Interface name
+    :param str mac: MAC address. May not be none unless ips is empty.
+    :raises FailedSystemCall
     """
-    if type == futils.IPV4:
+    if mac is None and ips:
+        raise ValueError("mac must be supplied if ips is not empty")
+
+    if ip_type == futils.IPV4:
         futils.check_call(['arp', '-s', ip, mac, '-i', interface])
         futils.check_call(["ip", "route", "replace", ip, "dev", interface])
     else:
         futils.check_call(["ip", "-6", "route", "replace", ip, "dev", interface])
 
 
-def del_route(type, ip, interface):
+def del_route(ip_type, ip, interface):
     """
     Delete a route to a given interface (including arp config).
-    Errors lead to exceptions that are not handled here.
+
+    :param ip_type: Type of IP (IPV4 or IPV6)
+    :param str ip: IP address
+    :param str interface: Interface name
+    :raises FailedSystemCall
     """
-    if type == futils.IPV4:
+    if ip_type == futils.IPV4:
         futils.check_call(['arp', '-d', ip, '-i', interface])
         futils.check_call(["ip", "route", "del", ip, "dev", interface])
     else:
         futils.check_call(["ip", "-6", "route", "del", ip, "dev", interface])
+
+
+def set_routes(ip_type, ips, interface, mac=None):
+    """
+    Set the routes on the interface to be the specified set.
+
+    :param ip_type: Type of IP (IPV4 or IPV6)
+    :param set ips: IPs to set up (any not in the set are removed)
+    :param str interface: Interface name
+    :param str mac: MAC address. May not be none unless ips is empty.
+    """
+    if mac is None and ips:
+        raise ValueError("mac must be supplied if ips is not empty")
+
+    current_ips = list_interface_ips(ip_type, interface)
+    for ip in (current_ips - ips):
+        del_route(ip_type, ip, interface)
+    for ip in (ips - current_ips):
+        add_route(ip_type, ip, interface, mac)
 
 
 def interface_up(if_name):
@@ -154,6 +186,7 @@ def interface_up(if_name):
     """
     with open('/sys/class/net/%s/operstate' % if_name, 'r') as f:
         state = f.read()
+    _log.debug("Interface %s is in state %s", if_name, state)
 
     return 'up' in state
 
@@ -199,14 +232,8 @@ class InterfaceWatcher(Actor):
                     _log.debug("Interface ID changed for %s. simulating "
                                "remove then add.", name)
                     self.update_sequencer.on_interface_update(name, None)
-                self.update_sequencer.on_interface_update(name, new_state,
+                self.update_sequencer.on_interface_update(name,
                                                           async=True)
-        previous_interfaces = set(self.interfaces.keys())
-        for removed_interface in previous_interfaces - seen_interfaces:
-            _log.info("Interface %s went away.", removed_interface)
-            del self.interfaces[removed_interface]
-            self.update_sequencer.on_interface_update(removed_interface,
-                                                      None, async=True)
 
     @actor_event
     def watch_interfaces(self):

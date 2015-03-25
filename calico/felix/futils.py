@@ -37,7 +37,9 @@ log = logging.getLogger(__name__)
 # Flag to indicate "IP v4" or "IP v6"; format that can be printed in logs.
 IPV4 = "IPv4"
 IPV6 = "IPv6"
-IP_VERSIONS = [IPV4, IPV6]
+IP_TYPES = [IPV4, IPV6]
+IP_VERSIONS = [4, 6]
+IP_TYPE_TO_VERSION = { IPV4: 4, IPV6: 6 }
 
 
 class FailedSystemCall(Exception):

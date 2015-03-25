@@ -165,10 +165,8 @@ class ReferenceManager(Actor):
 
         This method should set in motion whatever messages need to be sent to
         eventually trigger a call to on_object_startup_complete().
-
-        This implementation does nothing.
         """
-        pass
+        raise NotImplementedError()  # pragma nocover
 
     def _create(self, object_id):
         """

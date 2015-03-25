@@ -28,6 +28,7 @@ from subprocess import CalledProcessError
 from calico.felix import devices, futils
 from calico.felix.actor import Actor, actor_event
 from calico.felix.futils import FailedSystemCall
+from calico.felix.futils import IPV4, IPV6
 from calico.felix.refcount import ReferenceManager, RefCountedActor
 from calico.felix.fiptables import DispatchChains
 from calico.felix.profilerules import RulesManager
@@ -36,41 +37,46 @@ from calico.felix.frules import (CHAIN_TO_PREFIX, profile_to_chain_name,
 
 _log = logging.getLogger(__name__)
 
-OUR_HOSTNAME = socket.gethostname()
-
-
 class EndpointManager(ReferenceManager):
-    def __init__(self, config, ip_version, iptables_updater, dispatch_chains,
+    def __init__(self, config, ip_type,
+                 iptables_updater,
+                 dispatch_chains,
                  rules_manager):
-        super(EndpointManager, self).__init__(qualifier="v%d" % ip_version)
+        super(EndpointManager, self).__init__(qualifier=ip_type)
+
+        # Configuration and version to use
+        self.config = config
+        self.ip_type = ip_type
+        self.ip_version = futils.IP_TYPE_TO_VERSION[ip_type]
 
         # Peers/utility classes.
-        self.ip_version = ip_version
-        self.config = config
         self.iptables_updater = iptables_updater
         self.dispatch_chains = dispatch_chains
         self.rules_mgr = rules_manager
 
-        # State
+        # Endpoints that are in use; LocalEndpoint actors referenced by
+        # endpoint_id.
         self.endpoints_by_id = {}
         self.endpoint_id_by_iface_name = {}
-        self.interfaces = {}
 
     def _create(self, object_id):
+        """
+        Overrides ReferenceManager._create()
+        """
         return LocalEndpoint(self.config,
                              object_id,
-                             self.ip_version,
+                             self.ip_type,
                              self.iptables_updater,
                              self.dispatch_chains,
                              self.rules_mgr)
 
     def _on_object_started(self, endpoint_id, obj):
+        """
+        Callback from a LocalEndpoint to report that it has started.
+        Overrides ReferenceManager._on_object_started
+        """
         ep = self.endpoints_by_id.get(endpoint_id)
         obj.on_endpoint_update(ep, async=True)
-        if ep:
-            iface_name = ep["name"]
-            obj.on_interface_update(self.interfaces.get(iface_name),
-                                    async=True)
 
     @actor_event
     def apply_snapshot(self, endpoints_by_id):
@@ -85,21 +91,32 @@ class EndpointManager(ReferenceManager):
 
     @actor_event
     def on_endpoint_update(self, endpoint_id, endpoint):
+        """
+        Event to indicate that an endpoint has been updated (including creation
+        or deletion).
+
+        :param str endpoint_id: The endpoint ID in question.
+        :endpoint dict[str]: Dictionary of all endpoint data. If None, the
+                             endpoint is to be deleted.
+        """
         if self._is_starting_or_live(endpoint_id):
+            # Local endpoint thread is running; tell it of the change.
             self.objects_by_id[endpoint_id].on_endpoint_update(endpoint,
                                                                async=True)
         if endpoint is None:
-            # Deletion.
+            # Deletion. Remove from the list.
             _log.info("Endpoint %s deleted", endpoint_id)
             old_ep = self.endpoints_by_id.pop(endpoint_id, {})
             if old_ep.get("name") in self.endpoint_id_by_iface_name:
                 self.endpoint_id_by_iface_name.pop(old_ep.get("name"))
             if self._is_starting_or_live(endpoint_id):
+                # Local endpoint is running, so remove our reference.
                 self.decref(endpoint_id)
         else:
+            # Creation or
             self.endpoints_by_id[endpoint_id] = endpoint
             self.endpoint_id_by_iface_name[endpoint["name"]] = endpoint_id
-        if endpoint and endpoint["host"] == OUR_HOSTNAME:
+        if endpoint and endpoint["host"] == self.config.HOSTNAME:
             _log.debug("Endpoint is local, ensuring it is active.")
             if not self._is_starting_or_live(endpoint_id):
                 # This will trigger _on_object_activated to pass the profile
@@ -111,26 +128,33 @@ class EndpointManager(ReferenceManager):
         _log.debug("Got reference to %s", ep_id)
 
     @actor_event
-    def on_interface_update(self, name, iface_state):
-        _log.info("EndpointManager received interface update")
-        if iface_state:
-            self.interfaces[name] = iface_state
-        else:
-            self.interfaces.pop(name, None)
-        endpoint_id = self.endpoint_id_by_iface_name.get(name)
-        _log.info("Matching endpoint: %s", endpoint_id)
-        if endpoint_id and self._is_starting_or_live(endpoint_id):
-            ep = self.objects_by_id[endpoint_id]
-            ep.on_interface_update(iface_state, async=True)
+    def on_interface_update(self, name):
+        """
+        Called when an interface is created or changes state.
+
+        The interface may be any interface on the host, not necessarily
+        one managed by any endpoint of this server.
+        """
+        try:
+            endpoint_id = self.endpoint_id_by_iface_name[name]
+            _log.info("Endpoint %s received interface update for %s",
+                      endpoint_id, name)
+            if self._is_starting_or_live(endpoint_id):
+                # LocalEndpoint is running, so tell it about the change.
+                ep = self.objects_by_id[endpoint_id]
+                ep.on_interface_update(async=True)
+
+        except KeyError:
+            _log.debug("Update on interface %s that we do not care about",
+                       name)
 
 
-# TODO:CHECK Why do we have v4 and v6 version of LocalEndpoint?
 class LocalEndpoint(RefCountedActor):
 
-    def __init__(self, config, endpoint_id, ip_version, iptables_updater,
+    def __init__(self, config, endpoint_id, ip_type, iptables_updater,
                  dispatch_chains, rules_manager):
-        super(LocalEndpoint, self).__init__(qualifier="%s(v%d)" %
-                                            (endpoint_id, ip_version))
+        super(LocalEndpoint, self).__init__(qualifier="%s(%s)" %
+                                            (endpoint_id, ip_type))
         assert isinstance(dispatch_chains, DispatchChains)
         assert isinstance(rules_manager, RulesManager)
 
@@ -141,14 +165,14 @@ class LocalEndpoint(RefCountedActor):
         self._curr_disp_chain_req = 0
 
         self.config = config
-        self.ip_version = ip_version
+        self.ip_type = ip_type
+        self.ip_version = futils.IP_TYPE_TO_VERSION[ip_type]
         self.iptables_updater = iptables_updater
         self.dispatch_chains = dispatch_chains
         self.rules_mgr = rules_manager
 
         # Will be filled in as we learn about the OS interface and the
         # endpoint config.
-        self.iface_state = None
         self.endpoint = None
         self._iface_name = None
         self._suffix = None
@@ -166,8 +190,13 @@ class LocalEndpoint(RefCountedActor):
 
     @actor_event
     def on_endpoint_update(self, endpoint):
+        """
+        Called when this endpoint has received an update.
+        :param dict[str] endpoint: endpoint parameter dictionary.
+        """
         _log.debug("Endpoint updated: %s", endpoint)
         if endpoint and (not self._iface_name or not self._endpoint_id):
+            # TODO: not valid to change interface / id, so need to firewall
             self._iface_name = endpoint["name"]
             self._endpoint_id = endpoint["id"]
             self._suffix = interface_to_suffix(self.config,
@@ -193,11 +222,22 @@ class LocalEndpoint(RefCountedActor):
                 _log.debug("Requested new profile.")
         self.endpoint = endpoint
 
-        self._maybe_update(was_ready)  # Bypasses queue.
+        if endpoint:
+            # Configure the network interface; may fail if not there yet (in
+            # which case we'll just do it when the interface comes up).
+            self._configure_interface()
+        else:
+            # Remove the network programming.
+            self._deconfigure_interface()
+
+        self._maybe_update(was_ready)
         _log.debug("%s finished processing update", self)
 
     @actor_event
     def on_unreferenced(self):
+        """
+        Overrides RefCountedActor:on_unreferenced.
+        """
         _log.info("%s now unreferenced, cleaning up", self)
         assert not self._ready, "Should be deleted before being unreffed."
         self._dead = True
@@ -209,6 +249,9 @@ class LocalEndpoint(RefCountedActor):
 
     @actor_event
     def on_prof_rules_ready(self, req_epoch, profile_id, prof_rules):
+        """
+        Actor event to report that the profile rules are ready.
+        """
         _log.debug("Profile rules ready for profile %s @ epoch %s",
                    profile_id, req_epoch)
         if self._prof_rules_req_epoch == req_epoch:
@@ -223,36 +266,42 @@ class LocalEndpoint(RefCountedActor):
                        profile_id, self._prof_rules_req_epoch)
 
     @actor_event
-    def on_interface_update(self, iface_state):
-        _log.info("Endpoint received new interface state: %s", iface_state)
-        if iface_state and not self._iface_name:
-            self._iface_name = iface_state.name
-            self._suffix = interface_to_suffix(self.config, self._iface_name)
-        was_ready = self._ready
-        self.iface_state = iface_state
-        self._maybe_update(was_ready)  # bypasses queue.
+    def on_interface_update(self):
+        """
+        Actor event to report that the interface is either up or changed.
+        """
+        _log.info("Endpoint %s received interface kick", self.endpoint_id)
+        self._configure_interface()
 
     @property
     def _missing_deps(self):
+        """
+        Returns a list of missing dependencies.
+        """
         missing_deps = []
         if not self.endpoint:
             missing_deps.append("endpoint")
         elif self.endpoint.get("state", "active") != "active":
             missing_deps.append("endpoint active")
-        if not self.iface_state:
-            missing_deps.append("interface")
-        elif not self.iface_state.up:
-            missing_deps.append("interface up")
         if not self._prof_rules:
             missing_deps.append("profile")
         return missing_deps
 
     @property
     def _ready(self):
+        """
+        Returns whether this LocalEndpoint has any dependencies preventing it
+        programming its rules.
+        """
         return not self._missing_deps
 
-    @actor_event
     def _maybe_update(self, was_ready):
+        """
+        Update the relevant programming for this endpoint.
+
+        :param bool was_ready: Whether this endpoint has already been
+                               successfully configured.
+        """
         is_ready = self._ready
         if not is_ready:
             _log.debug("%s not ready, waiting on %s", self, self._missing_deps)
@@ -283,6 +332,9 @@ class LocalEndpoint(RefCountedActor):
 
     @actor_event
     def _on_dispatch_chain_entry_removed(self, disp_chain_epoch, error):
+        """
+        Actor event to report that the dispatch chain has been removed.
+        """
         if disp_chain_epoch == self._curr_disp_chain_req:
             _log.debug("Dispatch chain entry removed, removing chains.")
             self._remove_chains()
@@ -318,12 +370,6 @@ class LocalEndpoint(RefCountedActor):
                 _log.debug("No intervening updates, adding to dispatch chain.")
                 self.dispatch_chains.on_endpoint_chains_ready(
                     self._iface_name, self._endpoint_id, async=True)
-                try:
-                    self._configure_interface()
-                except (IOError, FailedSystemCall, CalledProcessError):
-                    _log.exception("Failed to configure interface, will retry "
-                                   "when we next get an update.")
-                    self._failed = True
         else:
             _log.error("Programming for %s failed: %r", self, error)
             self._failed = True
@@ -350,28 +396,56 @@ class LocalEndpoint(RefCountedActor):
         """
         Applies sysctls and routes to the interface.
         """
-        devices.configure_interface_ipv4(self._iface_name)
-        ipv6_gw = self.endpoint.get("ipv6_gateway", None)
-        devices.configure_interface_ipv6(self._iface_name, ipv6_gw)
-        for ip_type in futils.IP_VERSIONS:
-            nets_key = "ipv4_nets" if ip_type == futils.IPV4 else "ipv6_nets"
+        try:
+            if self.ip_type == IPV4:
+                devices.configure_interface_ipv4(self._iface_name)
+                nets_key = "ipv4_nets"
+            else:
+                ipv6_gw = self.endpoint.get("ipv6_gateway", None)
+                devices.configure_interface_ipv6(self._iface_name, ipv6_gw)
+                nets_key = "ipv6_nets"
+
+            ips = set()
             for ip in self.endpoint.get(nets_key, []):
-                # Note: this may fail if the interface has been deleted, we'll
-                # catch that in the caller...
-                ip = futils.net_to_ip(ip)
-                devices.add_route(ip_type, ip, self._iface_name,
-                                  self.endpoint["mac"])
+                ips.add(futils.net_to_ip(ip))
+            devices.set_routes(self.ip_type, ips,
+                               self._iface_name,
+                               self.endpoint["mac"])
+
+        except (IOError, FailedSystemCall, CalledProcessError):
+            if not devices.interface_exists(self._iface_name):
+                _log.info("Interface %s for %s does not exist yet",
+                           self._iface_name, self.endpoint_id)
+            elif not devices.interface_up(self._iface_name):
+                _log.info("Interface %s for %s is not up yet",
+                           self._iface_name, self.endpoint_id)
+            else:
+                # OK, that really should not happen.
+                _log.exception("Failed to configure interface %s for %s",
+                               self._iface_name, self.endpoint_id)
+                raise
+
 
     def _deconfigure_interface(self):
         """
-        Applies sysctls and routes to the interface.
+        Removes routes from the interface.
         """
-        # TODO: delete routes...
-        pass
+        try:
+            devices.set_routes(self.ip_type, set(), self._iface_name, None)
+
+        except (IOError, FailedSystemCall, CalledProcessError):
+            if not devices.interface_exists(self._iface_name):
+                # Deleted under our feet - so the rules are gone.
+                _log.debug("Interface %s for %s deleted",
+                           self._iface_name, self.endpoint_id)
+            else:
+                # An error deleting the rules. Log and continue.
+                _log.exception("Cannot delete rules for interface %s for %s",
+                               self._iface_name, self.endpoint_id)
 
     def __str__(self):
-        return ("Endpoint<ipv%s,id=%s,iface=%s>" %
-                (self.ip_version, self._endpoint_id or "unknown",
+        return ("Endpoint<%s,id=%s,iface=%s>" %
+                (self.ip_type, self._endpoint_id or "unknown",
                  self._iface_name or "unknown"))
 
     def _cleanup_queued_decrefs(self):

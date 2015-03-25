@@ -39,6 +39,7 @@ from calico.felix.profilerules import RulesManager
 from calico.felix.frules import install_global_rules
 from calico.felix.dbcache import UpdateSequencer
 from calico.felix.config import Config
+from calico.felix.futils import IPV4, IPV6
 
 _log = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ def _main_greenlet(config):
         v4_rules_manager = RulesManager(4, v4_updater, v4_ipset_mgr)
         v4_dispatch_chains = DispatchChains(config, 4, v4_updater)
         v4_ep_manager = EndpointManager(config,
-                                        4,
+                                        IPV4,
                                         v4_updater,
                                         v4_dispatch_chains,
                                         v4_rules_manager)
@@ -65,7 +66,7 @@ def _main_greenlet(config):
         v6_rules_manager = RulesManager(6, v6_updater, v6_ipset_mgr)
         v6_dispatch_chains = DispatchChains(config, 6, v6_updater)
         v6_ep_manager = EndpointManager(config,
-                                        6,
+                                        IPV6,
                                         v6_updater,
                                         v6_dispatch_chains,
                                         v6_rules_manager)
@@ -113,11 +114,6 @@ def _main_greenlet(config):
         # Install the global rules before we start polling for updates.
         _log.info("Installing global rules.")
         install_global_rules(config, v4_updater, v6_updater)
-
-        # Make sure we queue an initial update of the interfaces before the
-        # etcd update.
-        _log.info("Triggering initial interface poll..")
-        iface_watcher.poll_interfaces(async=False)
 
         # Start polling for updates.
         _log.info("Starting polling for interface and etcd updates.")

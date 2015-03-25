@@ -27,9 +27,6 @@ from calico.felix.actor import actor_event, Actor
 _log = logging.getLogger(__name__)
 
 
-OUR_HOSTNAME = socket.gethostname()
-
-
 class UpdateSequencer(Actor):
     def __init__(self, config, ipsets_mgrs, rules_managers, endpoint_managers):
         super(UpdateSequencer, self).__init__()
@@ -93,10 +90,10 @@ class UpdateSequencer(Actor):
             ipset_mgr.on_tags_update(profile_id, tags, async=True)
 
     @actor_event
-    def on_interface_update(self, name, iface_state):
-        _log.info("Interface %s changed state: %s", name, iface_state)
+    def on_interface_update(self, name):
+        _log.info("Interface %s up", name)
         for endpoint_mgr in self.endpoint_mgrs:
-            endpoint_mgr.on_interface_update(name, iface_state, async=True)
+            endpoint_mgr.on_interface_update(name, async=True)
 
     @actor_event
     def on_endpoint_update(self, endpoint_id, endpoint):

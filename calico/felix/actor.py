@@ -19,15 +19,16 @@ felix.actor
 
 Actor infrastructure used in Felix.
 """
-import logging
-import functools
 import collections
-import weakref
+import functools
+import gevent
+import logging
+import os
 import sys
 import traceback
+import uuid
+import weakref
 
-import gevent
-import os
 from gevent.event import AsyncResult
 from gevent.queue import Queue
 
@@ -48,6 +49,7 @@ class Message(object):
     Message passed to an actor.
     """
     def __init__(self, method, results, caller_path, recipient):
+        self.uuid = uuid.uuid4().hex[:12]
         self.method = method
         self.results = results
         self.caller = caller_path
@@ -55,7 +57,8 @@ class Message(object):
         self.recipient = recipient
 
     def __str__(self):
-        data = "%s by %s to %s" % (self.name, self.caller, self.recipient)
+        data = ("%s (%s by %s to %s)" %
+                (self.uuid, self.name, self.caller, self.recipient))
         return data
 
 class ExceptionTrackingRef(weakref.ref):
