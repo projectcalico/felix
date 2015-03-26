@@ -22,8 +22,12 @@ IP sets management functions.
 from collections import defaultdict
 
 import logging
+import os
+import tempfile
+
 from subprocess import CalledProcessError
 from calico.felix import futils
+from calico.felix.futils import IPV4, IPV6
 from calico.felix.actor import actor_event
 from calico.felix.refcount import ReferenceManager, RefCountedActor
 from gevent import subprocess
@@ -31,40 +35,51 @@ import re
 
 _log = logging.getLogger(__name__)
 
-#TODO: We pass round whether something is IPv4 or v6 in three different ways.
-# need to sort that out.
+IPSET_PREFIX = { IPV4: "fx-v4-", IPV6: "fx-v6-" }
+IPSET_TMP_PREFIX = { IPV4: "fx-tmp-v4-", IPV6: "fx-tmp-v6-" }
+
 class IpsetManager(ReferenceManager):
-    def __init__(self, set_type, family="inet"):
-        super(IpsetManager, self).__init__(qualifier=family)
+    def __init__(self, ip_type):
+        """
+        Manages all the ipsets for tags for either IPv4 or IPv6.
+
+        :param ip_type: IP type (IPV4 or IPV6)
+        """
+        super(IpsetManager, self).__init__(qualifier=ip_type)
+
+        self.ip_type = ip_type
 
         # State.
-        self.set_type = set_type
-        self.family = family
         self.tags_by_prof_id = {}
         self.endpoints_by_ep_id = {}
-        self.prefix = "fx-v4-" if family == "inet" else "fx-v6-"
 
         # Indexes.
         self.endpoint_ids_by_tag = defaultdict(set)
         self.endpoint_ids_by_profile_id = defaultdict(set)
 
     def _create(self, tag_id):
-        return ActiveIpset(self.prefix + futils.uniquely_shorten(tag_id, 16),
-                           self.set_type, family=self.family)
+        # Create the ActiveIpset, and put a message on the queue that will
+        # trigger it to update the ipset as soon as it starts. Note that we do
+        # this now so that it is sure to be processed with the first batch even
+        # if other messages are arriving.
+        active_ipset = ActiveIpset(futils.uniquely_shorten(tag_id, 16),
+                                   self.ip_type)
 
-    def _on_object_started(self, tag_id, ipset):
-        new_members = set()
+        members = set()
         for ep_id in self.endpoint_ids_by_tag.get(tag_id, set()):
             ep = self.endpoints_by_ep_id.get(ep_id, {})
             nets = self.nets_key
-            new_members.update(map(futils.net_to_ip, ep.get(nets, [])))
-        # This call will force the ipset to be programmed, triggering a kick
-        # to the reference manager's on_object_startup_complete().
-        ipset.replace_members(new_members, async=True)
+            members.update(map(futils.net_to_ip, ep.get(nets, [])))
+
+        active_ipset.replace_members(members, async=True)
+        return active_ipset
+
+    def _on_object_started(self, tag_id, ipset):
+        _log.debug("ActiveIpset actor for %s started", tag_id)
 
     @property
     def nets_key(self):
-        nets = "ipv4_nets" if self.family == "inet" else "ipv6_nets"
+        nets = "ipv4_nets" if self.ip_type == IPV4 else "ipv6_nets"
         return nets
 
     @actor_event
@@ -210,41 +225,42 @@ def tag_to_ipset_name(tag_name):
 
 class ActiveIpset(RefCountedActor):
 
-    def __init__(self, name, set_type, family="inet"):
-        super(ActiveIpset, self).__init__(qualifier=name)
+    def __init__(self, tag, ip_type):
+        """
+        Actor managing a single ipset.
 
-        self.name = name
-        self.set_type = set_type
-        self.family = family
+        :param str name: Name of the ipset
+        :param ip_type: IPV4 or IPV6
+        """
+        super(ActiveIpset, self).__init__(qualifier=tag)
+
+        self.tag = tag
+        self.ip_type = ip_type
+        self.name = IPSET_PREFIX[ip_type] + tag
+        self.tmpname = IPSET_TMP_PREFIX[ip_type] + tag
+        self.family = "inet" if ip_type == IPV4 else "inet6"
+
+        # Members - which entries should be in the ipset.
         self.members = set()
-        """Database state"""
 
+        # Members which really are in the ipset.
         self.programmed_members = None
-        """
-        State loaded from ipset command.  None if we haven't loaded
-        yet or the set doesn't exist.
-        """
-        self.dirty = True
-        """
-        Flag to tell the _on_batch_processed method that a sync is required.
-        """
 
-        self._load_from_ipset(async=True)
+        # Do the sets exist?
+        self.set_exists = ipset_exists(self.name)
+        self.tmpset_exists = ipset_exists(self.tmpname)
 
     @actor_event
     def replace_members(self, members):
         _log.info("Replacing members of ipset %s", self.name)
         assert isinstance(members, set), "Expected members to be a set"
-        if self.programmed_members != members:
-            self.members = members
-            self.dirty = True
+        self.members = members
 
     @actor_event
     def add_member(self, member):
         _log.info("Adding member %s to ipset %s", member, self.name)
         if member not in self.members:
             self.members.add(member)
-            self.dirty = True
 
     @actor_event
     def remove_member(self, member):
@@ -253,102 +269,93 @@ class ActiveIpset(RefCountedActor):
             self.members.remove(member)
         except KeyError:
             _log.info("%s was not in ipset %s", member, self.name)
-        else:
-            self.dirty = True
 
     @actor_event
     def on_unreferenced(self):
-        try:
-            if self.programmed_members is not None:
-                try:
-                    subprocess.check_call(["ipset", "destroy", self.name])
-                except CalledProcessError:
-                    _log.exception("Failed to destroy ipset %s", self.name)
-                    raise
-                self.programmed_members = None
-        finally:
-            self._notify_cleanup_complete()
-
-    @actor_event
-    def _load_from_ipset(self):
-        try:
-            output = subprocess.check_output(["ipset", "list", self.name])
-        except CalledProcessError as cpe:
-            if cpe.returncode == 1:
-                # ipset doesn't exist.  TODO: better check?
-                self.programmed_members = None
-            else:
-                raise
-        else:
-            # Output ends with:
-            # Members:
-            # <one member per line>
-            lines = output.splitlines()
-            self.programmed_members = set(lines[lines.index("Members:") + 1:])
-            self._notify_ready()
-
-    def _start_msg_batch(self, batch):
-        # Look backwards in the batch for a replace_members call, which trumps
-        # any other add/remove calls.
-        for pos in xrange(len(batch)-1, -1, -1):
-            msg = batch[pos]
-            if msg.method.func == self.replace_members.func:
-                _log.debug("Batch had a replace_members call, combining.")
-                # Calls after the replace can't be combined.
-                replace_and_following_msgs = batch[pos:]
-                # Look for any _load_from_ipset calls; those can't be combined.
-                msgs_before_replace = batch[:pos]
-                load_msgs = []
-                non_load_msgs = []
-                for msg in msgs_before_replace:
-                    if msg.method.func == self._load_from_ipset.func:
-                        load_msgs.append(msg)
-                    else:
-                        non_load_msgs.append(msg)
-                # Insert the async results for the calls that we're combining
-                # into the replace msg's list.
-                replace_results = msg.results
-                previous_results = []
-                for msg in non_load_msgs:
-                    previous_results.extend(msg.results)
-                replace_results[:0] = previous_results
-                assert len(batch) == len(replace_results) + \
-                    (len(replace_and_following_msgs) - 1) + \
-                    len(load_msgs)
-                return load_msgs + replace_and_following_msgs
-        return batch
+        if self.set_exists:
+            futils.check_call(["ipset", "destroy", name])
+        self._notify_cleanup_complete()
 
     def _finish_msg_batch(self, batch, results):
-        if self.dirty:
+        # No need to combine members of the batch (although we could). None of
+        # the add_members / remove_members / replace_members calls actually
+        # does any work, just updating state. The _finish_msg_batch call will
+        # then program the real changes.
+        if self.members != self.programmed_members:
             self._sync_to_ipset()
-            self.dirty = False
 
     def _sync_to_ipset(self):
-        if self.programmed_members is None:
-            # We're only called after _load_from_ipset() so we know that the
-            # ipset doesn't exist.
-            p = subprocess.Popen(["ipset", "create",
-                                  self.name, self.set_type, "family",
-                                  self.family],
-                                 stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
-            out, err = p.communicate()
-            if p.wait() != 0:
-                _log.error("Failed to create ipset: Out:\n%sErr:\n%s", out,
-                           err)
-            self.programmed_members = set()
-            self.programmed = True
-            self._notify_ready()
-        _log.debug("Programmed members: %s", self.programmed_members)
-        _log.debug("Desired members: %s", self.members)
-        members_to_add = self.members - self.programmed_members
-        _log.debug("Adding members: %s", members_to_add)
-        for member in members_to_add:
-            subprocess.check_output(["ipset", "add", self.name, member])
-            self.programmed_members.add(member)
-        members_to_remove = self.programmed_members - self.members
-        _log.debug("Removing members: %s", members_to_remove)
-        for member in members_to_remove:
-            subprocess.check_output(["ipset", "del", self.name, member])
-            self.programmed_members.remove(member)
-        assert self.programmed_members == self.members
+        _log.debug("Setting ipset %s to %s", self.name, self.members)
+        fd, filename = tempfile.mkstemp(text=True)
+        f = os.fdopen(fd, "w")
+
+        if not self.set_exists:
+            # ipset does not exist, so just create it and put the data in it.
+            set_name = self.name
+            create = True
+            swap = False
+        elif not self.tmpset_exists:
+            # Set exists, but tmpset does not
+            set_name = self.tmpname
+            create = True
+            swap = True
+        else:
+            # Both set and tmpset exist
+            set_name = self.tmpname
+            create = False
+            swap = True
+
+        if create:
+            f.write("create %s hash:ip family %s\n" % (set_name, self.family))
+        else:
+            f.write("flush %s\n" % (set_name))
+
+        for member in self.members:
+            f.write("add %s %s\n" % (set_name, member))
+
+        if swap:
+            f.write("swap %s %s\n" % (self.name, self.tmpname))
+            f.write("destroy %s\n" % (self.tmpname))
+
+        f.close()
+
+        # Load that data.
+        futils.check_call(["ipset", "restore", "-file", filename])
+
+        # By the time we get here, the set exists, and the tmpset does not if
+        # we just destroyed it after a swap (it might still exist if it did and
+        # the main set did not when we started, unlikely though that seems!).
+        self.set_exists = True
+        if swap:
+            self.tmpset_exists = False
+
+        # Tidy up the tmp file.
+        os.remove(filename)
+
+        # We have got the set into the correct state.
+        self.programmed_members = self.members.copy()
+
+
+def ipset_exists(name):
+    """
+    Check if a set of the correct name exists.
+    """
+    return (futils.call_silent(["ipset", "list", name]) == 0)
+
+
+def list_ipset_names():
+    """
+    List all names of ipsets. Note that this is *not* the same as the ipset
+    list command which lists contents too (hence the name change).
+    """
+    data  = futils.check_call(["ipset", "list"]).stdout
+    lines = data.split("\n")
+
+    names = []
+
+    for line in lines:
+        words = line.split()
+        if (len(words) > 1 and words[0] == "Name:"):
+            names.append(words[1])
+
+    return names

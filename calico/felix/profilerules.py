@@ -110,6 +110,8 @@ class ProfileRules(RefCountedActor):
         adding and removing the tag a lot.  That's OK; we'll have increffed
         the tag the correct number of times as we requested it.
         """
+        #TODO: The above comment appears to be wrong; there's a bug where we
+        # leak references and hence ipsets when objects are added / removed.
 
         self._profile = None
         """

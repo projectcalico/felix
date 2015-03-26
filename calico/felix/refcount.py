@@ -55,14 +55,19 @@ class ReferenceManager(Actor):
         assert callback is not None
 
         if object_id not in self.objects_by_id:
-            _log.debug("%s Object for id %s didn't exist", self, object_id)
+            _log.debug("%s object with id %s didn't exist",
+                       self.name, object_id)
             obj = self._create(object_id)
             obj._manager = weakref.proxy(self)
             obj._id = object_id
             self.objects_by_id[object_id] = obj
+        else:
+            obj =  self.objects_by_id[object_id]
+            _log.debug("%s object with id %s existed with ref count %d",
+                       self.name, object_id, obj.ref_count)
 
         self.pending_ref_callbacks[object_id].add(callback)
-        self.objects_by_id[object_id].ref_count += 1
+        obj.ref_count += 1
 
         # Depending on state of object, may need to start it or immediately
         # call back.
@@ -101,12 +106,14 @@ class ReferenceManager(Actor):
         obj = self.objects_by_id[object_id]
         obj.ref_count -= 1
         assert obj.ref_count >= 0, "Ref count dropped below 0.s"
+        _log.debug("Reference count for %s object %s is %d",
+                   self.name, object_id, obj.ref_count)
         if obj.ref_count == 0:
             _log.debug("No more references to object with id %s", object_id)
             if obj.ref_mgmt_state == CREATED:
                 _log.debug("%s was never started, discarding", obj)
             else:
-                _log.debug("%s is running, cleaning it up")
+                _log.debug("%s is running, cleaning it up", obj)
                 obj.ref_mgmt_state = STOPPING
                 obj.on_unreferenced(async=True)
                 self.stopping_objects_by_id[object_id].add(obj)

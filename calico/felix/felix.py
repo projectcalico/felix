@@ -52,7 +52,7 @@ def _main_greenlet(config):
     try:
         _log.info("Creating actors.")
         v4_updater = IptablesUpdater(ip_version=4)
-        v4_ipset_mgr = IpsetManager("hash:ip", family="inet")
+        v4_ipset_mgr = IpsetManager(IPV4)
         v4_rules_manager = RulesManager(4, v4_updater, v4_ipset_mgr)
         v4_dispatch_chains = DispatchChains(config, 4, v4_updater)
         v4_ep_manager = EndpointManager(config,
@@ -62,7 +62,7 @@ def _main_greenlet(config):
                                         v4_rules_manager)
 
         v6_updater = IptablesUpdater(ip_version=6)
-        v6_ipset_mgr = IpsetManager("hash:ip", family="inet6")
+        v6_ipset_mgr = IpsetManager(IPV6)
         v6_rules_manager = RulesManager(6, v6_updater, v6_ipset_mgr)
         v6_dispatch_chains = DispatchChains(config, 6, v6_updater)
         v6_ep_manager = EndpointManager(config,

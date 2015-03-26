@@ -75,6 +75,7 @@ class ExceptionTrackingRef(weakref.ref):
         super(ExceptionTrackingRef, self).__init__(obj, callback)
         self.exception = None
         self.tag = None
+        self.msg = None
 
         # Callback won't get triggered if we die before the object we reference
         # so stash a reference to this object, which we clean up when the
@@ -103,7 +104,7 @@ def _reap_ref(ref):
     del _refs[ref.idx]
     if ref.exception:
         _log.critical("TrackedAsyncResult %s was leaked with exception %r",
-                      ref.tag, ref.exception)
+                      ref.msg, ref.exception)
         print >> sys.stderr, "TrackedAsyncResult %s was leaked with " \
                              "exception %r" % (ref.tag, ref.exception)
 
@@ -128,6 +129,9 @@ class TrackedAsyncResult(AsyncResult):
         super(TrackedAsyncResult, self).__init__()
         self.__ref = ExceptionTrackingRef(self, _reap_ref)
         self.__ref.tag = tag
+
+    def set_msg(self, msg):
+        self.__ref.msg = msg
 
     def set_exception(self, exception):
         self.__ref.exception = exception
@@ -171,8 +175,16 @@ def actor_event(fn):
             return fn(self, *args, **kwargs)
         else:
             assert async_set, "Cross-actor calls must specify async arg."
-        result = TrackedAsyncResult(method_name)
+
+        try:
+            caller = "%s (processing %s)" % (actor_storage.name, actor_storage.msg_uuid)
+        except AttributeError:
+            caller = calling_path
+
         partial = functools.partial(fn, self, *args, **kwargs)
+        result = TrackedAsyncResult(method_name)
+        msg = Message(partial, [result], caller, self.name)
+        result.set_msg(msg)
 
         if self._event_queue.full():
             _log.warn("Queue for %s full, this greenlet may block", self)
@@ -185,12 +197,6 @@ def actor_event(fn):
         greenlet_running = bool(self.greenlet)
         allow_block = greenlet_running or self.skip_running_check
 
-        try:
-            caller = "%s (processing %s)" % (actor_storage.name, actor_storage.msg_uuid)
-        except AttributeError:
-            caller = calling_path
-
-        msg = Message(partial, [result], caller, self.name)
         _log.debug("Message %s sent by %s to %s",
                    msg, caller, self.name)
         self._event_queue.put(msg,
@@ -318,6 +324,7 @@ class Actor(object):
                     self._current_msg = None
             try:
                 # Give subclass a chance to post-process the batch.
+                _log.debug("Finishing message batch")
                 self._finish_msg_batch(batch, results)
             except SplitBatchAndRetry:
                 # The subclass couldn't process the batch as is (probably
