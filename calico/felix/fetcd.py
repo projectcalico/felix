@@ -28,6 +28,8 @@ import re
 from urllib3.exceptions import ReadTimeoutError
 from netaddr import IPAddress, AddrFormatError
 
+from calico import common
+
 _log = logging.getLogger(__name__)
 
 
@@ -38,6 +40,10 @@ TAGS_RE = re.compile(
     r'^/calico/policy/profile/(?P<profile_id>[^/]+)/tags')
 ENDPOINT_RE = re.compile(
     r'^/calico/host/(?P<hostname>[^/]+)/.+/endpoint/(?P<endpoint_id>[^/]+)')
+
+
+class ValidationFailed(Exception):
+    pass
 
 
 def watch_etcd(config, update_splitter):
@@ -173,7 +179,18 @@ def parse_if_endpoint(config, etcd_node):
 
 
 def validate_endpoint(config, endpoint):
+    """
+    Ensures that the supplied endpoint is valid. Once this routine has returned
+    successfully, we know that all required fields are present and have valid values.
+
+    :param config: configuration structure
+    :param endpoint: endpoint dictionary as read from etcd
+    :raises ValidationFailed
+    """
     issues = []
+
+    if not isinstance(endpoint, dict):
+        raise ValidationFailed("Expected endpoint to be a dict.")
 
     if "state" not in endpoint:
         issues.append("Missing 'state' field.")
@@ -193,24 +210,27 @@ def validate_endpoint(config, endpoint):
                           (endpoint["name"], config.IFACE_PREFIX))
 
     for version in (4, 6):
+        nets = "ipv%d_nets" % version
+        if nets not in endpoint:
+            issues.append("Missing network %s." % nets)
+        else:
+            for ip in endpoint.get(nets, []):
+                if not common.validate_cidr(ip, version):
+                    issues.append("IP address %r is not a valid IPv%d CIDR." %
+                                  (ip, version))
+                    break
+
         gw_key = "ipv%d_gateway" % version
         try:
             gw_str = endpoint[gw_key]
-            if gw_str is not None:
-                _ = IPAddress(gw_str)
+            if not common.validate_ip_addr(gw_str, version):
+                issues.append("%s is not a valid IPv%d gateway address." %
+                              (gw_key, version))
         except KeyError:
-            # Gateway not included for this version.
             pass
-        except AddrFormatError:
-            issues.append("%s is not a valid IPv%d address." %
-                          (gw_key, version))
 
     if issues:
         raise ValidationFailed(" ".join(issues))
-
-
-class ValidationFailed(Exception):
-    pass
 
 
 def parse_if_rules(etcd_node):
@@ -223,11 +243,41 @@ def parse_if_rules(etcd_node):
         else:
             rules = json_decoder.decode(etcd_node.value)
             rules["id"] = profile_id
+            try:
+                validate_rules(rules)
+            except ValidationFailed as e:
+                _log.exception("Validation failed for profile %s rules : %s",
+                             profile_id, rules)
+                return profile_id, None
 
         _log.debug("Found rules for profile %s : %s", profile_id, rules)
 
         return profile_id, rules
     return None, None
+
+
+def validate_rules(rules):
+    """
+    Ensures that the supplied rules are valid. Once this routine has returned
+    successfully, we know that all required fields are present and have valid values.
+
+    :param rules: rules list as read from etcd
+    :raises ValidationFailed
+    """
+    issues = []
+
+    if not isinstance(rules, dict):
+        raise ValidationFailed("Expected rules to be a dict.")
+
+    for key in ("inbound_rules", "outbound_rules"):
+        if key not in rules:
+            issues.append("No %s in rules." % key)
+            continue
+
+    #TODO: need to consider what further firewalling to add here.
+
+    if issues:
+        raise ValidationFailed(" ".join(issues))
 
 
 def parse_if_tags(etcd_node):
@@ -239,12 +289,41 @@ def parse_if_tags(etcd_node):
             tags = None
         else:
             tags = json_decoder.decode(etcd_node.value)
+            try:
+                validate_tags(tags)
+            except ValidationFailed:
+                _log.exception("Validation failed for profile %s tags : %s",
+                               profile_id, tags)
+                return profile_id, None
 
         _log.debug("Found tags for profile %s : %s", profile_id, tags)
 
         return profile_id, tags
     return None, None
 
+
+def validate_tags(tags):
+    """
+    Ensures that the supplied tags are valid. Once this routine has returned
+    successfully, we know that all required fields are present and have valid
+    values.
+
+    :param config: configuration structure
+    :param tags: tag set as read from etcd
+    :raises ValidationFailed
+    """
+    issues = []
+
+    if not isinstance(tags, list):
+        issues.append("Expected tags to be a list.")
+    else:
+        for tag in tags:
+            if not isinstance(tag, StringTypes):
+                issues.append("Expected tag '%s' to be a string." % tag)
+                break
+
+    if issues:
+        raise ValidationFailed(" ".join(issues))
 
 def load_config(host, port):
     """
