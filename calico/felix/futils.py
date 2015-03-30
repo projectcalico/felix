@@ -41,6 +41,8 @@ IP_TYPES = [IPV4, IPV6]
 IP_VERSIONS = [4, 6]
 IP_TYPE_TO_VERSION = { IPV4: 4, IPV6: 6 }
 
+SHORTENED_PREFIX = "_"
+
 
 class FailedSystemCall(Exception):
     def __init__(self, message, args, retcode, stdout, stderr):
@@ -136,16 +138,19 @@ def net_to_ip(net_or_ip):
 
 def uniquely_shorten(string, length):
     """
-    Take a string and uniquely truncate it to at most length characters. We do
-    this by either using it directly (if it is no more than length characters
-    long), or else by hashing it and taking the first length characters of the
-    hash.
+    Take a string and deterministically shorten it to at most length
+    characters. Tries to return the input string unaltered unless it would
+    potentially conflict with a shortened result.  Shortened results are
+    formed by applying a secure hash to the input and truncating it to length.
     """
-    if len(string) <= length:
+
+    if len(string) <= length and not (len(string) == length and
+                                      string.startswith(SHORTENED_PREFIX)):
         return string
 
-    h = hashlib.md5()
+    h = hashlib.sha256()
+    h.update("%s " % length)
     h.update(string)
     hash_text = h.hexdigest()
 
-    return hash_text[:length]
+    return SHORTENED_PREFIX + hash_text[:length-len(SHORTENED_PREFIX)]
