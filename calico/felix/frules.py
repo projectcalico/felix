@@ -26,14 +26,14 @@ _log = logging.getLogger(__name__)
 
 
 # Chain names
-CHAIN_PREROUTING = "fx-PREROUTING"
-CHAIN_INPUT = "fx-INPUT"
-CHAIN_FORWARD = "fx-FORWARD"
-CHAIN_TO_ENDPOINT = "fx-TO-ENDPOINT"
-CHAIN_FROM_ENDPOINT = "fx-FROM-ENDPOINT"
-CHAIN_TO_PREFIX = "fx-to-"
-CHAIN_FROM_PREFIX = "fx-from-"
-CHAIN_PROFILE_PREFIX = "fx-p-"
+CHAIN_PREROUTING = "felix-PREROUTING"
+CHAIN_INPUT = "felix-INPUT"
+CHAIN_FORWARD = "felix-FORWARD"
+CHAIN_TO_ENDPOINT = "felix-TO-ENDPOINT"
+CHAIN_FROM_ENDPOINT = "felix-FROM-ENDPOINT"
+CHAIN_TO_PREFIX = "felix-to-"
+CHAIN_FROM_PREFIX = "felix-from-"
+CHAIN_PROFILE_PREFIX = "felix-p-"
 
 
 # Valid keys for a rule JSON dict.
@@ -244,4 +244,3 @@ def rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,
                               else on_deny)
 
     return " ".join(str(x) for x in update_fragments)
-

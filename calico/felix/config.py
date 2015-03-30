@@ -31,9 +31,6 @@ import socket
 from calico import common
 from calico.felix import fetcd
 
-# TODO: This purely reads from the config files. Should do better, but valid
-# intermediate state.
-
 # Logger
 log = logging.getLogger(__name__)
 

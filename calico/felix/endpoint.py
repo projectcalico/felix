@@ -178,7 +178,6 @@ class LocalEndpoint(RefCountedActor):
         self.endpoint = None
         self._iface_name = None
         self._suffix = None
-        self._endpoint_id = None
 
         # Track whether the last attempt to program the dataplane succeeded.
         # We'll force a reprogram next time we get a kick.
@@ -197,10 +196,10 @@ class LocalEndpoint(RefCountedActor):
         :param dict[str] endpoint: endpoint parameter dictionary.
         """
         _log.debug("Endpoint updated: %s", endpoint)
-        if endpoint and (not self._iface_name or not self._endpoint_id):
-            # TODO: not valid to change interface / id, so need to firewall
+        if endpoint and not self.endpoint:
+            # This is the first time we have seen the endpoint, so extract the
+            # interface name and endpoint ID.
             self._iface_name = endpoint["name"]
-            self._endpoint_id = endpoint["id"]
             self._suffix = interface_to_suffix(self.config,
                                                self._iface_name)
         was_ready = self._ready
@@ -222,6 +221,8 @@ class LocalEndpoint(RefCountedActor):
                 self.rules_mgr.get_and_incref(new_profile_id,
                                               callback=cb, async=True)
                 _log.debug("Requested new profile.")
+
+        # Store off the endpoint we were passed.
         self.endpoint = endpoint
 
         if endpoint:
@@ -371,7 +372,7 @@ class LocalEndpoint(RefCountedActor):
                 # Up to date, tell the dispatch chain/configure iface.
                 _log.debug("No intervening updates, adding to dispatch chain.")
                 self.dispatch_chains.on_endpoint_chains_ready(
-                    self._iface_name, self._endpoint_id, async=True)
+                    self._iface_name, self.endpoint_id, async=True)
         else:
             _log.error("Programming for %s failed: %r", self, error)
             self._failed = True
@@ -447,7 +448,7 @@ class LocalEndpoint(RefCountedActor):
 
     def __str__(self):
         return ("Endpoint<%s,id=%s,iface=%s>" %
-                (self.ip_type, self._endpoint_id or "unknown",
+                (self.ip_type, self.endpoint_id,
                  self._iface_name or "unknown"))
 
     def _cleanup_queued_decrefs(self):

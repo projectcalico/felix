@@ -35,8 +35,8 @@ import re
 
 _log = logging.getLogger(__name__)
 
-IPSET_PREFIX = { IPV4: "fx-v4-", IPV6: "fx-v6-" }
-IPSET_TMP_PREFIX = { IPV4: "fx-tmp-v4-", IPV6: "fx-tmp-v6-" }
+IPSET_PREFIX = { IPV4: "felix-v4-", IPV6: "felix-v6-" }
+IPSET_TMP_PREFIX = { IPV4: "felix-tmp-v4-", IPV6: "felix-tmp-v6-" }
 
 class IpsetManager(ReferenceManager):
     def __init__(self, ip_type):
