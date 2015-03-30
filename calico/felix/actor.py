@@ -151,56 +151,46 @@ def actor_event(fn):
     method_name = fn.__name__
     @functools.wraps(fn)
     def queue_fn(self, *args, **kwargs):
-        # Police that cross-actor calls must be explicit about blocking.
+        # Get call information for logging purposes.
         calling_file, line_no, func, _ = traceback.extract_stack()[-2]
         calling_file = os.path.basename(calling_file)
         calling_path = "%s:%s:%s" % (calling_file, line_no, func)
+        try:
+            caller = "%s (processing %s)" % (actor_storage.name,
+                                             actor_storage.msg_uuid)
+        except AttributeError:
+            caller = calling_path
 
-        on_same_greenlet = (self.greenlet == gevent.getcurrent())
+        # Figure out our arguments.
         async_set = "async" in kwargs
         async = kwargs.pop("async", False)
-        # TODO: Why do we disallow async messages to same greenlet?
-        assert not (on_same_greenlet and async), \
-            "Async call to own queue, deadlocks if queue full."
+        on_same_greenlet = (self.greenlet == gevent.getcurrent())
+
+        if on_same_greenlet and not async:
+            # Bypass the queue if we're already on the same greenlet, or we would
+            # deadlock by waiting for ourselves.
+            return fn(self, *args, **kwargs)
+
+        # async must be specified, unless on the same actor.
+        assert async_set, "All cross-actor event calls must specify async arg."
+
         if (not on_same_greenlet and
                 not async and
                 _log.isEnabledFor(logging.DEBUG)):
             _log.debug("BLOCKING CALL: %s", calling_path)
-        if on_same_greenlet:
-            # Bypass the queue if we're already on the same greenlet.  This
-            # is both useful and avoids deadlock.
-            # TODO: if we remove the "no async to same greenlet" only do if
-            # this is asynchronous.
-            #_log.debug("Message processed locally : %s", method_name)
-            return fn(self, *args, **kwargs)
-        else:
-            assert async_set, "Cross-actor calls must specify async arg."
 
-        try:
-            caller = "%s (processing %s)" % (actor_storage.name, actor_storage.msg_uuid)
-        except AttributeError:
-            caller = calling_path
-
+        # OK, so build the message and put it on the queue.
         partial = functools.partial(fn, self, *args, **kwargs)
         result = TrackedAsyncResult(method_name)
         msg = Message(partial, [result], caller, self.name)
         result.set_msg(msg)
 
-        if self._event_queue.full():
-            _log.warn("Queue for %s full, this greenlet may block", self)
-        # Only block on the queue if the greenlet is running or we could block
-        # forever.
-        # TODO: But if we allow blocking, then we can hit deadlock if enough work
-        # comes in. Hence we can never allow blocking, surely, which in the process
-        # means that the logic about disallowing async messages to same greenlet
-        # above is not right.
-        greenlet_running = bool(self.greenlet)
-        allow_block = greenlet_running or self.skip_running_check
-
+        # We never allow ourselves to block on the queue if it is full, to
+        # avoid the risk of complete deadlock.
         _log.debug("Message %s sent by %s to %s",
                    msg, caller, self.name)
         self._event_queue.put(msg,
-                              block=allow_block)
+                              block=False)
         if async:
             return result
         else:
@@ -232,7 +222,6 @@ class Actor(object):
         self.greenlet = gevent.Greenlet(self._loop)
         self._op_count = 0
         self._current_msg = None
-        self.skip_running_check = False
         self.started = False
 
         # Message being processed; purely for logging.
