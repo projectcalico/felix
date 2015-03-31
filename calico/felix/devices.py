@@ -170,7 +170,7 @@ def set_routes(ip_type, ips, interface, mac=None):
     :param ip_type: Type of IP (IPV4 or IPV6)
     :param set ips: IPs to set up (any not in the set are removed)
     :param str interface: Interface name
-    :param str mac: MAC address. May not be none unless ips is empty.
+    :param str mac|NoneType: MAC address. May not be none unless ips is empty.
     """
     if mac is None and ips:
         raise ValueError("mac must be supplied if ips is not empty")
