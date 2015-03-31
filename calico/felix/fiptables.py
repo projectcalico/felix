@@ -25,6 +25,7 @@ import random
 from subprocess import CalledProcessError
 import time
 import itertools
+from calico.felix import frules
 
 from calico.felix.actor import Actor, actor_event, ResultOrExc, SplitBatchAndRetry
 from calico.felix.frules import (CHAIN_TO_ENDPOINT,
@@ -128,7 +129,8 @@ MAX_IPT_BACKOFF = 0.2
 
 def _stub_drop_rules(chain):
     return ["--flush %s" % chain,
-            "--append %s --jump DROP" % chain]
+            frules.commented_drop_fragment(chain,
+                                           'WARNING Missing chain DROP:')]
 
 
 class IptablesUpdater(Actor):

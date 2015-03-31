@@ -31,7 +31,7 @@ from calico.felix.refcount import ReferenceManager, RefCountedActor
 from calico.felix.fiptables import DispatchChains
 from calico.felix.profilerules import RulesManager
 from calico.felix.frules import (CHAIN_TO_PREFIX, profile_to_chain_name,
-                                 CHAIN_FROM_PREFIX)
+                                 CHAIN_FROM_PREFIX, commented_drop_fragment)
 
 _log = logging.getLogger(__name__)
 
@@ -394,6 +394,7 @@ def _get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     to_chain.append("--append %s --match conntrack "
                     "--ctstate RELATED,ESTABLISHED --jump RETURN" %
                     to_chain_name)
+    assert profile_id, "Profile ID should be set, not %s" % profile_id
     profile_in_chain = profile_to_chain_name("inbound", profile_id)
     to_chain.append("--append %s --goto %s" %
                     (to_chain_name, profile_in_chain))
@@ -435,7 +436,8 @@ def _get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
         from_chain.append("--append %s --src %s --match mac --mac-source %s "
                           "--goto %s" % (from_chain_name, cidr,
                                          mac.upper(), profile_out_chain))
-    from_chain.append("--append %s --jump DROP" % from_chain_name)
+    from_chain.append(commented_drop_fragment(from_chain_name,
+                                              "Anti-spoof DROP:"))
 
     updates = {to_chain_name: to_chain, from_chain_name: from_chain}
     deps = {to_chain_name: to_deps, from_chain_name: from_deps}

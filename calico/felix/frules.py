@@ -21,6 +21,7 @@ Felix rule management, including iptables and ipsets.
 import logging
 from subprocess import CalledProcessError
 from calico.felix import futils
+import re
 
 _log = logging.getLogger(__name__)
 
@@ -149,12 +150,20 @@ def rules_to_chain_rewrite_lines(chain_name, rules, ip_version, tag_to_ipset,
                                                            tag_to_ipset,
                                                            on_allow=on_allow,
                                                            on_deny=on_deny))
-        fragments.append("--append %s --jump DROP" % chain_name)
+        fragments.append(commented_drop_fragment(chain_name,
+                                                 "Default DROP rule:"))
         return fragments
     except Exception:
         _log.exception("Failed to convert rules to fragments: %s.  Will DROP!",
                        rules)
-        return ["--append %s --jump DROP" % chain_name]
+        return [commented_drop_fragment(chain_name,
+                                        "ERROR failed to parse rules DROP:")]
+
+
+def commented_drop_fragment(chain_name, comment):
+    assert re.match(r'[\w: ]{,256}', comment), "Invalid comment %r" % comment
+    return ('--append %s --jump DROP -m comment --comment "%s"' %
+            (chain_name, comment))
 
 
 def rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,

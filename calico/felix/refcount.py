@@ -5,6 +5,7 @@ import functools
 import logging
 import weakref
 from calico.felix.actor import Actor, actor_event
+import gevent
 
 _log = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ class ReferenceManager(Actor):
         if obj and obj.ref_mgmt_state == LIVE:
             _log.debug("Object %s is LIVE, notifying referrers", object_id)
             for cb in self.pending_ref_callbacks[object_id]:
-                cb(object_id, obj)
+                gevent.spawn(cb, object_id, obj)
             self.pending_ref_callbacks.pop(object_id)
         else:
             _log.debug("Cannot notify referrers for %s; object state: %s",
@@ -188,6 +189,68 @@ class ReferenceManager(Actor):
         return (obj_id in self.objects_by_id
                 and self.objects_by_id[obj_id].ref_mgmt_state in
                     (STARTING, LIVE))
+
+
+class RefHelper(object):
+    def __init__(self, actor, ref_mgr, ready_callback):
+        self._actor = weakref.proxy(actor)
+        self._ref_mgr = ref_mgr
+        self._ready_callback = ready_callback
+
+        self.required_refs = set()
+        self.pending_increfs = set()
+        self.acquired_refs = {}
+
+    def acquire_ref(self, obj_id):
+        if obj_id not in self.required_refs:
+            _log.debug("Increffing object %s", obj_id)
+            self.required_refs.add(obj_id)
+            cb = functools.partial(self.on_ref_acquired, async=True)
+            self.pending_increfs.add(obj_id)
+            self._ref_mgr.get_and_incref(obj_id, callback=cb, async=True)
+
+    def discard_ref(self, obj_id):
+        if obj_id in self.required_refs:
+            _log.debug("Discarding object %s", obj_id)
+            self.required_refs.remove(obj_id)
+            self.acquired_refs.pop(obj_id, None)
+            if obj_id not in self.pending_increfs:
+                _log.debug("Decreffing object %s", obj_id)
+                self._ref_mgr.decref(obj_id, async=True)
+
+    def discard_all(self):
+        for obj_id in list(self.required_refs):
+            self.discard_ref(obj_id)
+
+    @actor_event
+    def on_ref_acquired(self, obj_id, obj):
+        was_ready = self.ready
+        self.pending_increfs.discard(obj_id)
+        if obj_id in self.required_refs:
+            # Still required.
+            self.acquired_refs[obj_id] = obj
+        else:
+            # Deleted while we were waiting.
+            _log.info("Object %s was discarded while waiting for its ref",
+                      obj_id)
+            self._ref_mgr.decref(obj_id)
+        now_ready = self.ready
+        if not was_ready and now_ready:
+            _log.debug("Acquired all references, calling ready callback")
+            self._ready_callback()
+
+    def iteritems(self):
+        return self.acquired_refs.iteritems()
+
+    @property
+    def ready(self):
+        return len(self.required_refs) == len(self.acquired_refs)
+
+    def __getattr__(self, item):
+        try:
+            return super(RefHelper, self).__getattr__(item)
+        except AttributeError:
+            return getattr(self._actor, item)
 
 
 class RefCountedActor(Actor):
