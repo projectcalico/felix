@@ -191,7 +191,7 @@ class ProfileRules(RefCountedActor):
     @actor_event
     def on_ipset_ready(self, request_epoch, tag, ipset):
         if self.pending_ipset_req_epochs.get(tag) == request_epoch:
-            _log.debug("ipset ready for current epoch.")
+            _log.debug("ipset %s ready for current epoch.")
             self.pending_ipset_req_epochs.pop(tag)
             self._tag_to_ip_set_name[tag] = ipset.name
         else:

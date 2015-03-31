@@ -105,7 +105,7 @@ class DispatchChains(Actor):
         for iface in self.iface_to_ep_id:
             # Add rule to global chain to direct traffic to the
             # endpoint-specific one.  Note that we use --goto, which means
-            # that, the endpoint-specific chain will return to our parent
+            # that the endpoint-specific chain will return to our parent
             # rather than to this chain.
             from calico.felix.endpoint import chain_names, interface_to_suffix
             ep_suffix = interface_to_suffix(self.config, iface)
@@ -122,7 +122,7 @@ class DispatchChains(Actor):
                                async=True)
         self.request_epoch += 1
         self.iptables_updater.rewrite_chains("filter", updates, dependencies,
-                                             callback=cb)
+                                             callback=cb, async=False)
 
     @actor_event
     def on_ipt_update_complete(self, request_epoch, error):

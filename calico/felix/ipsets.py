@@ -36,6 +36,15 @@ _log = logging.getLogger(__name__)
 IPSET_PREFIX = { IPV4: "felix-v4-", IPV6: "felix-v6-" }
 IPSET_TMP_PREFIX = { IPV4: "felix-tmp-v4-", IPV6: "felix-tmp-v6-" }
 
+def tag_to_ipset_name(ip_type, tag, tmp=False):
+    """
+    Turn a tag ID in all its glory into an ipset name.
+    """
+    if not tmp:
+        name = IPSET_PREFIX[ip_type] + tag
+    else:
+        name = IPSET_TMP_PREFIX[ip_type] + tag
+    return name
 
 class IpsetManager(ReferenceManager):
     def __init__(self, ip_type):
@@ -217,11 +226,6 @@ class IpsetManager(ReferenceManager):
         _log.info("Endpoint update complete")
 
 
-def tag_to_ipset_name(tag_name):
-    assert re.match(r'^\w+$', tag_name), "Tags must be alphanumeric for now"
-    return "calico-tag-" + tag_name
-
-
 class ActiveIpset(RefCountedActor):
 
     def __init__(self, tag, ip_type):
@@ -235,8 +239,8 @@ class ActiveIpset(RefCountedActor):
 
         self.tag = tag
         self.ip_type = ip_type
-        self.name = IPSET_PREFIX[ip_type] + tag
-        self.tmpname = IPSET_TMP_PREFIX[ip_type] + tag
+        self.name = tag_to_ipset_name(ip_type, tag)
+        self.tmpname = tag_to_ipset_name(ip_type, tag, tmp=True)
         self.family = "inet" if ip_type == IPV4 else "inet6"
 
         # Members - which entries should be in the ipset.
@@ -248,6 +252,9 @@ class ActiveIpset(RefCountedActor):
         # Do the sets exist?
         self.set_exists = ipset_exists(self.name)
         self.tmpset_exists = ipset_exists(self.tmpname)
+
+        # Notified ready?
+        self.notified_ready = False
 
     @actor_event
     def replace_members(self, members):
@@ -282,6 +289,11 @@ class ActiveIpset(RefCountedActor):
         # then program the real changes.
         if self.members != self.programmed_members:
             self._sync_to_ipset()
+
+        if not self.notified_ready:
+            # We have created the set, so we are now ready.
+            self.notified_ready = True
+            self._notify_ready()
 
     def _sync_to_ipset(self):
         _log.debug("Setting ipset %s to %s", self.name, self.members)
