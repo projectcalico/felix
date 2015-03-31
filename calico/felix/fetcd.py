@@ -269,15 +269,96 @@ def validate_rules(rules):
     if not isinstance(rules, dict):
         raise ValidationFailed("Expected rules to be a dict.")
 
-    for key in ("inbound_rules", "outbound_rules"):
-        if key not in rules:
-            issues.append("No %s in rules." % key)
+    for dirn in ("inbound_rules", "outbound_rules"):
+        if dirn not in rules:
+            issues.append("No %s in rules." % dirn)
             continue
 
-    #TODO: need to consider what further firewalling to add here.
+        if not isinstance(rules[dirn], list):
+            issues.append("Expected rules[%s] to be a dict." % dirn)
+            continue
+
+        for rule in rules[dirn]:
+            # Absolutely all fields are optional, but some have valid and
+            # invalid values.
+            protocol = rule.get('protocol')
+            if (protocol is not None and
+                not protocol in [ "tcp", "udp", "icmp", "icmpv6" ]):
+                    issues.append("Invalid protocol in rule %s." % rule)
+
+            ip_version = rule.get('ip_version')
+            if (ip_version is not None and
+                not ip_version in [ 4, 6 ]):
+                # Bad IP version prevents further validation
+                issues.append("Invalid ip_version in rule %s." % rule)
+                continue
+
+            if ip_version == 4 and protocol == "icmpv6":
+                issues.append("Using icmpv6 with IPv4 in rule %s." % rule)
+            if ip_version == 6 and protocol == "icmp":
+                issues.append("Using icmp with IPv6 in rule %s." % rule)
+
+            # TODO: Validate that src_tag and dst_tag contain only valid characters.
+
+            for key in ("src_net", "dst_net"):
+                network = rule.get(key)
+                if (network is not None and
+                    not common.validate_cidr(rule[key], ip_version)):
+                    issues.append("Invalid CIDR (version %s) in rule %s." %
+                                  (ip_version, rule))
+
+            for key in ("src_ports", "dst_ports"):
+                ports = rule.get(key)
+                if (ports is not None and
+                    not isinstance(ports, list)):
+                    issues.append("Expected ports to be a list in rule %s."
+                                  % rule)
+                    continue
+
+                if ports is not None:
+                    for port in ports:
+                        error = validate_rule_port(port)
+                        if error:
+                            issues.append("Invalid port %s (%s) in rule %s." %
+                                          (port, error, rule))
+
+            action = rule.get('action')
+            if (action is not None and
+                not protocol in [ "accept", "deny" ]):
+                issues.append("Invalid action in rule %s." % rule)
+
+            icmp_type = rule.get('icmp_type')
+            #TODO: firewall the icmp_type too
 
     if issues:
         raise ValidationFailed(" ".join(issues))
+
+
+def validate_rule_port(port):
+    """
+    Validates that any value in a port list really is valid.
+    Valid values are an integer port, or a string range separated by a colon.
+
+    :param port: the port, which is validated for type
+    :return str: None or an error string if invalid
+    """
+    if isinstance(port, int):
+        if port < 1 or port > 65535:
+            return "integer out of range"
+        return None
+
+    if isinstance(port, str):
+        # Format N:M, i.e. a port range.
+        fields = port.split(":")
+        if not len(fields) == 2:
+            return "range unparseable"
+        start = int(fields.pop(0))
+        end = int(fields.pop(0))
+        if (start >= end or start < 1 or end > 65535):
+            return "range invalid"
+        return None
+
+    return "neither integer nor string"
 
 
 def parse_if_tags(etcd_node):

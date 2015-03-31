@@ -138,10 +138,12 @@ def rules_to_chain_rewrite_lines(chain_name, rules, ip_version, tag_to_ipset,
                                  on_allow="ACCEPT", on_deny="DROP"):
     fragments = []
     for r in rules:
-        fragments.append(rule_to_iptables_fragment(chain_name, r, ip_version,
-                                                   tag_to_ipset,
-                                                   on_allow=on_allow,
-                                                   on_deny=on_deny))
+        rule_version = r.get['ip_version']
+        if rule_version == None or rules_version == ip_version:
+            fragments.append(rule_to_iptables_fragment(chain_name, r, ip_version,
+                                                       tag_to_ipset,
+                                                       on_allow=on_allow,
+                                                       on_deny=on_deny))
     return fragments
 
 
