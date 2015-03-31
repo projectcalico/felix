@@ -193,11 +193,33 @@ class IptablesUpdater(Actor):
         self.requiring_chains = defaultdict(lambda: defaultdict(set))
         """Map from chain to the set of chains that depend on it."""
 
+        # Structures managing batches.  The first three objects are all default
+        # dicts keyed on table. The value stored is as follows.
+        #
+        # bch_affected_chains : set of chains in this batch
+        # bch_updates : defaultdict mapping chain to set of updates for that
+        #               chain
+        # PLW: shouldn't it be a list of updates, as order matters?
+        # bch_dependencies : defaultdict mapping chain to set of chains which
+        #                    that chain requires to exist
+        #
+
+        # PLW: Surely better to combine these three and the next two into one
+        # single structure keyed on table? Think that would be more readable,
+        # so you do the table lookup once rather than have to do it every time
+        # on every single one of these five objects - especially in the 99%
+        # case where the table is the same for the entire batch.
         self.bch_affected_chains = None
         self.bch_updates = None
         self.bch_dependencies = None
+
+        # default dict from table to set of explicitly programmed chains,
         self.bch_new_expl_prog_chains = None
+        # default dict from table to another default dict, which in turn maps
+        # from chain to set of chains that explicitly depend on it (i.e. the
+        # inverse of bch_dependencies above)
         self.bch_requiring_chain_upds = None
+
         self.completion_callbacks = None
         self._reset_batched_work()  # Avoid duplicating init logic.
 
@@ -212,7 +234,6 @@ class IptablesUpdater(Actor):
 
         self.completion_callbacks = []
 
-    @actor_event
     def _load_from_dataplane(self):
         """
         Populates the chains_in_dataplane dict with the current set of
@@ -246,7 +267,7 @@ class IptablesUpdater(Actor):
         for chain, updates in update_calls_by_chain.iteritems():
             self.bch_affected_chains[table_name].add(chain)
             deps = dependent_chains.get(chain, set([]))
-            self.bch_dependencies[table_name] = deps
+            self.bch_dependencies[table_name][chain] = deps
             updates = ["--flush %s" % chain] + updates
             self.bch_updates[table_name][chain] = updates
         if callback:
@@ -254,10 +275,14 @@ class IptablesUpdater(Actor):
 
     def ensure_rule_inserted(self, table, rule_fragment):
         try:
-            self._execute_iptables(['--delete %s' % rule_fragment,
-                                    '--insert %s' % rule_fragment])
+            self._execute_iptables(['*%s' % table,
+                                    '--delete %s' % rule_fragment,
+                                    '--insert %s' % rule_fragment,
+                                    'COMMIT'])
         except CalledProcessError:
-            self._execute_iptables(['--insert %s' % rule_fragment])
+            self._execute_iptables(['*%s' % table,
+                                    '--insert %s' % rule_fragment,
+                                    'COMMIT'])
 
 
     @actor_event
@@ -335,7 +360,7 @@ class IptablesUpdater(Actor):
         # when a chain is no longer referenced and may be cleaned up.
         bch_reqrng_chns = defaultdict(lambda: defaultdict(set))
         for table in self.bch_dependencies:
-            for chain, new_deps in self.bch_dependencies[table]:
+            for chain, new_deps in self.bch_dependencies[table].iteritems():
                 # Make sure that any required chains are already present or
                 # are going to be programmed.
                 for dep in new_deps:
@@ -345,7 +370,7 @@ class IptablesUpdater(Actor):
                         # stub chain in its place.  Note: this may overwrite
                         # a deletion of that chain.
                         bch_updates[dep] = _stub_drop_rules(dep)
-                        self.bch_affected_chains.add(dep)
+                        self.bch_affected_chains[table].add(dep)
                 # Calculate updates to our index of requiring chains.  If any
                 # of the requiring chain sets become empty, we may GC that
                 # chain.
@@ -383,7 +408,7 @@ class IptablesUpdater(Actor):
         # Stage 4: queue updates for chains that are no longer required.
         for table in bch_reqrng_chns:
             bch_updts = self.bch_updates[table]
-            for chain, reqing_chns in bch_reqrng_chns[table]:
+            for chain, reqing_chns in bch_reqrng_chns[table].iteritems():
                 if (not reqing_chns and
                         chain not in new_expl_prog_chains[table]):
                     # Nothing depends on this chain and we haven't been told
@@ -396,7 +421,7 @@ class IptablesUpdater(Actor):
     def _update_indexes(self):
         self.explicitly_programmed_chains = self.bch_new_expl_prog_chains
         for table in self.bch_requiring_chain_upds:
-            for chain, reqng_chains in self.bch_requiring_chain_upds[table]:
+            for chain, reqng_chains in self.bch_requiring_chain_upds[table].iteritems():
                 if reqng_chains:
                     self.requiring_chains[table][chain] = reqng_chains
                 else:
@@ -437,7 +462,7 @@ class IptablesUpdater(Actor):
                     input_lines.append("--delete-chain %s" % chain_name)
                 else:
                     input_lines.extend(chain_updates)
-            input_lines.append("COMMIT\n")
+            input_lines.append("COMMIT")
         return input_lines
 
     def _execute_iptables(self, input_lines):
@@ -452,12 +477,12 @@ class IptablesUpdater(Actor):
         num_tries = 0
         success = False
         while not success:
-            input_str = "\n".join(input_lines)
+            input_str = "\n".join(input_lines) + "\n"
             _log.debug("%s input:\n%s", self.restore_cmd, input_str)
 
             # Run iptables-restore in noflush mode so that it doesn't
             # blow away all the tables we're not touching.
-            cmd = [self.restore_cmd, "--noflush"]
+            cmd = [self.restore_cmd, "--noflush", "--verbose"]
             iptables_proc = subprocess.Popen(cmd,
                                              stdin=subprocess.PIPE,
                                              stdout=subprocess.PIPE,
