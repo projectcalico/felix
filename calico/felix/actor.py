@@ -185,12 +185,11 @@ def actor_event(fn):
         msg = Message(partial, [result], caller, self.name)
         result.set_msg(msg)
 
-        # We never allow ourselves to block on the queue if it is full, to
-        # avoid the risk of complete deadlock.
         _log.debug("Message %s sent by %s to %s",
                    msg, caller, self.name)
         self._event_queue.put(msg,
-                              block=False)
+                              block=True,
+                              timeout=60)
         if async:
             return result
         else:
