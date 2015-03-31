@@ -80,6 +80,8 @@ class TestCommon(unittest.TestCase):
         self.assertTrue(common.validate_ip_addr("2001::abc", None))
         self.assertFalse(common.validate_ip_addr("2001::a/64", None))
 
+        self.assertFalse(common.validate_ip_addr(None, None))
+
     def test_validate_cidr(self):
         self.assertTrue(common.validate_cidr("1.2.3.4", 4))
         self.assertFalse(common.validate_cidr("1.2.3.4.5", 4))
@@ -107,3 +109,5 @@ class TestCommon(unittest.TestCase):
         self.assertTrue(common.validate_cidr("::", None))
         self.assertTrue(common.validate_cidr("2001::abc", None))
         self.assertTrue(common.validate_cidr("2001::a/64", None))
+
+        self.assertFalse(common.validate_cidr(None, None))

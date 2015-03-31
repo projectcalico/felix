@@ -84,7 +84,7 @@ def validate_ip_addr(addr, version):
     try:
         ip = netaddr.IPAddress(addr, version=version)
         return True
-    except (netaddr.core.AddrFormatError, ValueError):
+    except (netaddr.core.AddrFormatError, ValueError, TypeError):
         return False
 
 
@@ -97,7 +97,7 @@ def validate_cidr(cidr, version):
     try:
         ip = netaddr.IPNetwork(cidr, version=version)
         return True
-    except (netaddr.core.AddrFormatError, ValueError):
+    except (netaddr.core.AddrFormatError, ValueError, TypeError):
         return False
 
 
