@@ -295,9 +295,9 @@ class IptablesUpdater(Actor):
                     final_result = ResultOrExc(None, e)
                 if cb:
                     if batch[0].method.keywords.get("suppress_exc"):
-                        cb(None)
+                        gevent.spawn(cb, None)
                     else:
-                        cb(e)
+                        gevent.spawn(e, None)
                 results[0] = final_result
             else:
                 _log.error("Non-retryable error from a combined batch, "
