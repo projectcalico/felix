@@ -25,18 +25,17 @@ import logging
 import os
 import tempfile
 
-from subprocess import CalledProcessError
 from calico.felix import futils
 from calico.felix.futils import IPV4, IPV6
 from calico.felix.actor import actor_event
 from calico.felix.refcount import ReferenceManager, RefCountedActor
-from gevent import subprocess
 import re
 
 _log = logging.getLogger(__name__)
 
 IPSET_PREFIX = { IPV4: "felix-v4-", IPV6: "felix-v6-" }
 IPSET_TMP_PREFIX = { IPV4: "felix-tmp-v4-", IPV6: "felix-tmp-v6-" }
+
 
 class IpsetManager(ReferenceManager):
     def __init__(self, ip_type):
@@ -229,7 +228,7 @@ class ActiveIpset(RefCountedActor):
         """
         Actor managing a single ipset.
 
-        :param str name: Name of the ipset
+        :param str tag: Name of tag that this ipset represents.
         :param ip_type: IPV4 or IPV6
         """
         super(ActiveIpset, self).__init__(qualifier=tag)
@@ -273,7 +272,7 @@ class ActiveIpset(RefCountedActor):
     @actor_event
     def on_unreferenced(self):
         if self.set_exists:
-            futils.check_call(["ipset", "destroy", name])
+            futils.check_call(["ipset", "destroy", self.name])
         self._notify_cleanup_complete()
 
     def _finish_msg_batch(self, batch, results):
@@ -340,7 +339,7 @@ def ipset_exists(name):
     """
     Check if a set of the correct name exists.
     """
-    return (futils.call_silent(["ipset", "list", name]) == 0)
+    return futils.call_silent(["ipset", "list", name]) == 0
 
 
 def list_ipset_names():
