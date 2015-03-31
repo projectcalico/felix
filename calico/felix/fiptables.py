@@ -94,7 +94,14 @@ class DispatchChains(Actor):
     def _update_chains(self):
         _log.info("%s Updating dispatch chain, num entries: %s", self,
                   len(self.iface_to_ep_id))
-        updates = []
+        to_upds = []
+        from_upds = []
+        updates = {CHAIN_FROM_ENDPOINT: to_upds,
+                   CHAIN_TO_ENDPOINT: from_upds}
+        to_deps = set()
+        from_deps = set()
+        dependencies = {CHAIN_FROM_ENDPOINT: to_deps,
+                        CHAIN_TO_ENDPOINT: from_deps}
         for iface in self.iface_to_ep_id:
             # Add rule to global chain to direct traffic to the
             # endpoint-specific one.  Note that we use --goto, which means
@@ -103,19 +110,19 @@ class DispatchChains(Actor):
             from calico.felix.endpoint import chain_names, interface_to_suffix
             ep_suffix = interface_to_suffix(self.config, iface)
             to_chain_name, from_chain_name = chain_names(ep_suffix)
-            updates.append("--append %s --in-interface %s --goto %s" %
-                           (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
-            updates.append("--append %s --out-interface %s --goto %s" %
+            from_upds.append("--append %s --in-interface %s --goto %s" %
+                             (CHAIN_FROM_ENDPOINT, iface, from_chain_name))
+            from_deps.add(from_chain_name)
+            to_upds.append("--append %s --out-interface %s --goto %s" %
                            (CHAIN_TO_ENDPOINT, iface, to_chain_name))
-        updates.extend(["--append %s --jump DROP" % CHAIN_TO_ENDPOINT,
-                        "--append %s --jump DROP" % CHAIN_FROM_ENDPOINT])
+            to_deps.add(to_chain_name)
+        to_upds.append("--append %s --jump DROP" % CHAIN_TO_ENDPOINT)
+        from_upds.append("--append %s --jump DROP" % CHAIN_FROM_ENDPOINT)
         cb = functools.partial(self.on_ipt_update_complete, self.request_epoch,
                                async=True)
         self.request_epoch += 1
-        self.iptables_updater.apply_updates("filter",
-                                            [CHAIN_TO_ENDPOINT,
-                                             CHAIN_FROM_ENDPOINT],
-                                            updates, callback=cb, async=True)
+        self.iptables_updater.rewrite_chains("filter", updates, dependencies,
+                                             callback=cb)
 
     @actor_event
     def on_ipt_update_complete(self, request_epoch, error):
@@ -139,6 +146,7 @@ class DispatchChains(Actor):
     def __str__(self):
         return self.__class__.__name__ + "<ipv%s,entries=%s>" % \
             (self.ip_version, len(self.iface_to_ep_id))
+
 
 _correlators = ("ipt-%s" % ii for ii in itertools.count())
 MAX_IPT_RETRIES = 10
@@ -241,7 +249,8 @@ class IptablesUpdater(Actor):
             self.bch_dependencies[table_name] = deps
             updates = ["--flush %s" % chain] + updates
             self.bch_updates[table_name][chain] = updates
-        self.completion_callbacks.append(callback)
+        if callback:
+            self.completion_callbacks.append(callback)
 
     @actor_event
     def delete_chains(self, table_name, chain_names, callback=None):
@@ -253,7 +262,8 @@ class IptablesUpdater(Actor):
         for chain_name in chain_names:
             self.bch_updates[table_name][chain_name] = None
             self.bch_dependencies[table_name][chain_name] = set()
-        self.completion_callbacks.append(callback)
+        if callback:
+            self.completion_callbacks.append(callback)
 
     def _start_msg_batch(self, batch):
         self._reset_batched_work()
