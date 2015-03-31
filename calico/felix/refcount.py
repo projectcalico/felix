@@ -44,7 +44,7 @@ class ReferenceManager(Actor):
         self.pending_ref_callbacks = collections.defaultdict(set)
 
     @actor_event
-    def get_and_incref(self, object_id, callback):
+    def get_and_incref(self, object_id, callback=None):
         """
         Acquire a reference to a ref-counted Actor, returns via callback.
         :param object_id: opaque ID of the Actor to retrieve, must be hashable.
@@ -52,7 +52,6 @@ class ReferenceManager(Actor):
         """
         _log.debug("Request for object %s", object_id)
         assert object_id is not None
-        assert callback is not None
 
         if object_id not in self.objects_by_id:
             _log.debug("%s object with id %s didn't exist",
@@ -62,11 +61,12 @@ class ReferenceManager(Actor):
             obj._id = object_id
             self.objects_by_id[object_id] = obj
         else:
-            obj =  self.objects_by_id[object_id]
+            obj = self.objects_by_id[object_id]
             _log.debug("%s object with id %s existed with ref count %d",
                        self.name, object_id, obj.ref_count)
 
-        self.pending_ref_callbacks[object_id].add(callback)
+        if callback:
+            self.pending_ref_callbacks[object_id].add(callback)
         obj.ref_count += 1
 
         # Depending on state of object, may need to start it or immediately

@@ -52,18 +52,14 @@ class DispatchChains(Actor):
 
     def __init__(self, config, ip_version, iptables_updater):
         super(DispatchChains, self).__init__(qualifier="v%d" % ip_version)
-        self.request_epoch = 1
-        self.response_epoch = 0
-
         self.config = config
         self.ip_version = ip_version
         self.iptables_updater = iptables_updater
         self.iface_to_ep_id = {}
         self._dirty = False
-        self.removal_callback_queue = []
 
     @actor_event
-    def on_endpoint_chains_ready(self, iface_name, endpoint_id):
+    def on_endpoint_added(self, iface_name, endpoint_id):
         """
         Message sent to us by the LocalEndpoint to tell us its
         endpoint-specific chain is in place and we should add it
@@ -78,9 +74,8 @@ class DispatchChains(Actor):
             self._dirty = True
 
     @actor_event
-    def remove_dispatch_rule(self, iface_name, callback=None):
+    def on_endpoint_removed(self, iface_name):
         _log.debug("%s asked to remove dispatch rule %s", self, iface_name)
-        self.removal_callback_queue.append((self.request_epoch, callback))
         # It should be present but be defensive and reprogram the chain
         # just in case if not.
         self.iface_to_ep_id.pop(iface_name, None)
@@ -118,30 +113,8 @@ class DispatchChains(Actor):
             to_deps.add(to_chain_name)
         to_upds.append("--append %s --jump DROP" % CHAIN_TO_ENDPOINT)
         from_upds.append("--append %s --jump DROP" % CHAIN_FROM_ENDPOINT)
-        cb = functools.partial(self.on_ipt_update_complete, self.request_epoch,
-                               async=True)
-        self.request_epoch += 1
         self.iptables_updater.rewrite_chains("filter", updates, dependencies,
-                                             callback=cb, async=False)
-
-    @actor_event
-    def on_ipt_update_complete(self, request_epoch, error):
-        assert request_epoch > self.response_epoch
-        if not error:
-            # Dataplane is now programmed up to at least this epoch...
-            _log.info("%s update %s complete", self, request_epoch)
-            self.response_epoch = request_epoch
-            self._fire_pending_callbacks()
-        else:
-            # FIXME: What to do when we fail?
-            _log.error("%s failed to program dataplane for epoch %s: %r",
-                       self, request_epoch, error)
-
-    def _fire_pending_callbacks(self):
-        pending_cbs = self.removal_callback_queue
-        while pending_cbs and pending_cbs[0][0] <= self.response_epoch:
-            _, cb = pending_cbs.pop(0)
-            cb(None)
+                                             async=False)
 
     def __str__(self):
         return self.__class__.__name__ + "<ipv%s,entries=%s>" % \
