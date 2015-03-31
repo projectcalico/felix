@@ -252,6 +252,14 @@ class IptablesUpdater(Actor):
         if callback:
             self.completion_callbacks.append(callback)
 
+    def ensure_rule_inserted(self, table, rule_fragment):
+        try:
+            self._execute_iptables(['--delete %s' % rule_fragment,
+                                    '--insert %s' % rule_fragment])
+        except CalledProcessError:
+            self._execute_iptables(['--insert %s' % rule_fragment])
+
+
     @actor_event
     def delete_chains(self, table_name, chain_names, callback=None):
         # We actually apply the changes in _finish_msg_batch().  Index the
@@ -487,7 +495,7 @@ class IptablesUpdater(Actor):
                         _log.error("Out of retries.  Error occurred on line "
                                    "%s: %r", line_number, offending_line)
                     else:
-                        _log.error("Unrecoverable error on line %s: %r",
+                        _log.error("Non-retryable error on line %s: %r",
                                    line_number, offending_line)
                 raise CalledProcessError(cmd=cmd, returncode=rc)
 

@@ -21,8 +21,6 @@ Endpoint management.
 """
 import collections
 import logging
-import socket
-import itertools
 import functools
 from subprocess import CalledProcessError
 from calico.felix import devices, futils
@@ -343,7 +341,7 @@ class LocalEndpoint(RefCountedActor):
             self._remove_chains()
 
     def _update_chains(self):
-        chains, updates = get_endpoint_rules(
+        updates, deps = _get_endpoint_rules(
             self._suffix,
             self._iface_name,
             self.ip_version,
@@ -356,9 +354,9 @@ class LocalEndpoint(RefCountedActor):
                                async=True)
         self._ipt_last_req = self._ipt_req_epoch
         self._ipt_req_epoch += 1
-        self.iptables_updater.apply_updates("filter",
-                                            chains, updates,
-                                            callback=cb, async=True)
+        self.iptables_updater.rewrite_chains("filter",
+                                             updates, deps,
+                                             callback=cb, async=True)
 
     @actor_event
     def on_iptables_update_complete(self, req_epoch, error):
@@ -470,7 +468,7 @@ def chain_names(endpoint_suffix):
     return to_chain_name, from_chain_name
 
 
-def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
+def _get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     to_chain_name, from_chain_name = chain_names(suffix)
 
     to_chain = ["--flush %s" % to_chain_name]
@@ -498,6 +496,7 @@ def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     profile_in_chain = profile_to_chain_name("inbound", profile_id)
     to_chain.append("--append %s --goto %s" %
                     (to_chain_name, profile_in_chain))
+    to_deps = set([profile_in_chain])
 
     # Now the chain that manages packets from the interface...
     from_chain = ["--flush %s" % from_chain_name]
@@ -523,6 +522,7 @@ def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
     # Anti-spoofing rules.  Only allow traffic from known (IP, MAC) pairs to
     # get to the profile chain, drop other traffic.
     profile_out_chain = profile_to_chain_name("outbound", profile_id)
+    from_deps = set([profile_out_chain])
     for ip in local_ips:
         if "/" in ip:
             cidr = ip
@@ -536,4 +536,6 @@ def get_endpoint_rules(suffix, iface, ip_version, local_ips, mac, profile_id):
                                          mac.upper(), profile_out_chain))
     from_chain.append("--append %s --jump DROP" % from_chain_name)
 
-    return [to_chain_name, from_chain_name], to_chain + from_chain
+    updates = {to_chain_name: to_chain, from_chain_name: from_chain}
+    deps = {to_chain_name: to_deps, from_chain_name: from_deps}
+    return updates, deps

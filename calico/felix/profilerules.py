@@ -204,8 +204,7 @@ class ProfileRules(RefCountedActor):
         """
         Updates the chains in the dataplane.
         """
-        chains = []
-        updates = []
+        updates = {}
         for direction in ("inbound", "outbound"):
             _log.debug("Updating %s chain for profile %s", direction,
                        self.id)
@@ -214,19 +213,18 @@ class ProfileRules(RefCountedActor):
             rules_key = "%s_rules" % direction
             new_rules = new_profile.get(rules_key, [])
             chain_name = profile_to_chain_name(direction, self.id)
-            chains.append(chain_name)
-            updates.extend(rules_to_chain_rewrite_lines(
+            updates[chain_name] = rules_to_chain_rewrite_lines(
                 chain_name,
                 new_rules,
                 self.ip_version,
                 self._tag_to_ip_set_name,
-                on_allow="RETURN"))
+                on_allow="RETURN")
         _log.debug("Queueing programming for rules %s: %s", self.id,
                    updates)
         cb = functools.partial(self._on_iptables_update_complete,
                                self.request_epoch, async=True)
-        self._iptables_updater.apply_updates("filter", chains, updates,
-                                             callback=cb, async=True)
+        self._iptables_updater.rewrite_chains("filter", updates, {},
+                                              callback=cb, async=True)
         self.request_epoch += 1
 
     @actor_event

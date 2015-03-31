@@ -91,72 +91,47 @@ def install_global_rules(config, v4_updater, v6_updater):
                       "--destination 169.254.169.254/32 "
                       "--jump DNAT --to-destination %s:%s" %
                       (config.METADATA_IP, config.METADATA_PORT))
-    v4_updater.apply_updates("nat", [CHAIN_PREROUTING], nat_pr, async=False)
+    v4_updater.rewrite_chains("nat", {CHAIN_PREROUTING: nat_pr}, {},
+                              async=False)
 
-    # Ensure we have a rule that forces us through the chain we just created.
-    rule = "PREROUTING --jump %s" % CHAIN_PREROUTING
-    try:
-        # Try to atomically delete and reinsert the rule, if we fail, we
-        # assume it wasn't present and insert it.
-        pr = ["--delete %s" % rule,
-              "--insert %s" % rule]
-        v4_updater.apply_updates("nat", [], pr, suppress_exc=True, async=False)
-    except CalledProcessError:
-        _log.info("Failed to detect pre-routing rule, will insert it.")
-        pr = ["--insert %s" % rule]
-        v4_updater.apply_updates("nat", [], pr)
+    v4_updater.ensure_rule_inserted("nat",
+                                    "PREROUTING --jump %s" % CHAIN_PREROUTING)
 
     # Now the filter table. This needs to have calico-filter-FORWARD and
     # calico-filter-INPUT chains, which we must create before adding any
     # rules that send to them.
     for iptables_updater in [v4_updater, v6_updater]:
-        iptables_updater.apply_updates("filter", [], [
-            "--delete INPUT --jump %s" % CHAIN_INPUT
-        ], suppress_exc=True, async=False)
-        iptables_updater.apply_updates("filter", [], [
-            "--delete FORWARD --jump %s" % CHAIN_FORWARD
-        ], suppress_exc=True, async=False)
-
-        # FIXME: This flushes the FROM/TO_ENDPOINT chains. (Breaks graceful.)
-        req_chains = [CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT,
-                      CHAIN_INPUT, CHAIN_FORWARD]
-
-        updates = []
-
-        # Add rules to the global chains to direct to our own.
-        # Force FORWARD traffic to go through our chain.
-        # TODO: remove any old version of the rule
-        updates.extend([
-            "--insert FORWARD --jump %s" % CHAIN_FORWARD
-        ])
-        # Force INPUT traffic to go through our chain.
-        updates.extend([
-            "--insert INPUT --jump %s" % CHAIN_INPUT
-        ])
-
-        # Configure our chains.
-        # The felix forward chain tests traffic to and from endpoints
-        updates.extend([
-            "--append %s --jump %s --in-interface %s" %
-                (CHAIN_FORWARD, CHAIN_FROM_ENDPOINT, iface_match),
-            "--append %s --jump %s --out-interface %s" %
-                (CHAIN_FORWARD, CHAIN_TO_ENDPOINT, iface_match),
-            "--append %s --jump ACCEPT --in-interface %s" %
-                (CHAIN_FORWARD, iface_match),
-            "--append %s --jump ACCEPT --out-interface %s" %
-                (CHAIN_FORWARD, iface_match),
-        ])
-
-        # The felix INPUT chain tests traffic from endpoints
-        updates.extend([
-            "--append %s --jump %s --in-interface %s" %
-                (CHAIN_INPUT, CHAIN_FROM_ENDPOINT, iface_match),
-            "--append %s --jump ACCEPT --in-interface %s" %
-                (CHAIN_INPUT, iface_match),
-        ])
-
-        iptables_updater.apply_updates("filter", req_chains, updates,
-                                       async=False)
+        iptables_updater.ensure_rule_inserted(
+            "filter",
+            "INPUT --jump %s" % CHAIN_INPUT)
+        iptables_updater.ensure_rule_inserted(
+            "filter",
+            "FORWARD --jump %s" % CHAIN_FORWARD)
+        iptables_updater.rewrite_chains(
+            "filter",
+            {
+                CHAIN_FORWARD: [
+                    "--append %s --jump %s --in-interface %s" %
+                        (CHAIN_FORWARD, CHAIN_FROM_ENDPOINT, iface_match),
+                    "--append %s --jump %s --out-interface %s" %
+                        (CHAIN_FORWARD, CHAIN_TO_ENDPOINT, iface_match),
+                    "--append %s --jump ACCEPT --in-interface %s" %
+                        (CHAIN_FORWARD, iface_match),
+                    "--append %s --jump ACCEPT --out-interface %s" %
+                        (CHAIN_FORWARD, iface_match),
+                ],
+                CHAIN_INPUT: [
+                    "--append %s --jump %s --in-interface %s" %
+                        (CHAIN_INPUT, CHAIN_FROM_ENDPOINT, iface_match),
+                    "--append %s --jump ACCEPT --in-interface %s" %
+                        (CHAIN_INPUT, iface_match),
+                ]
+            },
+            {
+                CHAIN_FORWARD: set([CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT]),
+                CHAIN_INPUT: set([CHAIN_FROM_ENDPOINT]),
+            },
+            async=False)
 
 
 def rules_to_chain_rewrite_lines(chain_name, rules, ip_version, tag_to_ipset,
