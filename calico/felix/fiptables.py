@@ -96,12 +96,12 @@ class DispatchChains(Actor):
                   len(self.iface_to_ep_id))
         to_upds = []
         from_upds = []
-        updates = {CHAIN_FROM_ENDPOINT: to_upds,
-                   CHAIN_TO_ENDPOINT: from_upds}
+        updates = {CHAIN_TO_ENDPOINT: to_upds,
+                   CHAIN_FROM_ENDPOINT: from_upds}
         to_deps = set()
         from_deps = set()
-        dependencies = {CHAIN_FROM_ENDPOINT: to_deps,
-                        CHAIN_TO_ENDPOINT: from_deps}
+        dependencies = {CHAIN_TO_ENDPOINT: to_deps,
+                        CHAIN_FROM_ENDPOINT: from_deps}
         for iface in self.iface_to_ep_id:
             # Add rule to global chain to direct traffic to the
             # endpoint-specific one.  Note that we use --goto, which means
