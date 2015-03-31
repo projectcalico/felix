@@ -192,33 +192,65 @@ class ReferenceManager(Actor):
 
 
 class RefHelper(object):
+    """
+    Helper class for a client of a ReferenceManager.  Manages the
+    lifecycle of a set of references and provides a callback when
+    all required references are available.
+    """
     def __init__(self, actor, ref_mgr, ready_callback):
-        self._actor = weakref.proxy(actor)
+        self._actor = actor
+        """Actor that we belong to, we'll use its queue for callbacks."""
         self._ref_mgr = ref_mgr
+        """Ref manager to acquire references from."""
         self._ready_callback = ready_callback
+        """Callback to issue when we acquire all the references required."""
 
         self.required_refs = set()
+        """Set of IDs of the references that we've been asked for."""
         self.pending_increfs = set()
+        """
+        Set of IDs of refernces for which we have an outstanding incref
+        request.
+        """
         self.acquired_refs = {}
+        """
+        Mapping from object ID to object that we've acquired.
+        """
 
     def acquire_ref(self, obj_id):
+        """
+        Add the given ID to the set of objects that we want to acquire.
+        Idempotent; does nothing if the ID is already in the set.
+        """
         if obj_id not in self.required_refs:
-            _log.debug("Increffing object %s", obj_id)
+            # Immediately record that we require this ref.
             self.required_refs.add(obj_id)
-            cb = functools.partial(self.on_ref_acquired, async=True)
-            self.pending_increfs.add(obj_id)
-            self._ref_mgr.get_and_incref(obj_id, callback=cb, async=True)
+            if obj_id not in self.pending_increfs:
+                # We're not already asking for the ref, request it.
+                _log.debug("Increffing object %s", obj_id)
+                cb = functools.partial(self.on_ref_acquired, async=True)
+                self.pending_increfs.add(obj_id)
+                self._ref_mgr.get_and_incref(obj_id, callback=cb, async=True)
 
     def discard_ref(self, obj_id):
         if obj_id in self.required_refs:
             _log.debug("Discarding object %s", obj_id)
+            # Immediately record that we no longer want the ref and throw it
+            # away.
             self.required_refs.remove(obj_id)
             self.acquired_refs.pop(obj_id, None)
             if obj_id not in self.pending_increfs:
+                # We're not still waiting for this object so it's safe to
+                # decref it.  If we are still waiting for it then we'll get
+                # a callback later and we'll spot that it's no longer needed
+                # at that point.
                 _log.debug("Decreffing object %s", obj_id)
                 self._ref_mgr.decref(obj_id, async=True)
 
     def discard_all(self):
+        """
+        Discards all references.
+        """
         for obj_id in list(self.required_refs):
             self.discard_ref(obj_id)
 
@@ -227,12 +259,13 @@ class RefHelper(object):
         was_ready = self.ready
         self.pending_increfs.discard(obj_id)
         if obj_id in self.required_refs:
-            # Still required.
+            # Still required, record it.
+            _log.debug("Reference %s acquired; still required", obj_id)
             self.acquired_refs[obj_id] = obj
         else:
             # Deleted while we were waiting.
-            _log.info("Object %s was discarded while waiting for its ref",
-                      obj_id)
+            _log.debug("Object %s was discarded while waiting for its ref",
+                       obj_id)
             self._ref_mgr.decref(obj_id)
         now_ready = self.ready
         if not was_ready and now_ready:
@@ -240,6 +273,10 @@ class RefHelper(object):
             self._ready_callback()
 
     def iteritems(self):
+        """
+        :return: iterator over pairs of the currently valid references.  Not
+                 safe for concurrent modification of the ret of IDs.
+        """
         return self.acquired_refs.iteritems()
 
     @property
@@ -247,6 +284,10 @@ class RefHelper(object):
         return len(self.required_refs) == len(self.acquired_refs)
 
     def __getattr__(self, item):
+        """
+        Passes through getattr requests to the Actor to allow us to
+        use @actor_event.
+        """
         try:
             return super(RefHelper, self).__getattr__(item)
         except AttributeError:
