@@ -139,15 +139,22 @@ def install_global_rules(config, v4_updater, v6_updater):
 
 def rules_to_chain_rewrite_lines(chain_name, rules, ip_version, tag_to_ipset,
                                  on_allow="ACCEPT", on_deny="DROP"):
-    fragments = []
-    for r in rules:
-        rule_version = r.get['ip_version']
-        if rule_version == None or rules_version == ip_version:
-            fragments.append(rule_to_iptables_fragment(chain_name, r, ip_version,
-                                                       tag_to_ipset,
-                                                       on_allow=on_allow,
-                                                       on_deny=on_deny))
-    return fragments
+    try:
+        fragments = []
+        for r in rules:
+            rule_version = r.get('ip_version')
+            if rule_version is None or rule_version == ip_version:
+                fragments.append(rule_to_iptables_fragment(chain_name, r,
+                                                           ip_version,
+                                                           tag_to_ipset,
+                                                           on_allow=on_allow,
+                                                           on_deny=on_deny))
+        fragments.append("--append %s --jump DROP" % chain_name)
+        return fragments
+    except Exception:
+        _log.exception("Failed to convert rules to fragments: %s.  Will DROP!",
+                       rules)
+        return ["--append %s --jump DROP" % chain_name]
 
 
 def rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,

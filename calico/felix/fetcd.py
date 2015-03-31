@@ -249,8 +249,8 @@ def parse_if_rules(etcd_node):
             try:
                 validate_rules(rules)
             except ValidationFailed as e:
-                _log.exception("Validation failed for profile %s rules : %s",
-                             profile_id, rules)
+                _log.exception("Validation failed for profile %s rules: %s",
+                               profile_id, rules)
                 return profile_id, None
 
         _log.debug("Found rules for profile %s : %s", profile_id, rules)
@@ -327,7 +327,7 @@ def validate_rules(rules):
 
             action = rule.get('action')
             if (action is not None and
-                not protocol in [ "accept", "deny" ]):
+                    action not in ("allow", "deny")):
                 issues.append("Invalid action in rule %s." % rule)
 
             icmp_type = rule.get('icmp_type')
