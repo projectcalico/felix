@@ -363,6 +363,7 @@ def interface_to_suffix(config, iface_name):
     suffix = futils.uniquely_shorten(suffix, 16)
     return suffix
 
+
 def chain_names(endpoint_suffix):
     to_chain_name = (CHAIN_TO_PREFIX + endpoint_suffix)
     from_chain_name = (CHAIN_FROM_PREFIX + endpoint_suffix)

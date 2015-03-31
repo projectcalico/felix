@@ -209,7 +209,7 @@ class RefHelper(object):
         """Set of IDs of the references that we've been asked for."""
         self.pending_increfs = set()
         """
-        Set of IDs of refernces for which we have an outstanding incref
+        Set of IDs of references for which we have an outstanding incref
         request.
         """
         self.acquired_refs = {}
@@ -233,6 +233,10 @@ class RefHelper(object):
                 self._ref_mgr.get_and_incref(obj_id, callback=cb, async=True)
 
     def discard_ref(self, obj_id):
+        """
+        Discard the reference identified by ID.  Idempotent; does nothing
+        if the reference wasn't present.
+        """
         if obj_id in self.required_refs:
             _log.debug("Discarding object %s", obj_id)
             # Immediately record that we no longer want the ref and throw it

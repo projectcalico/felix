@@ -98,12 +98,12 @@ class DispatchChains(Actor):
         from_deps = set()
         dependencies = {CHAIN_TO_ENDPOINT: to_deps,
                         CHAIN_FROM_ENDPOINT: from_deps}
+        from calico.felix.endpoint import chain_names, interface_to_suffix
         for iface in self.iface_to_ep_id:
             # Add rule to global chain to direct traffic to the
             # endpoint-specific one.  Note that we use --goto, which means
             # that the endpoint-specific chain will return to our parent
             # rather than to this chain.
-            from calico.felix.endpoint import chain_names, interface_to_suffix
             ep_suffix = interface_to_suffix(self.config, iface)
             to_chain_name, from_chain_name = chain_names(ep_suffix)
             from_upds.append("--append %s --in-interface %s --goto %s" %
@@ -249,12 +249,27 @@ class IptablesUpdater(Actor):
 
     @actor_event
     def ensure_rule_inserted(self, table, rule_fragment):
+        """
+        Runs the given rule fragment, prefixed with --insert.  If the
+        rule was already inserted, it is removed and reinserted at the
+        start of the chain.
+
+        This is intended to cover the start-up corner case where we need to
+        insert a rule into the pre-existing kernel chains.  Most code
+        should use the more robust approach of rewriting the whole chain
+        using rewrite_chains().
+        """
         try:
+            # Make an atomic delete + insert of the rule.  If the rule already
+            # exists then this will have no effect.
             self._execute_iptables(['*%s' % table,
                                     '--delete %s' % rule_fragment,
                                     '--insert %s' % rule_fragment,
                                     'COMMIT'])
         except CalledProcessError:
+            # Assume the rule didn't exist, try inserting it.
+            _log.debug("Failed to do atomic delete/insert, assuming rule "
+                       "wasn't programmed.")
             self._execute_iptables(['*%s' % table,
                                     '--insert %s' % rule_fragment,
                                     'COMMIT'])
@@ -440,7 +455,7 @@ class IptablesUpdater(Actor):
             input_lines.append("COMMIT")
         return input_lines
 
-    def _execute_iptables(self, input_lines):
+    def _execute_iptables(self, input_lines, suppress_exc_log=False):
         """
         Runs ip(6)tables-restore with the given input.  Retries iff
         the COMMIT fails.
@@ -470,9 +485,6 @@ class IptablesUpdater(Actor):
                 success = True
             else:
                 # Parse the output to determine if error is retryable.
-                _log.error("Failed to run %s.\nOutput:\n%s\n"
-                           "Error:\n%s\nInput was:\n%s",
-                           self.restore_cmd, out, err, input_str)
                 match = re.search(r"line (\d+) failed", err)
                 if match:
                     # Have a line number, work out if this was a commit
@@ -492,9 +504,15 @@ class IptablesUpdater(Actor):
                             backoff = MAX_IPT_BACKOFF
                         backoff *= (1.5 + random.random())
                     elif num_tries >= MAX_IPT_RETRIES:
+                        _log.error("Failed to run %s.\nOutput:\n%s\n"
+                                   "Error:\n%s\nInput was:\n%s",
+                                   self.restore_cmd, out, err, input_str)
                         _log.error("Out of retries.  Error occurred on line "
                                    "%s: %r", line_number, offending_line)
-                    else:
+                    elif not suppress_exc_log:
+                        _log.error("Failed to run %s.\nOutput:\n%s\n"
+                                   "Error:\n%s\nInput was:\n%s",
+                                   self.restore_cmd, out, err, input_str)
                         _log.error("Non-retryable error on line %s: %r",
                                    line_number, offending_line)
                 raise CalledProcessError(cmd=cmd, returncode=rc)

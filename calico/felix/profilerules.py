@@ -18,10 +18,9 @@ felix.profilerules
 
 ProfileRules actor, handles local profile chains.
 """
-import functools
+
 import logging
-import itertools
-from calico.felix.actor import Actor, actor_event, wait_and_check
+from calico.felix.actor import actor_event
 from calico.felix.frules import (profile_to_chain_name,
                                  rules_to_chain_rewrite_lines)
 from calico.felix.refcount import ReferenceManager, RefCountedActor, RefHelper
@@ -109,6 +108,7 @@ class ProfileRules(RefCountedActor):
         """
         _log.debug("Profile update to %s: %s", self.id, profile)
         assert profile is None or profile["id"] == self.id
+        assert not self.dead, "Shouldn't receive updates after we're dead."
 
         old_tags = extract_tags_from_profile(self._profile)
         new_tags = extract_tags_from_profile(profile)
@@ -148,6 +148,7 @@ class ProfileRules(RefCountedActor):
             chains.append(chain_name)
         self._iptables_updater.delete_chains("filter", chains, async=False)
         self.ipset_refs.discard_all()
+        self.ipset_refs = None # Break ref cycle.
         self._profile = None
         self._notify_cleanup_complete()
 
