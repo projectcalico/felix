@@ -179,7 +179,8 @@ class TestActor(BaseTestCase):
                 (m_full, m_put):
             m_full.return_value = True
             self._actor.do_a(async=True)
-            self.assertFalse(m_put.call_args[1]["block"])
+            self.assertTrue(m_put.call_args[1]["block"])
+            self.assertEqual(m_put.call_args[1]["timeout"], 60)
 
     def test_loop_coverage(self):
         with mock.patch.object(self._actor, "_step", autospec=True) as m_step:
