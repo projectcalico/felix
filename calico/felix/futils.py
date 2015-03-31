@@ -21,6 +21,7 @@ felix.futils
 
 Felix utilities.
 """
+import functools
 import hashlib
 import logging
 import os
@@ -136,6 +137,7 @@ def time_ms():
 def net_to_ip(net_or_ip):
     return net_or_ip.split("/")[0]
 
+
 def uniquely_shorten(string, length):
     """
     Take a string and deterministically shorten it to at most length
@@ -154,3 +156,14 @@ def uniquely_shorten(string, length):
     hash_text = h.hexdigest()
 
     return SHORTENED_PREFIX + hash_text[:length-len(SHORTENED_PREFIX)]
+
+
+def logging_exceptions(fn):
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except:
+            log.exception("Exception in wrapped function %s", fn)
+            raise
+    return wrapped

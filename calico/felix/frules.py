@@ -95,18 +95,13 @@ def install_global_rules(config, v4_updater, v6_updater):
                               async=False)
 
     v4_updater.ensure_rule_inserted("nat",
-                                    "PREROUTING --jump %s" % CHAIN_PREROUTING)
+                                    "PREROUTING --jump %s" % CHAIN_PREROUTING,
+                                    async=False)
 
     # Now the filter table. This needs to have calico-filter-FORWARD and
     # calico-filter-INPUT chains, which we must create before adding any
     # rules that send to them.
     for iptables_updater in [v4_updater, v6_updater]:
-        iptables_updater.ensure_rule_inserted(
-            "filter",
-            "INPUT --jump %s" % CHAIN_INPUT)
-        iptables_updater.ensure_rule_inserted(
-            "filter",
-            "FORWARD --jump %s" % CHAIN_FORWARD)
         iptables_updater.rewrite_chains(
             "filter",
             {
@@ -131,6 +126,14 @@ def install_global_rules(config, v4_updater, v6_updater):
                 CHAIN_FORWARD: set([CHAIN_FROM_ENDPOINT, CHAIN_TO_ENDPOINT]),
                 CHAIN_INPUT: set([CHAIN_FROM_ENDPOINT]),
             },
+            async=False)
+        iptables_updater.ensure_rule_inserted(
+            "filter",
+            "INPUT --jump %s" % CHAIN_INPUT,
+            async=False)
+        iptables_updater.ensure_rule_inserted(
+            "filter",
+            "FORWARD --jump %s" % CHAIN_FORWARD,
             async=False)
 
 

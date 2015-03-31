@@ -21,6 +21,7 @@ Etcd polling functions.
 import itertools
 import json
 import logging
+from calico.felix.futils import logging_exceptions
 from types import StringTypes
 from etcd import EtcdException
 import etcd
@@ -46,6 +47,7 @@ class ValidationFailed(Exception):
     pass
 
 
+@logging_exceptions
 def watch_etcd(config, update_splitter):
     """
     Loads the snapshot from etcd and then monitors etcd for changes.

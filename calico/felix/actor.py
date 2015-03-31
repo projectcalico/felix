@@ -327,7 +327,7 @@ class Actor(object):
                 continue
             except BaseException as e:
                 # Report failure to all.
-                _log.exception("_on_batch_processed failed.")
+                _log.exception("_finish_msg_batch failed.")
                 results = [(None, e)] * len(results)
 
             # Batch complete and finalized, set all the results.

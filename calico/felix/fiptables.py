@@ -197,9 +197,8 @@ class IptablesUpdater(Actor):
         # dicts keyed on table. The value stored is as follows.
         #
         # bch_affected_chains : set of chains in this batch
-        # bch_updates : defaultdict mapping chain to set of updates for that
-        #               chain
-        # PLW: shouldn't it be a list of updates, as order matters?
+        # bch_updates : defaultdict mapping chain to list of updates for that
+        #               chain or None to indicate a deletion.
         # bch_dependencies : defaultdict mapping chain to set of chains which
         #                    that chain requires to exist
         #
@@ -227,7 +226,7 @@ class IptablesUpdater(Actor):
 
     def _reset_batched_work(self):
         self.bch_affected_chains = defaultdict(set)
-        self.bch_updates = defaultdict(lambda: defaultdict(set))
+        self.bch_updates = defaultdict(dict)
         self.bch_dependencies = defaultdict(lambda: defaultdict(set))
         self.bch_new_expl_prog_chains = None
         self.bch_requiring_chain_upds = None
@@ -273,6 +272,7 @@ class IptablesUpdater(Actor):
         if callback:
             self.completion_callbacks.append(callback)
 
+    @actor_event
     def ensure_rule_inserted(self, table, rule_fragment):
         try:
             self._execute_iptables(['*%s' % table,
