@@ -53,7 +53,7 @@ class EtcdWatcher(Actor):
         self.update_splitter = update_splitter
         self.config = config
 
-    # TODO: surely we don't need logging_exceptions here? If we do, don't we
+    # TODO: PLW surely we don't need logging_exceptions here? If we do, don't we
     # need it on all actor events?
     @actor_event
     @logging_exceptions

@@ -245,6 +245,8 @@ class Actor(object):
     # TODO: Can we just start the greenlet always?
     # There is some craziness about actors that are in CREATED state, where
     # pending a previous iteration shutting down.
+    # PLW: I agree that the answer here is probably no, but not sure if we
+    # could somehow simplify the code in this area.
     def start(self):
         assert not self.greenlet, "Already running"
         _log.debug("Starting %s", self)
@@ -284,6 +286,9 @@ class Actor(object):
         if self.batch_delay and not self._event_queue.full():
             # If requested by our subclass, delay the start of the batch to
             # allow more work to accumulate.
+            # PLW: why do we do this batch_delay? To me it seems that we only
+            # need to do batching if events are arriving faster than we can
+            # process them, so why both add complexity and add delay?
             gevent.sleep(self.batch_delay)
         while not self._event_queue.empty():
             # We're the only ones getting from the queue so this should
@@ -382,6 +387,7 @@ class Actor(object):
         It is usually easier to build up a batch of changes to make in the
         @actor_event-decorated methods and then process them in
         _post_process_msg_batch().
+        PLW: post_process_msg_batch does not exist? Probably _finish_msg_batch.
 
         Intended to be overridden.  This implementation simply returns the
         input batch.

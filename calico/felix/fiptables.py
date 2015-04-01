@@ -182,7 +182,10 @@ class IptablesUpdater(Actor):
         # single structure keyed on table? Think that would be more readable,
         # so you do the table lookup once rather than have to do it every time
         # on every single one of these five objects - especially in the 99%
-        # case where the table is the same for the entire batch.
+        # case where the table is the same for the entire batch. I'd actually
+        # even go further and say to put all the objects which are default
+        # dicts based on table into a single structure; think that would be way
+        # easier to read and manage.
         self.bch_affected_chains = None
         self.bch_updates = None
         self.bch_dependencies = None
