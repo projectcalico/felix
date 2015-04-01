@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2014 Metaswitch Networks
+# Copyright 2015 Metaswitch Networks
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ from etcd import EtcdException
 import etcd
 import re
 from urllib3.exceptions import ReadTimeoutError
-from netaddr import IPAddress, AddrFormatError
 
 from calico import common
 
@@ -86,7 +85,8 @@ def watch_etcd(config, update_splitter):
                 endpoints_by_id[endpoint_id] = endpoint
                 continue
 
-        # Actually apply the snapshot, grabbing the future in case it raises an error.
+        # Actually apply the snapshot, grabbing the future in case it raises
+        # an error.
         f_apply_snap = update_splitter.apply_snapshot(rules_by_id,
                                                       tags_by_id,
                                                       endpoints_by_id)
@@ -101,21 +101,21 @@ def watch_etcd(config, update_splitter):
         # was modified.
         _log.info("Initial etcd index: %s; modifiedIndex: %s",
                   initial_dump.etcd_index, initial_dump.modifiedIndex)
-        last_etcd_index = initial_dump.etcd_index
+        next_etcd_index = initial_dump.etcd_index + 1
         del initial_dump
         continue_polling = True
         while continue_polling:
             if f_apply_snap and f_apply_snap.ready():
                 # Snapshot application finished, check for exceptions.
-                _log.info("Snapshot application returned, checking for errors.")
+                _log.info("Snapshot application returned, checking for errors")
                 f_apply_snap.get_nowait()
                 f_apply_snap = None
 
             try:
-                _log.debug("About to wait for etcd update %s", last_etcd_index + 1)
+                _log.debug("About to wait for etcd update %s", next_etcd_index)
                 response = client.read("/calico/",
                                        wait=True,
-                                       waitIndex=last_etcd_index + 1,
+                                       waitIndex=next_etcd_index,
                                        recursive=True,
                                        timeout=0)
                 _log.debug("etcd response: %r", response)
@@ -128,13 +128,14 @@ def watch_etcd(config, update_splitter):
                 continue
             except EtcdException:
                 _log.exception("Failed to read from etcd. wait_index=%s",
-                               last_etcd_index)
+                               next_etcd_index)
                 raise
-            # Defensive, the etcd_index returned on subsequent requests is the one
-            # that we waited on and the modifiedIndex is the index at which the
-            # key's value was changed. Just in case there's a corner case where
-            # we get an old modifiedIndex, make sure we always increase the index.
-            last_etcd_index = max(response.modifiedIndex, last_etcd_index + 1)
+            # Defensive, the etcd_index returned on subsequent requests is the
+            # one that we waited on and the modifiedIndex is the index at
+            # which the key's value was changed. Just in case there's a corner
+            # case where we get an old modifiedIndex, make sure we always
+            # increase the index.
+            next_etcd_index = max(response.modifiedIndex, next_etcd_index + 1)
 
             # TODO: regex parsing getting messy.
             profile_id, rules = parse_if_rules(response)
@@ -159,14 +160,14 @@ def watch_etcd(config, update_splitter):
                 # FIXME: this check is over-broad.
                 # It's purpose is to catch deletions of whole directories
                 # or other operations that we're not expecting.
-                _log.warning("Unexpected action %s to %s; triggering resync.",
-                             response.action, response.key)
+                _log.warning("Unexpected action %s to %s; triggering "
+                             "resync.", response.action, response.key)
                 continue_polling = False
 
 
 # Intern JSON keys as we load them to reduce occupancy.
 def intern_dict(d):
-    return dict((intern(str(k)), v) for k,v in d.iteritems())
+    return dict((intern(str(k)), v) for k, v in d.iteritems())
 json_decoder = json.JSONDecoder(object_hook=intern_dict)
 
 
@@ -197,7 +198,8 @@ def parse_if_endpoint(config, etcd_node):
 def validate_endpoint(config, endpoint):
     """
     Ensures that the supplied endpoint is valid. Once this routine has returned
-    successfully, we know that all required fields are present and have valid values.
+    successfully, we know that all required fields are present and have valid
+    values.
 
     :param config: configuration structure
     :param endpoint: endpoint dictionary as read from etcd
@@ -262,7 +264,7 @@ def parse_if_rules(etcd_node):
             rules["id"] = profile_id
             try:
                 validate_rules(rules)
-            except ValidationFailed as e:
+            except ValidationFailed:
                 _log.exception("Validation failed for profile %s rules: %s",
                                profile_id, rules)
                 return profile_id, None
@@ -276,7 +278,8 @@ def parse_if_rules(etcd_node):
 def validate_rules(rules):
     """
     Ensures that the supplied rules are valid. Once this routine has returned
-    successfully, we know that all required fields are present and have valid values.
+    successfully, we know that all required fields are present and have valid
+    values.
 
     :param rules: rules list as read from etcd
     :raises ValidationFailed
@@ -371,7 +374,7 @@ def validate_rule_port(port):
             return "range unparseable"
         start = int(fields.pop(0))
         end = int(fields.pop(0))
-        if (start >= end or start < 1 or end > 65535):
+        if start >= end or start < 1 or end > 65535:
             return "range invalid"
         return None
 
@@ -406,7 +409,6 @@ def validate_tags(tags):
     successfully, we know that all required fields are present and have valid
     values.
 
-    :param config: configuration structure
     :param tags: tag set as read from etcd
     :raises ValidationFailed
     """
@@ -422,6 +424,7 @@ def validate_tags(tags):
 
     if issues:
         raise ValidationFailed(" ".join(issues))
+
 
 def load_config(host, port):
     """
