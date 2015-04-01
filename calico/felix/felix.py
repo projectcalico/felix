@@ -23,7 +23,7 @@ The main logic for Felix.
 # Monkey-patch before we do anything else...
 from calico.felix.devices import InterfaceWatcher
 from calico.felix.endpoint import EndpointManager
-from calico.felix.fetcd import watch_etcd
+from calico.felix.fetcd import EtcdWatcher
 from calico.felix.ipsets import IpsetManager
 from gevent import monkey
 monkey.patch_all()
@@ -76,6 +76,7 @@ def _main_greenlet(config):
                                           v6_rules_manager],
                                          [v4_ep_manager, v6_ep_manager])
         iface_watcher = InterfaceWatcher(update_splitter)
+        etcd_watcher = EtcdWatcher(config, update_splitter)
 
         _log.info("Starting actors.")
         v4_updater.start()
@@ -91,6 +92,8 @@ def _main_greenlet(config):
         v6_ep_manager.start()
 
         iface_watcher.start()
+        etcd_watcher.start()
+
         greenlets = [
             v4_updater.greenlet,
             v4_ipset_mgr.greenlet,
@@ -104,20 +107,21 @@ def _main_greenlet(config):
             v6_dispatch_chains.greenlet,
             v6_ep_manager.greenlet,
 
-            iface_watcher.greenlet
+            iface_watcher.greenlet,
+            etcd_watcher.greenlet
         ]
 
         # Install the global rules before we start polling for updates.
         _log.info("Installing global rules.")
         install_global_rules(config, v4_updater, v6_updater)
 
-        # Start polling for updates.
+        # Start polling for updates. These kicks make the actors poll
+        # indefinitely.
         _log.info("Starting polling for interface and etcd updates.")
-        iface_watcher.watch_interfaces(async=True)  # Never returns, async!
-        greenlets.append(gevent.spawn(watch_etcd, config, update_splitter))
+        iface_watcher.watch_interfaces(async=True)
+        etcd_watcher.watch_etcd(async=True)
 
         # Wait for something to fail.
-        # TODO: Maybe restart failed greenlets.
         stopped_greenlets_iter = gevent.iwait(greenlets)
         stopped_greenlet = next(stopped_greenlets_iter)
         try:
