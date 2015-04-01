@@ -182,7 +182,10 @@ class IptablesUpdater(Actor):
         # single structure keyed on table? Think that would be more readable,
         # so you do the table lookup once rather than have to do it every time
         # on every single one of these five objects - especially in the 99%
-        # case where the table is the same for the entire batch.
+        # case where the table is the same for the entire batch. I'd actually
+        # even go further and say to put all the objects which are default
+        # dicts based on table into a single structure; think that would be way
+        # easier to read and manage.
         self.bch_affected_chains = None
         self.bch_updates = None
         self.bch_dependencies = None
@@ -273,7 +276,6 @@ class IptablesUpdater(Actor):
             self._execute_iptables(['*%s' % table,
                                     '--insert %s' % rule_fragment,
                                     'COMMIT'])
-
 
     @actor_event
     def delete_chains(self, table_name, chain_names, callback=None):
@@ -455,7 +457,7 @@ class IptablesUpdater(Actor):
             input_lines.append("COMMIT")
         return input_lines
 
-    def _execute_iptables(self, input_lines, suppress_exc_log=False):
+    def _execute_iptables(self, input_lines):
         """
         Runs ip(6)tables-restore with the given input.  Retries iff
         the COMMIT fails.
@@ -509,7 +511,7 @@ class IptablesUpdater(Actor):
                                    self.restore_cmd, out, err, input_str)
                         _log.error("Out of retries.  Error occurred on line "
                                    "%s: %r", line_number, offending_line)
-                    elif not suppress_exc_log:
+                    else:
                         _log.error("Failed to run %s.\nOutput:\n%s\n"
                                    "Error:\n%s\nInput was:\n%s",
                                    self.restore_cmd, out, err, input_str)

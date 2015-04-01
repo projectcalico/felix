@@ -160,6 +160,8 @@ class Actor(object):
     # TODO: Can we just start the greenlet always?
     # There is some craziness about actors that are in CREATED state, where
     # pending a previous iteration shutting down.
+    # PLW: I agree that the answer here is probably no, but not sure if we
+    # could somehow simplify the code in this area.
     def start(self):
         assert not self.greenlet, "Already running"
         _log.debug("Starting %s", self)
@@ -199,6 +201,9 @@ class Actor(object):
         if self.batch_delay and not self._event_queue.full():
             # If requested by our subclass, delay the start of the batch to
             # allow more work to accumulate.
+            # PLW: why do we do this batch_delay? To me it seems that we only
+            # need to do batching if events are arriving faster than we can
+            # process them, so why both add complexity and add delay?
             gevent.sleep(self.batch_delay)
         while not self._event_queue.empty():
             # We're the only ones getting from the queue so this should
@@ -304,7 +309,7 @@ class Actor(object):
 
         It is usually easier to build up a batch of changes to make in the
         @actor_event-decorated methods and then process them in
-        _post_process_msg_batch().
+        _finish_msg_batch().
 
         Intended to be overridden.  This implementation simply returns the
         input batch.
@@ -512,6 +517,15 @@ def actor_event(fn):
 
         _log.debug("Message %s sent by %s to %s",
                    msg, caller, self.name)
+        # TODO (PLW): I still think this should not block. We can ensure that
+        # it does not block trivially by setting the queue size to be 0, and
+        # that would surely have lower occupancy than creating a new greenlet
+        # every time we want to put a message onto the queue. I'm not really
+        # with the logic of why we would ever want to block as the queues get
+        # busy; not convinced it really does imply back pressure.
+        # Incidentally, queue length is 10, which is clearly incredibly low (I
+        # think 1000 is a way more plausible level at which I would think our
+        # queues are full). We should discuss that, unless you just agree!
         self._event_queue.put(msg,
                               block=True,
                               timeout=60)

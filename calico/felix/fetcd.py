@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright 2014 Metaswitch Networks
+# Copyright 2015 Metaswitch Networks
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,18 +18,18 @@ felix.fetcd
 
 Etcd polling functions.
 """
+from etcd import EtcdException
+import etcd
 import itertools
 import json
 import logging
-from calico.felix.futils import logging_exceptions
-from types import StringTypes
-from etcd import EtcdException
-import etcd
 import re
+from types import StringTypes
 from urllib3.exceptions import ReadTimeoutError
-from netaddr import IPAddress, AddrFormatError
 
 from calico import common
+from calico.felix.futils import logging_exceptions
+from calico.felix.actor import Actor, actor_event
 
 _log = logging.getLogger(__name__)
 
@@ -47,126 +47,133 @@ class ValidationFailed(Exception):
     pass
 
 
-@logging_exceptions
-def watch_etcd(config, update_splitter):
-    """
-    Loads the snapshot from etcd and then monitors etcd for changes.
-    Posts events to the UpdateSplitter.
+class EtcdWatcher(Actor):
+    def __init__(self, config, update_splitter):
+        super(EtcdWatcher, self).__init__()
+        self.update_splitter = update_splitter
+        self.config = config
 
-    Intended to be used as a greenlet.  Intended to be restarted if
-    it raises an exception.
+    # TODO: PLW surely we don't need logging_exceptions here? If we do, don't we
+    # need it on all actor events?
+    @actor_event
+    @logging_exceptions
+    def watch_etcd(self):
+        """
+        Loads the snapshot from etcd and then monitors etcd for changes.
+        Posts events to the UpdateSplitter.
 
-    :returns: Does not return.
-    :raises EtcdException: if a read from etcd fails and we may fall out of
-            sync.
-    """
-    while True:
-        client = etcd.Client('localhost', config.ETCD_PORT)
+        Intended to be used as a greenlet.  Intended to be restarted if
+        it raises an exception.
 
-        # TODO handle GR flag and missing /calico/ node.
+        :returns: Does not return.
+        :raises EtcdException: if a read from etcd fails and we may fall out of
+                sync.
+        """
+        while True:
+            client = etcd.Client('localhost', self.config.ETCD_PORT)
 
-        # Load initial dump from etcd.  First just get all the endpoints and
-        # profiles by id.  The response contains a generation ID allowing us
-        # to then start polling for updates without missing any.
-        initial_dump = client.read("/calico/", recursive=True)
-        rules_by_id = {}
-        tags_by_id = {}
-        endpoints_by_id = {}
-        for child in initial_dump.children:
-            profile_id, rules = parse_if_rules(child)
-            if profile_id:
-                rules_by_id[profile_id] = rules
-                continue
-            profile_id, tags = parse_if_tags(child)
-            if profile_id:
-                tags_by_id[profile_id] = tags
-                continue
-            endpoint_id, endpoint = parse_if_endpoint(config, child)
-            if endpoint_id and endpoint:
-                endpoints_by_id[endpoint_id] = endpoint
-                continue
+            # TODO handle GR flag and missing /calico/ node.
 
-        # Actually apply the snapshot, grabbing the future in case it raises an error.
-        f_apply_snap = update_splitter.apply_snapshot(rules_by_id,
-                                                      tags_by_id,
-                                                      endpoints_by_id)
+            # Load initial dump from etcd.  First just get all the endpoints and
+            # profiles by id.  The response contains a generation ID allowing us
+            # to then start polling for updates without missing any.
+            initial_dump = client.read("/calico/", recursive=True)
+            rules_by_id = {}
+            tags_by_id = {}
+            endpoints_by_id = {}
+            for child in initial_dump.children:
+                profile_id, rules = parse_if_rules(child)
+                if profile_id:
+                    rules_by_id[profile_id] = rules
+                    continue
+                profile_id, tags = parse_if_tags(child)
+                if profile_id:
+                    tags_by_id[profile_id] = tags
+                    continue
+                endpoint_id, endpoint = parse_if_endpoint(self.config, child)
+                if endpoint_id and endpoint:
+                    endpoints_by_id[endpoint_id] = endpoint
+                    continue
 
-        # These read only objects are no longer required, so tidy them up.
-        del rules_by_id
-        del tags_by_id
-        del endpoints_by_id
+            # Actually apply the snapshot. This does not return anything, but
+            # just sends the relevant messages to the relevant threads to make
+            # all the processing occur.
+            self.update_splitter.apply_snapshot(rules_by_id,
+                                                tags_by_id,
+                                                endpoints_by_id)
 
-        # On first call, the etcd_index seems to be the high-water mark for the
-        # data returned whereas the modified index just tells us when the key
-        # was modified.
-        _log.info("Initial etcd index: %s; modifiedIndex: %s",
-                  initial_dump.etcd_index, initial_dump.modifiedIndex)
-        last_etcd_index = initial_dump.etcd_index
-        del initial_dump
-        continue_polling = True
-        while continue_polling:
-            if f_apply_snap and f_apply_snap.ready():
-                # Snapshot application finished, check for exceptions.
-                _log.info("Snapshot application returned, checking for errors.")
-                f_apply_snap.get_nowait()
-                f_apply_snap = None
+            # These read only objects are no longer required, so tidy them up.
+            del rules_by_id
+            del tags_by_id
+            del endpoints_by_id
 
-            try:
-                _log.debug("About to wait for etcd update %s", last_etcd_index + 1)
-                response = client.read("/calico/",
-                                       wait=True,
-                                       waitIndex=last_etcd_index + 1,
-                                       recursive=True,
-                                       timeout=0)
-                _log.debug("etcd response: %r", response)
-            except ReadTimeoutError:
-                _log.warning("Read from etcd timed out, retrying.")
-                # TODO: We are timing out after 60 seconds, perhaps because we
-                # should be using "read_timeout" not "timeout". However, a
-                # timeout of 0 is probably wrong if that does not reestablish
-                # connections periodically. Needs a bit more thought.
-                continue
-            except EtcdException:
-                _log.exception("Failed to read from etcd. wait_index=%s",
-                               last_etcd_index)
-                raise
-            # Defensive, the etcd_index returned on subsequent requests is the one
-            # that we waited on and the modifiedIndex is the index at which the
-            # key's value was changed. Just in case there's a corner case where
-            # we get an old modifiedIndex, make sure we always increase the index.
-            last_etcd_index = max(response.modifiedIndex, last_etcd_index + 1)
+            # On first call, the etcd_index seems to be the high-water mark for the
+            # data returned whereas the modified index just tells us when the key
+            # was modified.
+            _log.info("Initial etcd index: %s; modifiedIndex: %s",
+                      initial_dump.etcd_index, initial_dump.modifiedIndex)
+            next_etcd_index = initial_dump.etcd_index + 1
+            del initial_dump
+            continue_polling = True
+            while continue_polling:
+                try:
+                    _log.debug("About to wait for etcd update %s", next_etcd_index)
+                    response = client.read("/calico/",
+                                           wait=True,
+                                           waitIndex=next_etcd_index,
+                                           recursive=True,
+                                           timeout=0)
+                    _log.debug("etcd response: %r", response)
+                except ReadTimeoutError:
+                    _log.warning("Read from etcd timed out, retrying.")
+                    # TODO: We are timing out 60 seconds after the initial
+                    # read, then again 60 seconds after that, for no reason I
+                    # can really see. However, a timeout of 0 is probably wrong
+                    # if that does not reestablish connections
+                    # periodically. Needs a bit more thought.
+                    continue
+                except EtcdException:
+                    _log.exception("Failed to read from etcd. wait_index=%s",
+                                   next_etcd_index)
+                    raise
+                # Defensive, the etcd_index returned on subsequent requests is the
+                # one that we waited on and the modifiedIndex is the index at
+                # which the key's value was changed. Just in case there's a corner
+                # case where we get an old modifiedIndex, make sure we always
+                # increase the index.
+                next_etcd_index = max(response.modifiedIndex, next_etcd_index + 1)
 
-            # TODO: regex parsing getting messy.
-            profile_id, rules = parse_if_rules(response)
-            if profile_id:
-                _log.info("Scheduling profile update %s", profile_id)
-                update_splitter.on_rules_update(profile_id, rules)
-                continue
-            profile_id, tags = parse_if_tags(response)
-            if profile_id:
-                _log.info("Scheduling profile update %s", profile_id)
-                update_splitter.on_tags_update(profile_id, tags)
-                continue
-            endpoint_id, endpoint = parse_if_endpoint(config, response)
-            if endpoint_id:
-                _log.info("Scheduling endpoint update %s", endpoint_id)
-                update_splitter.on_endpoint_update(endpoint_id, endpoint)
-                continue
+                # TODO: regex parsing getting messy.
+                profile_id, rules = parse_if_rules(response)
+                if profile_id:
+                    _log.info("Scheduling profile update %s", profile_id)
+                    self.update_splitter.on_rules_update(profile_id, rules)
+                    continue
+                profile_id, tags = parse_if_tags(response)
+                if profile_id:
+                    _log.info("Scheduling profile update %s", profile_id)
+                    self.update_splitter.on_tags_update(profile_id, tags)
+                    continue
+                endpoint_id, endpoint = parse_if_endpoint(self.config, response)
+                if endpoint_id:
+                    _log.info("Scheduling endpoint update %s", endpoint_id)
+                    self.update_splitter.on_endpoint_update(endpoint_id, endpoint)
+                    continue
 
-            _log.debug("Response action: %s, key: %s",
-                       response.action, response.key)
-            if response.action not in ("set", "create"):
-                # FIXME: this check is over-broad.
-                # It's purpose is to catch deletions of whole directories
-                # or other operations that we're not expecting.
-                _log.warning("Unexpected action %s to %s; triggering resync.",
-                             response.action, response.key)
-                continue_polling = False
+                _log.debug("Response action: %s, key: %s",
+                           response.action, response.key)
+                if response.action not in ("set", "create"):
+                    # FIXME: this check is over-broad.
+                    # It's purpose is to catch deletions of whole directories
+                    # or other operations that we're not expecting.
+                    _log.warning("Unexpected action %s to %s; triggering "
+                                 "resync.", response.action, response.key)
+                    continue_polling = False
 
 
 # Intern JSON keys as we load them to reduce occupancy.
 def intern_dict(d):
-    return dict((intern(str(k)), v) for k,v in d.iteritems())
+    return dict((intern(str(k)), v) for k, v in d.iteritems())
 json_decoder = json.JSONDecoder(object_hook=intern_dict)
 
 
@@ -197,7 +204,8 @@ def parse_if_endpoint(config, etcd_node):
 def validate_endpoint(config, endpoint):
     """
     Ensures that the supplied endpoint is valid. Once this routine has returned
-    successfully, we know that all required fields are present and have valid values.
+    successfully, we know that all required fields are present and have valid
+    values.
 
     :param config: configuration structure
     :param endpoint: endpoint dictionary as read from etcd
@@ -262,7 +270,7 @@ def parse_if_rules(etcd_node):
             rules["id"] = profile_id
             try:
                 validate_rules(rules)
-            except ValidationFailed as e:
+            except ValidationFailed:
                 _log.exception("Validation failed for profile %s rules: %s",
                                profile_id, rules)
                 return profile_id, None
@@ -276,7 +284,8 @@ def parse_if_rules(etcd_node):
 def validate_rules(rules):
     """
     Ensures that the supplied rules are valid. Once this routine has returned
-    successfully, we know that all required fields are present and have valid values.
+    successfully, we know that all required fields are present and have valid
+    values.
 
     :param rules: rules list as read from etcd
     :raises ValidationFailed
@@ -371,7 +380,7 @@ def validate_rule_port(port):
             return "range unparseable"
         start = int(fields.pop(0))
         end = int(fields.pop(0))
-        if (start >= end or start < 1 or end > 65535):
+        if start >= end or start < 1 or end > 65535:
             return "range invalid"
         return None
 
@@ -406,7 +415,6 @@ def validate_tags(tags):
     successfully, we know that all required fields are present and have valid
     values.
 
-    :param config: configuration structure
     :param tags: tag set as read from etcd
     :raises ValidationFailed
     """
@@ -423,9 +431,10 @@ def validate_tags(tags):
     if issues:
         raise ValidationFailed(" ".join(issues))
 
+
 def load_config(host, port):
     """
-    TODO: Add watching of the config.
+    TODO: Add watching of the config, probably not required for MVP.
 
     Load configuration detail for this host from etcd.
     :returns: a dictionary of key to paarameters
