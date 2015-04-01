@@ -178,6 +178,7 @@ class ProfileRules(RefCountedActor):
                    updates)
         self._iptables_updater.rewrite_chains("filter", updates, {},
                                               async=False)
+        # TODO Isolate exceptions from programming the chains to this profile.
         if not self.notified_ready:
             self._notify_ready()
             self.notified_ready = True

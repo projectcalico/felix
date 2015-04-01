@@ -36,6 +36,7 @@ _log = logging.getLogger(__name__)
 IPSET_PREFIX = { IPV4: "felix-v4-", IPV6: "felix-v6-" }
 IPSET_TMP_PREFIX = { IPV4: "felix-tmp-v4-", IPV6: "felix-tmp-v6-" }
 
+
 def tag_to_ipset_name(ip_type, tag, tmp=False):
     """
     Turn a tag ID in all its glory into an ipset name.
@@ -45,6 +46,7 @@ def tag_to_ipset_name(ip_type, tag, tmp=False):
     else:
         name = IPSET_TMP_PREFIX[ip_type] + tag
     return name
+
 
 class IpsetManager(ReferenceManager):
     def __init__(self, ip_type):

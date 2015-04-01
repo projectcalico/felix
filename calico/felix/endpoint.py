@@ -19,14 +19,12 @@ felix.endpoint
 
 Endpoint management.
 """
-import collections
 import logging
-import functools
 from subprocess import CalledProcessError
 from calico.felix import devices, futils
-from calico.felix.actor import Actor, actor_event
+from calico.felix.actor import actor_event
 from calico.felix.futils import FailedSystemCall
-from calico.felix.futils import IPV4, IPV6
+from calico.felix.futils import IPV4
 from calico.felix.refcount import ReferenceManager, RefCountedActor
 from calico.felix.fiptables import DispatchChains
 from calico.felix.profilerules import RulesManager
@@ -281,7 +279,7 @@ class LocalEndpoint(RefCountedActor):
                 self._failed = False  # Don't care any more.
 
                 self.dispatch_chains.on_endpoint_removed(ifce_name,
-                                                          async=True)
+                                                         async=True)
                 self._remove_chains()
 
     def _update_chains(self):
@@ -292,14 +290,22 @@ class LocalEndpoint(RefCountedActor):
             self.endpoint.get("ipv%s_nets" % self.ip_version, []),
             self.endpoint["mac"],
             self.endpoint["profile_id"])
-
-        self.iptables_updater.rewrite_chains("filter",
-                                             updates, deps,  async=True)
+        try:
+            self.iptables_updater.rewrite_chains("filter",
+                                                 updates, deps, async=False)
+        except CalledProcessError:
+            _log.exception("Failed to program chains for %s. Removing.", self)
+            self._failed = True
+            self._remove_chains()
 
     def _remove_chains(self):
-        self.iptables_updater.delete_chains("filter",
-                                            chain_names(self._suffix),
-                                            async=True)
+        try:
+            self.iptables_updater.delete_chains("filter",
+                                                chain_names(self._suffix),
+                                                async=True)
+        except CalledProcessError:
+            _log.exception("Failed to delete chains for %s", self)
+            self._failed = True
 
     def _configure_interface(self):
         """
