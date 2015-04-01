@@ -95,11 +95,12 @@ class EtcdWatcher(Actor):
                     endpoints_by_id[endpoint_id] = endpoint
                     continue
 
-            # Actually apply the snapshot, grabbing the future in case it raises
-            # an error.
-            f_apply_snap = self.update_splitter.apply_snapshot(rules_by_id,
-                                                               tags_by_id,
-                                                               endpoints_by_id)
+            # Actually apply the snapshot. This does not return anything, but
+            # just sends the relevant messages to the relevant threads to make
+            # all the processing occur.
+            self.update_splitter.apply_snapshot(rules_by_id,
+                                                tags_by_id,
+                                                endpoints_by_id)
 
             # These read only objects are no longer required, so tidy them up.
             del rules_by_id
@@ -115,12 +116,6 @@ class EtcdWatcher(Actor):
             del initial_dump
             continue_polling = True
             while continue_polling:
-                if f_apply_snap and f_apply_snap.ready():
-                    # Snapshot application finished, check for exceptions.
-                    _log.info("Snapshot application returned, checking for errors")
-                    f_apply_snap.get_nowait()
-                    f_apply_snap = None
-
                 try:
                     _log.debug("About to wait for etcd update %s", next_etcd_index)
                     response = client.read("/calico/",
@@ -131,10 +126,11 @@ class EtcdWatcher(Actor):
                     _log.debug("etcd response: %r", response)
                 except ReadTimeoutError:
                     _log.warning("Read from etcd timed out, retrying.")
-                    # TODO: We are timing out after 60 seconds, perhaps because we
-                    # should be using "read_timeout" not "timeout". However, a
-                    # timeout of 0 is probably wrong if that does not reestablish
-                    # connections periodically. Needs a bit more thought.
+                    # TODO: We are timing out 60 seconds after the initial
+                    # read, then again 60 seconds after that, for no reason I
+                    # can really see. However, a timeout of 0 is probably wrong
+                    # if that does not reestablish connections
+                    # periodically. Needs a bit more thought.
                     continue
                 except EtcdException:
                     _log.exception("Failed to read from etcd. wait_index=%s",
@@ -438,7 +434,7 @@ def validate_tags(tags):
 
 def load_config(host, port):
     """
-    TODO: Add watching of the config.
+    TODO: Add watching of the config, probably not required for MVP.
 
     Load configuration detail for this host from etcd.
     :returns: a dictionary of key to paarameters

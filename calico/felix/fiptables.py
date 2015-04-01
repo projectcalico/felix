@@ -274,7 +274,6 @@ class IptablesUpdater(Actor):
                                     '--insert %s' % rule_fragment,
                                     'COMMIT'])
 
-
     @actor_event
     def delete_chains(self, table_name, chain_names, callback=None):
         # We actually apply the changes in _finish_msg_batch().  Index the
@@ -455,7 +454,7 @@ class IptablesUpdater(Actor):
             input_lines.append("COMMIT")
         return input_lines
 
-    def _execute_iptables(self, input_lines, suppress_exc_log=False):
+    def _execute_iptables(self, input_lines):
         """
         Runs ip(6)tables-restore with the given input.  Retries iff
         the COMMIT fails.
@@ -509,7 +508,7 @@ class IptablesUpdater(Actor):
                                    self.restore_cmd, out, err, input_str)
                         _log.error("Out of retries.  Error occurred on line "
                                    "%s: %r", line_number, offending_line)
-                    elif not suppress_exc_log:
+                    else:
                         _log.error("Failed to run %s.\nOutput:\n%s\n"
                                    "Error:\n%s\nInput was:\n%s",
                                    self.restore_cmd, out, err, input_str)

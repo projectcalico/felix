@@ -185,8 +185,17 @@ def actor_event(fn):
         msg = Message(partial, [result], caller, self.name)
         result.set_msg(msg)
 
-        _log.debug("Message %s sent by %s to %s",
-                   msg, caller, self.name)
+        _log.debug("Message %s sent by %s to %s, queue length %d",
+                   msg, caller, self.name, self._event_queue.qsize())
+        # TODO (PLW): I still think this should not block. We can ensure that
+        # it does not block trivially by setting the queue size to be 0, and
+        # that would surely have lower occupancy than creating a new greenlet
+        # every time we want to put a message onto the queue. I'm not really
+        # with the logic of why we would ever want to block as the queues get
+        # busy; not convinced it really does imply back pressure.
+        # Incidentally, queue length is 10, which is clearly incredibly low (I
+        # think 1000 is a way more plausible level at which I would think our
+        # queues are full). We should discuss that, unless you just agree!
         self._event_queue.put(msg,
                               block=True,
                               timeout=60)
@@ -296,8 +305,9 @@ class Actor(object):
             assert batch is not None, "_start_msg_batch() should return batch."
             results = []  # Will end up same length as batch.
             for msg in batch:
-                _log.debug("Message %s recd by %s from %s",
-                           msg, msg.recipient, msg.caller)
+                _log.debug("Message %s recd by %s from %s, queue length %d",
+                           msg, msg.recipient, msg.caller,
+                           self._event_queue.qsize())
                 self._current_msg = msg
                 try:
                     # Actually execute the per-message method and record its

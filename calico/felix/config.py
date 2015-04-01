@@ -59,7 +59,6 @@ class Config(object):
         """
         Create a config.
         :raises EtcdException
-        # TODO: worth tidying this up, since cfg file stuff is overkill.
         """
         self._KnownSections = set()
         self._KnownObjects  = set()

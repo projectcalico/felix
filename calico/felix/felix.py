@@ -172,7 +172,7 @@ def main():
                                 config.LOGLEVSYS,
                                 config.LOGLEVSCR)
 
-        _log.info("Starting up")
+        _log.info("Felix initializing")
         gevent.spawn(_main_greenlet, config).join()  # Should never return
     except BaseException:
         # Make absolutely sure that we exit by asking the OS to terminate our
