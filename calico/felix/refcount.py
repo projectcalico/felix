@@ -314,8 +314,8 @@ class RefCountedActor(Actor):
         is complete.  Notifies the manager.
         """
         _log.debug("Notifying manager that %s is ready", self)
-        self._manager.on_object_startup_complete(self._id,
-                                                 self, async=True)
+        gevent.spawn(self._manager.on_object_startup_complete,
+                     self._id, self, async=True)
 
     def _notify_cleanup_complete(self):
         """
@@ -323,8 +323,8 @@ class RefCountedActor(Actor):
         is complete.  Notifies the manager.
         """
         _log.debug("Notifying manager that %s is done cleaning up", self)
-        self._manager.on_object_cleanup_complete(self._id,
-                                                 self, async=True)
+        gevent.spawn(self._manager.on_object_cleanup_complete,
+                     self._id, self, async=True)
 
     @actor_event
     def on_unreferenced(self):
