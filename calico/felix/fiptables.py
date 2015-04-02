@@ -48,7 +48,6 @@ class DispatchChains(Actor):
     add/remove them from the chains.
     """
 
-    queue_size = 1000
     batch_delay = 0.1
 
     def __init__(self, config, ip_version, iptables_updater):
