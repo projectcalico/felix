@@ -29,7 +29,6 @@ from types import StringTypes
 from urllib3.exceptions import ReadTimeoutError
 
 from calico import common
-from calico.felix.futils import logging_exceptions
 from calico.felix.actor import Actor, actor_event
 
 _log = logging.getLogger(__name__)
@@ -42,7 +41,7 @@ TAGS_RE = re.compile(
     r'^/calico/policy/profile/(?P<profile_id>[^/]+)/tags')
 ENDPOINT_RE = re.compile(
     r'^/calico/host/(?P<hostname>[^/]+)/.+/endpoint/(?P<endpoint_id>[^/]+)')
-DB_READY_FLAG_PATH = "/calico/config/ready"
+DB_READY_FLAG_PATH = "/calico/config/Ready"
 
 
 RETRY_DELAY = 5
