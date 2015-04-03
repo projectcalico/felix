@@ -29,7 +29,7 @@ from calico.felix import frules
 
 from calico.felix.actor import Actor, actor_event, ResultOrExc, SplitBatchAndRetry
 from calico.felix.frules import (CHAIN_TO_ENDPOINT,
-                                 CHAIN_FROM_ENDPOINT)
+                                 CHAIN_FROM_ENDPOINT, FELIX_PREFIX)
 from gevent import subprocess
 import gevent
 import re
@@ -159,7 +159,7 @@ class IptablesUpdater(Actor):
         """Mapping from table to set of present chains.  Loaded at start
            of day and then kept in sync."""
 
-        self.explicitly_programmed_chains = defaultdict(set)
+        self.explicitly_prog_chains = defaultdict(set)
 
         self.required_chains = defaultdict(lambda: defaultdict(set))
         """Map from table to map from chain to the set of chains that it
@@ -289,6 +289,22 @@ class IptablesUpdater(Actor):
         if callback:
             self.completion_callbacks.append(callback)
 
+    @actor_event
+    def cleanup(self):
+        """
+        Trigger clean up
+        """
+        for table, chains in self.chains_in_dataplane.iteritems():
+            orphan_chains = chains - self.explicitly_prog_chains[table]
+            # Filter out chains that are already touched by this batch.  Note:
+            # We do not try to filter out chains that are referenced but not
+            # explicitly programmed, we'll catch those in _finish_msg_batch()
+            # and reprogram them as a stub.
+            chains_to_delete = [c for c in orphan_chains
+                                if c not in self.bch_affected_chains[table] and
+                                   c.startswith(FELIX_PREFIX)]
+            self.delete_chains(table, chains_to_delete)
+
     def _start_msg_batch(self, batch):
         self._reset_batched_work()
         return batch
@@ -361,9 +377,9 @@ class IptablesUpdater(Actor):
         # chains.  We'll use it below to decide
         # - whether we need to write a stub chain for a required chain.
         # - whether it's safe to delete a chain that's no longer referenced.
-        new_expl_prog_chains = defaultdict(
-            set,
-            self.explicitly_programmed_chains)
+        new_expl_prog_chains = defaultdict(set)
+        for table, old_chains in self.explicitly_prog_chains.iteritems():
+            new_expl_prog_chains[table] = set(old_chains)
         for table, table_upds in self.bch_updates.iteritems():
             for chain, upds in table_upds.iteritems():
                 if upds is not None:
@@ -436,7 +452,7 @@ class IptablesUpdater(Actor):
         self.bch_requiring_chain_upds = bch_reqrng_chns
 
     def _update_indexes(self):
-        self.explicitly_programmed_chains = self.bch_new_expl_prog_chains
+        self.explicitly_prog_chains = self.bch_new_expl_prog_chains
         for table in self.bch_requiring_chain_upds:
             for chain, reqng_chains in self.bch_requiring_chain_upds[table].iteritems():
                 if reqng_chains:

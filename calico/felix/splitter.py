@@ -20,14 +20,18 @@ felix.splitter
 Simple object that just splits notifications out for IPv4 and IPv6.
 """
 import logging
+import gevent
 
 _log = logging.getLogger(__name__)
 
 
 class UpdateSplitter(object):
-    def __init__(self, ipsets_mgrs, rules_managers, endpoint_managers):
+    def __init__(self, config, ipsets_mgrs, rules_managers, endpoint_managers,
+                 iptables_updaters):
 
+        self.config = config
         self.ipsets_mgrs = ipsets_mgrs
+        self.iptables_updaters = iptables_updaters
         self.rules_mgrs = rules_managers
         self.endpoint_mgrs = endpoint_managers
 
@@ -53,10 +57,17 @@ class UpdateSplitter(object):
         for ep_mgr in self.endpoint_mgrs:
             ep_mgr.apply_snapshot(endpoints_by_id, async=True)
 
-        # TODO: Start of day mark and sweep.
         _log.info("Applying snapshot. DONE. %s rules, %s tags, "
                   "%s endpoints", len(rules_by_prof_id), len(tags_by_prof_id),
                   len(endpoints_by_id))
+        gevent.spawn_later(self.config.STARTUP_CLEANUP_DELAY,
+                           self.trigger_cleanup)
+
+    def trigger_cleanup(self):
+        for ipt_updater in self.iptables_updaters:
+            ipt_updater.cleanup(async=False)
+        for ipset_mgr in self.ipsets_mgrs:
+            ipset_mgr.cleanup(async=False)
 
     def on_rules_update(self, profile_id, rules):
         """
