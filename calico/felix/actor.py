@@ -78,13 +78,14 @@ Thread safety
 While the framework makes it easy to avoid shared state, there are
 some gotchas:
 
-* By default, Actor queues are bounded, which means that, if the queues
-  get full, there's the possibility of deadlock if actors call each other
-  in a cycle.
-
 * Using the async=False feature blocks the current greenlet until the
   one it is calling into returns a result.  This can also cause deadlock
   if there are call cycles.
+
+* We deliberately use unbounded queues for queueing up messages between
+  actors. Bounding the queues would allow deadlock since the sending actor
+  can block on a full queue and the receiving actor may be blocked on the
+  queue of the sender, trying to send another message.
 
 Unhandled Exceptions
 ~~~~~~~~~~~~~~~~~~~~
