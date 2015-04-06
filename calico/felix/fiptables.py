@@ -294,6 +294,10 @@ class IptablesUpdater(Actor):
         """
         Trigger clean up
         """
+        # In case someone deleted something from under us, reload from the
+        # dataplane.  This has side-effects outside our batch but only this
+        # method cares and it's important that we start with fresh information.
+        self._load_from_dataplane()
         for table, chains in self.chains_in_dataplane.iteritems():
             orphan_chains = chains - self.explicitly_prog_chains[table]
             # Filter out chains that are already touched by this batch.  Note:
@@ -303,6 +307,9 @@ class IptablesUpdater(Actor):
             chains_to_delete = [c for c in orphan_chains
                                 if c not in self.bch_affected_chains[table] and
                                    c.startswith(FELIX_PREFIX)]
+            # SMC: It'd be nice if we could do a best-effort delete on these
+            # chains but that's hard to do since they'll all be processed as
+            # one atomic iptables-restore.
             self.delete_chains(table, chains_to_delete)
 
     def _start_msg_batch(self, batch):

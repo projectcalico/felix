@@ -60,14 +60,28 @@ class UpdateSplitter(object):
         _log.info("Applying snapshot. DONE. %s rules, %s tags, "
                   "%s endpoints", len(rules_by_prof_id), len(tags_by_prof_id),
                   len(endpoints_by_id))
+
         gevent.spawn_later(self.config.STARTUP_CLEANUP_DELAY,
                            self.trigger_cleanup)
 
     def trigger_cleanup(self):
-        for ipt_updater in self.iptables_updaters:
-            ipt_updater.cleanup(async=False)
-        for ipset_mgr in self.ipsets_mgrs:
-            ipset_mgr.cleanup(async=False)
+        """
+        Called from a separate greenlet, asks the managers to clean up
+        unused ipsets and iptables.
+        """
+        try:
+            # Need to clean up iptables first because they reference ipsets
+            # and force them to stay alive.
+            for ipt_updater in self.iptables_updaters:
+                ipt_updater.cleanup(async=False)
+        except Exception:
+            _log.exception("iptables cleanup failed, will retry on resync.")
+        try:
+            # It's still worth a try to clean up any ipsets that we can.
+            for ipset_mgr in self.ipsets_mgrs:
+                ipset_mgr.cleanup(async=False)
+        except Exception:
+            _log.exception("ipsets cleanup failed, will retry on resync.")
 
     def on_rules_update(self, profile_id, rules):
         """
