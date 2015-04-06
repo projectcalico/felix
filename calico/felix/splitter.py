@@ -61,6 +61,11 @@ class UpdateSplitter(object):
                   "%s endpoints", len(rules_by_prof_id), len(tags_by_prof_id),
                   len(endpoints_by_id))
 
+        # Since we don't wait for all the above processing to finish, set a
+        # timer to clean up orphaned ipsets and tables later.  If the snapshot
+        # takes longer than this timer to apply then we might do the cleanup
+        # before the snapshot is finished.  That would cause dropped packets
+        # until applying the snapshot finishes.
         gevent.spawn_later(self.config.STARTUP_CLEANUP_DELAY,
                            self.trigger_cleanup)
 
