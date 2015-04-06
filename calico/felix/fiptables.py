@@ -499,6 +499,7 @@ class IptablesUpdater(Actor):
             for chain_name, chain_updates in chains.iteritems():
                 if chain_updates is None:
                     # Delete the chain
+                    input_lines.append(":%s" % chain_name)
                     input_lines.append("--delete-chain %s" % chain_name)
             input_lines.append("COMMIT")
         return input_lines
