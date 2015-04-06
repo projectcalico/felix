@@ -69,6 +69,8 @@ class ReferenceManager(Actor):
         if callback:
             self.pending_ref_callbacks[object_id].add(callback)
         obj.ref_count += 1
+        _log.debug("Reference count for %s object %s is %d",
+                   self.name, object_id, obj.ref_count)
 
         # Depending on state of object, may need to start it or immediately
         # call back.
