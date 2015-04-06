@@ -118,7 +118,7 @@ class IpsetManager(ReferenceManager):
         """
         Clean up left-over ipsets that existed at start-of-day.
         """
-        all_ipsets = list_ipset_names
+        all_ipsets = list_ipset_names()
         # only clean up our own rubbish.
         felix_ipsets = set([n for n in all_ipsets if n.startswith(FELIX_PFX)])
         whitelist = set()

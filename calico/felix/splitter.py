@@ -74,6 +74,7 @@ class UpdateSplitter(object):
         Called from a separate greenlet, asks the managers to clean up
         unused ipsets and iptables.
         """
+        _log.info("Triggering a cleanup of orphaned ipsets/chains")
         try:
             # Need to clean up iptables first because they reference ipsets
             # and force them to stay alive.

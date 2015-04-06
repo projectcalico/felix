@@ -324,8 +324,11 @@ class IptablesUpdater(Actor):
             input_lines = self._calculate_ipt_modify_input()
             self._execute_iptables(input_lines)
             modify_succeeded = True
-            input_lines = self._calculate_ipt_delete_input()
-            if input_lines:
+            try:
+                input_lines = self._calculate_ipt_delete_input()
+            except NothingToDo:
+                pass
+            else:
                 self._execute_iptables(input_lines)
         except CalledProcessError as e:
             if len(batch) == 1:
@@ -480,6 +483,10 @@ class IptablesUpdater(Actor):
                     self.chains_in_dataplane[table].add(chain)
 
     def _calculate_ipt_modify_input(self):
+        """
+        Calculate the input for phase 1 of a batch, where we only modify and
+        create chains.
+        """
         # Valid input looks like this.
         #
         # *table
@@ -506,26 +513,25 @@ class IptablesUpdater(Actor):
         return input_lines
 
     def _calculate_ipt_delete_input(self):
-        # Valid input looks like this.
-        #
-        # *table
-        # :chain_name
-        # :chain_name_2
-        # -F chain_name
-        # -A chain_name -j ACCEPT
-        # COMMIT
-        #
-        # The chains are created if they don't exist.
+        """
+        Calculate the input for phase 2 of a batch, where we actually
+        try to delete chains.
+        """
         input_lines = []
+        found_delete = False
         for table, chains in self.bch_updates.iteritems():
             input_lines.append("*%s" % table)
             for chain_name, chain_updates in chains.iteritems():
                 if chain_updates is None:
                     # Delete the chain
-                    input_lines.append(":%s" % chain_name)
+                    input_lines.append(":%s -" % chain_name)
                     input_lines.append("--delete-chain %s" % chain_name)
+                    found_delete = True
             input_lines.append("COMMIT")
-        return input_lines
+        if found_delete:
+            return input_lines
+        else:
+            raise NothingToDo()
 
     def _execute_iptables(self, input_lines):
         """
@@ -575,6 +581,7 @@ class IptablesUpdater(Actor):
                         if backoff > MAX_IPT_BACKOFF:
                             backoff = MAX_IPT_BACKOFF
                         backoff *= (1.5 + random.random())
+                        continue
                     elif num_tries >= MAX_IPT_RETRIES:
                         _log.error("Failed to run %s.\nOutput:\n%s\n"
                                    "Error:\n%s\nInput was:\n%s",
@@ -587,6 +594,9 @@ class IptablesUpdater(Actor):
                                    self.restore_cmd, out, err, input_str)
                         _log.error("Non-retryable error on line %s: %r",
                                    line_number, offending_line)
+                else:
+                    _log.error("%s completed with output:\n%s\n%s",
+                               self.restore_cmd, out, err)
                 raise CalledProcessError(cmd=cmd, returncode=rc)
 
 
@@ -606,3 +616,7 @@ def parse_ipt_save(raw_save_output):
             chain_name = line[1:].split(" ")[0]
             table.add(chain_name)
     return chains
+
+
+class NothingToDo(Exception):
+    pass
