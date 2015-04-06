@@ -146,16 +146,18 @@ class ProfileRules(RefCountedActor):
         Called to tell us that this profile is no longer needed.  Removes
         our iptables configuration.
         """
-        self.dead = True
-        chains = []
-        for direction in ["inbound", "outbound"]:
-            chain_name = profile_to_chain_name(direction, self.id)
-            chains.append(chain_name)
-        self._iptables_updater.delete_chains("filter", chains, async=False)
-        self.ipset_refs.discard_all()
-        self.ipset_refs = None # Break ref cycle.
-        self._profile = None
-        self._notify_cleanup_complete()
+        try:
+            self.dead = True
+            chains = []
+            for direction in ["inbound", "outbound"]:
+                chain_name = profile_to_chain_name(direction, self.id)
+                chains.append(chain_name)
+            self._iptables_updater.delete_chains("filter", chains, async=False)
+            self.ipset_refs.discard_all()
+            self.ipset_refs = None # Break ref cycle.
+            self._profile = None
+        finally:
+            self._notify_cleanup_complete()
 
     def _update_chains(self):
         """
