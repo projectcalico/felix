@@ -304,7 +304,10 @@ class IptablesUpdater(Actor):
             if len(batch) == 1:
                 _log.error("Non-retryable %s failure. RC=%s", self.restore_cmd,
                            e.returncode)
-                cb = self.completion_callbacks[0]
+                try:
+                    cb = self.completion_callbacks[0]
+                except IndexError:
+                    cb = None
                 if batch[0].method.keywords.get("suppress_exc"):
                     final_result = ResultOrExc(None, None)
                 else:

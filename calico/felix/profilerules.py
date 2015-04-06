@@ -58,6 +58,8 @@ class RulesManager(ReferenceManager):
 
     @actor_event
     def apply_snapshot(self, rules_by_profile_id):
+        _log.info("Rules manager applying snapshot; %s rules",
+                  len(rules_by_profile_id))
         missing_ids = set(self.rules_by_profile_id.keys())
         for profile_id, profile in rules_by_profile_id.iteritems():
             self.on_rules_update(profile_id, profile)  # Skips queue
