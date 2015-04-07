@@ -128,7 +128,8 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         # Allow the etcd transport's resync thread to run.
         self.give_way()
         self.simulated_time_advance(1)
-        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap'})
+        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap',
+                               '/calico/config/Ready': True})
 
     def test_start_two_ports(self):
         """Startup with two existing ports but no existing etcd data.
@@ -144,6 +145,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         self.simulated_time_advance(1)
         expected_writes = {
             '/calico/config/InterfacePrefix': 'tap',
+            '/calico/config/Ready': True,
             '/calico/host/felix-host-1/workload/openstack/endpoint/DEADBEEF-1234-5678':
                 {"name": "tapDEADBEEF-12",
                  "profile_id": "SGID-default",
@@ -162,19 +164,15 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                  "ipv6_nets": []},
             '/calico/policy/profile/SGID-default/rules':
                 {"outbound_rules": [{"dst_ports": ["1:65535"],
-                                     "dst_tag": None,
                                      "dst_net": "0.0.0.0/0",
                                      "ip_version": 4},
                                     {"dst_ports": ["1:65535"],
-                                     "dst_tag": None,
                                      "dst_net": "::/0",
                                      "ip_version": 6}],
-                 "inbound_rules": [{"src_ports": ["1:65535"],
-                                    "src_net": None,
+                 "inbound_rules": [{"dst_ports": ["1:65535"],
                                     "src_tag": "SGID-default",
                                     "ip_version": 4},
-                                   {"src_ports": ["1:65535"],
-                                    "src_net": None,
+                                   {"dst_ports": ["1:65535"],
                                     "src_tag": "SGID-default",
                                     "ip_version": 6}]},
             '/calico/policy/profile/SGID-default/tags':
@@ -186,7 +184,8 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         # was written on the first iteration.
         print "\nResync with existing etcd data\n"
         self.simulated_time_advance(t_etcd.PERIODIC_RESYNC_INTERVAL_SECS)
-        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap'})
+        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap',
+                               '/calico/config/Ready': True})
         self.assertEtcdDeletes(set())
 
         # Delete lib.port1
@@ -200,7 +199,8 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         # Do another resync - expect no changes to the etcd data.
         print "\nResync with existing etcd data\n"
         self.simulated_time_advance(t_etcd.PERIODIC_RESYNC_INTERVAL_SECS)
-        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap'})
+        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap',
+                               '/calico/config/Ready': True})
         self.assertEtcdDeletes(set())
 
         # Add lib.port1 back again.
@@ -216,19 +216,15 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                  "ipv6_nets": []},
             '/calico/policy/profile/SGID-default/rules':
                 {"outbound_rules": [{"dst_ports": ["1:65535"],
-                                     "dst_tag": None,
                                      "dst_net": "0.0.0.0/0",
                                      "ip_version": 4},
                                     {"dst_ports": ["1:65535"],
-                                     "dst_tag": None,
                                      "dst_net": "::/0",
                                      "ip_version": 6}],
-                 "inbound_rules": [{"src_ports": ["1:65535"],
-                                    "src_net": None,
+                 "inbound_rules": [{"dst_ports": ["1:65535"],
                                     "src_tag": "SGID-default",
                                     "ip_version": 4},
-                                   {"src_ports": ["1:65535"],
-                                    "src_net": None,
+                                   {"dst_ports": ["1:65535"],
                                     "src_tag": "SGID-default",
                                     "ip_version": 6}]},
             '/calico/policy/profile/SGID-default/tags':
@@ -265,6 +261,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         self.simulated_time_advance(t_etcd.PERIODIC_RESYNC_INTERVAL_SECS)
         expected_writes = {
             '/calico/config/InterfacePrefix': 'tap',
+            '/calico/config/Ready': True,
             '/calico/host/felix-host-1/workload/openstack/endpoint/DEADBEEF-1234-5678':
                 {"name": "tapDEADBEEF-12",
                  "profile_id": "SGID-default",
@@ -291,19 +288,15 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                  "ipv4_nets": []},
             '/calico/policy/profile/SGID-default/rules':
                 {"outbound_rules": [{"dst_ports": ["1:65535"],
-                                     "dst_tag": None,
                                      "dst_net": "0.0.0.0/0",
                                      "ip_version": 4},
                                     {"dst_ports": ["1:65535"],
-                                     "dst_tag": None,
                                      "dst_net": "::/0",
                                      "ip_version": 6}],
-                 "inbound_rules": [{"src_ports": ["1:65535"],
-                                    "src_net": None,
+                 "inbound_rules": [{"dst_ports": ["1:65535"],
                                     "src_tag": "SGID-default",
                                     "ip_version": 4},
-                                   {"src_ports": ["1:65535"],
-                                    "src_net": None,
+                                   {"dst_ports": ["1:65535"],
                                     "src_tag": "SGID-default",
                                     "ip_version": 6}]},
             '/calico/policy/profile/SGID-default/tags':
@@ -346,8 +339,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                  "ipv4_nets": []},
             '/calico/policy/profile/SG-1/rules':
                 {"outbound_rules": [],
-                 "inbound_rules": [{"src_ports": ["5060:5061"],
-                                    "src_net": None,
+                 "inbound_rules": [{"dst_ports": ["5060:5061"],
                                     "src_tag": "SGID-default",
                                     "ip_version": 4}]},
             '/calico/policy/profile/SG-1/tags':
@@ -399,7 +391,8 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         # Resync with all latest data - expect no etcd writes or deletes.
         print "\nResync with existing etcd data\n"
         self.simulated_time_advance(t_etcd.PERIODIC_RESYNC_INTERVAL_SECS)
-        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap'})
+        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap',
+                               '/calico/config/Ready': True,})
         self.assertEtcdDeletes(set([]))
 
         # Change SG-1 to allow only port 5060.
@@ -422,8 +415,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         expected_writes = {
             '/calico/policy/profile/SG-1/rules':
                 {"outbound_rules": [],
-                 "inbound_rules": [{"src_ports": [5060],
-                                    "src_net": None,
+                 "inbound_rules": [{"dst_ports": [5060],
                                     "src_tag": "SGID-default",
                                     "ip_version": 4}]},
             '/calico/policy/profile/SG-1/tags':
@@ -437,7 +429,8 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         self.db.get_security_groups.return_value[1]['security_group_rules'][0]['port_range_max'] = 5060
         print "\nResync with existing etcd data\n"
         self.simulated_time_advance(t_etcd.PERIODIC_RESYNC_INTERVAL_SECS)
-        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap'})
+        self.assertEtcdWrites({'/calico/config/InterfacePrefix': 'tap',
+                               '/calico/config/Ready': True,})
         self.assertEtcdDeletes(set([
             '/calico/host/felix-host-1/workload/openstack/endpoint/DEADBEEF-1234-5678',
             '/calico/host/felix-host-1/workload/openstack/endpoint/FACEBEEF-1234-5678',

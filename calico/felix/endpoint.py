@@ -51,10 +51,13 @@ class EndpointManager(ReferenceManager):
         self.dispatch_chains = dispatch_chains
         self.rules_mgr = rules_manager
 
-        # Endpoints that are in use; LocalEndpoint actors referenced by
-        # endpoint_id.
+        # All endpoint dicts that we know about.
         self.endpoints_by_id = {}
         self.endpoint_id_by_iface_name = {}
+
+        # Set of endpoints that are live on this host.  I.e. ones that we've
+        # increffed.
+        self.local_endpoint_ids = set()
 
     def _create(self, object_id):
         """
@@ -78,6 +81,16 @@ class EndpointManager(ReferenceManager):
     @actor_event
     def apply_snapshot(self, endpoints_by_id):
         missing_endpoints = set(self.endpoints_by_id.keys())
+
+        # Tell the dispatch chains about the local endpoints in advance so
+        # that we don't flap the dispatch chain at start-of-day.
+        local_iface_name_to_ep_id = {}
+        for ep_id, ep in endpoints_by_id.iteritems():
+            if ep and ep["host"] == self.config.HOSTNAME and ep.get("name"):
+                local_iface_name_to_ep_id[ep.get("name")] = ep_id
+        self.dispatch_chains.apply_snapshot(local_iface_name_to_ep_id,
+                                            async=True)
+
         for endpoint_id, endpoint in endpoints_by_id.iteritems():
             self.on_endpoint_update(endpoint_id, endpoint)
             missing_endpoints.discard(endpoint_id)
@@ -106,9 +119,9 @@ class EndpointManager(ReferenceManager):
             old_ep = self.endpoints_by_id.pop(endpoint_id, {})
             if old_ep.get("name") in self.endpoint_id_by_iface_name:
                 self.endpoint_id_by_iface_name.pop(old_ep.get("name"))
-            if self._is_starting_or_live(endpoint_id):
-                # Local endpoint is running, so remove our reference.
+            if endpoint_id in self.local_endpoint_ids:
                 self.decref(endpoint_id)
+                self.local_endpoint_ids.remove(endpoint_id)
         else:
             # Creation or modification
             _log.info("Endpoint %s modified or created", endpoint_id)
@@ -117,9 +130,10 @@ class EndpointManager(ReferenceManager):
 
         if endpoint and endpoint["host"] == self.config.HOSTNAME:
             _log.debug("Endpoint is local, ensuring it is active.")
-            if not self._is_starting_or_live(endpoint_id):
+            if endpoint_id not in self.local_endpoint_ids:
                 # This will trigger _on_object_activated to pass the endpoint
                 # we just saved off to the endpoint.
+                self.local_endpoint_ids.add(endpoint_id)
                 self.get_and_incref(endpoint_id)
 
     @actor_event
@@ -192,7 +206,7 @@ class LocalEndpoint(RefCountedActor):
         if old_profile_id != new_profile_id:
             if old_profile_id:
                 # Clean up the old profile.
-                self.rules_mgr.decref(old_profile_id)
+                self.rules_mgr.decref(old_profile_id, async=True)
             if new_profile_id is not None:
                 _log.debug("Acquiring new profile %s", new_profile_id)
                 self.rules_mgr.get_and_incref(new_profile_id, async=True)

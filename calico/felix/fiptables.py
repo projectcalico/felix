@@ -29,7 +29,7 @@ from calico.felix import frules
 
 from calico.felix.actor import Actor, actor_event, ResultOrExc, SplitBatchAndRetry
 from calico.felix.frules import (CHAIN_TO_ENDPOINT,
-                                 CHAIN_FROM_ENDPOINT)
+                                 CHAIN_FROM_ENDPOINT, FELIX_PREFIX)
 from gevent import subprocess
 import gevent
 import re
@@ -48,7 +48,6 @@ class DispatchChains(Actor):
     add/remove them from the chains.
     """
 
-    queue_size = 1000
     batch_delay = 0.1
 
     def __init__(self, config, ip_version, iptables_updater):
@@ -58,6 +57,16 @@ class DispatchChains(Actor):
         self.iptables_updater = iptables_updater
         self.iface_to_ep_id = {}
         self._dirty = False
+
+    @actor_event
+    def apply_snapshot(self, iface_to_ep_id):
+        _log.info("Applying dispatch chains snapshot.")
+        if self.iface_to_ep_id != iface_to_ep_id:
+            self.iface_to_ep_id = dict(iface_to_ep_id)  # Take a copy.
+        # Always reprogram the chain, even if it's empty.  This makes sure that
+        # we resync and it stops the iptables layer from marking our chain as
+        # missing.
+        self._dirty = True
 
     @actor_event
     def on_endpoint_added(self, iface_name, endpoint_id):
@@ -160,7 +169,7 @@ class IptablesUpdater(Actor):
         """Mapping from table to set of present chains.  Loaded at start
            of day and then kept in sync."""
 
-        self.explicitly_programmed_chains = defaultdict(set)
+        self.explicitly_prog_chains = defaultdict(set)
 
         self.required_chains = defaultdict(lambda: defaultdict(set))
         """Map from table to map from chain to the set of chains that it
@@ -290,31 +299,83 @@ class IptablesUpdater(Actor):
         if callback:
             self.completion_callbacks.append(callback)
 
+    @actor_event
+    def cleanup(self):
+        """
+        Trigger clean up
+        """
+        # In case someone deleted something from under us, reload from the
+        # dataplane.  This has side-effects outside our batch but only this
+        # method cares and it's important that we start with fresh information.
+        self._load_from_dataplane()
+        for table, chains in self.chains_in_dataplane.iteritems():
+            orphan_chains = chains - self.explicitly_prog_chains[table]
+            # Filter out chains that are already touched by this batch.  Note:
+            # We do not try to filter out chains that are referenced but not
+            # explicitly programmed, we'll catch those in _finish_msg_batch()
+            # and reprogram them as a stub.
+            chains_to_delete = [c for c in orphan_chains
+                                if c not in self.bch_affected_chains[table] and
+                                   c.startswith(FELIX_PREFIX)]
+            # SMC: It'd be nice if we could do a best-effort delete on these
+            # chains but that's hard to do since they'll all be processed as
+            # one atomic iptables-restore.
+            self.delete_chains(table, chains_to_delete)
+
     def _start_msg_batch(self, batch):
         self._reset_batched_work()
         return batch
 
     def _finish_msg_batch(self, batch, results):
         start = time.time()
-
+        modify_succeeded = False
         try:
             self._calculate_index_changes()
-            input_lines = self._calculate_ipt_input()
+            input_lines = self._calculate_ipt_modify_input()
             self._execute_iptables(input_lines)
+            modify_succeeded = True
+            try:
+                input_lines = self._calculate_ipt_delete_input()
+            except NothingToDo:
+                pass
+            else:
+                self._execute_iptables(input_lines)
         except CalledProcessError as e:
             if len(batch) == 1:
-                _log.error("Non-retryable %s failure. RC=%s", self.restore_cmd,
-                           e.returncode)
-                cb = self.completion_callbacks[0]
-                if batch[0].method.keywords.get("suppress_exc"):
+                # We only executed a single message, see what remedial action
+                # we can take.
+
+                try:
+                    cb = self.completion_callbacks[0]
+                except IndexError:
+                    cb = None
+
+                if modify_succeeded:
+                    # We succeeded in modifying the chain(s) but failed to
+                    # delete some chains.  The chain(s) that we were trying to
+                    # delete will have been re-written as safe DROP chains.
+                    # Such chains will be cleaned up next time we run cleanup.
+                    #
+                    # We can get here at start of day, before we've done our
+                    # first cleanup.
+                    _log.error("Failed to delete some chains.  Rewrote them "
+                               "as stubs.")
+                    e = None
                     final_result = ResultOrExc(None, None)
+                    # FIXME not that chains are still in dataplane.
+                    self._update_indexes()
                 else:
-                    final_result = ResultOrExc(None, e)
+                    _log.error("Non-retryable %s failure. RC=%s",
+                               self.restore_cmd, e.returncode)
+                    if batch[0].method.keywords.get("suppress_exc"):
+                        final_result = ResultOrExc(None, None)
+                    else:
+                        final_result = ResultOrExc(None, e)
                 if cb:
                     if batch[0].method.keywords.get("suppress_exc"):
-                        gevent.spawn(cb, None)
+                        cb(None)
                     else:
-                        gevent.spawn(e, None)
+                        cb(e)
                 results[0] = final_result
             else:
                 _log.error("Non-retryable error from a combined batch, "
@@ -336,9 +397,9 @@ class IptablesUpdater(Actor):
         # chains.  We'll use it below to decide
         # - whether we need to write a stub chain for a required chain.
         # - whether it's safe to delete a chain that's no longer referenced.
-        new_expl_prog_chains = defaultdict(
-            set,
-            self.explicitly_programmed_chains)
+        new_expl_prog_chains = defaultdict(set)
+        for table, old_chains in self.explicitly_prog_chains.iteritems():
+            new_expl_prog_chains[table] = set(old_chains)
         for table, table_upds in self.bch_updates.iteritems():
             for chain, upds in table_upds.iteritems():
                 if upds is not None:
@@ -411,7 +472,7 @@ class IptablesUpdater(Actor):
         self.bch_requiring_chain_upds = bch_reqrng_chns
 
     def _update_indexes(self):
-        self.explicitly_programmed_chains = self.bch_new_expl_prog_chains
+        self.explicitly_prog_chains = self.bch_new_expl_prog_chains
         for table in self.bch_requiring_chain_upds:
             for chain, reqng_chains in self.bch_requiring_chain_upds[table].iteritems():
                 if reqng_chains:
@@ -431,7 +492,11 @@ class IptablesUpdater(Actor):
                 else:
                     self.chains_in_dataplane[table].add(chain)
 
-    def _calculate_ipt_input(self):
+    def _calculate_ipt_modify_input(self):
+        """
+        Calculate the input for phase 1 of a batch, where we only modify and
+        create chains.
+        """
         # Valid input looks like this.
         #
         # *table
@@ -451,11 +516,32 @@ class IptablesUpdater(Actor):
             for chain_name, chain_updates in chains.iteritems():
                 if chain_updates is None:
                     # Delete the chain
-                    input_lines.append("--delete-chain %s" % chain_name)
+                    input_lines.extend(_stub_drop_rules(chain_name))
                 else:
                     input_lines.extend(chain_updates)
             input_lines.append("COMMIT")
         return input_lines
+
+    def _calculate_ipt_delete_input(self):
+        """
+        Calculate the input for phase 2 of a batch, where we actually
+        try to delete chains.
+        """
+        input_lines = []
+        found_delete = False
+        for table, chains in self.bch_updates.iteritems():
+            input_lines.append("*%s" % table)
+            for chain_name, chain_updates in chains.iteritems():
+                if chain_updates is None:
+                    # Delete the chain
+                    input_lines.append(":%s -" % chain_name)
+                    input_lines.append("--delete-chain %s" % chain_name)
+                    found_delete = True
+            input_lines.append("COMMIT")
+        if found_delete:
+            return input_lines
+        else:
+            raise NothingToDo()
 
     def _execute_iptables(self, input_lines):
         """
@@ -505,6 +591,7 @@ class IptablesUpdater(Actor):
                         if backoff > MAX_IPT_BACKOFF:
                             backoff = MAX_IPT_BACKOFF
                         backoff *= (1.5 + random.random())
+                        continue
                     elif num_tries >= MAX_IPT_RETRIES:
                         _log.error("Failed to run %s.\nOutput:\n%s\n"
                                    "Error:\n%s\nInput was:\n%s",
@@ -517,6 +604,9 @@ class IptablesUpdater(Actor):
                                    self.restore_cmd, out, err, input_str)
                         _log.error("Non-retryable error on line %s: %r",
                                    line_number, offending_line)
+                else:
+                    _log.error("%s completed with output:\n%s\n%s",
+                               self.restore_cmd, out, err)
                 raise CalledProcessError(cmd=cmd, returncode=rc)
 
 
@@ -536,3 +626,7 @@ def parse_ipt_save(raw_save_output):
             chain_name = line[1:].split(" ")[0]
             table.add(chain_name)
     return chains
+
+
+class NothingToDo(Exception):
+    pass
