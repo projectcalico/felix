@@ -1,4 +1,4 @@
 gevent
 greenlet
 netaddr
-python-etcd
+calico-python-etcd
