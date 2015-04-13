@@ -8,5 +8,5 @@
 set -e
 
 coverage erase
-tox "$@"
+PYTHONDONTWRITEBYTECODE=1 tox "$@"
 coverage html
