@@ -160,8 +160,6 @@ install -d -m 755 %{buildroot}%{_sysconfdir}
 %endif
 
 # Install config and other non-Python files
-install -d %{buildroot}%{_sysconfdir}/calico
-install etc/*.cfg.example %{buildroot}%{_sysconfdir}/calico
 install -d %{buildroot}%{_datadir}/calico/bird
 install etc/bird/*.template %{buildroot}%{_datadir}/calico/bird
 install -d %{buildroot}%{_bindir}
