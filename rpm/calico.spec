@@ -193,7 +193,6 @@ rm -rf $RPM_BUILD_ROOT
 %files felix
 %defattr(-,root,root,-)
 /usr/bin/calico-felix
-/etc/calico/felix.cfg.example
 %if 0%{?el7}
     %{_unitdir}/calico-felix.service
 %else

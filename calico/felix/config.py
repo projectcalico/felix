@@ -20,8 +20,8 @@ felix.config
 
 Configuration management for Felix.
 
-On instantiation, this module automatically parses the configuration file and
-builds a singleton configuration object. Other modules should just import the
+On instantiation, this module reads environment variables and builds a
+singleton configuration object. Other modules should just import the
 Config object and use the fields within it.
 """
 import os
@@ -57,26 +57,17 @@ class ConfigException(Exception):
         return "%s (data source : %s)" % (self.message, self.source)
 
 class Config(object):
-    def __init__(self, config_path):
+    def __init__(self):
         """
         Create a config.
         :raises EtcdException
         """
-        self._KnownSections = set()
-        self._KnownObjects  = set()
-
-        self._config_path = config_path
-        self._items = {}
-
-        self.read_cfg_file(config_path)
-
-        self.ETCD_ADDR = self.get_cfg_entry("global", "EtcdAddr",
-                                            "localhost:4001")
+        self.ETCD_ADDR = self.getenv("ETCDADDR", "localhost:4001")
         fields = self.ETCD_ADDR.split(":")
         if len(fields) != 2:
             raise ConfigException("Invalid format for EtcdAddr (%s) - must be "
                                   "hostname:port" %
-                                  (self.ETCD_ADDR), self._config_path)
+                                  (self.ETCD_ADDR), "environment")
 
         self.validate_addr("EtcdAddr", fields[0])
 
@@ -84,11 +75,9 @@ class Config(object):
             int(fields[1])
         except ValueError:
             raise ConfigException("Invalid port in EtcdAddr (%s)" %
-                                  (self.ETCD_ADDR), self._config_path)
+                                  (self.ETCD_ADDR), "environment")
 
-        self.HOSTNAME = self.get_cfg_entry("global",
-                                           "FelixHostname",
-                                           socket.gethostname())
+        self.HOSTNAME = self.getenv("HOSTNAME", socket.gethostname())
 
         self.STARTUP_CLEANUP_DELAY = 30
         self.METADATA_IP = "127.0.0.1"
@@ -122,47 +111,16 @@ class Config(object):
 
         self.validate_cfg()
 
-        self.warn_unused_cfg(cfg_dict)
-
-    def read_cfg_file(self, config_file):
-        self._parser = ConfigParser.ConfigParser()
-        self._parser.read(config_file)
-
-        # Build up the list of sections.
-        for section in self._parser.sections():
-            self._items[section] = dict(self._parser.items(section))
-
-        if not self._items:
-            log.warning("Configuration file %s has no sections",
-                        config_file)
-
-    def get_cfg_entry(self, section, name, default):
-        name = name.lower()
-        section = section.lower()
-
-        # We're assuming that there's only one section for now so we don't
-        # need the section name in the environment variable name.
-        assert section == "global"
-        env_var = ("FELIX_%s" % name).upper()
+    def getenv(self, name, default):
+        env_var = "FELIX_%s" % name
         log.debug("Looking for environment variable override %s", env_var)
         if env_var in os.environ:
             value = os.environ[env_var]
-            log.info("Environment variable %s=%r overrides config file: %s/%s",
-                     env_var, value, section, name)
+            log.info("Environment variable %s=%r overrides default %s",
+                     env_var, value, default)
             return value
 
-        if section not in self._items:
-            return default
-
-        item = self._items[section]
-
-        if name in item:
-            value = item[name]
-            del item[name]
-        else:
-            value = default
-
-        return value
+        return default
 
     def validate_cfg(self):
         #*********************************************************************#
@@ -193,19 +151,6 @@ class Config(object):
             # Metadata is not required.
             self.LOGFILE = None
 
-    def warn_unused_cfg(self, cfg_dict):
-        # Firewall that no unexpected items in the config file - i.e. ones we
-        # have not used.
-        for section in self._items.keys():
-            for lKey in self._items[section].keys():
-                log.warning("Got unexpected item %s=%s in %s",
-                            lKey, self._items[section][lKey], self._config_path)
-
-        for lKey in cfg_dict:
-            log.warning("Got unexpected etcd config item %s=%s",
-                        lKey, cfg_dict[lKey])
-
-
     def validate_addr(self, name, addr):
         """
         Validate an address, returning the IP address it resolves to. If the
@@ -219,10 +164,10 @@ class Config(object):
             stripped_addr = addr.strip()
             if not stripped_addr:
                 raise ConfigException("Blank %s value" % name,
-                                      self._config_path)
+                                      "environment")
 
             return socket.gethostbyname(addr)
         except socket.gaierror:
             raise ConfigException("Invalid or unresolvable %s value : %s" %
                                   (name, addr),
-                                  self._config_path)
+                                  "environment")

@@ -79,43 +79,20 @@ class TestConfig(unittest.TestCase):
         """
         Test various ways of defaulting config.
         """
-        files = [ "felix_missing.cfg", # does not exist
-                  "felix_empty.cfg", # empty file
-                  "felix_empty_section.cfg", # file with empty section
-                  "felix_extra.cfg", # extra config is just logged
-                  ]
+        host = socket.gethostname()
+        host_path = "/calico/host/%s/config/" % host
 
-        for filename in files:
-            host = socket.gethostname()
-            host_path = "/calico/host/%s/config/" % host
+        config = Config()
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "ExtraJunk": "whatever", #ignored
+                     "ResyncIntervalSecs": "123" }
+        config.update_config(cfg_dict)
 
-
-            config = Config("calico/felix/test/data/%s" % filename)
-            cfg_dict = { "InterfacePrefix": "blah",
-                         "ExtraJunk": "whatever", #ignored
-                         "ResyncIntervalSecs": "123" }
-            config.update_config(cfg_dict)
-
-            # Test defaulting.
-            self.assertEqual(config.ETCD_ADDR, "localhost:4001")
-            self.assertEqual(config.HOSTNAME, host)
-            self.assertEqual(config.IFACE_PREFIX, "blah")
-            self.assertEqual(config.RESYNC_INT_SEC, 123)
-
-    def test_invalid_port(self):
-
-        data = { "felix_invalid_port.cfg": "Invalid port in EtcdAddr",
-                 "felix_invalid_addr.cfg": "Invalid or unresolvable EtcdAddr",
-                 "felix_invalid_both.cfg": "Invalid or unresolvable EtcdAddr",
-                 "felix_invalid_format.cfg": "Invalid format for EtcdAddr"
-        }
-
-
-        for filename in data:
-            log.debug("Test filename : %s", filename)
-            with self.assertRaisesRegexp(ConfigException,
-                                         data[filename]):
-                config = Config("calico/felix/test/data/%s" % filename)
+        # Test defaulting.
+        self.assertEqual(config.ETCD_ADDR, "localhost:4001")
+        self.assertEqual(config.HOSTNAME, host)
+        self.assertEqual(config.IFACE_PREFIX, "blah")
+        self.assertEqual(config.RESYNC_INT_SEC, 123)
 
     def test_no_logfile(self):
         # Logging to file can be excluded by explicitly saying "none"
@@ -128,7 +105,7 @@ class TestConfig(unittest.TestCase):
 
         result = StubEtcdResult(host_path)
 
-        config = Config("calico/felix/test/data/felix_missing.cfg")
+        config = Config()
         cfg_dict = { "InterfacePrefix": "blah",
                      "LogFilePath": "None",
                      "ResyncIntervalSecs": "123" }
@@ -228,5 +205,5 @@ class TestConfig(unittest.TestCase):
         Test environment variables override config options,
         """
         with patch.dict("os.environ", {"FELIX_ETCDADDR": "testhost:1234"}):
-            cfg = config.Config("/tmp/felix.cfg")
+            cfg = config.Config()
         self.assertEqual(cfg.ETCD_ADDR, "testhost:1234")
