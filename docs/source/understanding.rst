@@ -8,7 +8,7 @@ also of considerations for deploying Calico at large scale.
    :maxdepth: 1
 
    l2-interconnectFabric
-   arch-felix-and-acl
+   architecture
    calico-neutron-api
    etcd-architecture
    etcd-data-model

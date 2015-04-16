@@ -14,7 +14,7 @@ solving this problem have problems at high scale.  Compared to these, we think
 Calico is more scalable, simpler and more flexible.  We think you should look
 into it if you have more than a handful of nodes on a single site.
 
-For a more detailed discussion of this topic, see our blog post at 
+For a more detailed discussion of this topic, see our blog post at
 http://www.projectcalico.org/why-calico/.
 
 "Does Calico work with IPv6?"
@@ -32,6 +32,10 @@ requirements and that nothing in the documents *mandates* the use of VLANs.
 
 "How Does Calico Maintain Saved State?"
 ---------------------------------------
+
+> Following the change to use etcd instead of message queues to communicate
+> between components, this document may now contain out of date information.
+> We will remedy this in the near future.
 
 State is saved in a few places in a Calico deployment, depending on
 whether it's global or local state.
