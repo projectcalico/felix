@@ -18,7 +18,7 @@ felix.fetcd
 
 Etcd polling functions.
 """
-from etcd import EtcdException
+from etcd import EtcdException, EtcdClusterIdChanged
 import etcd
 import itertools
 import json
@@ -196,6 +196,7 @@ class EtcdWatcher(Actor):
                                                 wait=True,
                                                 waitIndex=next_etcd_index,
                                                 recursive=True,
+                                                check_cluster_uuid=True,
                                                 timeout=Timeout(connect=10,
                                                                 read=90))
                     _log.debug("etcd response: %r", response)
@@ -205,6 +206,9 @@ class EtcdWatcher(Actor):
                     _log.debug("Read from etcd timed out, retrying.")
                     self._reconnect()
                     continue
+                except EtcdClusterIdChanged:
+                    _log.warn("Etcd cluster has restarted, resyncing.")
+                    continue_polling = False
                 except EtcdException as e:
                     # Sadly, python-etcd doesn't have a clean exception
                     # hierarchy; look at the message.  We only log the stack
