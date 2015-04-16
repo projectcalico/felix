@@ -23,6 +23,9 @@ import eventlet
 import json
 import re
 
+# OpenStack imports.
+from oslo.config import cfg
+
 # Calico imports.
 from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  TAGS_KEY_RE, HOST_DIR, key_for_endpoint,
@@ -30,6 +33,15 @@ from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  key_for_profile_rules, key_for_profile_tags,
                                  key_for_config)
 from calico.openstack.transport import CalicoTransport
+
+# Register Calico-specific options.
+calico_opts = [
+    cfg.StrOpt('etcd_host', default='localhost',
+               help="The hostname or IP of the etcd node/proxy"),
+    cfg.IntOpt('etcd_port', default=4001,
+               help="The port to use for the etcd node/proxy"),
+]
+cfg.CONF.register_opts(calico_opts, 'calico')
 
 LOG = None
 OPENSTACK_ENDPOINT_RE = re.compile(
@@ -53,7 +65,8 @@ class CalicoTransportEtcd(CalicoTransport):
 
     def initialize(self):
         # Prepare client for accessing etcd data.
-        self.client = etcd.Client()
+        self.client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+                                  port=cfg.CONF.calico.etcd_port)
 
         # Spawn a green thread for periodically resynchronizing etcd against
         # the OpenStack database.
