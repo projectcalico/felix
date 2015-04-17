@@ -56,7 +56,7 @@ versions of those packages are released by Ubuntu.
 ::
 
     Package: *
-    Pin: origin launchpad.net/project-calico
+    Pin: release o=LP-PPA-project-calico-*
     Pin-Priority: 1001
 
 Juno
