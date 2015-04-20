@@ -18,7 +18,9 @@ felix.fetcd
 
 Etcd polling functions.
 """
-from etcd import EtcdException, EtcdClusterIdChanged, EtcdKeyNotFound
+import socket
+from etcd import (EtcdException, EtcdClusterIdChanged, EtcdKeyNotFound,
+                  EtcdEventIndexCleared)
 import etcd
 import itertools
 import json
@@ -26,7 +28,7 @@ import logging
 import gevent
 from types import StringTypes
 from urllib3 import Timeout
-from urllib3.exceptions import ReadTimeoutError
+from urllib3.exceptions import ReadTimeoutError, ConnectTimeoutError, HTTPError
 
 from calico import common
 from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
@@ -200,10 +202,27 @@ class EtcdWatcher(Actor):
                                                                 read=90),
                                                 check_cluster_id=True)
                     _log.debug("etcd response: %r", response)
+                except ConnectTimeoutError:
+                    _log.warning("Connection timeout when trying to  connect "
+                                 "to etcd")
+                    self._reconnect()
+                    continue
                 except ReadTimeoutError:
                     # This is expected when we're doing a poll and nothing
                     # happened.
                     _log.debug("Read from etcd timed out, retrying.")
+                    self._reconnect()
+                    continue
+                except socket.timeout:
+                    # That this leaks out appears to be an artifact of running
+                    # urllib3 on top of gevent.  Be defensive and reconnect.
+                    _log.debug("Raw socket.timeout leaked out of "
+                               "python-etcd.  Retrying.")
+                    self._reconnect()
+                    continue
+                except HTTPError:
+                    _log.exception("Unexpected error from urllib3, "
+                                   "reconnecting to etcd...")
                     self._reconnect()
                     continue
                 except EtcdClusterIdChanged:
@@ -211,11 +230,16 @@ class EtcdWatcher(Actor):
                                "full resync...")
                     continue_polling = False
                     continue
+                except EtcdEventIndexCleared:
+                    # Our poll fell too far behind and etcd can no longer
+                    # service our request.
+                    _log.error("Fell too far behind current etcd index, "
+                               "triggering a full resync.")
+                    continue_polling = False
                 except EtcdException as e:
-                    # Sadly, python-etcd doesn't have a clean exception
-                    # hierarchy; look at the message.  We only log the stack
-                    # trace for errors we're not expecting to avoid copious
-                    # log spam.
+                    # Sadly, python-etcd doesn't have a dedicated exception
+                    # for the "no more machines in cluster" error. Parse the
+                    # message:
                     msg = (e.message or "unknown").lower()
                     if "no more machines" in msg:
                         # This error comes from python-etcd when it can't
@@ -225,14 +249,9 @@ class EtcdWatcher(Actor):
                         # That'd recover from errors caused by resource
                         # exhaustion/leaks.
                         _log.error("Connection to etcd failed, will retry.")
-                    elif "requested index is outdated" in msg:
-                        # Error from etcd itself, this is fatal for our event
-                        # poll, we have to do a full resync.
-                        _log.error("Fell too far behind current etcd index, "
-                                   "triggering a full resync.")
-                        continue_polling = False
                     else:
-                        # Assume any other errors are fatal.
+                        # Assume any other errors are fatal to our poll and
+                        # do a full resync.
                         _log.exception("Unknown etcd error %r; doing resync.",
                                        e.message)
                         continue_polling = False
@@ -517,7 +536,17 @@ def validate_rules(rules):
                 issues.append("Invalid action in rule %s." % rule)
 
             icmp_type = rule.get('icmp_type')
-            #TODO: firewall the icmp_type too
+            if icmp_type is not None:
+                if not 0 <= icmp_type <= 255:
+                    issues.append("ICMP type is out of range.")
+            icmp_code = rule.get("icmp_code")
+            if icmp_code is not None:
+                if not 0 <= icmp_code <= 255:
+                    issues.append("ICMP code is out of range.")
+                if icmp_type is None:
+                    # FIXME ICMP code without ICMP type not supported by iptables
+                    # Firewall against that for now.
+                    issues.append("ICMP code specified without ICMP type.")
 
     if issues:
         raise ValidationFailed(" ".join(issues))
