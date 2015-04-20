@@ -347,16 +347,6 @@ On a compute node, perform the following steps:
 
          initctl start bird
 
-12. Create the ``/etc/calico/felix.cfg`` file by copying
-    ``/etc/calico/felix.cfg.example`` and edit it:
-
-    -  Change the ``PluginAddress`` and ``ACLAddress`` settings to the
-       host name or IP address of the controller node.
-    -  Restart the Felix service:
-
-       - on RHEL 6.5, run ``initctl start calico-felix``.
-       - on RHEL 7, run ``systemctl restart calico-felix``.
-
 Next Steps
 ----------
 

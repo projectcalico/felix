@@ -306,15 +306,6 @@ On a compute node, perform the following steps:
    configuration appropriately. You should consult the relevant
    documentation for your chosen BGP stack.
 
-9.  Create the ``/etc/calico/felix.cfg`` file by taking a copy of the
-    supplied sample config at ``/etc/calico/felix.cfg.example``. Then,
-    in ``/etc/calico/felix.cfg``:
-
-    -  Change both the ``PluginAddress`` and ``ACLAddress`` settings to
-       the host name or IP address of the controller node.
-
-10. Restart the Felix service with ``service calico-felix restart``.
-
 Next Steps
 ----------
 

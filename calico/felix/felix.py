@@ -169,12 +169,8 @@ def main():
         # Initialise the logging with default parameters.
         common.default_logging()
 
-        # Load config
-        # FIXME: old felix used argparse but that's not in Python 2.6, so
-        # hard-coded path.
-
         try:
-            config = Config("/etc/calico/felix.cfg")
+            config = Config()
         except:
             # Attempt to open a log file, ignoring any errors it gets, before
             # we raise the exception.

@@ -160,8 +160,6 @@ install -d -m 755 %{buildroot}%{_sysconfdir}
 %endif
 
 # Install config and other non-Python files
-install -d %{buildroot}%{_sysconfdir}/calico
-install etc/*.cfg.example %{buildroot}%{_sysconfdir}/calico
 install -d %{buildroot}%{_datadir}/calico/bird
 install etc/bird/*.template %{buildroot}%{_datadir}/calico/bird
 install -d %{buildroot}%{_bindir}
@@ -193,7 +191,6 @@ rm -rf $RPM_BUILD_ROOT
 %files felix
 %defattr(-,root,root,-)
 /usr/bin/calico-felix
-/etc/calico/felix.cfg.example
 %if 0%{?el7}
     %{_unitdir}/calico-felix.service
 %else
