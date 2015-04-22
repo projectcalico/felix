@@ -289,10 +289,6 @@ class ActiveIpset(RefCountedActor):
         # Members which really are in the ipset.
         self.programmed_members = None
 
-        # Do the sets exist?
-        self.set_exists = ipset_exists(self.name)
-        self.tmpset_exists = ipset_exists(self.tmpname)
-
         # Notified ready?
         self.notified_ready = False
 
@@ -329,10 +325,11 @@ class ActiveIpset(RefCountedActor):
     @actor_message()
     def on_unreferenced(self):
         try:
-            if self.set_exists:
-                futils.check_call(["ipset", "destroy", self.name])
-            if self.tmpset_exists:
-                futils.check_call(["ipset", "destroy", self.tmpname])
+            # Destroy the ipsets - ignoring any errors.
+            _log.debug("Delete ipsets %s and %s if they exist",
+                       self.name, self.tmpname)
+            futils.call_silent(["ipset", "destroy", self.name])
+            futils.call_silent(["ipset", "destroy", self.tmpname])
         finally:
             self._notify_cleanup_complete()
 
@@ -354,12 +351,12 @@ class ActiveIpset(RefCountedActor):
         fd, filename = tempfile.mkstemp(text=True)
         f = os.fdopen(fd, "w")
 
-        if not self.set_exists:
+        if not ipset_exists(self.name):
             # ipset does not exist, so just create it and put the data in it.
             set_name = self.name
             create = True
             swap = False
-        elif not self.tmpset_exists:
+        elif not ipset_exists(self.tmpname):
             # Set exists, but tmpset does not
             set_name = self.tmpname
             create = True
@@ -386,13 +383,6 @@ class ActiveIpset(RefCountedActor):
 
         # Load that data.
         futils.check_call(["ipset", "restore", "-file", filename])
-
-        # By the time we get here, the set exists, and the tmpset does not if
-        # we just destroyed it after a swap (it might still exist if it did and
-        # the main set did not when we started, unlikely though that seems!).
-        self.set_exists = True
-        if swap:
-            self.tmpset_exists = False
 
         # Tidy up the tmp file.
         os.remove(filename)
