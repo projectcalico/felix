@@ -519,7 +519,16 @@ installation that uses an IP fabric will be limited to the routing table
 size of its constituent network hardware, with a reasonable upper limit
 today of 128,000 endpoints.
 
+On the other hand, with an Ethernet frabric, all your vRouters have to
+handle the endpoints for the whole network (both in BGP and in the
+kernel). Switching to an IP fabric allows you to shift the burden to
+the North: if your spine is part of the IP fabric, each vRouter may
+just learn the routes to other endpoints in the rack. Only the spine
+has to know all endpoints and, as there are fewer of them, it may be
+less expensive to scale them appropriately.
 
+An IP fabric also enables some scenarios difficult to implement with
+an Ethernet fabric like anycast IP.
 
 .. [#endpoints]
    In Calico's terminology, an endpoint is an IP address and interface.
