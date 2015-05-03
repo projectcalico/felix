@@ -32,10 +32,13 @@ the native networking implementation – but with higher
 
 ## How do I get started with Project Calico?
 
-To get started, you first need a working installation of
-[OpenStack](http://www.openstack.org/). Then download and install the latest
-stable build of Calico following the instructions
+To get started on
+[OpenStack](http://www.openstack.org/) follow the instructions
 [here](http://docs.projectcalico.org/en/latest/openstack.html).
+
+To get started on
+[Docker](http://www.docker.com/) follow the instructions
+[here](https://github.com/Metaswitch/calico-docker/blob/master/README.md).
 
 Technical documentation is [here](http://docs.projectcalico.org/). For
 information about contributing to Calico itself, see the section titled
