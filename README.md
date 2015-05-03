@@ -90,10 +90,10 @@ type:
 
     pip install -e .
 
-This will install the code and all its dependencies, *except for Neutron*. This
+This will install the code and all its dependencies, *except for Neutron or Docker dependencies*. This
 is all you need to work on Felix. If you want to work on our OpenStack plugin,
 you'll also need to install Neutron: doing that is outside the scope of this
-article.
+article.  If you want to work on Docker integration please see the [calico-docker](https://github.com/Metaswitch/calico-docker) repo.
 
 To run the unit tests, you'll also need to type:
 
