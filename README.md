@@ -24,7 +24,7 @@ environments.
 ## What does Calico do?
 
 Calico integrates seamlessly with the cloud orchestration system (such as
-OpenStack) to enable secure IP communication between virtual machines. As VMs
+OpenStack) to enable secure IP communication between virtual machines or containers. As VMs or containers
 are created or destroyed, their IP addresses are advertised to the rest of the
 network and they are able to send/receive data over IP just as they would with
 the native networking implementation – but with higher
@@ -34,9 +34,7 @@ the native networking implementation – but with higher
 
 To get started on
 [OpenStack](http://www.openstack.org/) follow the instructions
-[here](http://docs.projectcalico.org/en/latest/openstack.html).
-
-To get started on
+[here](http://docs.projectcalico.org/en/latest/openstack.html). To get started on
 [Docker](http://www.docker.com/) follow the instructions
 [here](https://github.com/Metaswitch/calico-docker/blob/master/README.md).
 
