@@ -29,9 +29,18 @@ import calico.openstack.mech_calico as mech_calico
 import calico.openstack.t_etcd as t_etcd
 
 
-class EtcdKeyNotFound(BaseException):
+ETCD_DIRECTORY = object()
+
+
+class EtcdException(BaseException):
     pass
 
+
+class EtcdKeyNotFound(EtcdException):
+    pass
+
+
+lib.m_etcd.EtcdException = EtcdException
 lib.m_etcd.EtcdKeyNotFound = EtcdKeyNotFound
 
 
@@ -57,6 +66,9 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
             self.recent_writes[key] = json.loads(value)
         except ValueError:
             self.recent_writes[key] = value
+        while key:
+            key = key.rpartition("/")[0]
+            self.etcd_data[key] = ETCD_DIRECTORY
 
     def check_etcd_delete(self, key, **kwargs):
         """Print each etcd delete as it occurs."""
@@ -68,7 +80,22 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                 if k == key or k[:keylen] == key + '/':
                     del self.etcd_data[k]
             self.recent_deletes.add(key + '(recursive)')
+        elif kwargs.get('dir', False):
+            # Non-recursive directory deletion.
+            keylen = len(key) + 1
+            for k in self.etcd_data.keys():
+                if k[:keylen] == key + '/' and len(k) > len(key):
+                    print "Directory not empty.  Contains: %r" % k
+                    raise lib.m_etcd.EtcdException("Dir not empty")
+            try:
+                value = self.etcd_data.pop(key)
+                self.assertTrue(value is ETCD_DIRECTORY)
+            except KeyError:
+                raise lib.m_etcd.EtcdKeyNotFound()
+            self.recent_deletes.add(key + '(dir)')
         else:
+            self.assertNotEquals(self.etcd_data[key],
+                                 ETCD_DIRECTORY)
             del self.etcd_data[key]
             self.recent_deletes.add(key)
 
@@ -225,7 +252,9 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         context._port = lib.port1
         self.driver.delete_port_postcommit(context)
         self.assertEtcdWrites({})
-        self.assertEtcdDeletes(set(['/calico/v1/host/felix-host-1/workload/openstack/instance-1/endpoint/DEADBEEF-1234-5678']))
+        self.assertEtcdDeletes(set(['/calico/v1/host/felix-host-1/workload/openstack/instance-1/endpoint/DEADBEEF-1234-5678',
+                                    '/calico/v1/host/felix-host-1/workload/openstack/instance-1/endpoint(dir)',
+                                    '/calico/v1/host/felix-host-1/workload/openstack/instance-1(dir)',]))
         self.osdb_ports = [lib.port2]
 
         # Do another resync - expect no changes to the etcd data.
@@ -282,7 +311,9 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
             "ipv6_nets": []
         }
         self.assertEtcdWrites(expected_writes)
-        self.assertEtcdDeletes(set(['/calico/v1/host/felix-host-1/workload/openstack/instance-1/endpoint/DEADBEEF-1234-5678']))
+        self.assertEtcdDeletes(set(['/calico/v1/host/felix-host-1/workload/openstack/instance-1/endpoint/DEADBEEF-1234-5678',
+                                    '/calico/v1/host/felix-host-1/workload/openstack/instance-1/endpoint(dir)',
+                                    '/calico/v1/host/felix-host-1/workload/openstack/instance-1(dir)',]))
 
         # Now resync again without updating self.osdb_ports to reflect that
         # port1 has moved to new-host.  The effect will be as though we've
@@ -301,7 +332,12 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                  "ipv6_nets": []}
         }
         self.assertEtcdWrites(expected_writes)
-        self.assertEtcdDeletes(set(['/calico/v1/host/new-host/workload/openstack/instance-1/endpoint/DEADBEEF-1234-5678']))
+        self.assertEtcdDeletes(set(['/calico/v1/host/new-host/workload/openstack/instance-1/endpoint/DEADBEEF-1234-5678',
+                                    '/calico/v1/host/new-host/workload/openstack/instance-1/endpoint(dir)',
+                                    '/calico/v1/host/new-host/workload/openstack/instance-1(dir)',
+                                    '/calico/v1/host/new-host/workload/openstack(dir)',
+                                    '/calico/v1/host/new-host/workload(dir)',
+                                    '/calico/v1/host/new-host(dir)',]))
 
         # Add another port with an IPv6 address.
         context._port = lib.port3.copy()
@@ -460,7 +496,14 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         self.assertEtcdWrites({})
         self.assertEtcdDeletes(set([
             '/calico/v1/host/felix-host-1/workload/openstack/instance-1/endpoint/DEADBEEF-1234-5678',
+            '/calico/v1/host/felix-host-1/workload/openstack/instance-1/endpoint(dir)',
+            '/calico/v1/host/felix-host-1/workload/openstack/instance-1(dir)',
             '/calico/v1/host/felix-host-1/workload/openstack/instance-2/endpoint/FACEBEEF-1234-5678',
+            '/calico/v1/host/felix-host-1/workload/openstack/instance-2/endpoint(dir)',
+            '/calico/v1/host/felix-host-1/workload/openstack/instance-2(dir)',
+            '/calico/v1/host/felix-host-1/workload/openstack(dir)',
+            '/calico/v1/host/felix-host-1/workload(dir)',
+            '/calico/v1/host/felix-host-1(dir)',
             '/calico/v1/policy/profile/SGID-default(recursive)']))
 
     def test_noop_entry_points(self):

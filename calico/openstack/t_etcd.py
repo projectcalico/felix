@@ -32,7 +32,8 @@ from oslo.config import cfg
 from calico.datamodel_v1 import (READY_KEY, CONFIG_DIR, TAGS_KEY_RE, HOST_DIR,
                                  key_for_endpoint, PROFILE_DIR,
                                  key_for_profile, key_for_profile_rules,
-                                 key_for_profile_tags, key_for_config)
+                                 key_for_profile_tags, key_for_config,
+                                 VERSION_DIR)
 from calico.openstack.transport import CalicoTransport
 
 # Register Calico-specific options.
@@ -198,11 +199,7 @@ class CalicoTransportEtcd(CalicoTransport):
                     # cases the etcd key is no longer valid and should be
                     # deleted.  In the migration case, data will be written
                     # below to an etcd key that incorporates the new hostname.
-                    try:
-                        self.client.delete(child.key)
-                    except etcd.EtcdKeyNotFound:
-                        LOG.debug("Key %s, which we were deleting, "
-                                  "disappeared", child.key)
+                    self._delete_key_and_empty_parents(child.key)
 
         # Now write etcd data for any endpoints remaining in the ports dict;
         # these are new endpoints - i.e. never previously represented in etcd
@@ -224,6 +221,30 @@ class CalicoTransportEtcd(CalicoTransport):
             self.needed_profiles -= self.profiles_to_clean_up
             self.profiles_to_clean_up.clear()
 
+    def _delete_key_and_empty_parents(self, key, stop_before=VERSION_DIR):
+        """
+        Tries to delete the given etcd key and then each of its
+        parent directories iff they are empty.
+        """
+        delete_failed = False
+        directory = False
+        assert key.startswith(stop_before), ("Key %s wasn't contained in %s" %
+                                             (key, stop_before))
+        while (len(key.strip("/")) > len(stop_before.strip("/")) and
+               not delete_failed):
+            try:
+                LOG.debug("Trying to delete %s %s",
+                          "directory" if directory else "key", key)
+                self.client.delete(key, dir=directory)
+            except etcd.EtcdKeyNotFound:
+                LOG.debug("Key %s, which we were deleting, disappeared", key)
+            except etcd.EtcdException as e:
+                # Expected when we try to delete a non-empty parent.
+                LOG.debug("Failed to delete %s (%r), giving up.", key, e)
+                delete_failed = True
+            else:
+                key = key.rpartition("/")[0]
+                directory = True
 
     def port_etcd_key(self, port):
         return key_for_endpoint(port['binding:host_id'],
@@ -390,11 +411,7 @@ class CalicoTransportEtcd(CalicoTransport):
     def endpoint_deleted(self, port):
         # Delete the etcd key for this endpoint.
         key = self.port_etcd_key(port)
-        try:
-            self.client.delete(key)
-        except etcd.EtcdKeyNotFound:
-            # Already gone, treat as success.
-            LOG.debug("Key %s, which we were deleting, disappeared", key)
+        self._delete_key_and_empty_parents(key, stop_before=HOST_DIR)
 
     def security_group_updated(self, sg):
         # Update the data that we're keeping for this security group.
