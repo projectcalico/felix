@@ -475,8 +475,8 @@ class EtcdWatcher(Actor):
 
     def on_workload_delete(self, response, hostname, orchestrator,
                            workload_id):
-        _log.info("Workload dir %s/%s/%s deleted, removing contained hosts",
-                  hostname, orchestrator, workload_id)
+        _log.debug("Workload dir %s/%s/%s deleted, removing endpoints",
+                   hostname, orchestrator, workload_id)
         for endpoint_id in list(self.endpoint_ids_per_host[hostname]):
             if (endpoint_id.orchestrator == orchestrator and
                     endpoint_id.workload == workload_id):

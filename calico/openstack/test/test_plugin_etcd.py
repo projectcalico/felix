@@ -588,6 +588,19 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
             'icmp_code': 100,
         })
 
+    def test_openstack_dirs_re(self):
+        self.assertFalse(t_etcd.OPENSTACK_DIRS_RE.match("/calico"))
+        self.assertFalse(t_etcd.OPENSTACK_DIRS_RE.match("/calico/v1"))
+        self.assertFalse(t_etcd.OPENSTACK_DIRS_RE.match("/calico/v1/"))
+        self.assertFalse(t_etcd.OPENSTACK_DIRS_RE.match("/calico/v1/host"))
+        self.assertFalse(t_etcd.OPENSTACK_DIRS_RE.match("/calico/v1/host/"))
+
+        self.assertTrue(t_etcd.OPENSTACK_DIRS_RE.match("/calico/v1/host/abcd"))
+        self.assertTrue(t_etcd.OPENSTACK_DIRS_RE.match("/calico/v1/host/abcd/workload"))
+        self.assertTrue(t_etcd.OPENSTACK_DIRS_RE.match("/calico/v1/host/abcd/workload/openstack"))
+        self.assertTrue(t_etcd.OPENSTACK_DIRS_RE.match("/calico/v1/host/abcd/workload/openstack/instance-1"))
+        self.assertTrue(t_etcd.OPENSTACK_DIRS_RE.match("/calico/v1/host/abcd/workload/openstack/instance-1/endpoint"))
+
     def assertNeutronToEtcd(self, neutron_rule, exp_etcd_rule):
         etcd_rule = t_etcd._neutron_rule_to_etcd_rule(neutron_rule)
         self.assertEqual(etcd_rule, exp_etcd_rule)

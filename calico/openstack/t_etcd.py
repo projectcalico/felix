@@ -49,6 +49,9 @@ LOG = None
 OPENSTACK_ENDPOINT_RE = re.compile(
     r'^' + HOST_DIR +
     r'/(?P<hostname>[^/]+)/.*openstack.*/endpoint/(?P<endpoint_id>[^/]+)')
+OPENSTACK_DIRS_RE = re.compile(
+    r'^' + HOST_DIR + r'/(?:[^/]+)(?:/[^/]+(?:/openstack(?:/[^/]+(?:/endpoint)?)?)?)?$'
+)
 
 json_decoder = json.JSONDecoder()
 
@@ -199,7 +202,15 @@ class CalicoTransportEtcd(CalicoTransport):
                     # cases the etcd key is no longer valid and should be
                     # deleted.  In the migration case, data will be written
                     # below to an etcd key that incorporates the new hostname.
-                    self._delete_key_and_empty_parents(child.key)
+                    self._delete_key_and_empty_parents(child.key,
+                                                       stop_before=HOST_DIR)
+            else:
+                # Check if it's a left-over empty directory.
+                m = OPENSTACK_DIRS_RE.match(child.key)
+                if child.dir and m:
+                    self._delete_key_and_empty_parents(child.key,
+                                                       directory=True,
+                                                       stop_before=HOST_DIR)
 
         # Now write etcd data for any endpoints remaining in the ports dict;
         # these are new endpoints - i.e. never previously represented in etcd
@@ -221,15 +232,16 @@ class CalicoTransportEtcd(CalicoTransport):
             self.needed_profiles -= self.profiles_to_clean_up
             self.profiles_to_clean_up.clear()
 
-    def _delete_key_and_empty_parents(self, key, stop_before=VERSION_DIR):
+    def _delete_key_and_empty_parents(self, key, stop_before=VERSION_DIR,
+                                      directory=False):
         """
         Tries to delete the given etcd key and then each of its
         parent directories iff they are empty.
         """
         delete_failed = False
-        directory = False
         assert key.startswith(stop_before), ("Key %s wasn't contained in %s" %
                                              (key, stop_before))
+        num_iterations = 0
         while (len(key.strip("/")) > len(stop_before.strip("/")) and
                not delete_failed):
             try:
@@ -242,9 +254,11 @@ class CalicoTransportEtcd(CalicoTransport):
                 # Expected when we try to delete a non-empty parent.
                 LOG.debug("Failed to delete %s (%r), giving up.", key, e)
                 delete_failed = True
-            else:
-                key = key.rpartition("/")[0]
-                directory = True
+            key = key.rpartition("/")[0]
+            directory = True
+
+            num_iterations += 1
+            assert num_iterations < 1000, "Infinite loop deleting key %s."
 
     def port_etcd_key(self, port):
         return key_for_endpoint(port['binding:host_id'],
