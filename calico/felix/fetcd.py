@@ -300,7 +300,7 @@ class EtcdWatcher(Actor):
         self.splitter.apply_snapshot(rules_by_id,
                                      tags_by_id,
                                      endpoints_by_id,
-                                     async=False)
+                                     async=True)
         # The etcd_index is the high-water-mark for the snapshot, record that
         # we want to poll starting at the next index.
         self.next_etcd_index = initial_dump.etcd_index + 1
@@ -420,7 +420,7 @@ class EtcdWatcher(Actor):
         _log.debug("Endpoint %s updated", combined_id)
         self.endpoint_ids_per_host[combined_id.host].add(combined_id)
         endpoint = parse_endpoint(self.config, endpoint_id, response.value)
-        self.splitter.on_endpoint_update(combined_id, endpoint)
+        self.splitter.on_endpoint_update(combined_id, endpoint, async=True)
 
     def on_endpoint_delete(self, response, hostname, orchestrator,
                            workload_id, endpoint_id):
@@ -430,31 +430,31 @@ class EtcdWatcher(Actor):
         self.endpoint_ids_per_host[combined_id.host].discard(combined_id)
         if not self.endpoint_ids_per_host[combined_id.host]:
             del self.endpoint_ids_per_host[combined_id.host]
-        self.splitter.on_endpoint_update(combined_id, None)
+        self.splitter.on_endpoint_update(combined_id, None, async=True)
 
     def on_rules_set(self, response, profile_id):
         _log.debug("Rules for %s set", profile_id)
         rules = parse_rules(profile_id, response.value)
-        self.splitter.on_rules_update(profile_id, rules)
+        self.splitter.on_rules_update(profile_id, rules, async=True)
 
     def on_rules_delete(self, response, profile_id):
         _log.debug("Rules for %s deleted", profile_id)
-        self.splitter.on_rules_update(profile_id, None)
+        self.splitter.on_rules_update(profile_id, None, async=True)
 
     def on_tags_set(self, response, profile_id):
         _log.debug("Tags for %s set", profile_id)
         rules = parse_tags(profile_id, response.value)
-        self.splitter.on_tags_update(profile_id, rules)
+        self.splitter.on_tags_update(profile_id, rules, async=True)
 
     def on_tags_delete(self, response, profile_id):
         _log.debug("Tags for %s deleted", profile_id)
-        self.splitter.on_tags_update(profile_id, None)
+        self.splitter.on_tags_update(profile_id, None, async=True)
 
     def on_profile_delete(self, response, profile_id):
         # Fake deletes for the rules and tags.
         _log.debug("Whole profile %s deleted", profile_id)
-        self.splitter.on_rules_update(profile_id, None)
-        self.splitter.on_tags_update(profile_id, None)
+        self.splitter.on_rules_update(profile_id, None, async=True)
+        self.splitter.on_tags_update(profile_id, None, async=True)
 
     def on_host_delete(self, response, hostname):
         ids_on_that_host = self.endpoint_ids_per_host.pop(hostname, set())
