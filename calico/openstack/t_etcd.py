@@ -23,7 +23,6 @@ import eventlet
 import eventlet.event
 from eventlet.semaphore import Semaphore
 import json
-import os
 import re
 import uuid
 
@@ -69,55 +68,49 @@ class CalicoTransportEtcd(CalicoTransport):
         # Initialize logger.
         global LOG
         LOG = logger
-        self.my_pid = None
 
-    def initialize(self):
-        # Prepare client for accessing etcd data.
-        my_pid = os.getpid()
-        if my_pid != self.my_pid:
-            if self.my_pid:
-                LOG.warning("PID changed from %s to %s, reinitializing",
-                            self.my_pid, my_pid)
-            self.my_pid = my_pid
-            self.client = etcd.Client(host=cfg.CONF.calico.etcd_host,
-                                      port=cfg.CONF.calico.etcd_port)
-            self.my_id = uuid.uuid4().hex
-            LOG.info("XXXXX My leadership ID = %s", self.my_id)
+        LOG.info("Calico transport created.")
 
-            # We will remember the OpenStack security group data, between resyncs,
-            # so that we can generate profiles when needed for new or updated
-            # endpoints.  Start off with an empty set.
-            self.sgs = {}
-            # Semaphore to protect all access to the sgs dict.
-            self._sgs_semaphore = Semaphore(1)
+        self.client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+                                  port=cfg.CONF.calico.etcd_port)
+        self.my_id = uuid.uuid4().hex
+        LOG.info("Chose leader UUID: %s", self.my_id)
 
-            # Also the set of profile IDs that we need for the current endpoints,
-            # so that we can generate the profile data if an underlying security
-            # group changes.  We clean this up lazily on the periodic resync so
-            # it should be a safe over-approximation.
-            self.needed_profiles = set()
-            # And set of profiles that are no longer needed, populated during
-            # resync.
-            self.profiles_to_clean_up = set()
-            # Semaphore protecting the needed_profiles and profiles_to_clean_up
-            # sets from concurrent modification between the main and resync
-            # threads.
-            self.profile_semaphore = Semaphore(1)
+        # We will remember the OpenStack security group data, between resyncs,
+        # so that we can generate profiles when needed for new or updated
+        # endpoints.  Start off with an empty set.
+        self.sgs = {}
+        # Semaphore to protect all access to the sgs dict.
+        self._sgs_semaphore = Semaphore(1)
 
-            # This event is used exactly once, at start of day, to delay all
-            # endpoint creation events behind security group synchronization.
-            # Note that this is a temporary work-around for a more severe problem,
-            # and should not be considered good architectural practice.
-            # This event has no meaningful return value.
-            self.start_of_day_lock = eventlet.event.Event()
-            self._start_of_day_complete = False
+        # Also the set of profile IDs that we need for the current endpoints,
+        # so that we can generate the profile data if an underlying security
+        # group changes.  We clean this up lazily on the periodic resync so
+        # it should be a safe over-approximation.
+        self.needed_profiles = set()
+        # And set of profiles that are no longer needed, populated during
+        # resync.
+        self.profiles_to_clean_up = set()
+        # Semaphore protecting the needed_profiles and profiles_to_clean_up
+        # sets from concurrent modification between the main and resync
+        # threads.
+        self.profile_semaphore = Semaphore(1)
 
-            # Spawn a green thread for periodically resynchronizing etcd against
-            # the OpenStack database.
-            eventlet.spawn(self.periodic_resync_thread)
+        # This event is used exactly once, at start of day, to delay all
+        # endpoint creation events behind security group synchronization.
+        # Note that this is a temporary work-around for a more severe problem,
+        # and should not be considered good architectural practice.
+        # This event has no meaningful return value.
+        self.start_of_day_lock = eventlet.event.Event()
+        self._start_of_day_complete = False
+
+        # Spawn a green thread for periodically resynchronizing etcd against
+        # the OpenStack database.
+        self.stopped = False
+        eventlet.spawn(self.periodic_resync_thread)
 
     def periodic_resync_thread(self):
-        while True:
+        while not self.stopped:
             LOG.info("%s Calico plugin doing periodic resync.", self.my_id)
             try:
                 LOG.info("%s Trying to claim leadership", self.my_id)
@@ -440,7 +433,6 @@ class CalicoTransportEtcd(CalicoTransport):
         # processing is complete. Note that, if start of day processing never
         # completes, we'll wait for a very long time indeed: for this reason,
         # log if we're going to have to wait for start-of-day processing.
-        self.initialize()
         if not self.start_of_day_lock.ready():
             LOG.warning(
                 "Endpoint creation blocked behind start of day processing"
@@ -462,18 +454,15 @@ class CalicoTransportEtcd(CalicoTransport):
 
     def endpoint_updated(self, port):
         # Do the same as for endpoint_created.
-        self.initialize()
         self.endpoint_created(port)
 
     def endpoint_deleted(self, port):
         # Delete the etcd key for this endpoint.
-        self.initialize()
         key = self.port_etcd_key(port)
         self._delete_key_and_empty_parents(key, stop_before=HOST_DIR)
 
     def security_group_updated(self, sg):
         # Update the data that we're keeping for this security group.
-        self.initialize()
         with self._sgs_semaphore:
             self.sgs[sg['id']] = sg
 
@@ -517,6 +506,10 @@ class CalicoTransportEtcd(CalicoTransport):
             # TODO Set this flag only once we're really ready!
             LOG.info('%s -> true', READY_KEY)
             self.client.write(READY_KEY, 'true')
+
+    def stop(self):
+        self.stopped = True
+
 
 def _neutron_rule_to_etcd_rule(rule):
     """

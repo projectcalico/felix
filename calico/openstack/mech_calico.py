@@ -27,6 +27,7 @@
 # It is implemented as a Neutron/ML2 mechanism driver.
 
 # OpenStack imports.
+import os
 from neutron.common import constants
 from neutron.common.exceptions import PortNotFound
 from neutron.openstack.common import log
@@ -60,31 +61,62 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             'tap',
             {'port_filter': True})
 
+        # Keep track of our PID so that we can detect if neutron forks off
+        # a worker.  We'll set this once we first initialize.
+        self._my_pid = None
+
         # Initialize fields for the database object and context.  We will
         # initialize these properly when we first need them.
-        self.db = None
-
-        # Use Etcd-based transport.
-        self.transport = CalicoTransportEtcd(self, LOG)
+        self._db = None
+        self._transport = None
 
     def initialize(self):
-        self.transport.initialize()
+        # To work around the fact that Neutron forks off workers after calling
+        # initialize, but before calling any API methods, we defer our
+        # initialization to the first API call.
+        LOG.info("initialize() called in process %s. Ignoring; will "
+                 "initialize lazily on-demand.", os.getpid())
 
-    def _get_db(self):
-        if not self.db:
-            self.db = manager.NeutronManager.get_plugin()
-            LOG.info("db = %s" % self.db)
+    def _maybe_initialize(self):
+        # Check the PID to see whether we've been forked since the last call.
+        # Since we set self.my_pid to None to begin with, this also covers the
+        # case where we don't get forked at all.
+        current_pid = os.getpid()
+        if current_pid != self._my_pid:
+            # Either this is the first time we've been called or we've been
+            # forked.  Intitialize.
+            LOG.info("Initializing Calico mechanism driver in process %s",
+                     current_pid)
+            if self._my_pid is not None:
+                # Unexpected but should be benign.
+                LOG.warning("Unexpectedly, we were previously initialized in "
+                            "process %s.", self._my_pid)
+            # Make sure we reconnect after a fork.
+            self._db = None
+            # Start a fresh transport.
+            if self._transport:
+                LOG.info("Stopping pre-fork transport.")
+                self._transport.stop()
+            self._transport = CalicoTransportEtcd(self, LOG)
+            self._my_pid = current_pid
+
+    @property
+    def db(self):
+        if not self._db:
+            self._db = manager.NeutronManager.get_plugin()
+            LOG.info("db = %s" % self._db)
 
             # Installer a notifier proxy in order to catch security group
             # changes, if we haven't already.
-            if self.db.notifier.__class__ != CalicoNotifierProxy:
-                self.db.notifier = CalicoNotifierProxy(self.db.notifier, self)
+            if self._db.notifier.__class__ != CalicoNotifierProxy:
+                self._db.notifier = CalicoNotifierProxy(self._db.notifier, self)
             else:
                 # In case the notifier proxy already exists but the current
                 # CalicoMechanismDriver instance has changed, ensure that the
                 # notifier proxy will delegate to the current
                 # CalicoMechanismDriver instance.
-                self.db.notifier.calico_driver = self
+                self._db.notifier.calico_driver = self
+        return self._db
 
     def check_segment_for_agent(self, segment, agent):
         LOG.debug("Checking segment %s with agent %s" % (segment, agent))
@@ -104,21 +136,27 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
     def create_network_postcommit(self, context):
         LOG.info("CREATE_NETWORK_POSTCOMMIT: %s" % context)
+        self._maybe_initialize()
 
     def update_network_postcommit(self, context):
         LOG.info("UPDATE_NETWORK_POSTCOMMIT: %s" % context)
+        self._maybe_initialize()
 
     def delete_network_postcommit(self, context):
         LOG.info("DELETE_NETWORK_POSTCOMMIT: %s" % context)
+        self._maybe_initialize()
 
     def create_subnet_postcommit(self, context):
         LOG.info("CREATE_SUBNET_POSTCOMMIT: %s" % context)
+        self._maybe_initialize()
 
     def update_subnet_postcommit(self, context):
         LOG.info("UPDATE_SUBNET_POSTCOMMIT: %s" % context)
+        self._maybe_initialize()
 
     def delete_subnet_postcommit(self, context):
         LOG.info("DELETE_SUBNET_POSTCOMMIT: %s" % context)
+        self._maybe_initialize()
 
     def add_port_gateways(self, port, context):
         assert self.db
@@ -131,19 +169,20 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
     def create_port_postcommit(self, context):
         LOG.info("CREATE_PORT_POSTCOMMIT: %s" % context)
+        self._maybe_initialize()
         port = context._port
         if self._port_is_endpoint_port(port):
             LOG.info("Created port: %s" % port)
-            self._get_db()
             self.add_port_gateways(port, context._plugin_context)
             self.add_port_interface_name(port)
-            self.transport.endpoint_created(port)
+            self._transport.endpoint_created(port)
             self.db.update_port_status(context._plugin_context,
                                        port['id'],
                                        constants.PORT_STATUS_ACTIVE)
 
     def update_port_postcommit(self, context):
         LOG.info("UPDATE_PORT_POSTCOMMIT: %s" % context)
+        self._maybe_initialize()
         port = context._port
         original = context.original
         if self._port_is_endpoint_port(port):
@@ -161,7 +200,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 LOG.info("Migration part 1")
                 self.add_port_gateways(original, context._plugin_context)
                 self.add_port_interface_name(original)
-                self.transport.endpoint_deleted(original)
+                self._transport.endpoint_deleted(original)
             elif original['binding:vif_type'] == 'unbound':
                 # This indicates part 2 of a port being migrated: the port
                 # being bound to its new location.  We should send an
@@ -172,41 +211,41 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 LOG.info("Migration part 2")
                 self.add_port_gateways(port, context._plugin_context)
                 self.add_port_interface_name(port)
-                self.transport.endpoint_created(port)
+                self._transport.endpoint_created(port)
             elif original['binding:host_id'] != port['binding:host_id']:
                 # Migration as implemented in Icehouse.
                 LOG.info("Migration as implemented in Icehouse")
                 self.add_port_gateways(original, context._plugin_context)
                 self.add_port_interface_name(original)
-                self.transport.endpoint_deleted(original)
+                self._transport.endpoint_deleted(original)
                 self.add_port_gateways(port, context._plugin_context)
                 self.add_port_interface_name(port)
-                self.transport.endpoint_created(port)
+                self._transport.endpoint_created(port)
             else:
                 # This is a non-migration-related update.
                 self.add_port_gateways(port, context._plugin_context)
                 self.add_port_interface_name(port)
-                self.transport.endpoint_updated(port)
+                self._transport.endpoint_updated(port)
 
     def delete_port_postcommit(self, context):
         LOG.info("DELETE_PORT_POSTCOMMIT: %s" % context)
+        self._maybe_initialize()
         port = context._port
         if self._port_is_endpoint_port(port):
             LOG.info("Deleted port: %s" % port)
-            self.transport.endpoint_deleted(port)
+            self._transport.endpoint_deleted(port)
 
     def send_sg_updates(self, sgids, db_context):
+        self._maybe_initialize()
         for sgid in sgids:
             sg = self.db.get_security_group(db_context, sgid)
             sg['members'] = self._get_members(sg, db_context)
-            self.transport.security_group_updated(sg)
+            self._transport.security_group_updated(sg)
 
     def get_endpoints(self):
         """Return the current set of endpoints.
         """
-        # Set up access to the Neutron database, if we haven't already.
-        self._get_db()
-
+        assert self._my_pid == os.getpid(), "Called before init."
         # Get a DB context for this query.
         db_context = ctx.get_admin_context()
 
@@ -225,9 +264,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
     def get_security_groups(self):
         """Return the current set of security groups.
         """
-        # Set up access to the Neutron database, if we haven't already.
-        self._get_db()
-
+        assert self._my_pid == os.getpid(), "Called before init."
         # Get a DB context for this query.
         db_context = ctx.get_admin_context()
 
@@ -263,6 +300,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
     def felix_status(self, hostname, up, start_flag):
         # Get a DB context for this processing.
+        self._maybe_initialize()
         db_context = ctx.get_admin_context()
 
         if up:
