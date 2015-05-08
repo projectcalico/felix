@@ -235,7 +235,7 @@ class IpsetManager(ReferenceManager):
         # previous endpoint then we default old_tags to the empty set.  Then,
         # when we calculate removed_tags, we'll get the empty set and the
         # removal loop will be skipped.
-        old_endpoint = self.endpoints_by_ep_id.get(endpoint_id, {})
+        old_endpoint = self.endpoints_by_ep_id.pop(endpoint_id, {})
         old_prof_ids = set(old_endpoint.get("profile_ids", []))
         old_tags = set()
         for profile_id in old_prof_ids:
@@ -248,6 +248,7 @@ class IpsetManager(ReferenceManager):
         else:
             _log.debug("Add/update, setting new_tags to indexed value.")
             new_prof_ids = set(endpoint.get("profile_ids", []))
+            self.endpoints_by_ep_id[endpoint_id] = endpoint
         new_tags = set()
         for profile_id in new_prof_ids:
             for tag in self.tags_by_prof_id.get(profile_id, []):
@@ -256,7 +257,8 @@ class IpsetManager(ReferenceManager):
         if new_prof_ids != old_prof_ids:
             # Profile ID changed, or an add/delete.  the _xxx_profile_index
             # methods ignore profile_id == None so we'll do the right thing.
-            _log.debug("Profile ID changed from %s to %s")
+            _log.debug("Profile ID changed from %s to %s",
+                       old_prof_ids, new_prof_ids)
             self._remove_profile_index(old_prof_ids, endpoint_id)
             self._add_profile_index(new_prof_ids, endpoint_id)
 
