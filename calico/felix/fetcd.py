@@ -19,6 +19,7 @@ felix.fetcd
 Etcd polling functions.
 """
 from collections import defaultdict
+import re
 from socket import timeout as SocketTimeout
 from etcd import (EtcdException, EtcdClusterIdChanged, EtcdKeyNotFound,
                   EtcdEventIndexCleared)
@@ -36,7 +37,7 @@ from calico.common import ValidationFailed
 from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  RULES_KEY_RE, TAGS_KEY_RE, ENDPOINT_KEY_RE,
                                  dir_for_per_host_config,
-                                 PROFILE_DIR, HOST_DIR, EndpointId)
+                                 PROFILE_DIR, HOST_DIR, EndpointId, POLICY_DIR)
 from calico.felix.actor import Actor, actor_message
 
 _log = logging.getLogger(__name__)
@@ -64,10 +65,17 @@ ACTION_MAPPING = {
     "expire": "delete",
 }
 
-
-class Capture(object):
-    def __init__(self, name):
-        self.name = name
+# Etcd paths that we care about for use with the Dispatcher class.
+# We use angle-brackets to name parameters that we want to capture.
+PER_PROFILE_DIR = PROFILE_DIR + "/<profile_id>"
+TAGS_KEY = PER_PROFILE_DIR + "/tags"
+RULES_KEY = PER_PROFILE_DIR + "/rules"
+PER_HOST_DIR = HOST_DIR + "/<hostname>"
+WORKLOAD_DIR = PER_HOST_DIR + "/workload"
+PER_ORCH_DIR = WORKLOAD_DIR + "/<orchestrator>"
+PER_WORKLOAD_DIR = PER_ORCH_DIR + "/<workload_id>"
+ENDPOINT_DIR = PER_WORKLOAD_DIR + "/endpoint"
+PER_ENDPOINT_KEY = ENDPOINT_DIR + "/<endpoint_id>"
 
 
 class EtcdWatcher(Actor):
@@ -85,65 +93,32 @@ class EtcdWatcher(Actor):
         # directory trees.
         self.endpoint_ids_per_host = defaultdict(set)
 
-        self.handlers = {
-            "delete": self.force_resync,
-
-            "Ready": {
-                "set": self.on_ready,
-                "delete": self.force_resync,
-            },
-
-            "policy": {
-                "delete": self.force_resync,
-
-                "profile": {
-                    "delete": self.force_resync,
-
-                    "capture": ("profile_id",  {
-                        "delete": self.on_profile_delete,
-
-                        "tags": {
-                            "delete": self.on_tags_delete,
-                            "set": self.on_tags_set,
-                        },
-
-                        "rules": {
-                            "delete": self.on_rules_delete,
-                            "set": self.on_rules_set,
-                        }
-                    })
-                }
-            },
-
-            "host": {
-                "delete": self.force_resync,
-
-                "capture": ("hostname",  {
-                    "delete": self.on_host_delete,
-
-                    "workload": {
-                        "delete": self.on_host_delete,
-
-                        "capture": ("orchestrator",  {
-                            "delete": self.on_orch_delete,
-
-                            "capture": ("workload_id",  {
-                                "delete": self.on_workload_delete,
-
-                                "endpoint": {
-                                    "delete": self.on_workload_delete,
-
-                                    "capture": ("endpoint_id",  {
-                                        "delete": self.on_endpoint_delete,
-                                        "set": self.on_endpoint_set
-                                    })
-                                }
-                            })
-                        })
-                    }
-                })
-            }
-        }
+        # Program the dispatcher with the paths we care about.  Since etcd
+        # gives us a single event for a recursive directory deletion, we have
+        # to handle deletes for lots of directories that we otherwise wouldn't
+        # care about.
+        self.dispatcher = Dispatcher()
+        reg = self.dispatcher.register
+        # Top-level directories etc.  If these go away, stop polling and
+        # resync.
+        reg(VERSION_DIR, on_del=self._resync)
+        reg(POLICY_DIR, on_del=self._resync)
+        reg(PROFILE_DIR, on_del=self._resync)
+        reg(CONFIG_DIR, on_del=self._resync)
+        reg(READY_KEY, on_set=self.on_ready_flag_set, on_del=self._resync)
+        # Profiles and their contents.
+        reg(PER_PROFILE_DIR, on_del=self.on_profile_delete)
+        reg(TAGS_KEY, on_set=self.on_tags_set, on_del=self.on_tags_delete)
+        reg(RULES_KEY, on_set=self.on_rules_set, on_del=self.on_rules_delete)
+        # Hosts, workloads and endpoints.
+        reg(HOST_DIR, on_del=self._resync)
+        reg(PER_HOST_DIR, on_del=self.on_host_delete)
+        reg(WORKLOAD_DIR, on_del=self.on_host_delete)
+        reg(PER_ORCH_DIR, on_del=self.on_orch_delete)
+        reg(PER_WORKLOAD_DIR, on_del=self.on_workload_delete)
+        reg(ENDPOINT_DIR, on_del=self.on_workload_delete)
+        reg(PER_ENDPOINT_KEY,
+            on_set=self.on_endpoint_set, on_del=self.on_endpoint_delete)
 
     @actor_message()
     def load_config(self):
@@ -203,7 +178,6 @@ class EtcdWatcher(Actor):
                 continue
 
     def _reconnect(self, copy_cluster_id=True):
-        _log.info("(Re)connecting to etcd...")
         etcd_addr = self.config.ETCD_ADDR
         if ":" in etcd_addr:
             host, port = etcd_addr.split(":")
@@ -213,8 +187,10 @@ class EtcdWatcher(Actor):
             port = 4001
         if self.client and copy_cluster_id:
             old_cluster_id = self.client.expected_cluster_id
-            _log.info("Old etcd cluster ID was %s.", old_cluster_id)
+            _log.info("(Re)connecting to etcd. Old etcd cluster ID was %s.",
+                      old_cluster_id)
         else:
+            _log.info("(Re)connecting to etcd. No previous cluster ID.")
             old_cluster_id = None
         self.client = etcd.Client(host=host, port=port,
                                   expected_cluster_id=old_cluster_id)
@@ -242,12 +218,7 @@ class EtcdWatcher(Actor):
                 while True:
                     # Wait for something to change.
                     response = self._wait_for_etcd_event()
-
-                    # Extract parts of the key following /calico/v1/
-                    key_parts = response.key.strip("/").split("/")[2:]
-
-                    # Actually deal with this event.
-                    self.handle_event(key_parts, response, self.handlers)
+                    self.dispatcher.handle_event(response)
             except ResyncRequired:
                 _log.info("Polling aborted, doing resync.")
 
@@ -379,42 +350,20 @@ class EtcdWatcher(Actor):
                                    response.modifiedIndex) + 1
         return response
 
-    def handle_event(self, key_parts, response, handlers,  captures=None):
-        if captures is None:
-            captures = {}
-        if not key_parts:
-            # We've reached the end of the key.
-            action = ACTION_MAPPING.get(response.action)
-            if action in handlers:
-                _log.debug("Found handler for event %s for %s, captures: %s",
-                           action, response.key, captures)
-                handlers[action](response, **captures)
-            else:
-                _log.debug("No handler for event %s on %s",
-                           action, response.key)
-        else:
-            next_part = key_parts[0]
-            key_parts = key_parts[1:]
-            if "capture" in handlers:
-                capture_name, sub_handler = handlers["capture"]
-                captures[capture_name] = next_part
-            elif next_part in handlers:
-                sub_handler = handlers[next_part]
-            else:
-                _log.debug("No matching sub-handler for %s", response.key)
-                return
-            self.handle_event(key_parts, response, sub_handler,
-                              captures=captures)
-
-    def force_resync(self, response, **kwargs):
+    def _resync(self, response, **kwargs):
+        """
+        Force a resync.
+        :raises ResyncRequired: always.
+        """
         raise ResyncRequired()
 
-    def on_ready(self, response):
+    def on_ready_flag_set(self, response):
         if response.value != "true":
             raise ResyncRequired()
 
     def on_endpoint_set(self, response, hostname, orchestrator,
-                           workload_id, endpoint_id):
+                        workload_id, endpoint_id):
+        """Handler for endpoint updates, passes the update to the splitter."""
         combined_id = EndpointId(hostname, orchestrator, workload_id,
                                  endpoint_id)
         _log.debug("Endpoint %s updated", combined_id)
@@ -424,6 +373,7 @@ class EtcdWatcher(Actor):
 
     def on_endpoint_delete(self, response, hostname, orchestrator,
                            workload_id, endpoint_id):
+        """Handler for endpoint deleted, passes the update to the splitter."""
         combined_id = EndpointId(hostname, orchestrator, workload_id,
                                  endpoint_id)
         _log.debug("Endpoint %s deleted", combined_id)
@@ -433,30 +383,44 @@ class EtcdWatcher(Actor):
         self.splitter.on_endpoint_update(combined_id, None, async=True)
 
     def on_rules_set(self, response, profile_id):
+        """Handler for rules updates, passes the update to the splitter."""
         _log.debug("Rules for %s set", profile_id)
         rules = parse_rules(profile_id, response.value)
         self.splitter.on_rules_update(profile_id, rules, async=True)
 
     def on_rules_delete(self, response, profile_id):
+        """Handler for rules deletes, passes the update to the splitter."""
         _log.debug("Rules for %s deleted", profile_id)
         self.splitter.on_rules_update(profile_id, None, async=True)
 
     def on_tags_set(self, response, profile_id):
+        """Handler for tags updates, passes the update to the splitter."""
         _log.debug("Tags for %s set", profile_id)
         rules = parse_tags(profile_id, response.value)
         self.splitter.on_tags_update(profile_id, rules, async=True)
 
     def on_tags_delete(self, response, profile_id):
+        """Handler for tags deletes, passes the update to the splitter."""
         _log.debug("Tags for %s deleted", profile_id)
         self.splitter.on_tags_update(profile_id, None, async=True)
 
     def on_profile_delete(self, response, profile_id):
+        """
+        Handler for a whole profile deletion
+
+        Fakes a tag and rules delete.
+        """
         # Fake deletes for the rules and tags.
         _log.debug("Whole profile %s deleted", profile_id)
         self.splitter.on_rules_update(profile_id, None, async=True)
         self.splitter.on_tags_update(profile_id, None, async=True)
 
     def on_host_delete(self, response, hostname):
+        """
+        Handler for deletion of a whole host directory.
+
+        Deletes all the contained endpoints.
+        """
         ids_on_that_host = self.endpoint_ids_per_host.pop(hostname, set())
         _log.info("Host %s deleted, removing %d endpoints",
                   hostname, len(ids_on_that_host))
@@ -464,6 +428,11 @@ class EtcdWatcher(Actor):
             self.splitter.on_endpoint_update(endpoint_id, None, async=True)
 
     def on_orch_delete(self, response, hostname, orchestrator):
+        """
+        Handler for deletion of a whole host orchestrator directory.
+
+        Deletes all the contained endpoints.
+        """
         _log.info("Orchestrator dir %s/%s deleted, removing contained hosts",
                   hostname, orchestrator)
         for endpoint_id in list(self.endpoint_ids_per_host[hostname]):
@@ -475,6 +444,11 @@ class EtcdWatcher(Actor):
 
     def on_workload_delete(self, response, hostname, orchestrator,
                            workload_id):
+        """
+        Handler for deletion of a whole workload directory.
+
+        Deletes all the contained endpoints.
+        """
         _log.debug("Workload dir %s/%s/%s deleted, removing endpoints",
                    hostname, orchestrator, workload_id)
         for endpoint_id in list(self.endpoint_ids_per_host[hostname]):
@@ -498,6 +472,55 @@ def _build_config_dict(cfg_node):
         config_dict[key] = value
     return config_dict
 
+
+class Dispatcher(object):
+    def __init__(self):
+        self.handler_root = {}
+
+    def register(self, path, on_set=None, on_del=None):
+        parts = path.split("/")
+
+        node = self.handler_root
+        for part in parts:
+            m = re.match(r'<(.*)>', part)
+            if m:
+                capture_name = m.group(1)
+                name, node = node.setdefault("capture", (capture_name, {}))
+                assert name == capture_name, (
+                    "Conflicting capture name %s vs %s" % (name, capture_name)
+                )
+            else:
+                node = node.setdefault(part, {})
+        if on_set:
+            node["set"] = on_set
+        if on_del:
+            node["delete"] = on_del
+
+    def handle_event(self, response):
+        _log.debug("etcd event %s for key %s", response.action, response.key)
+        key_parts = response.key.rstrip("/").split("/")
+        self._handle(key_parts, response, self.handler_root, {})
+
+    def _handle(self, key_parts, response, handler_node, captures):
+        while key_parts:
+            next_part = key_parts.pop(0)
+            if "capture" in handler_node:
+                capture_name, handler_node = handler_node["capture"]
+                captures[capture_name] = next_part
+            elif next_part in handler_node:
+                handler_node = handler_node[next_part]
+            else:
+                _log.debug("No matching sub-handler for %s", response.key)
+                return
+        # We've reached the end of the key.
+        action = ACTION_MAPPING.get(response.action)
+        if action in handler_node:
+            _log.debug("Found handler for event %s for %s, captures: %s",
+                       action, response.key, captures)
+            handler_node[action](response, **captures)
+        else:
+            _log.debug("No handler for event %s on %s. Handler node %s.",
+                       action, response.key, handler_node)
 
 # Intern JSON keys as we load them to reduce occupancy.
 def intern_dict(d):
