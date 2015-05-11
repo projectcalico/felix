@@ -45,13 +45,6 @@ _log = logging.getLogger(__name__)
 
 RETRY_DELAY = 5
 
-# If we see an unhandled event (e.g. a directory deletion) for keys in any of
-# these prefixes, we'll abort our polling and resync.
-PREFIXES_TO_RESYNC_ON_CHANGE = [
-    READY_KEY,
-    PROFILE_DIR,
-    HOST_DIR,
-]
 
 # Map etcd event actions to the effects we care about.
 ACTION_MAPPING = {
@@ -65,7 +58,7 @@ ACTION_MAPPING = {
     "expire": "delete",
 }
 
-# Etcd paths that we care about for use with the Dispatcher class.
+# Etcd paths that we care about for use with the PathDispatcher class.
 # We use angle-brackets to name parameters that we want to capture.
 PER_PROFILE_DIR = PROFILE_DIR + "/<profile_id>"
 TAGS_KEY = PER_PROFILE_DIR + "/tags"
@@ -97,7 +90,7 @@ class EtcdWatcher(Actor):
         # gives us a single event for a recursive directory deletion, we have
         # to handle deletes for lots of directories that we otherwise wouldn't
         # care about.
-        self.dispatcher = Dispatcher()
+        self.dispatcher = PathDispatcher()
         reg = self.dispatcher.register
         # Top-level directories etc.  If these go away, stop polling and
         # resync.
@@ -473,13 +466,12 @@ def _build_config_dict(cfg_node):
     return config_dict
 
 
-class Dispatcher(object):
+class PathDispatcher(object):
     def __init__(self):
         self.handler_root = {}
 
     def register(self, path, on_set=None, on_del=None):
-        parts = path.split("/")
-
+        parts = path.strip("/").split("/")
         node = self.handler_root
         for part in parts:
             m = re.match(r'<(.*)>', part)
@@ -498,7 +490,7 @@ class Dispatcher(object):
 
     def handle_event(self, response):
         _log.debug("etcd event %s for key %s", response.action, response.key)
-        key_parts = response.key.rstrip("/").split("/")
+        key_parts = response.key.strip("/").split("/")
         self._handle(key_parts, response, self.handler_root, {})
 
     def _handle(self, key_parts, response, handler_node, captures):
@@ -521,6 +513,7 @@ class Dispatcher(object):
         else:
             _log.debug("No handler for event %s on %s. Handler node %s.",
                        action, response.key, handler_node)
+
 
 # Intern JSON keys as we load them to reduce occupancy.
 def intern_dict(d):
