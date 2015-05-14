@@ -18,6 +18,7 @@ felix.fetcd
 
 Etcd polling functions.
 """
+from collections import defaultdict
 from socket import timeout as SocketTimeout
 from etcd import (EtcdException, EtcdClusterIdChanged, EtcdKeyNotFound,
                   EtcdEventIndexCleared)
@@ -35,22 +36,25 @@ from calico.common import ValidationFailed, KNOWN_RULE_KEYS
 from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  RULES_KEY_RE, TAGS_KEY_RE, ENDPOINT_KEY_RE,
                                  dir_for_per_host_config,
-                                 get_profile_id_for_profile_dir, dir_for_host,
-                                 PROFILE_DIR, HOST_DIR, EndpointId)
+                                 dir_for_host,
+                                 PROFILE_DIR, HOST_DIR, EndpointInfo,
+                                 delete_action,
+                                 DELETED_NONE,
+                                 DELETED_ALL,
+                                 DELETED_PROFILE,
+                                 DELETED_TAGS,
+                                 DELETED_RULES,
+                                 DELETED_ENDPOINT,
+                                 DELETED_WORKLOAD,
+                                 DELETED_ORCHESTRATOR,
+                                 DELETED_HOST)
+
 from calico.felix.actor import Actor, actor_message
 
 _log = logging.getLogger(__name__)
 
 
 RETRY_DELAY = 5
-
-# If we see an unhandled event (e.g. a directory deletion) for keys in any of
-# these prefixes, we'll abort our polling and resync.
-PREFIXES_TO_RESYNC_ON_CHANGE = [
-    READY_KEY,
-    PROFILE_DIR,
-    HOST_DIR,
-]
 
 
 class EtcdWatcher(Actor):
@@ -59,6 +63,12 @@ class EtcdWatcher(Actor):
         self.config = config
         self.client = None
         self.my_config_dir = dir_for_per_host_config(self.config.HOSTNAME)
+
+        # Set of EndpointInfo objects on each host.
+        self.endpoints_by_host = defaultdict(set)
+
+        # Update splitter. Not available until watch_etcd is called.
+        self._update_splitter = None
 
     @actor_message()
     def load_config(self):
@@ -142,6 +152,8 @@ class EtcdWatcher(Actor):
 
         :returns: Does not return.
         """
+        self._update_splitter = update_splitter
+
         while True:
             _log.info("Reconnecting and loading snapshot from etcd...")
             self._reconnect(copy_cluster_id=False)
@@ -156,8 +168,11 @@ class EtcdWatcher(Actor):
                       self.client.expected_cluster_id)
             rules_by_id = {}
             tags_by_id = {}
-            endpoints_by_id = {}
+            endpoints_by_ep_info = {}
             still_ready = False
+
+            self.endpoints_by_host.clear()
+
             for child in initial_dump.children:
                 profile_id, rules = parse_if_rules(child)
                 if profile_id:
@@ -167,9 +182,10 @@ class EtcdWatcher(Actor):
                 if profile_id:
                     tags_by_id[profile_id] = tags
                     continue
-                endpoint_id, endpoint = parse_if_endpoint(self.config, child)
-                if endpoint_id and endpoint:
-                    endpoints_by_id[endpoint_id] = endpoint
+                endpoint_info, endpoint = parse_if_endpoint(self.config, child)
+                if endpoint_info and endpoint:
+                    endpoints_by_ep_info[endpoint_info] = endpoint
+                    self.endpoints_by_host[endpoint_info.host].add(endpoint_info)
                     continue
 
                 # Double-check the flag hasn't changed since we read it before.
@@ -191,13 +207,13 @@ class EtcdWatcher(Actor):
             _log.info("Snapshot parsed, passing to update splitter")
             update_splitter.apply_snapshot(rules_by_id,
                                            tags_by_id,
-                                           endpoints_by_id,
+                                           endpoints_by_ep_info,
                                            async=False)
 
             # These read only objects are no longer required, so tidy them up.
             del rules_by_id
             del tags_by_id
-            del endpoints_by_id
+            del endpoints_by_ep_info
 
             # On first call, the etcd_index seems to be the high-water mark
             # for the data returned whereas the modified index just tells us
@@ -275,17 +291,13 @@ class EtcdWatcher(Actor):
                                       response.modifiedIndex) + 1
 
                 if response.action == "delete":
-                    # Handle expected directory deletions by faking events for
-                    # child nodes.
-                    profile_id = get_profile_id_for_profile_dir(response.key)
-                    if profile_id:
-                        _log.info("Delete for whole profile %s", profile_id)
-                        update_splitter.on_rules_update(profile_id, None,
-                                                        async=False)
-                        update_splitter.on_tags_update(profile_id, None,
-                                                       async=False)
-                        continue
-                    # TODO: Do we need to handle workload deletions?
+                    # Something has been deleted - figure out what we need to
+                    # do and do it.
+                    _log.info("Deletion of object %s", response.key)
+                    continue_polling = self._process_delete(response)
+
+                    # We have now processed all of the actions.
+                    continue
 
                 profile_id, rules = parse_if_rules(response)
                 if profile_id:
@@ -299,12 +311,13 @@ class EtcdWatcher(Actor):
                     update_splitter.on_tags_update(profile_id, tags,
                                                    async=False)
                     continue
-                endpoint_id, endpoint = parse_if_endpoint(self.config,
-                                                          response)
-                if endpoint_id:
-                    _log.info("Scheduling endpoint update %s", endpoint_id)
-                    update_splitter.on_endpoint_update(endpoint_id, endpoint,
+                ep_info, endpoint = parse_if_endpoint(self.config,
+                                                      response)
+                if ep_info:
+                    _log.info("Scheduling endpoint update %s", ep_info)
+                    update_splitter.on_endpoint_update(ep_info, endpoint,
                                                        async=False)
+                    self.endpoints_by_host[ep_info.host].add(ep_info)
                     continue
 
                 if response.key == READY_KEY:
@@ -322,7 +335,6 @@ class EtcdWatcher(Actor):
                     # that we're not expecting.
                     _log.warning("Unexpected event: %s; triggering resync.",
                                  response)
-                    continue_polling = False
                 if response.key.startswith(CONFIG_DIR):
                     _log.warning("Global config changed but we don't "
                                  "yet support dynamic config: %s",
@@ -331,6 +343,75 @@ class EtcdWatcher(Actor):
                     _log.warning("Config for this felix changed but we don't "
                                  "yet support dynamic config: %s",
                                  response)
+
+    def _process_delete(self, response):
+        """
+        Handle a deletion.
+
+        :param response: Response received
+        :returns whether or not to continue polling.
+        """
+        # List of deleted endpoints - may not be any.
+        deleted_ep_info = []
+        continue_polling = True
+
+        del_action = delete_action(response.key)
+
+        if del_action['type'] == DELETED_NONE:
+            # We don't care about this key.
+            _log.debug("Ignore deletion of %s",
+                         response.key)
+        elif del_action['type'] == DELETED_ALL:
+            _log.warning("Major deletion (%s) - resync all data",
+                         response.key)
+            continue_polling = False
+        elif del_action['type'] == DELETED_PROFILE:
+            _log.info("Delete for whole profile %s", del_action['profile'])
+            self._update_splitter.on_rules_update(del_action['profile'],
+                                                  None,
+                                                  async=True)
+            self._update_splitter.on_tags_update(del_action['profile'],
+                                                 None,
+                                                 async=True)
+        elif del_action['type'] == DELETED_TAGS:
+            _log.info("Delete for tags in profile %s", del_action['profile'])
+            self._update_splitter.on_tags_update(del_action['profile'],
+                                                 None,
+                                                 async=True)
+        elif del_action['type'] == DELETED_RULES:
+            _log.info("Delete for rules in profile %s", del_action['profile'])
+            self._update_splitter.on_rules_update(del_action['profile'],
+                                                  None,
+                                                  async=True)
+        elif del_action['type'] == DELETED_ENDPOINT:
+            deleted_ep_info.append(
+                EndpointInfo(del_action['host'],
+                             del_action['orchestrator'],
+                             del_action['workload'],
+                             del_action['endpoint']))
+        else:
+            assert (del_action['type'] in (DELETED_WORKLOAD,
+                                           DELETED_ORCHESTRATOR,
+                                           DELETED_HOST))
+
+            orch = del_action.get('orchestrator')
+            work = del_action.get('workload')
+
+            for ep_info in self.endpoints_by_host[del_action['host']]:
+                if ((not orch or orch == ep_info.orchestrator) and
+                    (not work or work == ep_info.workload)):
+                    deleted_ep_info.append(ep_info)
+
+        for ep_info in deleted_ep_info:
+            _log.info("Scheduling endpoint deletion %s", ep_info)
+            host = del_action['host']
+            self._update_splitter.on_endpoint_update(ep_info, None, async=True)
+            self.endpoints_by_host[host].remove(ep_info)
+            if not self.endpoints_by_host[host]:
+                # All endpoints removed from this host - forget about it.
+                del self.endpoints_by_host[host]
+
+        return continue_polling
 
 def _build_config_dict(cfg_node):
     """
@@ -350,7 +431,6 @@ def intern_dict(d):
     return dict((intern(str(k)), v) for k, v in d.iteritems())
 json_decoder = json.JSONDecoder(object_hook=intern_dict)
 
-
 def parse_if_endpoint(config, etcd_node):
     m = ENDPOINT_KEY_RE.match(etcd_node.key)
     if m:
@@ -359,20 +439,16 @@ def parse_if_endpoint(config, etcd_node):
         orch = m.group("orchestrator")
         workload_id = m.group("workload_id")
         endpoint_id = m.group("endpoint_id")
-        if etcd_node.action == "delete":
-            _log.debug("Found deleted endpoint %s", endpoint_id)
+        endpoint = json_decoder.decode(etcd_node.value)
+        try:
+            common.validate_endpoint(config, endpoint)
+        except ValidationFailed as e:
+            _log.warning("Validation failed for endpoint %s, treating as "
+                         "missing: %s", endpoint_id, e.message)
             endpoint = None
         else:
-            endpoint = json_decoder.decode(etcd_node.value)
-            try:
-                common.validate_endpoint(config, endpoint)
-            except ValidationFailed as e:
-                _log.warning("Validation failed for endpoint %s, treating as "
-                             "missing: %s", endpoint_id, e.message)
-                endpoint = None
-            else:
-                _log.debug("Validated endpoint : %s", endpoint)
-        return EndpointId(host, orch, workload_id, endpoint_id), endpoint
+            _log.debug("Validated endpoint : %s", endpoint)
+        return EndpointInfo(host, orch, workload_id, endpoint_id), endpoint
     return None, None
 
 

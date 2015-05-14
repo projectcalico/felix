@@ -48,18 +48,18 @@ class IpsetManager(ReferenceManager):
 
         # State.
         self.tags_by_prof_id = {}
-        self.endpoints_by_ep_id = {}
+        self.endpoints_by_ep_info = {}
 
         # Main index.  Since an IP address can be assigned to multiple
         # endpoints, we need to track which endpoints reference an IP.  When
         # we find the set of endpoints with an IP is empty, we remove the
         # ip from the tag.
-        # ip_owners_by_tag[tag][ip][profile_id] = set([endpoint_id,
-        #                                              endpoint_id2, ...])
+        # ip_owners_by_tag[tag][ip][profile_id] = set([endpoint_info,
+        #                                              endpoint_info2, ...])
         self.ip_owners_by_tag = defaultdict(
             lambda: defaultdict(lambda: defaultdict(set)))
 
-        self.endpoint_ids_by_profile_id = defaultdict(set)
+        self.endpoint_infos_by_profile_id = defaultdict(set)
 
         # Set of tag IDs that may be out of sync.  Accumulated by the
         # index-update functions.  We apply the updates in _finish_msg_batch().
@@ -109,9 +109,9 @@ class IpsetManager(ReferenceManager):
         return nets
 
     @actor_message()
-    def apply_snapshot(self, tags_by_prof_id, endpoints_by_id):
+    def apply_snapshot(self, tags_by_prof_id, endpoints_by_ep_info):
         _log.info("Applying tags snapshot. %s tags, %s endpoints",
-                  len(tags_by_prof_id), len(endpoints_by_id))
+                  len(tags_by_prof_id), len(endpoints_by_ep_info))
         missing_profile_ids = set(self.tags_by_prof_id.keys())
         for profile_id, tags in tags_by_prof_id.iteritems():
             assert tags is not None
@@ -122,18 +122,18 @@ class IpsetManager(ReferenceManager):
             self.on_tags_update(profile_id, None)
             self._maybe_yield()
         del missing_profile_ids
-        missing_endpoints = set(self.endpoints_by_ep_id.keys())
-        for endpoint_id, endpoint in endpoints_by_id.iteritems():
+        missing_endpoints = set(self.endpoints_by_ep_info.keys())
+        for endpoint_info, endpoint in endpoints_by_ep_info.iteritems():
             assert endpoint is not None
-            self.on_endpoint_update(endpoint_id, endpoint)
-            missing_endpoints.discard(endpoint_id)
+            self.on_endpoint_update(endpoint_info, endpoint)
+            missing_endpoints.discard(endpoint_info)
             self._maybe_yield()
-        for endpoint_id in missing_endpoints:
-            self.on_endpoint_update(endpoint_id, None)
+        for endpoint_info in missing_endpoints:
+            self.on_endpoint_update(endpoint_info, None)
             self._maybe_yield()
 
         _log.info("Tags snapshot applied: %s tags, %s endpoints",
-                  len(tags_by_prof_id), len(endpoints_by_id))
+                  len(tags_by_prof_id), len(endpoints_by_ep_info))
 
     @actor_message()
     def cleanup(self):
@@ -185,22 +185,22 @@ class IpsetManager(ReferenceManager):
         new_tags = set(tags or [])
         # Find the endpoints that use these tags and work out what tags have
         # been added/removed.
-        endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id, set())
+        endpoint_infos = self.endpoint_infos_by_profile_id.get(profile_id, set())
         added_tags = new_tags - old_tags
         removed_tags = old_tags - new_tags
-        _log.debug("Endpoint IDs with this profile: %s", endpoint_ids)
+        _log.debug("Endpoint IDs with this profile: %s", endpoint_infos)
         _log.debug("Profile %s added tags: %s", profile_id, added_tags)
         _log.debug("Profile %s removed tags: %s", profile_id, removed_tags)
 
-        for endpoint_id in endpoint_ids:
-            endpoint = self.endpoints_by_ep_id.get(endpoint_id, {})
+        for endpoint_info in endpoint_infos:
+            endpoint = self.endpoints_by_ep_info.get(endpoint_info, {})
             ip_addrs = self._extract_ips(endpoint)
             for tag_id in removed_tags:
                 for ip in ip_addrs:
-                    self._remove_mapping(tag_id, profile_id, endpoint_id, ip)
+                    self._remove_mapping(tag_id, profile_id, endpoint_info, ip)
             for tag_id in added_tags:
                 for ip in ip_addrs:
-                    self._add_mapping(tag_id, profile_id, endpoint_id, ip)
+                    self._add_mapping(tag_id, profile_id, endpoint_info, ip)
 
         if tags is None:
             _log.info("Tags for profile %s deleted", profile_id)
@@ -215,16 +215,14 @@ class IpsetManager(ReferenceManager):
                        endpoint.get(self.nets_key, [])))
 
     @actor_message()
-    def on_endpoint_update(self, endpoint_id, endpoint):
+    def on_endpoint_update(self, endpoint_info, endpoint):
         """
         Update tag memberships and indices with the new endpoint dict.
 
-        :param EndpointId endpoint_id: ID of the endpoint.
+        :param EndpointInfo endpoint_info: Info about the endpoint.
         :param dict|NoneType endpoint: Either a dict containing endpoint
-            information or None to indicate deletion.
-
+            data or None to indicate deletion.
         """
-
         # Endpoint updates are the most complex to handle because they may
         # change the profile IDs (and hence the set of tags) as well as the
         # ip addresses attached to the interface.  In addition, the endpoint
@@ -235,7 +233,7 @@ class IpsetManager(ReferenceManager):
         # previous endpoint then we default old_tags to the empty set.  Then,
         # when we calculate removed_tags, we'll get the empty set and the
         # removal loop will be skipped.
-        old_endpoint = self.endpoints_by_ep_id.pop(endpoint_id, {})
+        old_endpoint = self.endpoints_by_ep_info.pop(endpoint_info, {})
         old_prof_ids = set(old_endpoint.get("profile_ids", []))
         old_tags = set()
         for profile_id in old_prof_ids:
@@ -248,7 +246,7 @@ class IpsetManager(ReferenceManager):
         else:
             _log.debug("Add/update, setting new_tags to indexed value.")
             new_prof_ids = set(endpoint.get("profile_ids", []))
-            self.endpoints_by_ep_id[endpoint_id] = endpoint
+            self.endpoints_by_ep_info[endpoint_info] = endpoint
         new_tags = set()
         for profile_id in new_prof_ids:
             for tag in self.tags_by_prof_id.get(profile_id, []):
@@ -259,8 +257,8 @@ class IpsetManager(ReferenceManager):
             # methods ignore profile_id == None so we'll do the right thing.
             _log.debug("Profile IDs changed from %s to %s",
                        old_prof_ids, new_prof_ids)
-            self._remove_profile_index(old_prof_ids, endpoint_id)
-            self._add_profile_index(new_prof_ids, endpoint_id)
+            self._remove_profile_index(old_prof_ids, endpoint_info)
+            self._add_profile_index(new_prof_ids, endpoint_info)
 
         # Since we've defaulted new/old_tags to set() if needed, we can
         # use set operations to calculate the tag changes.
@@ -277,44 +275,44 @@ class IpsetManager(ReferenceManager):
         # from one profile to another but keeps the same tag.
         for profile_id, tag in added_tags:
             for ip in new_ips:
-                self._add_mapping(tag, profile_id,  endpoint_id, ip)
+                self._add_mapping(tag, profile_id,  endpoint_info, ip)
         # Change IPs in unchanged tags.
         added_ips = new_ips - old_ips
         removed_ips = old_ips - new_ips
         for profile_id, tag in unchanged_tags:
             for ip in removed_ips:
-                self._remove_mapping(tag, profile_id,  endpoint_id, ip)
+                self._remove_mapping(tag, profile_id,  endpoint_info, ip)
             for ip in added_ips:
-                self._add_mapping(tag, profile_id,  endpoint_id, ip)
+                self._add_mapping(tag, profile_id,  endpoint_info, ip)
         # Remove *all* *old* IPs from removed tags.  For a deletion, only this
         # loop will fire.
         for profile_id, tag in removed_tags:
             for ip in old_ips:
-                self._remove_mapping(tag, profile_id, endpoint_id, ip)
+                self._remove_mapping(tag, profile_id, endpoint_info, ip)
 
         _log.info("Endpoint update complete")
 
-    def _add_mapping(self, tag_id, profile_id, endpoint_id, ip_address):
+    def _add_mapping(self, tag_id, profile_id, endpoint_info, ip_address):
         """
         Adds the given tag->IP->profile->endpoint mapping to the index.
         Marks the tag as dirty if the update resulted in the IP being
         newly added.
         """
         ip_added = not bool(self.ip_owners_by_tag[tag_id][ip_address])
-        ep_ids = self.ip_owners_by_tag[tag_id][ip_address][profile_id]
-        ep_ids.add(endpoint_id)
+        ep_infos = self.ip_owners_by_tag[tag_id][ip_address][profile_id]
+        ep_infos.add(endpoint_info)
         if ip_added:
             self._dirty_tags.add(tag_id)
 
-    def _remove_mapping(self, tag_id, profile_id, endpoint_id, ip_address):
+    def _remove_mapping(self, tag_id, profile_id, endpoint_info, ip_address):
         """
         Removes the tag->IP->profile->endpoint mapping from index.
         Marks the tag as dirty if the update resulted in the IP being
         removed.
         """
-        ep_ids = self.ip_owners_by_tag[tag_id][ip_address][profile_id]
-        ep_ids.discard(endpoint_id)
-        if not ep_ids:
+        ep_infos = self.ip_owners_by_tag[tag_id][ip_address][profile_id]
+        ep_infos.discard(endpoint_info)
+        if not ep_infos:
             del self.ip_owners_by_tag[tag_id][ip_address][profile_id]
             if not self.ip_owners_by_tag[tag_id][ip_address]:
                 del self.ip_owners_by_tag[tag_id][ip_address]
@@ -322,24 +320,24 @@ class IpsetManager(ReferenceManager):
             if not self.ip_owners_by_tag[tag_id]:
                 del self.ip_owners_by_tag[tag_id]
 
-    def _add_profile_index(self, prof_ids, endpoint_id):
+    def _add_profile_index(self, prof_ids, endpoint_info):
         """
         Notes in the index that an endpoint uses the given profiles.
         """
         for prof_id in prof_ids:
-            self.endpoint_ids_by_profile_id[prof_id].add(endpoint_id)
+            self.endpoint_infos_by_profile_id[prof_id].add(endpoint_info)
 
-    def _remove_profile_index(self, prof_ids, endpoint_id):
+    def _remove_profile_index(self, prof_ids, endpoint_info):
         """
         Notes in the index that an endpoint no longer uses any of the
         given profiles.
         """
         for prof_id in prof_ids:
-            endpoints = self.endpoint_ids_by_profile_id[prof_id]
-            endpoints.discard(endpoint_id)
+            endpoints = self.endpoint_infos_by_profile_id[prof_id]
+            endpoints.discard(endpoint_info)
             if not endpoints:
                 _log.debug("No more endpoints use profile %s", prof_id)
-                del self.endpoint_ids_by_profile_id[prof_id]
+                del self.endpoint_infos_by_profile_id[prof_id]
 
     def _finish_msg_batch(self, batch, results):
         """

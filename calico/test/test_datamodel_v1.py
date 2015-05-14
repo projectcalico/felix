@@ -70,19 +70,91 @@ class TestDatamodel(unittest.TestCase):
         self.assertEqual(key_for_config("ConfigValue"),
                          "/calico/v1/config/ConfigValue")
 
-    def test_get_profile_id(self):
-        self.assertEqual(
-            get_profile_id_for_profile_dir("/calico/v1/policy/profile/prof1"),
-            "prof1")
-        self.assertEqual(
-            get_profile_id_for_profile_dir("/calico/v1/policy/profile/prof1/"),
-            "prof1")
+    def test_del_action(self):
+        del_action = delete_action("/calico/v1/whocares")
+        expected = { 'type': DELETED_NONE }
+        self.assertEqual(del_action, expected)
 
-    def test_get_profile_id_non_profile(self):
-        self.assertEquals(
-            get_profile_id_for_profile_dir("/calico"), None)
-        self.assertEquals(
-            get_profile_id_for_profile_dir("/calico/foo"), None)
-        self.assertEquals(
-            get_profile_id_for_profile_dir("/calico/v1/policy/profile/prof1/rules"), None)
+        for path in ("/calico", "/calico/", "/calico/v1", "/calico/v1/",
+                     "/calico/v1/Ready", "/calico/v1/host", "/calico/v1/host/",
+                     "/calico/v1/policy", "/calico/v1/policy/"):
+            log.debug("Check deletion of path %r", path)
+            del_action = delete_action(path)
+            expected = { 'type': DELETED_ALL }
+            self.assertEqual(del_action, expected)
 
+        values = ["name", "with spaces", " _something-else_ "]
+
+        for profile_id in values:
+            path = "/calico/v1/policy/profile/%s/rules" % profile_id
+            log.debug("Check deletion of path %r", path)
+            del_action = delete_action(path)
+            expected = { 'type': DELETED_RULES,
+                         'profile': profile_id}
+            self.assertEqual(del_action, expected)
+
+            path = "/calico/v1/policy/profile/%s/tags" % profile_id
+            log.debug("Check deletion of path %r", path)
+            del_action = delete_action(path)
+            expected = { 'type': DELETED_TAGS,
+                         'profile': profile_id}
+            self.assertEqual(del_action, expected)
+
+            path = "/calico/v1/policy/profile/%s" % profile_id
+            log.debug("Check deletion of path %r", path)
+            del_action = delete_action(path)
+            expected = { 'type': DELETED_PROFILE,
+                         'profile': profile_id}
+            self.assertEqual(del_action, expected)
+
+            path = "/calico/v1/policy/profile/%s/" % profile_id
+            log.debug("Check deletion of path %r", path)
+            del_action = delete_action(path)
+            expected = { 'type': DELETED_PROFILE,
+                         'profile': profile_id}
+            self.assertEqual(del_action, expected)
+
+        for host in values:
+            base = "/calico/v1/host/%s" % host
+            for path in (base, base + "/", base + "/workload",
+                         base + "/workload/"):
+                log.debug("Check deletion of host %r", path)
+                del_action = delete_action(path)
+                expected = { 'type': DELETED_HOST,
+                             'host': host}
+                self.assertEqual(del_action, expected)
+
+            for orch in values:
+                base = "/calico/v1/host/%s/workload/%s" % (host, orch)
+                for path in (base, base + "/"):
+                    log.debug("Check deletion of orchestrator %r", path)
+                    del_action = delete_action(path)
+                    expected = { 'type': DELETED_ORCHESTRATOR,
+                                 'host': host,
+                                 'orchestrator': orch}
+                    self.assertEqual(del_action, expected)
+
+                for workload in values:
+                    base = "/calico/v1/host/%s/workload/%s/%s" \
+                           % (host, orch, workload)
+                    for path in (base, base + "/", base + "/endpoint",
+                                 base + "/endpoint/"):
+                        log.debug("Check deletion of workload %r", path)
+                        del_action = delete_action(path)
+                        expected = { 'type': DELETED_WORKLOAD,
+                                     'host': host,
+                                     'orchestrator': orch,
+                                     'workload': workload}
+                        self.assertEqual(del_action, expected)
+
+                    for ep_id in values:
+                        path = "/calico/v1/host/%s/workload/%s/%s/endpoint/%s" \
+                               % (host, orch, workload, ep_id)
+                        log.debug("Check deletion of endpoint %r", path)
+                        del_action = delete_action(path)
+                        expected = { 'type': DELETED_ENDPOINT,
+                                     'host': host,
+                                     'orchestrator': orch,
+                                     'workload': workload,
+                                     'endpoint': ep_id}
+                        self.assertEqual(del_action, expected)

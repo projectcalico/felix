@@ -55,14 +55,128 @@ RULES_KEY_RE = re.compile(
 # "profile_id".
 TAGS_KEY_RE = re.compile(
     r'^' + PROFILE_DIR + r'/(?P<profile_id>[^/]+)/tags')
-# Regex to match endpoints, captures "hostname" and "endpoint_id".
+
+# Regex to match profile refcounts, capturing the profile ID in capture group
+# "profile_id".
+PROFILE_REFCOUNT_RE = re.compile(
+    r'^' + PROFILE_DIR + r'/(?P<profile_id>[^/]+)/refcount')
+
+# Regex to match profiles.
+PROFILE_KEY_RE = re.compile(
+    r'^' + PROFILE_DIR + r'/(?P<profile_id>[^/]+)$')
+
+# Regex to match endpoints.
 ENDPOINT_KEY_RE = re.compile(
     r'^' + HOST_DIR +
     r'/(?P<hostname>[^/]+)/'
     r'workload/'
     r'(?P<orchestrator>[^/]+)/'
     r'(?P<workload_id>[^/]+)/'
-    r'endpoint/(?P<endpoint_id>[^/]+)')
+    r'endpoint/(?P<endpoint_id>[^/]+)$')
+
+# Regex to match workloads or the endpoint directory below it.
+WORKLOAD_KEY_RE = re.compile(
+    r'^' + HOST_DIR +
+    r'/(?P<hostname>[^/]+)/'
+    r'workload/'
+    r'(?P<orchestrator>[^/]+)/'
+    r'(?P<workload_id>[^/]+)'
+    r'(/endpoint){0,1}$')
+
+# Regex to match orchestrators.
+ORCHESTRATOR_KEY_RE = re.compile(
+    r'^' + HOST_DIR +
+    r'/(?P<hostname>[^/]+)/'
+    r'workload/'
+    r'(?P<orchestrator>[^/]+)$')
+
+# Regex to match either a host or the workload directory below it
+HOST_KEY_RE = re.compile(
+    r'^' + HOST_DIR +
+    r'/(?P<hostname>[^/]+)'
+    r'(/workload){0,1}$')
+
+# Types of object which has been deleted; see delete_action for more. If a single object is affected, then the type is associated with a list of objects Each action is returned with a list indicating what objects have been affected,
+
+DELETED_NONE = "nothing"
+DELETED_ALL = "all"
+DELETED_TAGS = "tags"
+DELETED_RULES = "rules"
+DELETED_PROFILE = "profile"
+DELETED_ENDPOINT = "endpoint"
+DELETED_WORKLOAD = "workload"
+DELETED_ORCHESTRATOR = "orchestrator"
+DELETED_HOST = "host"
+
+def delete_action(path):
+    """
+    Given a key path that has been deleted, return what has been removed.
+    :param path: path which has been deleted
+    :returns: a dictionary indicating what is gone.
+
+    The dictionary contains a key "type" whose value is one of the DELETED_*
+    fields. Other keys in the dict are specified as follows.
+
+    DELETED_NONE         : []
+    DELETED_ALL          : []
+    DELETED_RULES        : [profile]
+    DELETED_TAGS         : [profile]
+    DELETED_PROFILE      : [profile]
+    DELETED_ENDPOINT     : [host, orchestrator, workload, endpoint]
+    DELETED_WORKLOAD     : [host, orchestrator, workload]
+    DELETED_ORCHESTRATOR : [host, orchestrator]
+    DELETED_HOST         : [host]
+    """
+    path = path.rstrip('/')
+
+    if path in (ROOT_DIR, VERSION_DIR, HOST_DIR, POLICY_DIR,
+                PROFILE_DIR, READY_KEY):
+        # We have lost so much information that we should resync completely.
+        return {"type": DELETED_ALL}
+
+    m = RULES_KEY_RE.match(path)
+    if m:
+        return {"type": DELETED_RULES,
+                "profile": m.group("profile_id")}
+
+    m = TAGS_KEY_RE.match(path)
+    if m:
+        return {"type": DELETED_TAGS,
+                "profile": m.group("profile_id")}
+
+    m = PROFILE_KEY_RE.match(path)
+    if m:
+        return {"type": DELETED_PROFILE,
+                "profile": m.group("profile_id")}
+
+    m = ENDPOINT_KEY_RE.match(path)
+    if m:
+        return {"type": DELETED_ENDPOINT,
+                "host": m.group("hostname"),
+                "orchestrator": m.group("orchestrator"),
+                "workload": m.group("workload_id"),
+                "endpoint": m.group("endpoint_id")}
+
+    m = WORKLOAD_KEY_RE.match(path)
+    if m:
+        return {"type": DELETED_WORKLOAD,
+                "host": m.group("hostname"),
+                "orchestrator": m.group("orchestrator"),
+                "workload": m.group("workload_id")}
+
+    m = ORCHESTRATOR_KEY_RE.match(path)
+    if m:
+        return {"type": DELETED_ORCHESTRATOR,
+                "host": m.group("hostname"),
+                "orchestrator": m.group("orchestrator")}
+
+    m = HOST_KEY_RE.match(path)
+    if m:
+        return {"type": DELETED_HOST,
+                "host": m.group("hostname")}
+
+    # Some field we do not care about.
+    return {"type": DELETED_NONE}
 
 
 def dir_for_host(hostname):
@@ -89,24 +203,10 @@ def key_for_profile_rules(profile_id):
 def key_for_profile_tags(profile_id):
     return PROFILE_DIR + "/%s/tags" % profile_id
 
-
 def key_for_config(config_name):
     return CONFIG_DIR + "/%s" % config_name
 
-
-def get_profile_id_for_profile_dir(key):
-    """
-    :param str key: etcd key.
-    :returns The profile ID if this is a profile dir or None if not.
-    """
-    key = key.rstrip('/')
-    if "/" not in key:
-        return None
-    prefix, final_node = key.rsplit("/", 1)
-    return final_node if prefix == PROFILE_DIR else None
-
-
-class EndpointId(namedtuple("EndpointId", ["host", "orchestrator",
-                                           "workload", "endpoint"])):
+class EndpointInfo(namedtuple("EndpointInfo", ["host", "orchestrator",
+                                               "workload", "endpoint"])):
     def __str__(self):
         return self.__class__.__name__ + ("<%s/%s/%s/%s>" % self)
