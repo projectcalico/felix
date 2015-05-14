@@ -24,6 +24,7 @@ import eventlet.event
 from eventlet.semaphore import Semaphore
 import json
 import re
+import uuid
 
 # OpenStack imports.
 from oslo.config import cfg
@@ -32,7 +33,8 @@ from oslo.config import cfg
 from calico.datamodel_v1 import (READY_KEY, CONFIG_DIR, TAGS_KEY_RE, HOST_DIR,
                                  key_for_endpoint, PROFILE_DIR,
                                  key_for_profile, key_for_profile_rules,
-                                 key_for_profile_tags, key_for_config)
+                                 key_for_profile_tags, key_for_config,
+                                 VERSION_DIR)
 from calico.openstack.transport import CalicoTransport
 
 # Register Calico-specific options.
@@ -48,6 +50,9 @@ LOG = None
 OPENSTACK_ENDPOINT_RE = re.compile(
     r'^' + HOST_DIR +
     r'/(?P<hostname>[^/]+)/.*openstack.*/endpoint/(?P<endpoint_id>[^/]+)')
+OPENSTACK_DIRS_RE = re.compile(
+    r'^' + HOST_DIR + r'/(?:[^/]+)(?:/[^/]+(?:/openstack(?:/[^/]+(?:/endpoint)?)?)?)?$'
+)
 
 json_decoder = json.JSONDecoder()
 
@@ -64,10 +69,12 @@ class CalicoTransportEtcd(CalicoTransport):
         global LOG
         LOG = logger
 
-    def initialize(self):
-        # Prepare client for accessing etcd data.
+        LOG.info("Calico transport created.")
+
         self.client = etcd.Client(host=cfg.CONF.calico.etcd_host,
                                   port=cfg.CONF.calico.etcd_port)
+        self.my_id = uuid.uuid4().hex
+        LOG.info("Chose leader UUID: %s", self.my_id)
 
         # We will remember the OpenStack security group data, between resyncs,
         # so that we can generate profiles when needed for new or updated
@@ -99,20 +106,47 @@ class CalicoTransportEtcd(CalicoTransport):
 
         # Spawn a green thread for periodically resynchronizing etcd against
         # the OpenStack database.
+        self.stopped = False
         eventlet.spawn(self.periodic_resync_thread)
 
     def periodic_resync_thread(self):
-        while True:
-            LOG.info("Calico plugin doing periodic resync.")
+        while not self.stopped:
+            LOG.info("%s Calico plugin doing periodic resync.", self.my_id)
             try:
-                # Write non-default config that Felices need.
-                self.provide_felix_config()
+                LOG.info("%s Trying to claim leadership", self.my_id)
+                try:
+                    leader = self.client.get('/calico/openstack/leader').value
+                except etcd.EtcdKeyNotFound:
+                    try:
+                        self.client.write("/calico/openstack/leader", self.my_id, ttl=120,
+                                          prevExist=False)
+                    except etcd.EtcdException:
+                        LOG.info("%s Failed to claim leadership", self.my_id)
+                    leader = self.client.get('/calico/openstack/leader').value
+                else:
+                    if leader == self.my_id:
+                        try:
+                            self.client.write("/calico/openstack/leader", self.my_id, ttl=120,
+                                              prevValue=self.my_id)
+                            LOG.info("%s Already the leader, refreshed ownership", self.my_id)
+                        except etcd.EtcdException:
+                            LOG.warning("Failed to refresh ownership.  "
+                                        "Rechecking leadership.")
+                            continue
 
-                # Resynchronize endpoint data.
-                self.resync_endpoints()
+                if leader == self.my_id:
+                    # Write non-default config that Felices need.
+                    LOG.info("%s Got the leadership", self.my_id)
+                    self.provide_felix_config()
 
-                # Resynchronize security group data.
-                self.resync_security_groups()
+                    # Resynchronize endpoint data.
+                    self.resync_endpoints()
+
+                    # Resynchronize security group data.
+                    self.resync_security_groups()
+                else:
+                    LOG.info("%s Not the leader, reloading security groups", self.my_id)
+                    self._reload_sgs_from_neutron()
 
                 # If this is our first pass through start of day processing, we
                 # can now unblock anyone waiting.
@@ -198,11 +232,15 @@ class CalicoTransportEtcd(CalicoTransport):
                     # cases the etcd key is no longer valid and should be
                     # deleted.  In the migration case, data will be written
                     # below to an etcd key that incorporates the new hostname.
-                    try:
-                        self.client.delete(child.key)
-                    except etcd.EtcdKeyNotFound:
-                        LOG.debug("Key %s, which we were deleting, "
-                                  "disappeared", child.key)
+                    self._delete_key_and_empty_parents(child.key,
+                                                       stop_before=HOST_DIR)
+            else:
+                # Check if it's a left-over empty directory.
+                m = OPENSTACK_DIRS_RE.match(child.key)
+                if child.dir and m:
+                    self._delete_key_and_empty_parents(child.key,
+                                                       directory=True,
+                                                       stop_before=HOST_DIR)
 
         # Now write etcd data for any endpoints remaining in the ports dict;
         # these are new endpoints - i.e. never previously represented in etcd
@@ -224,6 +262,33 @@ class CalicoTransportEtcd(CalicoTransport):
             self.needed_profiles -= self.profiles_to_clean_up
             self.profiles_to_clean_up.clear()
 
+    def _delete_key_and_empty_parents(self, key, stop_before=VERSION_DIR,
+                                      directory=False):
+        """
+        Tries to delete the given etcd key and then each of its
+        parent directories iff they are empty.
+        """
+        delete_failed = False
+        assert key.startswith(stop_before), ("Key %s wasn't contained in %s" %
+                                             (key, stop_before))
+        num_iterations = 0
+        while (len(key.strip("/")) > len(stop_before.strip("/")) and
+               not delete_failed):
+            try:
+                LOG.debug("Trying to delete %s %s",
+                          "directory" if directory else "key", key)
+                self.client.delete(key, dir=directory)
+            except etcd.EtcdKeyNotFound:
+                LOG.debug("Key %s, which we were deleting, disappeared", key)
+            except etcd.EtcdException as e:
+                # Expected when we try to delete a non-empty parent.
+                LOG.debug("Failed to delete %s (%r), giving up.", key, e)
+                delete_failed = True
+            key = key.rpartition("/")[0]
+            directory = True
+
+            num_iterations += 1
+            assert num_iterations < 1000, "Infinite loop deleting key %s."
 
     def port_etcd_key(self, port):
         return key_for_endpoint(port['binding:host_id'],
@@ -261,14 +326,16 @@ class CalicoTransportEtcd(CalicoTransport):
     def port_profile_id(self, port):
         return '_'.join(port['security_groups'])
 
-    def resync_security_groups(self):
-        # Get all current security groups from the OpenStack database and key
-        # them on security group ID.
+    def _reload_sgs_from_neutron(self):
         with self._sgs_semaphore:
             self.sgs.clear()
             for sg in self.driver.get_security_groups():
                 self.sgs[sg['id']] = sg
 
+    def resync_security_groups(self):
+        # Get all current security groups from the OpenStack database and key
+        # them on security group ID.
+        self._reload_sgs_from_neutron()
         # As we look at the etcd data, accumulate a set of profile IDs that
         # already have correct data.
         correct_profiles = set()
@@ -371,6 +438,8 @@ class CalicoTransportEtcd(CalicoTransport):
                 "Endpoint creation blocked behind start of day processing"
             )
             self.start_of_day_lock.wait()
+            LOG.warning("Start of day processing complete, unblocking "
+                        "endpoint creation")
 
         # Write etcd data for the new endpoint.
         data = self.port_etcd_data(port)
@@ -390,11 +459,7 @@ class CalicoTransportEtcd(CalicoTransport):
     def endpoint_deleted(self, port):
         # Delete the etcd key for this endpoint.
         key = self.port_etcd_key(port)
-        try:
-            self.client.delete(key)
-        except etcd.EtcdKeyNotFound:
-            # Already gone, treat as success.
-            LOG.debug("Key %s, which we were deleting, disappeared", key)
+        self._delete_key_and_empty_parents(key, stop_before=HOST_DIR)
 
     def security_group_updated(self, sg):
         # Update the data that we're keeping for this security group.
@@ -441,6 +506,10 @@ class CalicoTransportEtcd(CalicoTransport):
             # TODO Set this flag only once we're really ready!
             LOG.info('%s -> true', READY_KEY)
             self.client.write(READY_KEY, 'true')
+
+    def stop(self):
+        self.stopped = True
+
 
 def _neutron_rule_to_etcd_rule(rule):
     """

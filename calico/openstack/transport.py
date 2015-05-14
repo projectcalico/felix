@@ -36,10 +36,6 @@ class CalicoTransport(object):
         self.driver = weakref.proxy(driver)
 
     @abc.abstractmethod
-    def initialize(self):
-        pass                    # pragma: no cover
-
-    @abc.abstractmethod
     def endpoint_created(self, port):
         """Indicate to the transport that an endpoint has been created.
 
