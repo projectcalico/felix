@@ -21,7 +21,7 @@ Unit tests for the IpsetManager.
 
 import logging
 from mock import *
-from calico.datamodel_v1 import EndpointId
+from calico.datamodel_v1 import EndpointInfo
 from calico.felix.futils import IPV4
 from calico.felix.ipsets import IpsetManager
 from calico.felix.test.base import BaseTestCase
@@ -31,7 +31,7 @@ from calico.felix.test.base import BaseTestCase
 log = logging.getLogger(__name__)
 
 
-EP_ID_1_1 = EndpointId("host1", "orch", "wl1_1", "ep1_1")
+EP_INFO_1_1 = EndpointInfo("host1", "orch", "wl1_1", "ep1_1")
 EP_1_1 = {
     "profile_ids": ["prof1", "prof2"],
     "ipv4_nets": ["10.0.0.1/32"],
@@ -44,8 +44,8 @@ EP_1_1_NEW_PROF_IP = {
     "profile_ids": ["prof3"],
     "ipv4_nets": ["10.0.0.3/32"],
 }
-EP_ID_1_2 = EndpointId("host1", "orch", "wl1_2", "ep1_2")
-EP_ID_2_1 = EndpointId("host2", "orch", "wl2_1", "ep2_1")
+EP_INFO_1_2 = EndpointInfo("host1", "orch", "wl1_2", "ep1_2")
+EP_INFO_2_1 = EndpointInfo("host2", "orch", "wl2_1", "ep2_1")
 EP_2_1 = {
     "profile_ids": ["prof1"],
     "ipv4_nets": ["10.0.0.1/32"],
@@ -65,14 +65,14 @@ class TestIpsetManager(BaseTestCase):
     def test_tag_then_enpdpoint(self):
         # Send in the messages.
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
-        self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_1_1, EP_1_1, async=True)
         # Let the actor process them.
         self.step_mgr()
         self.assert_one_ep_one_tag()
 
     def test_endpoint_then_tag(self):
         # Send in the messages.
-        self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_1_1, EP_1_1, async=True)
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
         # Let the actor process them.
         self.step_mgr()
@@ -81,21 +81,21 @@ class TestIpsetManager(BaseTestCase):
     def test_endpoint_then_tag_idempotent(self):
         for _ in xrange(3):
             # Send in the messages.
-            self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
+            self.mgr.on_endpoint_update(EP_INFO_1_1, EP_1_1, async=True)
             self.mgr.on_tags_update("prof1", ["tag1"], async=True)
             # Let the actor process them.
             self.step_mgr()
             self.assert_one_ep_one_tag()
 
     def assert_one_ep_one_tag(self):
-        self.assertEqual(self.mgr.endpoints_by_ep_id, {
-            EP_ID_1_1: EP_1_1,
+        self.assertEqual(self.mgr.endpoints_by_ep_info, {
+            EP_INFO_1_1: EP_1_1,
         })
         self.assertEqual(self.mgr.ip_owners_by_tag, {
             "tag1": {
                 "10.0.0.1": {
                     "prof1": set([
-                        EP_ID_1_1
+                        EP_INFO_1_1
                     ])
                 }
             }
@@ -104,22 +104,22 @@ class TestIpsetManager(BaseTestCase):
     def test_change_ip(self):
         # Initial set-up.
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
-        self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_1_1, EP_1_1, async=True)
         self.step_mgr()
         # Update the endpoint's IPs:
-        self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1_NEW_IP, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_1_1, EP_1_1_NEW_IP, async=True)
         self.step_mgr()
 
         self.assertEqual(self.mgr.ip_owners_by_tag, {
             "tag1": {
                 "10.0.0.2": {
                     "prof1": set([
-                        EP_ID_1_1
+                        EP_INFO_1_1
                     ])
                 },
                 "10.0.0.3": {
                     "prof1": set([
-                        EP_ID_1_1
+                        EP_INFO_1_1
                     ])
                 }
             }
@@ -127,7 +127,7 @@ class TestIpsetManager(BaseTestCase):
 
     def test_tag_updates(self):
         # Initial set-up.
-        self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_1_1, EP_1_1, async=True)
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
         self.step_mgr()
 
@@ -138,14 +138,14 @@ class TestIpsetManager(BaseTestCase):
             "tag1": {
                 "10.0.0.1": {
                     "prof1": set([
-                        EP_ID_1_1
+                        EP_INFO_1_1
                     ])
                 }
             },
             "tag2": {
                 "10.0.0.1": {
                     "prof1": set([
-                        EP_ID_1_1
+                        EP_INFO_1_1
                     ])
                 }
             }
@@ -159,7 +159,7 @@ class TestIpsetManager(BaseTestCase):
             "tag2": {
                 "10.0.0.1": {
                     "prof1": set([
-                        EP_ID_1_1
+                        EP_INFO_1_1
                     ])
                 }
             }
@@ -177,44 +177,44 @@ class TestIpsetManager(BaseTestCase):
 
     def test_update_profile_and_ips(self):
         # Initial set-up.
-        self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_1_1, EP_1_1, async=True)
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
         self.mgr.on_tags_update("prof3", ["tag3"], async=True)
         self.step_mgr()
 
-        self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1_NEW_PROF_IP, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_1_1, EP_1_1_NEW_PROF_IP, async=True)
         self.step_mgr()
 
         self.assertEqual(self.mgr.ip_owners_by_tag, {
             "tag3": {
                 "10.0.0.3": {
                     "prof3": set([
-                        EP_ID_1_1
+                        EP_INFO_1_1
                     ])
                 }
             }
         })
-        self.assertEqual(self.mgr.endpoint_ids_by_profile_id, {
-            "prof3": set([EP_ID_1_1])
+        self.assertEqual(self.mgr.endpoint_infos_by_profile_id, {
+            "prof3": set([EP_INFO_1_1])
         })
 
     def test_duplicate_ips(self):
         # Add in two endpoints with the same IP.
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
-        self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
-        self.mgr.on_endpoint_update(EP_ID_2_1, EP_2_1, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_1_1, EP_1_1, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_2_1, EP_2_1, async=True)
         self.step_mgr()
         # Index should contain both:
-        self.assertEqual(self.mgr.endpoints_by_ep_id, {
-            EP_ID_1_1: EP_1_1,
-            EP_ID_2_1: EP_2_1,
+        self.assertEqual(self.mgr.endpoints_by_ep_info, {
+            EP_INFO_1_1: EP_1_1,
+            EP_INFO_2_1: EP_2_1,
         })
         self.assertEqual(self.mgr.ip_owners_by_tag, {
             "tag1": {
                 "10.0.0.1": {
                     "prof1": set([
-                        EP_ID_1_1,
-                        EP_ID_2_1,
+                        EP_INFO_1_1,
+                        EP_INFO_2_1,
                     ])
                 }
             }
@@ -227,52 +227,51 @@ class TestIpsetManager(BaseTestCase):
             "tag1": {
                 "10.0.0.1": {
                     "prof1": set([
-                        EP_ID_1_1,
-                        EP_ID_2_1,
+                        EP_INFO_1_1,
+                        EP_INFO_2_1,
                     ]),
                     "prof2": set([
-                        EP_ID_1_1,
+                        EP_INFO_1_1,
                     ])
                 }
             },
             "tag2": {
                 "10.0.0.1": {
                     "prof2": set([
-                        EP_ID_1_1,
+                        EP_INFO_1_1,
                     ])
                 }
             },
         })
 
         # Remove one, check the index gets updated.
-        self.mgr.on_endpoint_update(EP_ID_2_1, None, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_2_1, None, async=True)
         self.step_mgr()
-        self.assertEqual(self.mgr.endpoints_by_ep_id, {
-            EP_ID_1_1: EP_1_1,
+        self.assertEqual(self.mgr.endpoints_by_ep_info, {
+            EP_INFO_1_1: EP_1_1,
         })
         self.assertEqual(self.mgr.ip_owners_by_tag, {
             "tag1": {
                 "10.0.0.1": {
                     "prof1": set([
-                        EP_ID_1_1,
+                        EP_INFO_1_1,
                     ]),
                     "prof2": set([
-                        EP_ID_1_1,
+                        EP_INFO_1_1,
                     ])
                 }
             },
             "tag2": {
                 "10.0.0.1": {
                     "prof2": set([
-                        EP_ID_1_1,
+                        EP_INFO_1_1,
                     ])
                 }
             },
         })
 
         # Remove the other, index should get completely cleaned up.
-        self.mgr.on_endpoint_update(EP_ID_1_1, None, async=True)
+        self.mgr.on_endpoint_update(EP_INFO_1_1, None, async=True)
         self.step_mgr()
-        self.assertEqual(self.mgr.endpoints_by_ep_id, {})
+        self.assertEqual(self.mgr.endpoints_by_ep_info, {})
         self.assertEqual(self.mgr.ip_owners_by_tag, {})
-

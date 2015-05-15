@@ -54,95 +54,95 @@ class EndpointManager(ReferenceManager):
         self.rules_mgr = rules_manager
 
         # All endpoint dicts that are on this host.
-        self.endpoints_by_id = {}
+        self.endpoints_by_info = {}
         # Dict that maps from interface name ("tap1234") to endpoint ID.
-        self.endpoint_id_by_iface_name = {}
+        self.endpoint_info_by_iface_name = {}
 
         # Set of endpoints that are live on this host.  I.e. ones that we've
         # increffed.
-        self.local_endpoint_ids = set()
+        self.local_endpoint_infos = set()
 
-    def _create(self, endpoint_id):
+    def _create(self, endpoint_info):
         """
         Overrides ReferenceManager._create()
         """
         return LocalEndpoint(self.config,
-                             endpoint_id,
+                             endpoint_info,
                              self.ip_type,
                              self.iptables_updater,
                              self.dispatch_chains,
                              self.rules_mgr)
 
-    def _on_object_started(self, endpoint_id, obj):
+    def _on_object_started(self, endpoint_info, obj):
         """
         Callback from a LocalEndpoint to report that it has started.
         Overrides ReferenceManager._on_object_started
         """
-        ep = self.endpoints_by_id.get(endpoint_id)
+        ep = self.endpoints_by_info.get(endpoint_info)
         obj.on_endpoint_update(ep, async=True)
 
     @actor_message()
-    def apply_snapshot(self, endpoints_by_id):
+    def apply_snapshot(self, endpoints_by_info):
         # Tell the dispatch chains about the local endpoints in advance so
         # that we don't flap the dispatch chain at start-of-day.
-        local_iface_name_to_ep_id = {}
-        for ep_id, ep in endpoints_by_id.iteritems():
-            if ep and ep_id.host == self.config.HOSTNAME and ep.get("name"):
-                local_iface_name_to_ep_id[ep.get("name")] = ep_id
-        self.dispatch_chains.apply_snapshot(local_iface_name_to_ep_id.keys(),
+        local_iface_name_to_ep_info = {}
+        for ep_info, ep in endpoints_by_info.iteritems():
+            if ep and ep_info.host == self.config.HOSTNAME and ep.get("name"):
+                local_iface_name_to_ep_info[ep.get("name")] = ep_info
+        self.dispatch_chains.apply_snapshot(local_iface_name_to_ep_info.keys(),
                                             async=True)
         # Then update/create endpoints and work out which endpoints have been
         # deleted.
-        missing_endpoints = set(self.endpoints_by_id.keys())
-        for endpoint_id, endpoint in endpoints_by_id.iteritems():
-            self.on_endpoint_update(endpoint_id, endpoint)
-            missing_endpoints.discard(endpoint_id)
+        missing_endpoints = set(self.endpoints_by_info.keys())
+        for endpoint_info, endpoint in endpoints_by_info.iteritems():
+            self.on_endpoint_update(endpoint_info, endpoint)
+            missing_endpoints.discard(endpoint_info)
             self._maybe_yield()
-        for endpoint_id in missing_endpoints:
-            self.on_endpoint_update(endpoint_id, None)
+        for endpoint_info in missing_endpoints:
+            self.on_endpoint_update(endpoint_info, None)
             self._maybe_yield()
 
     @actor_message()
-    def on_endpoint_update(self, endpoint_id, endpoint):
+    def on_endpoint_update(self, endpoint_info, endpoint):
         """
         Event to indicate that an endpoint has been updated (including
         creation or deletion).
 
-        :param EndpointId endpoint_id: The endpoint ID in question.
+        :param EndpointInfo endpoint_info: The endpoint info in question.
         :param dict[str]|NoneType endpoint: Dictionary of all endpoint
             data or None if the endpoint is to be deleted.
         """
-        if endpoint_id.host != self.config.HOSTNAME:
-            _log.debug("Skipping endpoint %s; not on our host.", endpoint_id)
+        if endpoint_info.host != self.config.HOSTNAME:
+            _log.debug("Skipping endpoint %s; not on our host.", endpoint_info)
             return
 
-        if self._is_starting_or_live(endpoint_id):
+        if self._is_starting_or_live(endpoint_info):
             # Local endpoint thread is running; tell it of the change.
-            _log.info("Update for live endpoint %s", endpoint_id)
-            self.objects_by_id[endpoint_id].on_endpoint_update(endpoint,
-                                                               async=True)
+            _log.info("Update for live endpoint %s", endpoint_info)
+            self.objects_by_id[endpoint_info].on_endpoint_update(endpoint,
+                                                                 async=True)
 
-        old_ep = self.endpoints_by_id.pop(endpoint_id, {})
+        old_ep = self.endpoints_by_info.pop(endpoint_info, {})
         # Interface name shouldn't change but popping it now is correct for
         # deletes and we add it back in below on create/modify.
         old_iface_name = old_ep.get("name")
-        self.endpoint_id_by_iface_name.pop(old_iface_name, None)
+        self.endpoint_info_by_iface_name.pop(old_iface_name, None)
         if endpoint is None:
             # Deletion. Remove from the list.
-            _log.info("Endpoint %s deleted", endpoint_id)
-            if endpoint_id in self.local_endpoint_ids:
-                self.decref(endpoint_id)
-                self.local_endpoint_ids.remove(endpoint_id)
+            _log.info("Endpoint %s deleted", endpoint_info)
+            if endpoint_info in self.local_endpoint_infos:
+                self.decref(endpoint_info)
+                self.local_endpoint_infos.remove(endpoint_info)
         else:
             # Creation or modification
-            _log.info("Endpoint %s modified or created", endpoint_id)
-            self.endpoints_by_id[endpoint_id] = endpoint
-            self.endpoint_id_by_iface_name[endpoint["name"]] = endpoint_id
-            if endpoint_id not in self.local_endpoint_ids:
+            _log.info("Endpoint %s modified or created", endpoint_info)
+            self.endpoints_by_info[endpoint_info] = endpoint
+            self.endpoint_info_by_iface_name[endpoint["name"]] = endpoint_info
+            if endpoint_info not in self.local_endpoint_infos:
                 # This will trigger _on_object_activated to pass the endpoint
                 # we just saved off to the endpoint.
-                self.local_endpoint_ids.add(endpoint_id)
-                self.get_and_incref(endpoint_id)
+                self.local_endpoint_infos.add(endpoint_info)
+                self.get_and_incref(endpoint_info)
 
     @actor_message()
     def on_interface_update(self, name):
@@ -153,29 +153,29 @@ class EndpointManager(ReferenceManager):
         one managed by any endpoint of this server.
         """
         try:
-            endpoint_id = self.endpoint_id_by_iface_name[name]
+            endpoint_info = self.endpoint_info_by_iface_name[name]
         except KeyError:
             _log.debug("Update on interface %s that we do not care about",
                        name)
         else:
             _log.info("Endpoint %s received interface update for %s",
-                      endpoint_id, name)
-            if self._is_starting_or_live(endpoint_id):
+                      endpoint_info, name)
+            if self._is_starting_or_live(endpoint_info):
                 # LocalEndpoint is running, so tell it about the change.
-                ep = self.objects_by_id[endpoint_id]
+                ep = self.objects_by_id[endpoint_info]
                 ep.on_interface_update(async=True)
 
 
 class LocalEndpoint(RefCountedActor):
 
-    def __init__(self, config, endpoint_id, ip_type, iptables_updater,
+    def __init__(self, config, endpoint_info, ip_type, iptables_updater,
                  dispatch_chains, rules_manager):
         super(LocalEndpoint, self).__init__(qualifier="%s(%s)" %
-                                            (endpoint_id.endpoint, ip_type))
+                                            (endpoint_info.endpoint, ip_type))
         assert isinstance(dispatch_chains, DispatchChains)
         assert isinstance(rules_manager, RulesManager)
 
-        self.endpoint_id = endpoint_id
+        self.endpoint_info = endpoint_info
 
         self.config = config
         self.ip_type = ip_type
@@ -257,7 +257,7 @@ class LocalEndpoint(RefCountedActor):
         """
         Actor event to report that the interface is either up or changed.
         """
-        _log.info("Endpoint %s received interface kick", self.endpoint_id)
+        _log.info("Endpoint %s received interface kick", self.endpoint_info)
         self._configure_interface()
 
     @property
@@ -317,7 +317,7 @@ class LocalEndpoint(RefCountedActor):
 
     def _update_chains(self):
         updates, deps = _get_endpoint_rules(
-            self.endpoint_id.endpoint,
+            self.endpoint_info.endpoint,
             self._suffix,
             self.ip_version,
             self.endpoint.get("ipv%s_nets" % self.ip_version, []),
@@ -362,14 +362,14 @@ class LocalEndpoint(RefCountedActor):
         except (IOError, FailedSystemCall, CalledProcessError):
             if not devices.interface_exists(self._iface_name):
                 _log.info("Interface %s for %s does not exist yet",
-                          self._iface_name, self.endpoint_id)
+                          self._iface_name, self.endpoint_info)
             elif not devices.interface_up(self._iface_name):
                 _log.info("Interface %s for %s is not up yet",
-                          self._iface_name, self.endpoint_id)
+                          self._iface_name, self.endpoint_info)
             else:
                 # Interface flapped back up after we failed?
                 _log.warning("Failed to configure interface %s for %s",
-                             self._iface_name, self.endpoint_id)
+                             self._iface_name, self.endpoint_info)
 
     def _deconfigure_interface(self):
         """
@@ -381,24 +381,24 @@ class LocalEndpoint(RefCountedActor):
             if not devices.interface_exists(self._iface_name):
                 # Deleted under our feet - so the rules are gone.
                 _log.debug("Interface %s for %s deleted",
-                           self._iface_name, self.endpoint_id)
+                           self._iface_name, self.endpoint_info)
             else:
                 # An error deleting the rules. Log and continue.
                 _log.exception("Cannot delete rules for interface %s for %s",
-                               self._iface_name, self.endpoint_id)
+                               self._iface_name, self.endpoint_info)
 
     def _on_profiles_ready(self):
         # We don't actually need to talk to the profiles, just log.
         _log.info("Endpoint %s acquired all required profile references",
-                  self.endpoint_id)
+                  self.endpoint_info)
 
     def __str__(self):
         return ("Endpoint<%s,id=%s,iface=%s>" %
-                (self.ip_type, self.endpoint_id,
+                (self.ip_type, self.endpoint_info,
                  self._iface_name or "unknown"))
 
 
-def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
+def _get_endpoint_rules(endpoint_info, suffix, ip_version, local_ips, mac,
                         profile_ids):
     to_chain_name, from_chain_name = chain_names(suffix)
 
@@ -446,7 +446,7 @@ def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
 
     # Default drop rule.
     to_chain.append(commented_drop_fragment(to_chain_name,
-                                            "Endpoint %s:" % endpoint_id))
+                                            "Endpoint %s:" % endpoint_info))
 
     # Now the chain that manages packets from the interface...
     from_chain = ["--flush %s" % from_chain_name]
@@ -502,7 +502,7 @@ def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
     # Final default DROP if no profile RETURNed or no MAC matched.
     drop_frag = commented_drop_fragment(from_chain_name,
                                         "Default DROP if no match (endpoint %s):" %
-                                        endpoint_id)
+                                        endpoint_info)
     from_chain.append(drop_frag)
 
     updates = {to_chain_name: to_chain, from_chain_name: from_chain}
