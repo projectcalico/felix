@@ -181,7 +181,7 @@ class Elector(object):
             self._etcd_client.write(self._key,
                                     id_string,
                                     ttl=self._ttl,
-                                    prevExists=False,
+                                    prevExist=False,
                                     timeout=self._interval)
 
         except Exception:
@@ -195,21 +195,27 @@ class Elector(object):
         _log.warning("Successfully become master - key %s, value %s",
                      self._key, id_string)
 
-        self._master = True
-
         while True:
-            eventlet.sleep(self._interval)
             try:
                 self._etcd_client.write(self._key,
                                         id_string,
                                         ttl=self._ttl,
                                         prevValue=id_string,
                                         timeout=self._interval)
+
+                # We only set _master when we have successfully written and
+                # rewritten. This is because testing appeared to reveal some
+                # odd timing windows where two writes with prevExist within 1ms
+                # can both succeed, so safer to find out right away.
+                self._master = True
+
             except Exception:
                 # This is a pretty broad except statement, but anything going
                 # wrong means this instance gives up being the master.
                 self._master = False
                 raise
+
+            eventlet.sleep(self._interval)
 
     def master(self):
         """
