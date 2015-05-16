@@ -94,17 +94,18 @@ def validate_port(port):
         return False
 
 
-def validate_ip_addr(addr, version):
+def validate_ip_addr(addr, version=None):
     """
     Validates that an IP address is valid. Returns true if valid, false if
     not. Version can be "4", "6", None for "IPv4", "IPv6", or "either"
     respectively.
     """
-    try:
-        ip = netaddr.IPAddress(addr, version=version)
-        return True
-    except (netaddr.core.AddrFormatError, ValueError, TypeError):
-        return False
+    if version == 4:
+        return netaddr.valid_ipv4(addr)
+    elif version == 6:
+        return netaddr.valid_ipv6(addr)
+    else:
+        return netaddr.valid_ipv4(addr) or netaddr.valid_ipv6(addr)
 
 
 def canonicalise_ip(addr, version):
@@ -132,15 +133,6 @@ def canonicalise_cidr(cidr, version):
         return None
     nw = netaddr.IPNetwork(cidr, version=version)
     return intern(str(nw))
-
-
-def validate_mac(mac):
-    try:
-        netaddr.EUI(mac, dialect=eui48.mac_unix)
-    except (netaddr.core.AddrFormatError, ValueError, TypeError):
-        return False
-    else:
-        return True
 
 
 def canonicalise_mac(mac):
@@ -302,7 +294,7 @@ def validate_endpoint(config, endpoint):
             issues.append("Expected '%s' to be a string; got %r." %
                           (field, endpoint[field]))
         elif field == "mac":
-            if not validate_mac(endpoint.get("mac")):
+            if not netaddr.valid_mac(endpoint.get("mac")):
                 issues.append("Invalid MAC address")
             else:
                 endpoint["mac"] = canonicalise_mac(endpoint.get("mac"))
