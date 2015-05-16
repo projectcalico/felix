@@ -44,22 +44,30 @@ HOST_DIR = VERSION_DIR + '/host'
 POLICY_DIR = VERSION_DIR + '/policy'
 PROFILE_DIR = POLICY_DIR + "/profile"
 
+# Regex fragment that matches a valid ID such as a profile ID or an
+# endpoint ID.
+_ID_RE_FRAGMENT = r'[0-9a-zA-Z-_\.]+'
+# Validation regexes for profiles and endpoint IDs.
+GENERIC_ID_RE = re.compile(r'^' + _ID_RE_FRAGMENT + r'$')
+PROFILE_ID_RE = GENERIC_ID_RE
+ENDPOINT_ID_RE = GENERIC_ID_RE
+
 # Regex to match profile rules, capturing the profile ID in capture group
 # "profile_id".
 RULES_KEY_RE = re.compile(
-    r'^' + PROFILE_DIR + r'/(?P<profile_id>[^/]+)/rules')
+    r'^' + PROFILE_DIR + r'/(?P<profile_id>' + _ID_RE_FRAGMENT + r')/rules')
 # Regex to match profile tags, capturing the profile ID in capture group
 # "profile_id".
 TAGS_KEY_RE = re.compile(
-    r'^' + PROFILE_DIR + r'/(?P<profile_id>[^/]+)/tags')
+    r'^' + PROFILE_DIR + r'/(?P<profile_id>' + _ID_RE_FRAGMENT + r')/tags')
 # Regex to match endpoints, captures "hostname" and "endpoint_id".
 ENDPOINT_KEY_RE = re.compile(
     r'^' + HOST_DIR +
-    r'/(?P<hostname>[^/]+)/'
+    r'/(?P<hostname>' + _ID_RE_FRAGMENT + r')/'
     r'workload/'
-    r'(?P<orchestrator>[^/]+)/'
-    r'(?P<workload_id>[^/]+)/'
-    r'endpoint/(?P<endpoint_id>[^/]+)')
+    r'(?P<orchestrator>' + _ID_RE_FRAGMENT + r')/'
+    r'(?P<workload_id>' + _ID_RE_FRAGMENT + r')/'
+    r'endpoint/(?P<endpoint_id>' + _ID_RE_FRAGMENT + r')')
 
 
 def dir_for_host(hostname):
@@ -101,6 +109,14 @@ def get_profile_id_for_profile_dir(key):
         return None
     prefix, final_node = key.rsplit("/", 1)
     return final_node if prefix == PROFILE_DIR else None
+
+
+def is_profile_id_valid(profile_id):
+    return profile_id and bool(PROFILE_ID_RE.match(profile_id))
+
+
+def is_endpoint_id_valid(endpoint_id):
+    return endpoint_id and bool(ENDPOINT_ID_RE.match(endpoint_id))
 
 
 class EndpointId(namedtuple("EndpointId", ["host", "orchestrator",

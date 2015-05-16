@@ -77,6 +77,7 @@ class TestDatamodel(unittest.TestCase):
         self.assertEqual(
             get_profile_id_for_profile_dir("/calico/v1/policy/profile/prof1/"),
             "prof1")
+        self.assertEqual(get_profile_id_for_profile_dir(""), None)
 
     def test_get_profile_id_non_profile(self):
         self.assertEquals(
@@ -85,4 +86,14 @@ class TestDatamodel(unittest.TestCase):
             get_profile_id_for_profile_dir("/calico/foo"), None)
         self.assertEquals(
             get_profile_id_for_profile_dir("/calico/v1/policy/profile/prof1/rules"), None)
+
+    def test_is_profile_id_valid(self):
+        self.assertTrue(is_profile_id_valid("0123456789abcdABCD.-_"))
+        self.assertFalse(is_profile_id_valid("+"))
+        self.assertFalse(is_profile_id_valid(None))
+
+    def test_is_endpoint_id_valid(self):
+        self.assertTrue(is_endpoint_id_valid("0123456789abcdABCD.-_"))
+        self.assertFalse(is_endpoint_id_valid("+"))
+        self.assertFalse(is_endpoint_id_valid(None))
 
