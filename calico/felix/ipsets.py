@@ -147,11 +147,15 @@ class IpsetManager(ReferenceManager):
         tmppfx = IPSET_TMP_PREFIX[self.ip_type]
         felix_ipsets = set([n for n in all_ipsets if n.startswith(pfx) or
                                                      n.startswith(tmppfx)])
+
+        # Ask the ipsets for all the names they may use and whitelist.
         whitelist = set()
-        for ipset in (self.objects_by_id.values() +
-                      self.stopping_objects_by_id.values()):
-            # Ask the ipset for all the names it may use and whitelist.
+        for ipset in (self.objects_by_id.values()):
             whitelist.update(ipset.owned_ipset_names())
+        for ipset in [ipsets for ipsets in
+                      self.stopping_objects_by_id.values()]:
+            whitelist.update(ipset.owned_ipset_names())
+
         _log.debug("Whitelisted ipsets: %s", whitelist)
         ipsets_to_delete = felix_ipsets - whitelist
         _log.debug("Deleting ipsets: %s", ipsets_to_delete)
