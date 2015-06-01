@@ -40,7 +40,7 @@ from calico.felix.config import Config
 from calico.felix.futils import IPV4, IPV6
 from calico.felix.devices import InterfaceWatcher
 from calico.felix.endpoint import EndpointManager
-from calico.felix.fetcd import EtcdWatcher
+from calico.felix.fetcd import EtcdAPI
 from calico.felix.ipsets import IpsetManager
 
 _log = logging.getLogger(__name__)
@@ -53,11 +53,12 @@ def _main_greenlet(config):
     """
     try:
         _log.info("Connecting to etcd to get our configuration.")
-        etcd_watcher = EtcdWatcher(config)
-        etcd_watcher.start()
-        # Ask the EtcdWatcher to fill in the global config object before we
+        etcd_api = EtcdAPI(config)
+        etcd_api.start()
+        # Ask the EtcdAPI to fill in the global config object before we
         # proceed.  We don't yet support config updates.
-        etcd_watcher.load_config(async=False)
+        config_loaded = etcd_api.load_config(async=False)
+        config_loaded.wait()
 
         _log.info("Main greenlet: Configuration loaded, starting remaining "
                   "actors...")
@@ -125,7 +126,7 @@ def _main_greenlet(config):
             v6_ep_manager.greenlet,
 
             iface_watcher.greenlet,
-            etcd_watcher.greenlet
+            etcd_api.greenlet
         ]
 
         # Install the global rules before we start polling for updates.
@@ -138,8 +139,7 @@ def _main_greenlet(config):
         _log.info("Starting polling for interface and etcd updates.")
         f = iface_watcher.watch_interfaces(async=True)
         monitored_items.append(f)
-        f = etcd_watcher.watch_etcd(update_splitter, async=True)
-        monitored_items.append(f)
+        etcd_api.start_etcd_watch(update_splitter, async=True)
 
         # Wait for something to fail.
         _log.info("All top-level actors started, waiting on failures...")

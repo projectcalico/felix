@@ -50,7 +50,7 @@ class TestBasic(BaseTestCase):
         else:
             sys.modules['etcd'] = self._real_etcd
 
-    @mock.patch("calico.felix.fetcd.EtcdWatcher.load_config")
+    @mock.patch("calico.felix.fetcd.EtcdAPI.load_config")
     @mock.patch("gevent.Greenlet.start", autospec=True)
     @mock.patch("calico.felix.felix.IptablesUpdater", autospec=True)
     @mock.patch("gevent.iwait", autospec=True, side_effect=TestException())

@@ -5,7 +5,7 @@ import logging
 from etcd import EtcdResult
 from mock import Mock, call
 from calico.datamodel_v1 import EndpointId
-from calico.felix.fetcd import EtcdWatcher, ResyncRequired
+from calico.felix.fetcd import _EtcdWatcher, ResyncRequired
 from calico.felix.splitter import UpdateSplitter
 from calico.felix.test.base import BaseTestCase
 
@@ -42,7 +42,7 @@ class TestExcdWatcher(BaseTestCase):
         super(TestExcdWatcher, self).setUp()
         m_config = Mock()
         m_config.IFACE_PREFIX = "tap"
-        self.watcher = EtcdWatcher(m_config)
+        self.watcher = _EtcdWatcher(m_config)
         self.m_splitter = Mock(spec=UpdateSplitter)
         self.watcher.splitter = self.m_splitter
 
