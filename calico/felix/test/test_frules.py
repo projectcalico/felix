@@ -69,6 +69,20 @@ RULES_TESTS = [
       DEFAULT_MARK]),
 
     ([{"protocol": "tcp",
+       "src_ports": [10]}], 4,
+     ["--append chain-foo --protocol tcp "
+      "--match tcp --source-port 10 --jump RETURN",
+      DEFAULT_MARK]),
+
+    ([{"protocol": "tcp",
+       "src_ports": [10, "0:12"]}], 4,
+     ["--append chain-foo --protocol tcp "
+      "--match tcp --source-port 0 --jump RETURN",
+      "--append chain-foo --protocol tcp "
+      "--match multiport --source-ports 10,1:12 --jump RETURN",
+      DEFAULT_MARK]),
+
+    ([{"protocol": "tcp",
        "src_ports": [1, "2:3", 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]}], 4,
      ["--append chain-foo --protocol tcp "
       "--match multiport --source-ports 1,2:3,4,5,6,7,8,9,10,11,12,13,14,15 "
@@ -114,6 +128,33 @@ class TestRules(BaseTestCase):
               '10', '11', '12', '13', '14', '15'],
              ['16', '17']]
         )
+        self.assertEqual(
+            frules._split_port_lists([1, "0:3", 4, 5, 6, 7, 8, 9,
+                                      10, 11, 12, 13, 14, 15, 16, 17]),
+            [['0'],
+             ['1', '1:3', '4', '5', '6', '7', '8', '9',
+              '10', '11', '12', '13', '14', '15'],
+             ['16', '17']]
+        )
+        self.assertEqual(
+            frules._split_port_lists([0, "0:3"]),
+            [['0'], ['1:3']]
+        )
+
+    def test_filter_zero_ports(self):
+        self.assertEqual(frules._filter_zero_ports(["0"]), (True, []))
+        self.assertEqual(frules._filter_zero_ports(["0:0"]), (True, []))
+        self.assertEqual(frules._filter_zero_ports(["0:1"]), (True, ["1"]))
+        self.assertEqual(frules._filter_zero_ports(["1:0"]), (True, ["1"]))
+        self.assertEqual(frules._filter_zero_ports(["0:65535"]),
+                         (True, ["1:65535"]))
+        self.assertEqual(frules._filter_zero_ports(["65535:0"]),
+                         (True, ["65535:1"]))
+
+        self.assertEqual(frules._filter_zero_ports([]), (False, []))
+        self.assertEqual(frules._filter_zero_ports([1]), (False, ["1"]))
+        self.assertEqual(frules._filter_zero_ports(["1:65535"]),
+                         (False, ["1:65535"]))
 
     def test_rules_generation(self):
         for rules, ip_version, expected_output in RULES_TESTS:
