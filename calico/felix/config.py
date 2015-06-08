@@ -177,7 +177,7 @@ class Config(object):
                            "IP-in-IP tunnel support enabled", False,
                            value_is_bool=True)
         self.add_parameter("IpInIpTunnelName",
-                           "IP-in-IP tunnel name", "calicoipip")
+                           "IP-in-IP tunnel name", "tunl0")
 
         # Read the environment variables, then the configuration file.
         self._read_env_vars()
