@@ -215,7 +215,11 @@ def _split_port_lists(ports):
     :return list[list[str]]: list of chunks.  If the input is empty, then
                              returns a list containing a single empty list.
     """
-    chunks = []
+    # If 0 is in any of the port ranges, we can't use the multiport extension
+    # so extract it into its own chunk.
+    zero_present, ports = _filter_zero_ports(ports)
+    chunks = [["0"]] if zero_present else []
+
     chunk = []
     entries_in_chunk = 0
     for port_or_range in ports:
@@ -235,6 +239,45 @@ def _split_port_lists(ports):
     if chunk or not chunks:
         chunks.append(chunk)
     return chunks
+
+
+def _filter_zero_ports(ports):
+    """
+    Filter out the 0 ports from a list of ports, which may contain ints
+    and strings representing ranges.
+
+    Normalises all ports and ranges to be strings.
+
+    For example: [0, 1, "2", "0:10"] is filtered to
+    (True, ["1", "2", "1:10"])
+
+    :return Tuple[bool,list]: zero_present (True if at least one port
+       contained 0), filtered_ports (list of ports).
+    """
+    zero_present = False
+    filtered_ports = []
+    for p in ports:
+        p = str(p)
+        if p in ("0", "0:0"):
+            # Skip copying the entry to avoid duplicates but record that a 0
+            # was in the list.
+            zero_present = True
+            continue
+        elif p in ("0:1", "1:0"):
+            # 0:1 and 1:0 will get converted to 1:1, which wastes space in the
+            # list.
+            zero_present = True
+            filtered_ports.append("1")
+        elif p.startswith("0:"):
+            zero_present = True
+            filtered_ports.append("1" + p[1:])
+        elif p.endswith(":0"):
+            # Defensive: iptables supports either order.
+            zero_present = True
+            filtered_ports.append(p[:-1] + "1")
+        else:
+            filtered_ports.append(p)
+    return zero_present, filtered_ports
 
 
 def _rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,
@@ -289,13 +332,38 @@ def _rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,
         ports_key = dirn + "_ports"
         if ports_key in rule and rule[ports_key]:
             assert proto in ["tcp", "udp"], "Protocol %s not supported with " \
-                                            "%s (%s)" % (proto, ports_key, rule)
-            ports = ','.join([str(p) for p in rule[ports_key]])
-            # multiport only supports 15 ports.  The calling function should
-            # have taken care of that.
-            num_ports = ports.count(",") + ports.count(":") + 1
-            assert num_ports <= 15, "Too many ports (%s)" % ports
-            append("--match multiport", "--%s-ports" % direction, ports)
+                                            "%s (%s)" % (proto, ports_key,
+                                                         rule)
+            ports_list = rule[ports_key]
+            assert isinstance(ports_list, list)
+            if len(ports_list) > 1:
+                # Multiple ports to match on, use the multiport extension.
+                # This has the limitation that it can only match on non-0
+                # ports so the calling function should have split out any
+                # 0-ports before calling us.
+                _log.debug("List of ports to match %s on: %s",
+                           direction, ports_list)
+                port_parts = []
+                num_ports = 0
+                for p in ports_list:
+                    p_str = str(p)
+                    # Calling function should have removed 0-ports.
+                    assert p_str != "0" and not p_str.startswith("0:"), \
+                        "Caller should have removed 0-ports"
+                    port_parts.append(p_str)
+                    num_ports += 2 if ":" in p_str else 1
+                # Calling function
+                assert num_ports <= 15, "Too many ports (%s)" % (ports_list,)
+                append("--match multiport", "--%s-ports" % direction,
+                       ",".join(port_parts))
+            else:
+                # Exactly one port or range to match on, use a normal match.
+                # This is simpler in the mainline case and it supports the
+                # 0 port, unlike multiport.
+                _log.debug("single port to match %s on: %s",
+                           direction, ports_list)
+                append("--match", proto,
+                       "--%s-port" % direction, ports_list[0])
 
     if rule.get("icmp_type") is not None:
         icmp_type = rule["icmp_type"]
