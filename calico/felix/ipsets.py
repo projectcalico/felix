@@ -407,13 +407,14 @@ class ActiveIpset(RefCountedActor):
 
         self.tag = tag
         self.ip_type = ip_type
-        self.name = tag_to_ipset_name(ip_type, tag)
-        self.tmpname = tag_to_ipset_name(ip_type, tag, tmp=True)
-        self.family = "inet" if ip_type == IPV4 else "inet6"
+        name = tag_to_ipset_name(ip_type, tag)
+        tmpname = tag_to_ipset_name(ip_type, tag, tmp=True)
+        family = "inet" if ip_type == IPV4 else "inet6"
 
+        # Helper class, used to do atomic rewrites of ipsets.
+        self._ipset = Ipset(name, tmpname, family, "hash:ip")
         # Members - which entries should be in the ipset.
         self.members = set()
-
         # Members which really are in the ipset.
         self.programmed_members = None
 
@@ -429,7 +430,7 @@ class ActiveIpset(RefCountedActor):
         :return: set of name of ipsets that this Actor owns and manages.  the
                  sets may or may not be present.
         """
-        return set([self.name, self.tmpname])
+        return set([self._ipset.set_name, self._ipset.temp_set_name])
 
     @actor_message()
     def replace_members(self, members):
@@ -440,6 +441,7 @@ class ActiveIpset(RefCountedActor):
         """
         _log.info("Replacing members of ipset %s", self.name)
         assert isinstance(members, set), "Expected members to be a set"
+        self._ipset.replace_members(members)
         self.members = members
 
     @actor_message()
@@ -448,11 +450,7 @@ class ActiveIpset(RefCountedActor):
         # the ipset in _finish_msg_batch.
         self.stopped = True
         try:
-            # Destroy the ipsets - ignoring any errors.
-            _log.debug("Delete ipsets %s and %s if they exist",
-                       self.name, self.tmpname)
-            futils.call_silent(["ipset", "destroy", self.name])
-            futils.call_silent(["ipset", "destroy", self.tmpname])
+            self._ipset.delete()
         finally:
             self._notify_cleanup_complete()
 
@@ -469,33 +467,8 @@ class ActiveIpset(RefCountedActor):
         _log.info("Rewriting %s ipset %s for tag %s with %d members.",
                   self.ip_type, self.name, self._id, len(self.members))
         _log.debug("Setting ipset %s to %s", self.name, self.members)
-
-        # We use ipset restore, which processes a batch of ipset updates.
-        # The only operation that we're sure is atomic is swapping two ipsets
-        # so we build up the complete set of members in a temporary ipset,
-        # swap it into place and then delete the old ipset.
-        create_cmd = "create %s hash:ip family %s --exist"
-        input_lines = [
-            # Ensure both the main set and the temporary set exist.
-            create_cmd % (self.name, self.family),
-            create_cmd % (self.tmpname, self.family),
-
-            # Flush the temporary set.  This is a no-op unless we had a
-            # left-over temporary set before.
-            "flush %s" % self.tmpname,
-        ]
-        # Add all the members to the temporary set,
-        input_lines += ["add %s %s" % (self.tmpname, m) for m in self.members]
-        # Then, atomically swap the temporary set into place.
-        input_lines.append("swap %s %s" % (self.name, self.tmpname))
-        # Finally, delete the temporary set (which was the old active set).
-        input_lines.append("destroy %s" % self.tmpname)
-        # COMMIT tells ipset restore to actually execute the changes.
-        input_lines.append("COMMIT")
-
-        input_str = "\n".join(input_lines) + "\n"
-        futils.check_call(["ipset", "restore"], input_str=input_str)
-
+        # Defer to our helper.
+        self._ipset.replace_members(self.members)
         # We have got the set into the correct state.
         self.programmed_members = self.members.copy()
 
@@ -511,6 +484,53 @@ class ActiveIpset(RefCountedActor):
                 self._id,
             )
         )
+
+
+class Ipset(object):
+    """
+    (Synchronous) wrapper around an ipset, supporting atomic rewrites.
+    """
+    def __init__(self, ipset_name, temp_ipset_name, ip_family,
+                 ipset_type="hash:ip"):
+        self.set_name = ipset_name
+        self.temp_set_name = temp_ipset_name
+        self.type = ipset_type
+        self.family = ip_family
+
+    def replace_members(self, members):
+        # We use ipset restore, which processes a batch of ipset updates.
+        # The only operation that we're sure is atomic is swapping two ipsets
+        # so we build up the complete set of members in a temporary ipset,
+        # swap it into place and then delete the old ipset.
+        create_cmd = "create %s %s family %s --exist"
+        input_lines = [
+            # Ensure both the main set and the temporary set exist.
+            create_cmd % (self.set_name, self.type, self.family),
+            create_cmd % (self.temp_set_name, self.type, self.family),
+
+            # Flush the temporary set.  This is a no-op unless we had a
+            # left-over temporary set before.
+            "flush %s" % self.temp_set_name,
+        ]
+        # Add all the members to the temporary set,
+        input_lines += ["add %s %s" % (self.temp_set_name, m)
+                        for m in members]
+        # Then, atomically swap the temporary set into place.
+        input_lines.append("swap %s %s" % (self.set_name, self.temp_set_name))
+        # Finally, delete the temporary set (which was the old active set).
+        input_lines.append("destroy %s" % self.temp_set_name)
+        # COMMIT tells ipset restore to actually execute the changes.
+        input_lines.append("COMMIT")
+
+        input_str = "\n".join(input_lines) + "\n"
+        futils.check_call(["ipset", "restore"], input_str=input_str)
+
+    def delete(self):
+        # Destroy the ipsets - ignoring any errors.
+        _log.debug("Delete ipsets %s and %s if they exist",
+                   self.set_name, self.temp_set_name)
+        futils.call_silent(["ipset", "destroy", self.set_name])
+        futils.call_silent(["ipset", "destroy", self.temp_set_name])
 
 
 def tag_to_ipset_name(ip_type, tag, tmp=False):
