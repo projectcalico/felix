@@ -26,7 +26,7 @@ from itertools import chain
 
 from calico.felix import futils
 from calico.felix.futils import IPV4, IPV6, FailedSystemCall
-from calico.felix.actor import actor_message
+from calico.felix.actor import actor_message, Actor
 from calico.felix.refcount import ReferenceManager, RefCountedActor
 
 _log = logging.getLogger(__name__)
@@ -72,12 +72,12 @@ class IpsetManager(ReferenceManager):
         self._dirty_tags = set()
 
     def _create(self, tag_id):
-        active_ipset = ActiveIpset(futils.uniquely_shorten(tag_id, 16),
+        active_ipset = TagIpset(futils.uniquely_shorten(tag_id, 16),
                                    self.ip_type)
         return active_ipset
 
     def _on_object_started(self, tag_id, active_ipset):
-        _log.debug("ActiveIpset actor for %s started", tag_id)
+        _log.debug("TagIpset actor for %s started", tag_id)
         # Fill the ipset in with its members, this will trigger its first
         # programming, after which it will call us back to tell us it is ready.
         # We can't use self._dirty_tags to defer this in case the set becomes
@@ -86,7 +86,7 @@ class IpsetManager(ReferenceManager):
 
     def _update_active_ipset(self, tag_id):
         """
-        Replaces the members of the identified ActiveIpset with the
+        Replaces the members of the identified TagIpset with the
         current set.
 
         :param tag_id: The ID of the tag, must be an active tag.
@@ -162,7 +162,7 @@ class IpsetManager(ReferenceManager):
                                                      n.startswith(tmppfx)])
         whitelist = set()
         live_ipsets = self.objects_by_id.itervalues()
-        # stopping_objects_by_id is a dict of sets of ActiveIpset objects,
+        # stopping_objects_by_id is a dict of sets of TagIpset objects,
         # chain them together.
         stopping_ipsets = chain.from_iterable(
             self.stopping_objects_by_id.itervalues())
@@ -188,7 +188,7 @@ class IpsetManager(ReferenceManager):
         Called when the tag list of the given profile has changed or been
         deleted.
 
-        Updates the indices and notifies any live ActiveIpset objects of any
+        Updates the indices and notifies any live TagIpset objects of any
         any changes that affect them.
 
         :param str profile_id: Profile ID affected.
@@ -383,7 +383,7 @@ class IpsetManager(ReferenceManager):
     def _finish_msg_batch(self, batch, results):
         """
         Called after a batch of messages is finished, processes any
-        pending ActiveIpset member updates.
+        pending TagIpset member updates.
 
         Doing that here allows us to lots of updates into one replace
         operation.  It also avoid wasted effort if tags are flapping.
@@ -394,32 +394,19 @@ class IpsetManager(ReferenceManager):
         _log.info("Finished sending updates to dirty tags.")
 
 
-class ActiveIpset(RefCountedActor):
-
-    def __init__(self, tag, ip_type):
+class IpsetActor(Actor):
+    def __init__(self, ipset, qualifier=None):
         """
         Actor managing a single ipset.
-
-        :param str tag: Name of tag that this ipset represents.
-        :param ip_type: IPV4 or IPV6
         """
-        super(ActiveIpset, self).__init__(qualifier=tag)
+        super(IpsetActor, self).__init__(qualifier=qualifier)
 
-        self.tag = tag
-        self.ip_type = ip_type
-        name = tag_to_ipset_name(ip_type, tag)
-        tmpname = tag_to_ipset_name(ip_type, tag, tmp=True)
-        family = "inet" if ip_type == IPV4 else "inet6"
-
-        # Helper class, used to do atomic rewrites of ipsets.
-        self._ipset = Ipset(name, tmpname, family, "hash:ip")
+        self._ipset = ipset
         # Members - which entries should be in the ipset.
         self.members = set()
         # Members which really are in the ipset.
         self.programmed_members = None
 
-        # Notified ready?
-        self.notified_ready = False
         self.stopped = False
 
     def owned_ipset_names(self):
@@ -437,12 +424,57 @@ class ActiveIpset(RefCountedActor):
         """
         Replace the members of this ipset with the supplied set.
 
-        :param set[str] members: Set of IP address strings.
+        :param set[str]|list[str] members: IP address strings.
         """
         _log.info("Replacing members of ipset %s", self.name)
-        assert isinstance(members, set), "Expected members to be a set"
-        self._ipset.replace_members(members)
-        self.members = members
+        self.members.clear()
+        self.members.update(members)
+
+    def _finish_msg_batch(self, batch, results):
+        if not self.stopped and self.members != self.programmed_members:
+            self._sync_to_ipset()
+
+    def _sync_to_ipset(self):
+        _log.info("Rewriting %s with %d members.", self, len(self.members))
+        _log.debug("Setting ipset %s to %s", self, self.members)
+        # Defer to our helper.
+        self._ipset.replace_members(self.members)
+        # We have got the set into the correct state.
+        self.programmed_members = self.members.copy()
+
+    def __str__(self):
+        return (
+            self.__class__.__name__ + "<queue_len=%s,live=%s,msg=%s,"
+                                      "name=%s>" %
+            (
+                self._event_queue.qsize(),
+                bool(self.greenlet),
+                self._current_msg,
+                self.name,
+            )
+        )
+
+
+class TagIpset(IpsetActor, RefCountedActor):
+
+    def __init__(self, tag, ip_type):
+        """
+        Refrence-counted Actor managing a single tag's ipset.
+
+        :param str tag: Name of tag that this ipset represents.
+        :param ip_type: IPV4 or IPV6
+        """
+
+        self.tag = tag
+        name = tag_to_ipset_name(ip_type, tag)
+        tmpname = tag_to_ipset_name(ip_type, tag, tmp=True)
+        family = "inet" if ip_type == IPV4 else "inet6"
+        # Helper class, used to do atomic rewrites of ipsets.
+        ipset = Ipset(name, tmpname, family, "hash:ip")
+        super(TagIpset, self).__init__(ipset, qualifier=tag)
+
+        # Notified ready?
+        self.notified_ready = False
 
     @actor_message()
     def on_unreferenced(self):
@@ -455,22 +487,11 @@ class ActiveIpset(RefCountedActor):
             self._notify_cleanup_complete()
 
     def _finish_msg_batch(self, batch, results):
-        if not self.stopped and self.members != self.programmed_members:
-            self._sync_to_ipset()
-
+        super(TagIpset, self)._finish_msg_batch(batch, results)
         if not self.notified_ready:
             # We have created the set, so we are now ready.
             self.notified_ready = True
             self._notify_ready()
-
-    def _sync_to_ipset(self):
-        _log.info("Rewriting %s ipset %s for tag %s with %d members.",
-                  self.ip_type, self.name, self._id, len(self.members))
-        _log.debug("Setting ipset %s to %s", self.name, self.members)
-        # Defer to our helper.
-        self._ipset.replace_members(self.members)
-        # We have got the set into the correct state.
-        self.programmed_members = self.members.copy()
 
     def __str__(self):
         return (
@@ -551,11 +572,11 @@ class Ipset(object):
         futils.call_silent(["ipset", "destroy", self.temp_set_name])
 
 
-HOSTS_IPSET_V4 = Ipset(FELIX_PFX + "-calico-hosts-4",
-                       FELIX_PFX + "-calico-hosts-4-tmp",
+HOSTS_IPSET_V4 = Ipset(FELIX_PFX + "calico-hosts-4",
+                       FELIX_PFX + "calico-hosts-4-tmp",
                        "inet")
-HOSTS_IPSET_V6 = Ipset(FELIX_PFX + "-calico-hosts-6",
-                       FELIX_PFX + "-calico-hosts-6-tmp",
+HOSTS_IPSET_V6 = Ipset(FELIX_PFX + "calico-hosts-6",
+                       FELIX_PFX + "calico-hosts-6-tmp",
                        "inet6")
 
 

@@ -24,7 +24,7 @@ import logging
 from mock import *
 from calico.datamodel_v1 import EndpointId
 from calico.felix.futils import IPV4, FailedSystemCall
-from calico.felix.ipsets import IpsetManager, ActiveIpset
+from calico.felix.ipsets import IpsetManager, TagIpset
 from calico.felix.refcount import CREATED
 from calico.felix.test.base import BaseTestCase
 
@@ -68,7 +68,7 @@ class TestIpsetManager(BaseTestCase):
         self.mgr._create = self.m_create
 
     def m_create(self, tag_id):
-        ipset = Mock(spec=ActiveIpset)
+        ipset = Mock(spec=TagIpset)
 
         ipset._manager = None
         ipset._id = None

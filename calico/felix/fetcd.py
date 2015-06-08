@@ -33,11 +33,12 @@ import urllib3.exceptions
 from urllib3.exceptions import ReadTimeoutError, ConnectTimeoutError
 
 from calico import common
-from calico.common import ValidationFailed
+from calico.common import ValidationFailed, validate_ip_addr, canonicalise_ip
 from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  RULES_KEY_RE, TAGS_KEY_RE, ENDPOINT_KEY_RE,
                                  dir_for_per_host_config,
-                                 PROFILE_DIR, HOST_DIR, EndpointId, POLICY_DIR)
+                                 PROFILE_DIR, HOST_DIR, EndpointId, POLICY_DIR,
+                                 HOST_IP_KEY_RE)
 from calico.etcdutils import PathDispatcher
 from calico.felix.actor import Actor, actor_message
 
@@ -53,6 +54,7 @@ PER_PROFILE_DIR = PROFILE_DIR + "/<profile_id>"
 TAGS_KEY = PER_PROFILE_DIR + "/tags"
 RULES_KEY = PER_PROFILE_DIR + "/rules"
 PER_HOST_DIR = HOST_DIR + "/<hostname>"
+HOST_IP_KEY = PER_HOST_DIR + "/bird_ip"
 WORKLOAD_DIR = PER_HOST_DIR + "/workload"
 PER_ORCH_DIR = WORKLOAD_DIR + "/<orchestrator>"
 PER_WORKLOAD_DIR = PER_ORCH_DIR + "/<workload_id>"
@@ -61,9 +63,10 @@ PER_ENDPOINT_KEY = ENDPOINT_DIR + "/<endpoint_id>"
 
 
 class EtcdWatcher(Actor):
-    def __init__(self, config):
+    def __init__(self, config, hosts_ipset):
         super(EtcdWatcher, self).__init__()
         self.config = config
+        self.hosts_ipset = hosts_ipset
         self.client = None
         self.my_config_dir = dir_for_per_host_config(self.config.HOSTNAME)
 
@@ -74,6 +77,8 @@ class EtcdWatcher(Actor):
         # Cache of known endpoints, used to resolve deletions of whole
         # directory trees.
         self.endpoint_ids_per_host = defaultdict(set)
+
+        self.ip_by_hostname = {}
 
         # Program the dispatcher with the paths we care about.  Since etcd
         # gives us a single event for a recursive directory deletion, we have
@@ -95,6 +100,9 @@ class EtcdWatcher(Actor):
         # Hosts, workloads and endpoints.
         reg(HOST_DIR, on_del=self._resync)
         reg(PER_HOST_DIR, on_del=self.on_host_delete)
+        reg(HOST_IP_KEY,
+            on_set=self.on_host_ip_set,
+            on_del=self.on_host_ip_delete)
         reg(WORKLOAD_DIR, on_del=self.on_host_delete)
         reg(PER_ORCH_DIR, on_del=self.on_orch_delete)
         reg(PER_WORKLOAD_DIR, on_del=self.on_workload_delete)
@@ -217,6 +225,7 @@ class EtcdWatcher(Actor):
         tags_by_id = {}
         endpoints_by_id = {}
         self.endpoint_ids_per_host.clear()
+        self.ip_by_hostname.clear()
         still_ready = False
         for child in initial_dump.children:
             profile_id, rules = parse_if_rules(child)
@@ -231,6 +240,10 @@ class EtcdWatcher(Actor):
             if endpoint_id and endpoint:
                 endpoints_by_id[endpoint_id] = endpoint
                 self.endpoint_ids_per_host[endpoint_id.host].add(endpoint_id)
+                continue
+            hostname, ip = parse_if_host_ip(child)
+            if hostname and ip:
+                self.ip_by_hostname[hostname] = ip
                 continue
 
             # Double-check the flag hasn't changed since we read it before.
@@ -254,6 +267,11 @@ class EtcdWatcher(Actor):
                                      tags_by_id,
                                      endpoints_by_id,
                                      async=True)
+
+        _log.info("Sending (%d) host IPs to ipset.", len(self.ip_by_hostname))
+        self.hosts_ipset.replace_members(self.ip_by_hostname.values(),
+                                         async=True)
+
         # The etcd_index is the high-water-mark for the snapshot, record that
         # we want to poll starting at the next index.
         self.next_etcd_index = initial_dump.etcd_index + 1
@@ -411,6 +429,20 @@ class EtcdWatcher(Actor):
                   hostname, len(ids_on_that_host))
         for endpoint_id in ids_on_that_host:
             self.splitter.on_endpoint_update(endpoint_id, None, async=True)
+        self.ip_by_hostname.pop(hostname, None)
+        self.hosts_ipset.replace_members(self.ip_by_hostname.values(),
+                                         async=True)
+
+    def on_host_ip_set(self, response, hostname):
+        ip = parse_host_ip(hostname, response.value)
+        self.ip_by_hostname[hostname] = ip
+        self.hosts_ipset.replace_members(self.ip_by_hostname.values(),
+                                         async=True)
+
+    def on_host_ip_delete(self, response, hostname):
+        self.ip_by_hostname.pop(hostname, None)
+        self.hosts_ipset.replace_members(self.ip_by_hostname.values(),
+                                         async=True)
 
     def on_orch_delete(self, response, hostname, orchestrator):
         """
@@ -542,6 +574,26 @@ def parse_tags(profile_id, raw_json):
         return None
     else:
         return tags
+
+
+def parse_if_host_ip(etcd_node):
+    m = HOST_IP_KEY_RE.match(etcd_node.key)
+    if m:
+        # Got some rules.
+        hostname = m.group("hostname")
+        if etcd_node.action == "delete":
+            ip = None
+        else:
+            ip = parse_host_ip(hostname, etcd_node.value)
+        return hostname, ip
+    return None, None
+
+
+def parse_host_ip(hostname, raw_value):
+    if raw_value is None or validate_ip_addr(raw_value):
+        return canonicalise_ip(raw_value, None)
+    else:
+        _log.debug("%s has invalid IP: %r", hostname, raw_value)
 
 
 def safe_decode_json(raw_json, log_tag=None):
