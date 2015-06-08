@@ -497,17 +497,29 @@ class Ipset(object):
         self.type = ipset_type
         self.family = ip_family
 
+    def ensure_exists(self):
+        """
+        Creates the ipset iif it does not exist.
+
+        Leaves the set and its contents untouched if it already exists.
+        """
+        input_lines = [self._create_cmd(self.set_name)]
+        self._exec_and_commit(input_lines)
+
     def replace_members(self, members):
+        """
+        Atomically rewrites the ipset with the new members.
+
+        Creates the set if it does not exist.
+        """
         # We use ipset restore, which processes a batch of ipset updates.
         # The only operation that we're sure is atomic is swapping two ipsets
         # so we build up the complete set of members in a temporary ipset,
         # swap it into place and then delete the old ipset.
-        create_cmd = "create %s %s family %s --exist"
         input_lines = [
             # Ensure both the main set and the temporary set exist.
-            create_cmd % (self.set_name, self.type, self.family),
-            create_cmd % (self.temp_set_name, self.type, self.family),
-
+            self._create_cmd(self.set_name),
+            self._create_cmd(self.temp_set_name),
             # Flush the temporary set.  This is a no-op unless we had a
             # left-over temporary set before.
             "flush %s" % self.temp_set_name,
@@ -520,10 +532,16 @@ class Ipset(object):
         # Finally, delete the temporary set (which was the old active set).
         input_lines.append("destroy %s" % self.temp_set_name)
         # COMMIT tells ipset restore to actually execute the changes.
-        input_lines.append("COMMIT")
+        self._exec_and_commit(input_lines)
 
+    def _exec_and_commit(self, input_lines):
+        input_lines.append("COMMIT")
         input_str = "\n".join(input_lines) + "\n"
         futils.check_call(["ipset", "restore"], input_str=input_str)
+
+    def _create_cmd(self, name):
+        return ("create %s %s family %s --exist" %
+                (name, self.type, self.family))
 
     def delete(self):
         # Destroy the ipsets - ignoring any errors.
@@ -531,6 +549,14 @@ class Ipset(object):
                    self.set_name, self.temp_set_name)
         futils.call_silent(["ipset", "destroy", self.set_name])
         futils.call_silent(["ipset", "destroy", self.temp_set_name])
+
+
+HOSTS_IPSET_V4 = Ipset(FELIX_PFX + "-calico-hosts-4",
+                       FELIX_PFX + "-calico-hosts-4-tmp",
+                       "inet")
+HOSTS_IPSET_V6 = Ipset(FELIX_PFX + "-calico-hosts-6",
+                       FELIX_PFX + "-calico-hosts-6-tmp",
+                       "inet6")
 
 
 def tag_to_ipset_name(ip_type, tag, tmp=False):
