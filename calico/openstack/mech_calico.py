@@ -25,6 +25,8 @@
 # It is implemented as a Neutron/ML2 mechanism driver.
 import os
 import eventlet
+import GreenletProfiler
+import os
 
 from collections import namedtuple
 from functools import wraps
@@ -180,6 +182,23 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self.transport = CalicoTransportEtcd(self)
 
         self._my_pid = current_pid
+
+        # Also run a profiler for 3 minutes.
+        GreenletProfiler.start()
+        eventlet.spawn(self._profile_timer_pop)
+
+    def _profile_timer_pop(self):
+        """
+        Stop the profiler in 3 minutes and save the stats.  Runs in a separate
+        greenlet.
+        """
+        eventlet.sleep(180)
+        func_stats = GreenletProfiler.get_func_stats()
+        GreenletProfiler.stop()
+        pid = os.getpid()
+        with open("/home/ubuntu/neutron-server-profiles/%s.out" % pid, 'w+') as f:
+            func_stats.print_all(out=f)
+        func_stats.save("/home/ubuntu/neutron-server-profiles/%s.yappi" % pid)
 
     def _get_db(self):
         if not self.db:
