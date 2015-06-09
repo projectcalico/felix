@@ -19,7 +19,6 @@ felix.frules
 Felix rule management, including iptables and ipsets.
 """
 import logging
-from subprocess import CalledProcessError
 import itertools
 from calico.felix import futils
 from calico.common import KNOWN_RULE_KEYS
@@ -304,11 +303,10 @@ def _rule_to_iptables_fragment(chain_name, rule, ip_version, tag_to_ipset,
     update_fragments = ["--append", chain_name]
     append = lambda *args: update_fragments.extend(args)
 
-    proto = None
-    if "protocol" in rule:
+    proto = rule.get("protocol")
+    if proto:
         proto = rule["protocol"]
-        assert proto in ["tcp", "udp", "icmp", "icmpv6"]
-        append("--protocol", proto)
+        append("--protocol", str(proto))
 
     for dirn in ["src", "dst"]:
         # Some params use the long-form of the name.
@@ -412,3 +410,4 @@ def chain_names(endpoint_suffix):
 
 class UnsupportedICMPType(Exception):
     pass
+
