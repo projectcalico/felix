@@ -28,8 +28,6 @@ from calico import common
 from calico.felix import futils
 
 # Logger
-import re
-
 _log = logging.getLogger(__name__)
 
 
