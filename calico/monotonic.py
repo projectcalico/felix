@@ -47,7 +47,7 @@ clock_gettime = librt.clock_gettime
 clock_gettime.argtypes = [ctypes.c_int, ctypes.POINTER(timespec)]
 
 
-def monotonic_time():
+def _raw_monotonic_time():
     """
     :returns: a time in seconds from an unspecified epoch (which may vary
         between processes).  Guaranteed to be monotonic within the life of
@@ -57,4 +57,13 @@ def monotonic_time():
     if clock_gettime(CLOCK_MONOTONIC_RAW , ctypes.pointer(t)) != 0:
         errno_ = ctypes.get_errno()
         raise OSError(errno_, os.strerror(errno_))
-    return t.tv_sec + t.tv_nsec * 1e-9
+    monotime = t.tv_sec + t.tv_nsec * 1e-9
+    return monotime
+
+
+# Make our epoch friendly.
+_epoch = _raw_monotonic_time()
+def monotonic_time():
+    return _raw_monotonic_time() - _epoch
+
+

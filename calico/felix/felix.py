@@ -22,6 +22,8 @@ The main logic for Felix.
 
 # Monkey-patch before we do anything else...
 from gevent import monkey
+from calico.felix.tracking import UpdateMonitor
+
 monkey.patch_all()
 
 import functools
@@ -57,9 +59,10 @@ def _main_greenlet(config):
     """
     try:
         _log.info("Connecting to etcd to get our configuration.")
+        update_monitor = UpdateMonitor()
         hosts_ipset_v4 = IpsetActor(HOSTS_IPSET_V4)
 
-        etcd_api = EtcdAPI(config, hosts_ipset_v4)
+        etcd_api = EtcdAPI(config, hosts_ipset_v4, update_monitor)
         etcd_api.start()
         # Ask the EtcdAPI to fill in the global config object before we
         # proceed.  We don't yet support config updates.
