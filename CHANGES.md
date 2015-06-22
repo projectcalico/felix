@@ -2,6 +2,8 @@
 
 ## 0.25-dev
 
+- #672: Fix bug where profile chain was left empty instead of being 
+  stubbed out.
 - Improve security between endpoint and host and simplify INPUT chain logic.
 
 ## 0.24

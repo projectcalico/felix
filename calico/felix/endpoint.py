@@ -20,7 +20,6 @@ felix.endpoint
 Endpoint management.
 """
 import logging
-from subprocess import CalledProcessError
 from calico.felix import devices, futils
 from calico.felix.actor import actor_message
 from calico.felix.futils import FailedSystemCall
@@ -349,7 +348,7 @@ class LocalEndpoint(RefCountedActor):
         )
         try:
             self.iptables_updater.rewrite_chains(updates, deps, async=False)
-        except CalledProcessError:
+        except FailedSystemCall:
             _log.exception("Failed to program chains for %s. Removing.", self)
             self._failed = True
             self._remove_chains()
@@ -358,7 +357,7 @@ class LocalEndpoint(RefCountedActor):
         try:
             self.iptables_updater.delete_chains(chain_names(self._suffix),
                                                 async=True)
-        except CalledProcessError:
+        except FailedSystemCall:
             _log.exception("Failed to delete chains for %s", self)
             self._failed = True
 
@@ -390,7 +389,7 @@ class LocalEndpoint(RefCountedActor):
                                self.endpoint["mac"],
                                reset_arp=reset_arp)
 
-        except (IOError, FailedSystemCall, CalledProcessError):
+        except (IOError, FailedSystemCall):
             if not devices.interface_exists(self._iface_name):
                 _log.info("Interface %s for %s does not exist yet",
                           self._iface_name, self.combined_id)
@@ -408,7 +407,7 @@ class LocalEndpoint(RefCountedActor):
         """
         try:
             devices.set_routes(self.ip_type, set(), self._iface_name, None)
-        except (IOError, FailedSystemCall, CalledProcessError):
+        except (IOError, FailedSystemCall):
             if not devices.interface_exists(self._iface_name):
                 # Deleted under our feet - so the rules are gone.
                 _log.debug("Interface %s for %s deleted",
