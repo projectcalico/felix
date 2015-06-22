@@ -94,13 +94,13 @@ class EtcdAPI(Actor):
     manages an "upstream" connection to etcd.
     """
 
-    def __init__(self, config, hosts_ipset):
+    def __init__(self, config, hosts_ipset, update_monitor):
         super(EtcdAPI, self).__init__()
         self._config = config
 
         # Start up the main etcd-watching greenlet.  It will wait for an
         # event from us before doing anything.
-        self._watcher = _EtcdWatcher(config, hosts_ipset)
+        self._watcher = _EtcdWatcher(config, hosts_ipset, update_monitor)
         self._watcher.link(self._on_worker_died)
         self._watcher.start()
 
@@ -161,9 +161,10 @@ class _EtcdWatcher(gevent.Greenlet):
     This greenlet is expected to be managed by the EtcdAPI Actor.
     """
 
-    def __init__(self, config, hosts_ipset):
+    def __init__(self, config, hosts_ipset, update_monitor):
         super(_EtcdWatcher, self).__init__()
         self.config = config
+        self.update_monitor = update_monitor
         self.hosts_ipset = hosts_ipset
 
         # Events triggered by the EtcdAPI Actor to tell us to load the config
@@ -277,6 +278,8 @@ class _EtcdWatcher(gevent.Greenlet):
 
     def _wait_for_ready(self):
         _log.info("Waiting for etcd to be ready...")
+        t = self.update_monitor.tracker(None, tag="wait-for-ready",
+                                        replace_all=True)
         ready = False
         while not ready:
             try:
@@ -300,6 +303,7 @@ class _EtcdWatcher(gevent.Greenlet):
                 _log.info("etcd not ready.  Will retry.")
                 gevent.sleep(RETRY_DELAY)
                 continue
+        t.work_complete()
 
     def _load_config(self):
         """
@@ -339,6 +343,8 @@ class _EtcdWatcher(gevent.Greenlet):
         initial_dump = self.client.read(VERSION_DIR, recursive=True)
         _log.info("Loaded snapshot from etcd cluster %s, parsing it...",
                   self.client.expected_cluster_id)
+        tracker = self.update_monitor.tracker(initial_dump.etcd_index,
+                                              tag="load initial dump")
         rules_by_id = {}
         tags_by_id = {}
         endpoints_by_id = {}
@@ -391,6 +397,7 @@ class _EtcdWatcher(gevent.Greenlet):
                                      tags_by_id,
                                      endpoints_by_id,
                                      ipv4_pools_by_id,
+                                     tracker=tracker,
                                      async=True)
         if self.config.IP_IN_IP_ENABLED:
             # We only support IPv4 for host tracking right now so there's not

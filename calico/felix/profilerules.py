@@ -25,6 +25,7 @@ from calico.felix.frules import (profile_to_chain_name,
                                  rules_to_chain_rewrite_lines)
 from calico.felix.futils import FailedSystemCall
 from calico.felix.refcount import ReferenceManager, RefCountedActor, RefHelper
+from calico.felix.tracking import DUMMY_TRACKER
 
 _log = logging.getLogger(__name__)
 
@@ -58,19 +59,22 @@ class RulesManager(ReferenceManager):
         active_profile.on_profile_update(profile_or_none, async=True)
 
     @actor_message()
-    def apply_snapshot(self, rules_by_profile_id):
+    def apply_snapshot(self, rules_by_profile_id, tracker=DUMMY_TRACKER):
         _log.info("Rules manager applying snapshot; %s rules",
                   len(rules_by_profile_id))
         missing_ids = set(self.rules_by_profile_id.keys())
+        tracker.split_work(len(rules_by_profile_id))
         for profile_id, profile in rules_by_profile_id.iteritems():
-            self.on_rules_update(profile_id, profile)  # Skips queue
+            self.on_rules_update(profile_id, profile, tracker=tracker)
             missing_ids.discard(profile_id)
             self._maybe_yield()
+        tracker.split_work(len(missing_ids))
         for dead_profile_id in missing_ids:
-            self.on_rules_update(dead_profile_id, None)
+            self.on_rules_update(dead_profile_id, None, tracker=tracker)
+        tracker.work_complete()
 
     @actor_message()
-    def on_rules_update(self, profile_id, profile):
+    def on_rules_update(self, profile_id, profile, tracker=DUMMY_TRACKER):
         if profile is not None:
             _log.info("Rules for profile %s updated.", profile_id)
             self.rules_by_profile_id[profile_id] = profile
@@ -81,7 +85,10 @@ class RulesManager(ReferenceManager):
             _log.info("Profile %s is active, kicking the ProfileRules.",
                       profile_id)
             ap = self.objects_by_id[profile_id]
-            ap.on_profile_update(profile, async=True)
+            ap.on_profile_update(profile, tracker=tracker, async=True)
+        else:
+            # No active profile, work is done.
+            tracker.work_complete()
 
 
 class ProfileRules(RefCountedActor):
@@ -100,6 +107,7 @@ class ProfileRules(RefCountedActor):
 
         # Latest profile update - a profile dictionary.
         self._pending_profile = None
+        self._pending_tracker = None
         # Currently-programmed profile dictionary.
         self._profile = None
 
@@ -117,7 +125,7 @@ class ProfileRules(RefCountedActor):
                   profile_id, self.chain_names)
 
     @actor_message()
-    def on_profile_update(self, profile):
+    def on_profile_update(self, profile, tracker=DUMMY_TRACKER):
         """
         Update the programmed iptables configuration with the new
         profile.
@@ -127,7 +135,9 @@ class ProfileRules(RefCountedActor):
         """
         _log.debug("%s: Profile update: %s", self, profile)
         assert not self._dead, "Shouldn't receive updates after we're dead."
+        self._notify_tracker()
         self._pending_profile = profile
+        self._pending_tracker = tracker
 
     @actor_message()
     def on_unreferenced(self):
@@ -184,34 +194,39 @@ class ProfileRules(RefCountedActor):
                 for tag in added_tags:
                     _log.debug("Requesting ipset for tag %s", tag)
                     self._ipset_refs.acquire_ref(tag)
-                self._dirty = True
+                self._dirty = True  # Cleared after successful programming.
                 self._profile = self._pending_profile
 
-            if (self._dirty and
-                    self._ipset_refs.ready and
-                    self._pending_profile is not None):
-                _log.info("Ready to program rules for %s", self.id)
-                try:
-                    self._update_chains()
-                except FailedSystemCall as e:
-                    _log.error("Failed to program profile chain %s; error: %r",
-                               self, e)
-                else:
-                    self._dirty = False
-            elif not self._dirty:
-                _log.debug("No changes to program.")
-            elif self._pending_profile is None:
-                _log.info("Profile is None, removing our chains")
-                try:
-                    self._delete_chains()
-                except FailedSystemCall:
-                    _log.exception("Failed to delete chains for profile %s",
-                                   self.id)
-                else:
-                    self._dirty = False
+            if not self._dirty:
+                # We may have got a profile update with no change, make sure
+                # me mark as complete.
+                self._notify_tracker()
             elif not self._ipset_refs.ready:
                 _log.info("Can't program rules %s yet, waiting on ipsets",
                           self.id)
+            else:
+                op = None
+                try:
+                    if self._pending_profile is not None:
+                        _log.info("Ready to program rules for %s", self.id)
+                        op = "update"
+                        self._update_chains()
+                    else:
+                        _log.info("Deleting rules for %s", self.id)
+                        op = "delete"
+                        self._delete_chains()
+                except FailedSystemCall as e:
+                    _log.error("Failed to %s profile chain %s; error: %r",
+                               op, self, e)
+                else:
+                    self._dirty = False
+                    self._notify_tracker()
+
+    def _notify_tracker(self):
+        if self._pending_tracker:
+            _log.debug("Notifying pending tracker that update is complete")
+            self._pending_tracker.work_complete()
+            self._pending_tracker = None
 
     def _delete_chains(self):
         """

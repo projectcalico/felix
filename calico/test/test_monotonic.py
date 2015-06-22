@@ -19,8 +19,8 @@ calico.test.test_monotonic
 Test for monotonic clock functions.
 """
 import logging
-import time
 from unittest import TestCase
+import gevent
 from calico.monotonic import monotonic_time
 
 _log = logging.getLogger(__name__)
@@ -30,7 +30,8 @@ class TestMonotonic(TestCase):
 
     def test_mainline(self):
         a = monotonic_time()
-        time.sleep(0.01)
+        gevent.sleep(0.01)
         b = monotonic_time()
         self.assertTrue(b >= a+0.01, msg="Monotonic time did not increase as "
-                                         "expected: %s, %s" % (a, b))
+                                         "expected: start: %s end: %s "
+                                         "delta: %s" % (a, b, b-a))

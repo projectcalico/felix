@@ -9,6 +9,7 @@ from calico.felix.ipsets import IpsetActor
 from calico.felix.fetcd import _EtcdWatcher, ResyncRequired
 from calico.felix.splitter import UpdateSplitter
 from calico.felix.test.base import BaseTestCase
+from calico.felix.tracking import UpdateMonitor
 
 _log = logging.getLogger(__name__)
 
@@ -44,7 +45,9 @@ class TestExcdWatcher(BaseTestCase):
         self.m_config = Mock()
         self.m_config.IFACE_PREFIX = "tap"
         self.m_hosts_ipset = Mock(spec=IpsetActor)
-        self.watcher = _EtcdWatcher(self.m_config, self.m_hosts_ipset)
+        self.m_monitor = Mock(spec=UpdateMonitor)
+        self.watcher = _EtcdWatcher(self.m_config, self.m_hosts_ipset,
+                                    self.m_monitor)
         self.m_splitter = Mock(spec=UpdateSplitter)
         self.watcher.splitter = self.m_splitter
 

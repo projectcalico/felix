@@ -23,6 +23,7 @@ import functools
 import logging
 import gevent
 from calico.felix.actor import Actor, actor_message
+from calico.felix.tracking import DUMMY_TRACKER
 
 _log = logging.getLogger(__name__)
 
@@ -52,7 +53,8 @@ class UpdateSplitter(Actor):
 
     @actor_message()
     def apply_snapshot(self, rules_by_prof_id, tags_by_prof_id,
-                       endpoints_by_id, ipv4_pools_by_id):
+                       endpoints_by_id, ipv4_pools_by_id,
+                       tracker=DUMMY_TRACKER):
         """
         Replaces the whole cache state with the input.  Applies deltas vs the
         current active state.
@@ -70,7 +72,10 @@ class UpdateSplitter(Actor):
         # so they can build their indexes before we activate anything.
         _log.info("Applying snapshot. Queueing rules.")
         for rules_mgr in self.rules_mgrs:
-            rules_mgr.apply_snapshot(rules_by_prof_id, async=True)
+            tracker.split_work()
+            rules_mgr.apply_snapshot(rules_by_prof_id,
+                                     tracker=tracker,
+                                     async=True)
         _log.info("Applying snapshot. Queueing tags/endpoints to ipset mgr.")
         for ipset_mgr in self.ipsets_mgrs:
             ipset_mgr.apply_snapshot(tags_by_prof_id, endpoints_by_id,
@@ -102,6 +107,8 @@ class UpdateSplitter(Actor):
                                functools.partial(self.trigger_cleanup,
                                                  async=True))
             self._cleanup_scheduled = True
+
+        tracker.work_complete()
 
     @actor_message()
     def trigger_cleanup(self):
