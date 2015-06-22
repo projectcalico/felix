@@ -107,7 +107,7 @@ class ProfileRules(RefCountedActor):
 
         # Latest profile update - a profile dictionary.
         self._pending_profile = None
-        self._pending_tracker = None
+        self._pending_trackers = []
         # Currently-programmed profile dictionary.
         self._profile = None
 
@@ -135,9 +135,9 @@ class ProfileRules(RefCountedActor):
         """
         _log.debug("%s: Profile update: %s", self, profile)
         assert not self._dead, "Shouldn't receive updates after we're dead."
-        self._notify_tracker()
+        self._notify_trackers()
         self._pending_profile = profile
-        self._pending_tracker = tracker
+        self._pending_trackers.append(tracker)
 
     @actor_message()
     def on_unreferenced(self):
@@ -200,7 +200,7 @@ class ProfileRules(RefCountedActor):
             if not self._dirty:
                 # We may have got a profile update with no change, make sure
                 # me mark as complete.
-                self._notify_tracker()
+                self._notify_trackers()
             elif not self._ipset_refs.ready:
                 _log.info("Can't program rules %s yet, waiting on ipsets",
                           self.id)
@@ -220,13 +220,13 @@ class ProfileRules(RefCountedActor):
                                op, self, e)
                 else:
                     self._dirty = False
-                    self._notify_tracker()
+                    self._notify_trackers()
 
-    def _notify_tracker(self):
-        if self._pending_tracker:
+    def _notify_trackers(self):
+        for tracker in self._pending_trackers:
             _log.debug("Notifying pending tracker that update is complete")
-            self._pending_tracker.work_complete()
-            self._pending_tracker = None
+            tracker.work_complete()
+        self._pending_trackers = []
 
     def _delete_chains(self):
         """

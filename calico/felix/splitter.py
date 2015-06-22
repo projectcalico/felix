@@ -127,7 +127,7 @@ class UpdateSplitter(Actor):
             ipset_mgr.cleanup(async=False)
 
     @actor_message()
-    def on_rules_update(self, profile_id, rules):
+    def on_rules_update(self, profile_id, rules, tracker=DUMMY_TRACKER):
         """
         Process an update to the rules of the given profile.
         :param str profile_id: Profile ID in question
@@ -136,7 +136,10 @@ class UpdateSplitter(Actor):
         """
         _log.info("Profile update: %s", profile_id)
         for rules_mgr in self.rules_mgrs:
-            rules_mgr.on_rules_update(profile_id, rules, async=True)
+            tracker.split_work()
+            rules_mgr.on_rules_update(profile_id, rules, tracker=tracker,
+                                      async=True)
+        tracker.work_complete()
 
     @actor_message()
     def on_tags_update(self, profile_id, tags):

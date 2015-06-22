@@ -54,7 +54,7 @@ def _raw_monotonic_time():
         a process.
     """
     t = timespec()
-    if clock_gettime(CLOCK_MONOTONIC_RAW , ctypes.pointer(t)) != 0:
+    if clock_gettime(CLOCK_MONOTONIC_RAW, ctypes.pointer(t)) != 0:
         errno_ = ctypes.get_errno()
         raise OSError(errno_, os.strerror(errno_))
     monotime = t.tv_sec + t.tv_nsec * 1e-9
@@ -64,6 +64,10 @@ def _raw_monotonic_time():
 # Make our epoch friendly.
 _epoch = _raw_monotonic_time()
 def monotonic_time():
+    """
+    :return: (monotonic) time in seconds since the monotonic module was
+        initialised.
+    """
     return _raw_monotonic_time() - _epoch
 
 

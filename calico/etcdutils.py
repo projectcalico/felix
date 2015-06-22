@@ -62,9 +62,13 @@ class PathDispatcher(object):
         if action in handler_node:
             _log.debug("Found handler for event %s for %s, captures: %s",
                        action, response.key, captures)
-            handler_node[action](response, **captures)
+            handler_fn = handler_node[action]
+            self._call_handler_fn(handler_fn, response, captures)
         else:
             _log.debug("No handler for event %s on %s. Handler node %s.",
                        action, response.key, handler_node)
+
+    def _call_handler_fn(self, handler_fn, response, captures):
+        handler_fn(response, **captures)
 
 

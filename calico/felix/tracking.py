@@ -34,7 +34,8 @@ class UpdateMonitor(object):
         self._trackers = blist.sorteddict()
         # Highest update ID which is complete and all lower IDs are also
         # complete.
-        self.high_water_mark = None
+        self.complete_hwm = None
+        self.seen_hwm = None
         gevent.spawn(self._loop)
 
     def tracker(self, update_id, replace_all=False, tag=None):
@@ -50,12 +51,14 @@ class UpdateMonitor(object):
         """
         if replace_all:
             self._trackers.clear()
-            self.high_water_mark = None
+            self.complete_hwm = None
+            self.seen_hwm = None
+        self.seen_hwm = max(self.seen_hwm, update_id)
         tracker = WorkTracker(self, update_id, tag=tag)
         self._trackers[update_id] = tracker
         return tracker
 
-    def _on_work_complete(self, tracker):
+    def on_work_complete(self, tracker):
         """
         Called by a WorkTracker when the work it is tracking is complete.
         """
@@ -63,8 +66,8 @@ class UpdateMonitor(object):
         for up_id, tracker in self._trackers.iteritems():
             if tracker.finished:
                 to_delete.append(up_id)
-                self.high_water_mark = max(tracker.update_id,
-                                           self.high_water_mark)
+                self.complete_hwm = max(tracker.update_id,
+                                           self.complete_hwm)
             else:
                 break
         for up_id in to_delete:
@@ -75,8 +78,8 @@ class UpdateMonitor(object):
     def _loop(self):
         while True:
             gevent.sleep(10)
-            _log.info("High-water mark: %s; outstanding work items:",
-                      self.high_water_mark)
+            _log.info("Highest seen: %s complete: %s; outstanding (%s):",
+                      self.seen_hwm, self.complete_hwm, len(self._trackers))
             _tracker_copy = self._trackers.copy()
             for k, v in _tracker_copy.iteritems():
                 _log.info("Work item %s: %s", k, v)
@@ -113,6 +116,7 @@ class _TrackerBase(object):
 
 class WorkTracker(_TrackerBase):
     def __init__(self, monitor, update_id, tag=None):
+        _log.debug("Creating tracker for %s, %s", update_id, tag)
         self._monitor = weakref.proxy(monitor)  # Avoid ref cycle.
         self._work_count = 1
         self.start_time = monotonic.monotonic_time()
@@ -122,20 +126,26 @@ class WorkTracker(_TrackerBase):
         self.tag = tag
 
     def split_work(self, number=1):
+        _log.debug("%s Adding %s extra work items", self, number)
         self.touch()
         self._work_count += number
 
     def touch(self):
-        self.last_update_time = monotonic.monotonic_time()
+        now = monotonic.monotonic_time()
+        _log.debug("%s Refreshing last-update timestamp.  Now %.2f",
+                   self, self.last_update_time, now)
+        self.last_update_time = now
 
     def work_complete(self, number=1):
+        _log.debug("%s Adding %s work items as complete", self, number)
         self.touch()
         self._work_count -= number
+        assert self._work_count >= 0
         if self.finished:
-            self._monitor._on_work_complete(self)
+            self._monitor.on_work_complete(self)
 
     def on_error(self, message):
-        _log.error("Error for work item %s: %s", self, message)
+        _log.error("%s Error logged: %s", self, message)
         self.touch()
         self.last_error = message
 

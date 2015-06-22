@@ -38,14 +38,15 @@ TAGS = ["a", "b"]
 TAGS_STR = json.dumps(TAGS)
 
 
-class TestExcdWatcher(BaseTestCase):
+class TestEtcdWatcher(BaseTestCase):
 
     def setUp(self):
-        super(TestExcdWatcher, self).setUp()
+        super(TestEtcdWatcher, self).setUp()
         self.m_config = Mock()
         self.m_config.IFACE_PREFIX = "tap"
         self.m_hosts_ipset = Mock(spec=IpsetActor)
         self.m_monitor = Mock(spec=UpdateMonitor)
+        self.m_tracker = self.m_monitor.tracker.return_value
         self.watcher = _EtcdWatcher(self.m_config, self.m_hosts_ipset,
                                     self.m_monitor)
         self.m_splitter = Mock(spec=UpdateSplitter)
@@ -142,23 +143,29 @@ class TestExcdWatcher(BaseTestCase):
     def test_rules_set(self):
         self.dispatch("/calico/v1/policy/profile/prof1/rules", "set",
                       value=RULES_STR)
-        self.m_splitter.on_rules_update.assert_called_once_with("prof1",
-                                                                RULES,
-                                                                async=True)
+        self.m_splitter.on_rules_update.assert_called_once_with(
+            "prof1",
+            RULES,
+            tracker=self.m_tracker,
+            async=True)
 
     def test_rules_set_bad_json(self):
         self.dispatch("/calico/v1/policy/profile/prof1/rules", "set",
                       value="{")
-        self.m_splitter.on_rules_update.assert_called_once_with("prof1",
-                                                                None,
-                                                                async=True)
+        self.m_splitter.on_rules_update.assert_called_once_with(
+            "prof1",
+            None,
+            tracker=self.m_tracker,
+            async=True)
 
     def test_rules_set_invalid(self):
         self.dispatch("/calico/v1/policy/profile/prof1/rules", "set",
                       value='{}')
-        self.m_splitter.on_rules_update.assert_called_once_with("prof1",
-                                                                None,
-                                                                async=True)
+        self.m_splitter.on_rules_update.assert_called_once_with(
+            "prof1",
+            None,
+            tracker=self.m_tracker,
+            async=True)
 
     def test_tags_set(self):
         self.dispatch("/calico/v1/policy/profile/prof1/tags", "set",
@@ -201,8 +208,10 @@ class TestExcdWatcher(BaseTestCase):
         self.dispatch("/calico/v1/policy/profile/profA", action="delete")
         self.m_splitter.on_tags_update.assert_called_once_with("profA", None,
                                                                async=True)
-        self.m_splitter.on_rules_update.assert_called_once_with("profA", None,
-                                                                async=True)
+        self.m_splitter.on_rules_update.assert_called_once_with(
+            "profA", None,
+            tracker=self.m_tracker,
+            async=True)
 
     def test_tags_del(self):
         """
@@ -218,8 +227,8 @@ class TestExcdWatcher(BaseTestCase):
         Test rules-only deletion.
         """
         self.dispatch("/calico/v1/policy/profile/profA/rules", action="delete")
-        self.m_splitter.on_rules_update.assert_called_once_with("profA", None,
-                                                                async=True)
+        self.m_splitter.on_rules_update.assert_called_once_with(
+            "profA", None, tracker=self.m_tracker, async=True)
         self.assertFalse(self.m_splitter.on_tags_update.called)
 
     def test_endpoint_del(self):
@@ -304,6 +313,7 @@ class TestExcdWatcher(BaseTestCase):
         Send an EtcdResult to the watcher's dispatcher.
         """
         m_response = Mock(spec=EtcdResult)
+        m_response.etcd_index = 12345
         m_response.key = key
         m_response.action = action
         m_response.value = value
