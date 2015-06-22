@@ -172,6 +172,11 @@ class Config(object):
                            "Log severity for logging to syslog", "ERROR")
         self.add_parameter("LogSeverityScreen",
                            "Log severity for logging to screen", "ERROR")
+        self.add_parameter("HeartbeatIntervalSecs", "Heartbeat Interval",
+                           0, value_is_int=True)
+        self.add_parameter("HeartbeatTTLSecs", "Heartbeat time to live",
+                           2*self.parameters["HeartbeatIntervalSecs"].value, value_is_int=True)
+
 
         # Read the environment variables, then the configuration file.
         self._read_env_vars()
@@ -217,6 +222,8 @@ class Config(object):
         self.LOGLEVFILE = self.parameters["LogSeverityFile"].value
         self.LOGLEVSYS = self.parameters["LogSeveritySys"].value
         self.LOGLEVSCR = self.parameters["LogSeverityScreen"].value
+        self.HEARTBEAT_INTERVAL_SECS = self.parameters["HeartbeatIntervalSecs"].value
+        self.HEARTBEAT_TTL_SECS = self.parameters["HeartbeatTTLSecs"].value
 
         self._validate_cfg(final=final)
 
@@ -346,6 +353,17 @@ class Config(object):
             if not common.validate_port(self.METADATA_PORT):
                 raise ConfigException("Invalid field value",
                                       self.parameters["MetadataPort"])
+
+        if self.HEARTBEAT_TTL_SECS < 0 or self.HEARTBEAT_INTERVAL_SECS <= 0:
+            self.HEARTBEAT_TTL_SECS = 0
+            self.HEARTBEAT_INTERVAL_SECS = 0
+
+        if self.parameters["HeartbeatTTLSecs"].active_source == DEFAULT:
+            self.HEARTBEAT_TTL_SECS = 2 * self.HEARTBEAT_INTERVAL_SECS
+
+        if self.HEARTBEAT_TTL_SECS < self.HEARTBEAT_INTERVAL_SECS:
+            raise ConfigException("Invalid heartbeat interval",
+                                  self.parameters["HeartbeatIntervalSecs"])
 
         if not final:
             # Do not check that unset parameters are defaulted; we have more

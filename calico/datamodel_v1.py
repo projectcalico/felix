@@ -44,6 +44,7 @@ READY_KEY = VERSION_DIR + "/Ready"
 # Global config (directory).
 CONFIG_DIR = VERSION_DIR + '/config'
 HOST_DIR = VERSION_DIR + '/host'
+HEARTBEATS_DIR = VERSION_DIR + '/heartbeats/host'
 POLICY_DIR = VERSION_DIR + '/policy'
 PROFILE_DIR = POLICY_DIR + "/profile"
 
@@ -74,6 +75,10 @@ def dir_for_host(hostname):
 
 def dir_for_per_host_config(hostname):
     return dir_for_host(hostname) + "/config"
+
+
+def key_for_heartbeats(hostname):
+    return HEARTBEATS_DIR+ "/%s" % hostname
 
 
 def key_for_endpoint(host, orchestrator, workload_id, endpoint_id):

@@ -89,6 +89,10 @@ class EtcdAPI(Actor):
         self._resync_greenlet = gevent.spawn(self._periodically_resync)
         self._resync_greenlet.link_exception(self._on_worker_died)
 
+        #Start up a heartbeat greenlet
+        self._heartbeat_greenlet = gevent.spawn(self._beat)
+        self._heartbeat_greenlet.link_exception(self._on_worker_died)
+
     @logging_exceptions
     def _periodically_resync(self):
         """
@@ -111,6 +115,26 @@ class EtcdAPI(Actor):
                        "seconds.", sleep_time)
             gevent.sleep(sleep_time)
             self.force_resync(reason="periodic resync", async=True)
+
+    @logging_exceptions
+    def _beat(self):
+        """
+        Greenlet: periodically writes a heartbeat to etcd
+
+        :return: Does not return.
+        """
+        _log.info("Started heartbeating thread. ")
+        interval = self._config.HEARTBEAT_INTERVAL_SECS
+        ttl = self._config.HEARTBEAT_TTL_SECS
+        _log.info("Config loaded, heartbeat interval %s, TTL: %s", interval, ttl)
+        if interval == 0:
+            _log.info("Interval is 0, heartbeating disabled.")
+            return
+        while True:
+            '''
+            write an etcd entry containing TTL
+            '''
+            gevent.sleep(interval)
 
     @actor_message()
     def load_config(self):
