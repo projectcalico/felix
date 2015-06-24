@@ -23,6 +23,7 @@ import functools
 import logging
 import gevent
 from calico.felix.actor import Actor, actor_message
+from calico.felix.tracking import DUMMY_TRACKER
 
 _log = logging.getLogger(__name__)
 
@@ -31,6 +32,13 @@ class UpdateSplitter(Actor):
     """
     Actor that takes the role of message broker, farming updates out to IPv4
     and IPv6-specific actors.
+
+    Users of the API should follow this contract:
+
+    (1) send an apply_snapshot message containing a complete and consistent
+        snapshot of the data model.
+    (2) send in-order updates via the on_xyz_update messages.
+    (3) at any point, repeat from (1)
     """
     def __init__(self, config, ipsets_mgrs, rules_managers, endpoint_managers,
                  iptables_updaters, ipv4_masq_manager):
@@ -45,7 +53,8 @@ class UpdateSplitter(Actor):
 
     @actor_message()
     def apply_snapshot(self, rules_by_prof_id, tags_by_prof_id,
-                       endpoints_by_id, ipv4_pools_by_id):
+                       endpoints_by_id, ipv4_pools_by_id,
+                       tracker=DUMMY_TRACKER):
         """
         Replaces the whole cache state with the input.  Applies deltas vs the
         current active state.
@@ -63,7 +72,10 @@ class UpdateSplitter(Actor):
         # so they can build their indexes before we activate anything.
         _log.info("Applying snapshot. Queueing rules.")
         for rules_mgr in self.rules_mgrs:
-            rules_mgr.apply_snapshot(rules_by_prof_id, async=True)
+            tracker.split_work()
+            rules_mgr.apply_snapshot(rules_by_prof_id,
+                                     tracker=tracker,
+                                     async=True)
         _log.info("Applying snapshot. Queueing tags/endpoints to ipset mgr.")
         for ipset_mgr in self.ipsets_mgrs:
             ipset_mgr.apply_snapshot(tags_by_prof_id, endpoints_by_id,
@@ -96,6 +108,8 @@ class UpdateSplitter(Actor):
                                                  async=True))
             self._cleanup_scheduled = True
 
+        tracker.work_complete()
+
     @actor_message()
     def trigger_cleanup(self):
         """
@@ -113,7 +127,7 @@ class UpdateSplitter(Actor):
             ipset_mgr.cleanup(async=False)
 
     @actor_message()
-    def on_rules_update(self, profile_id, rules):
+    def on_rules_update(self, profile_id, rules, tracker=DUMMY_TRACKER):
         """
         Process an update to the rules of the given profile.
         :param str profile_id: Profile ID in question
@@ -122,7 +136,10 @@ class UpdateSplitter(Actor):
         """
         _log.info("Profile update: %s", profile_id)
         for rules_mgr in self.rules_mgrs:
-            rules_mgr.on_rules_update(profile_id, rules, async=True)
+            tracker.split_work()
+            rules_mgr.on_rules_update(profile_id, rules, tracker=tracker,
+                                      async=True)
+        tracker.work_complete()
 
     @actor_message()
     def on_tags_update(self, profile_id, tags):

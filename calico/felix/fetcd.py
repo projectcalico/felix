@@ -46,6 +46,7 @@ from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
 from calico.etcdutils import PathDispatcher
 from calico.felix.actor import Actor, actor_message
 from calico.felix.futils import intern_dict, intern_list, logging_exceptions
+from calico.felix.tracking import DUMMY_TRACKER
 
 _log = logging.getLogger(__name__)
 
@@ -94,13 +95,13 @@ class EtcdAPI(Actor):
     manages an "upstream" connection to etcd.
     """
 
-    def __init__(self, config, hosts_ipset):
+    def __init__(self, config, hosts_ipset, update_monitor):
         super(EtcdAPI, self).__init__()
         self._config = config
 
         # Start up the main etcd-watching greenlet.  It will wait for an
         # event from us before doing anything.
-        self._watcher = _EtcdWatcher(config, hosts_ipset)
+        self._watcher = _EtcdWatcher(config, hosts_ipset, update_monitor)
         self._watcher.link(self._on_worker_died)
         self._watcher.start()
 
@@ -115,7 +116,7 @@ class EtcdAPI(Actor):
         return self._watcher.configured
 
     @actor_message()
-    def start_etcd_watch(self, splitter):
+    def start_watch(self, splitter):
         """
         Starts watching etcd for changes.  Implicitly loads the config
         if it hasn't been loaded yet.
@@ -147,16 +148,24 @@ class _EtcdWatcher(gevent.Greenlet):
     """
     Greenlet that watches the etcd data model for changes.
 
-    Loads the initial dump from etcd and applies it as a snapshot.
-    Then, watches etcd for changes and sends them to the update
-    splitter for processing.
+    (1) Waits for the load_config event to be triggered.
+    (2) Connects to etcd and waits for the Ready flag to be set,
+        indicating the data model is consistent.
+    (3) Loads the config from etcd and passes it to the config object.
+    (4) Waits for the begin_polling Event to be triggered.
+    (5) Loads a complete snapshot from etcd and passes it to the
+        UpdateSplitter.
+    (6) Watches etcd for changes, sending them incrementally to the
+        UpdateSplitter.
+    (On etcd error) starts again from step (5)
 
     This greenlet is expected to be managed by the EtcdAPI Actor.
     """
 
-    def __init__(self, config, hosts_ipset):
+    def __init__(self, config, hosts_ipset, update_monitor):
         super(_EtcdWatcher, self).__init__()
         self.config = config
+        self.update_monitor = update_monitor
         self.hosts_ipset = hosts_ipset
 
         # Events triggered by the EtcdAPI Actor to tell us to load the config
@@ -190,7 +199,7 @@ class _EtcdWatcher(gevent.Greenlet):
         # gives us a single event for a recursive directory deletion, we have
         # to handle deletes for lots of directories that we otherwise wouldn't
         # care about.
-        self.dispatcher = PathDispatcher()
+        self.dispatcher = TrackingPathDispatcher(self.update_monitor)
         reg = self.dispatcher.register
         # Top-level directories etc.  If these go away, stop polling and
         # resync.
@@ -270,6 +279,8 @@ class _EtcdWatcher(gevent.Greenlet):
 
     def _wait_for_ready(self):
         _log.info("Waiting for etcd to be ready...")
+        t = self.update_monitor.tracker(None, tag="wait-for-ready",
+                                        replace_all=True)
         ready = False
         while not ready:
             try:
@@ -293,6 +304,7 @@ class _EtcdWatcher(gevent.Greenlet):
                 _log.info("etcd not ready.  Will retry.")
                 gevent.sleep(RETRY_DELAY)
                 continue
+        t.work_complete()
 
     def _load_config(self):
         """
@@ -332,6 +344,8 @@ class _EtcdWatcher(gevent.Greenlet):
         initial_dump = self.client.read(VERSION_DIR, recursive=True)
         _log.info("Loaded snapshot from etcd cluster %s, parsing it...",
                   self.client.expected_cluster_id)
+        tracker = self.update_monitor.tracker(initial_dump.etcd_index,
+                                              tag="load initial dump")
         rules_by_id = {}
         tags_by_id = {}
         endpoints_by_id = {}
@@ -384,6 +398,7 @@ class _EtcdWatcher(gevent.Greenlet):
                                      tags_by_id,
                                      endpoints_by_id,
                                      ipv4_pools_by_id,
+                                     tracker=tracker,
                                      async=True)
         if self.config.IP_IN_IP_ENABLED:
             # We only support IPv4 for host tracking right now so there's not
@@ -487,13 +502,15 @@ class _EtcdWatcher(gevent.Greenlet):
         """
         raise ResyncRequired()
 
-    def on_ready_flag_set(self, response):
+    def on_ready_flag_set(self, response, tracker=DUMMY_TRACKER):
+        tracker.work_complete()
         if response.value != "true":
             raise ResyncRequired()
 
     def on_endpoint_set(self, response, hostname, orchestrator,
-                        workload_id, endpoint_id):
+                        workload_id, endpoint_id, tracker=DUMMY_TRACKER):
         """Handler for endpoint updates, passes the update to the splitter."""
+        tracker.work_complete()
         combined_id = EndpointId(hostname, orchestrator, workload_id,
                                  endpoint_id)
         _log.debug("Endpoint %s updated", combined_id)
@@ -502,8 +519,9 @@ class _EtcdWatcher(gevent.Greenlet):
         self.splitter.on_endpoint_update(combined_id, endpoint, async=True)
 
     def on_endpoint_delete(self, response, hostname, orchestrator,
-                           workload_id, endpoint_id):
+                           workload_id, endpoint_id, tracker=DUMMY_TRACKER):
         """Handler for endpoint deleted, passes the update to the splitter."""
+        tracker.work_complete()
         combined_id = EndpointId(hostname, orchestrator, workload_id,
                                  endpoint_id)
         _log.debug("Endpoint %s deleted", combined_id)
@@ -512,31 +530,35 @@ class _EtcdWatcher(gevent.Greenlet):
             del self.endpoint_ids_per_host[combined_id.host]
         self.splitter.on_endpoint_update(combined_id, None, async=True)
 
-    def on_rules_set(self, response, profile_id):
+    def on_rules_set(self, response, profile_id, tracker=DUMMY_TRACKER):
         """Handler for rules updates, passes the update to the splitter."""
         _log.debug("Rules for %s set", profile_id)
         rules = parse_rules(profile_id, response.value)
         profile_id = intern(profile_id.encode("utf8"))
-        self.splitter.on_rules_update(profile_id, rules, async=True)
+        self.splitter.on_rules_update(profile_id, rules, tracker=tracker,
+                                      async=True)
 
-    def on_rules_delete(self, response, profile_id):
+    def on_rules_delete(self, response, profile_id, tracker=DUMMY_TRACKER):
         """Handler for rules deletes, passes the update to the splitter."""
         _log.debug("Rules for %s deleted", profile_id)
-        self.splitter.on_rules_update(profile_id, None, async=True)
+        self.splitter.on_rules_update(profile_id, None, tracker=tracker,
+                                      async=True)
 
-    def on_tags_set(self, response, profile_id):
+    def on_tags_set(self, response, profile_id, tracker=DUMMY_TRACKER):
         """Handler for tags updates, passes the update to the splitter."""
+        tracker.work_complete()
         _log.debug("Tags for %s set", profile_id)
         rules = parse_tags(profile_id, response.value)
         profile_id = intern(profile_id.encode("utf8"))
         self.splitter.on_tags_update(profile_id, rules, async=True)
 
-    def on_tags_delete(self, response, profile_id):
+    def on_tags_delete(self, response, profile_id, tracker=DUMMY_TRACKER):
         """Handler for tags deletes, passes the update to the splitter."""
+        tracker.work_complete()
         _log.debug("Tags for %s deleted", profile_id)
         self.splitter.on_tags_update(profile_id, None, async=True)
 
-    def on_profile_delete(self, response, profile_id):
+    def on_profile_delete(self, response, profile_id, tracker=DUMMY_TRACKER):
         """
         Handler for a whole profile deletion
 
@@ -544,10 +566,11 @@ class _EtcdWatcher(gevent.Greenlet):
         """
         # Fake deletes for the rules and tags.
         _log.debug("Whole profile %s deleted", profile_id)
-        self.splitter.on_rules_update(profile_id, None, async=True)
+        self.splitter.on_rules_update(profile_id, None, tracker=tracker,
+                                      async=True)
         self.splitter.on_tags_update(profile_id, None, async=True)
 
-    def on_host_delete(self, response, hostname):
+    def on_host_delete(self, response, hostname, tracker=DUMMY_TRACKER):
         """
         Handler for deletion of a whole host directory.
 
@@ -556,11 +579,13 @@ class _EtcdWatcher(gevent.Greenlet):
         ids_on_that_host = self.endpoint_ids_per_host.pop(hostname, set())
         _log.info("Host %s deleted, removing %d endpoints",
                   hostname, len(ids_on_that_host))
+        tracker.work_complete()
         for endpoint_id in ids_on_that_host:
             self.splitter.on_endpoint_update(endpoint_id, None, async=True)
         self.on_host_ip_delete(response, hostname)
 
-    def on_host_ip_set(self, response, hostname):
+    def on_host_ip_set(self, response, hostname, tracker=DUMMY_TRACKER):
+        tracker.work_complete()
         if not self.config.IP_IN_IP_ENABLED:
             _log.debug("Ignoring update to %s because IP-in-IP is disabled",
                        response.key)
@@ -575,7 +600,8 @@ class _EtcdWatcher(gevent.Greenlet):
         self.hosts_ipset.replace_members(self.ipv4_by_hostname.values(),
                                          async=True)
 
-    def on_host_ip_delete(self, response, hostname):
+    def on_host_ip_delete(self, response, hostname, tracker=DUMMY_TRACKER):
+        tracker.work_complete()
         if not self.config.IP_IN_IP_ENABLED:
             _log.debug("Ignoring update to %s because IP-in-IP is disabled",
                        response.key)
@@ -584,14 +610,17 @@ class _EtcdWatcher(gevent.Greenlet):
             self.hosts_ipset.replace_members(self.ipv4_by_hostname.values(),
                                              async=True)
 
-    def on_ipam_v4_pool_set(self, response, pool_id):
+    def on_ipam_v4_pool_set(self, response, pool_id, tracker=DUMMY_TRACKER):
+        tracker.work_complete()
         pool = parse_ipam_pool(pool_id, response.value)
         self.splitter.on_ipam_pool_update(pool_id, pool, async=True)
 
-    def on_ipam_v4_pool_delete(self, response, pool_id):
+    def on_ipam_v4_pool_delete(self, response, pool_id, tracker=DUMMY_TRACKER):
+        tracker.work_complete()
         self.splitter.on_ipam_pool_update(pool_id, None, async=True)
 
-    def on_orch_delete(self, response, hostname, orchestrator):
+    def on_orch_delete(self, response, hostname, orchestrator,
+                       tracker=DUMMY_TRACKER):
         """
         Handler for deletion of a whole host orchestrator directory.
 
@@ -599,6 +628,7 @@ class _EtcdWatcher(gevent.Greenlet):
         """
         _log.info("Orchestrator dir %s/%s deleted, removing contained hosts",
                   hostname, orchestrator)
+        tracker.work_complete()
         orchestrator = intern(orchestrator.encode("utf8"))
         for endpoint_id in list(self.endpoint_ids_per_host[hostname]):
             if endpoint_id.orchestrator == orchestrator:
@@ -608,7 +638,7 @@ class _EtcdWatcher(gevent.Greenlet):
             del self.endpoint_ids_per_host[hostname]
 
     def on_workload_delete(self, response, hostname, orchestrator,
-                           workload_id):
+                           workload_id, tracker=DUMMY_TRACKER):
         """
         Handler for deletion of a whole workload directory.
 
@@ -616,6 +646,7 @@ class _EtcdWatcher(gevent.Greenlet):
         """
         _log.debug("Workload dir %s/%s/%s deleted, removing endpoints",
                    hostname, orchestrator, workload_id)
+        tracker.work_complete()
         orchestrator = intern(orchestrator.encode("utf8"))
         workload_id = intern(workload_id.encode("utf8"))
         for endpoint_id in list(self.endpoint_ids_per_host[hostname]):
@@ -625,6 +656,18 @@ class _EtcdWatcher(gevent.Greenlet):
                 self.endpoint_ids_per_host[hostname].discard(endpoint_id)
         if not self.endpoint_ids_per_host[hostname]:
             del self.endpoint_ids_per_host[hostname]
+
+
+class TrackingPathDispatcher(PathDispatcher):
+    def __init__(self, update_monitor):
+        super(TrackingPathDispatcher, self).__init__()
+        self.update_monitor = update_monitor
+
+    def _call_handler_fn(self, handler_fn, response, captures):
+        tracker = self.update_monitor.tracker(response.etcd_index,
+                                              tag=(response.key,
+                                                   response.action))
+        handler_fn(response, tracker=tracker, **captures)
 
 
 def _build_config_dict(cfg_node):

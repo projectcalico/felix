@@ -22,6 +22,8 @@ The main logic for Felix.
 
 # Monkey-patch before we do anything else...
 from gevent import monkey
+from calico.felix.tracking import UpdateMonitor
+
 monkey.patch_all()
 
 import functools
@@ -57,9 +59,10 @@ def _main_greenlet(config):
     """
     try:
         _log.info("Connecting to etcd to get our configuration.")
+        update_monitor = UpdateMonitor()
         hosts_ipset_v4 = IpsetActor(HOSTS_IPSET_V4)
 
-        etcd_api = EtcdAPI(config, hosts_ipset_v4)
+        etcd_api = EtcdAPI(config, hosts_ipset_v4, update_monitor)
         etcd_api.start()
         # Ask the EtcdAPI to fill in the global config object before we
         # proceed.  We don't yet support config updates.
@@ -154,7 +157,7 @@ def _main_greenlet(config):
         _log.info("Starting polling for interface and etcd updates.")
         f = iface_watcher.watch_interfaces(async=True)
         monitored_items.append(f)
-        etcd_api.start_etcd_watch(update_splitter, async=True)
+        etcd_api.start_watch(update_splitter, async=True)
 
         # Register a SIG_USR handler to trigger a diags dump.
         def dump_top_level_actors(log):

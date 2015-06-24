@@ -523,6 +523,7 @@ class ExceptionTrackingWeakRef(weakref.ref):
     Specialised weak reference with a slot to hold an exception
     that was leaked.
     """
+    __slots__ = ["exception", "tag", "idx"]
 
     # Note: superclass implements __new__ so we have to mimic its args
     # and have the callback passed in.
