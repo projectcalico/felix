@@ -20,6 +20,7 @@ Etcd polling functions.
 """
 from collections import defaultdict
 import random
+import time
 from socket import timeout as SocketTimeout
 import httplib
 import json
@@ -40,7 +41,8 @@ from calico.common import ValidationFailed
 from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  RULES_KEY_RE, TAGS_KEY_RE, ENDPOINT_KEY_RE,
                                  dir_for_per_host_config,
-                                 PROFILE_DIR, HOST_DIR, EndpointId, POLICY_DIR)
+                                 PROFILE_DIR, HOST_DIR, EndpointId, POLICY_DIR,
+                                 STATUS_DIR, key_for_status)
 from calico.etcdutils import PathDispatcher
 from calico.felix.actor import Actor, actor_message
 from calico.felix.futils import logging_exceptions
@@ -89,8 +91,12 @@ class EtcdAPI(Actor):
         self._resync_greenlet = gevent.spawn(self._periodically_resync)
         self._resync_greenlet.link_exception(self._on_worker_died)
 
-        #Start up a heartbeat greenlet
-        self._heartbeat_greenlet = gevent.spawn(self._beat)
+        # Create an client to write to etcd
+        self.client = None
+        _reconnect(self)
+
+        # Start up a heartbeat greenlet
+        self._heartbeat_greenlet = gevent.spawn(self.update_felix_status)
         self._heartbeat_greenlet.link_exception(self._on_worker_died)
 
     @logging_exceptions
@@ -117,23 +123,23 @@ class EtcdAPI(Actor):
             self.force_resync(reason="periodic resync", async=True)
 
     @logging_exceptions
-    def _beat(self):
+    def update_felix_status(self):
         """
         Greenlet: periodically writes a heartbeat to etcd
 
         :return: Does not return.
         """
         _log.info("Started heartbeating thread. ")
-        interval = self._config.HEARTBEAT_INTERVAL_SECS
+        key = key_for_status(self._config.HOSTNAME)
         ttl = self._config.HEARTBEAT_TTL_SECS
+        interval = self._config.HEARTBEAT_INTERVAL_SECS
         _log.info("Config loaded, heartbeat interval %s, TTL: %s", interval, ttl)
         if interval == 0:
             _log.info("Interval is 0, heartbeating disabled.")
             return
         while True:
-            '''
-            write an etcd entry containing TTL
-            '''
+            value = time.time()
+            client.write(key, value, ttl=ttl)
             gevent.sleep(interval)
 
     @actor_message()
@@ -188,7 +194,7 @@ class _EtcdWatcher(gevent.Greenlet):
 
     def __init__(self, config):
         super(_EtcdWatcher, self).__init__()
-        self.config = config
+        self._config = config
 
         # Events triggered by the EtcdAPI Actor to tell us to load the config
         # and start polling.  These are one-way flags.
@@ -204,7 +210,7 @@ class _EtcdWatcher(gevent.Greenlet):
 
         # Etcd client, initialised lazily.
         self.client = None
-        self.my_config_dir = dir_for_per_host_config(self.config.HOSTNAME)
+        self.my_config_dir = dir_for_per_host_config(self._config.HOSTNAME)
 
         # Polling state initialized at poll start time.
         self.splitter = None
@@ -223,6 +229,7 @@ class _EtcdWatcher(gevent.Greenlet):
         # Top-level directories etc.  If these go away, stop polling and
         # resync.
         reg(VERSION_DIR, on_del=self._resync)
+        reg(STATUS_DIR, on_del=self._resync)
         reg(POLICY_DIR, on_del=self._resync)
         reg(PROFILE_DIR, on_del=self._resync)
         reg(CONFIG_DIR, on_del=self._resync)
@@ -250,7 +257,7 @@ class _EtcdWatcher(gevent.Greenlet):
         self.load_config.wait()
         while True:
             _log.info("Reconnecting and loading snapshot from etcd...")
-            self._reconnect(copy_cluster_id=False)
+            _reconnect(self, copy_cluster_id=False)
             self._wait_for_ready()
 
             while not self.configured.is_set():
@@ -275,23 +282,6 @@ class _EtcdWatcher(gevent.Greenlet):
             except ResyncRequired:
                 _log.info("Polling aborted, doing resync.")
 
-    def _reconnect(self, copy_cluster_id=True):
-        etcd_addr = self.config.ETCD_ADDR
-        if ":" in etcd_addr:
-            host, port = etcd_addr.split(":")
-            port = int(port)
-        else:
-            host = etcd_addr
-            port = 4001
-        if self.client and copy_cluster_id:
-            old_cluster_id = self.client.expected_cluster_id
-            _log.info("(Re)connecting to etcd. Old etcd cluster ID was %s.",
-                      old_cluster_id)
-        else:
-            _log.info("(Re)connecting to etcd. No previous cluster ID.")
-            old_cluster_id = None
-        self.client = etcd.Client(host=host, port=port,
-                                  expected_cluster_id=old_cluster_id)
 
     def _wait_for_ready(self):
         _log.info("Waiting for etcd to be ready...")
@@ -345,7 +335,7 @@ class _EtcdWatcher(gevent.Greenlet):
                            "retry.", e)
                 gevent.sleep(RETRY_DELAY)
             else:
-                self.config.report_etcd_config(host_dict, global_dict)
+                self._config.report_etcd_config(host_dict, global_dict)
                 return
 
     def _load_initial_dump(self):
@@ -371,7 +361,7 @@ class _EtcdWatcher(gevent.Greenlet):
             if profile_id:
                 tags_by_id[profile_id] = tags
                 continue
-            endpoint_id, endpoint = parse_if_endpoint(self.config, child)
+            endpoint_id, endpoint = parse_if_endpoint(self._config, child)
             if endpoint_id and endpoint:
                 endpoints_by_id[endpoint_id] = endpoint
                 self.endpoint_ids_per_host[endpoint_id.host].add(endpoint_id)
@@ -437,13 +427,13 @@ class _EtcdWatcher(gevent.Greenlet):
                 _log.debug("Read from etcd timed out (%r), retrying.", e)
                 # Force a reconnect to ensure urllib3 doesn't recycle the
                 # connection.  (We were seeing this with urllib3 1.7.1.)
-                self._reconnect()
+                _reconnect(self)
             except (ConnectTimeoutError,
                     urllib3.exceptions.HTTPError,
                     httplib.HTTPException):
                 _log.warning("Low-level HTTP error, reconnecting to "
                              "etcd.", exc_info=True)
-                self._reconnect()
+                _reconnect(self)
             except (EtcdClusterIdChanged, EtcdEventIndexCleared) as e:
                 _log.warning("Out of sync with etcd (%r).  Reconnecting "
                              "for full sync.", e)
@@ -468,7 +458,7 @@ class _EtcdWatcher(gevent.Greenlet):
                     # do a full resync.
                     _log.exception("Unknown etcd error %r; doing resync.",
                                    e.message)
-                    self._reconnect()
+                    _reconnect(self)
                     raise ResyncRequired()
             except:
                 _log.exception("Unexpected exception during etcd poll")
@@ -499,7 +489,7 @@ class _EtcdWatcher(gevent.Greenlet):
                                  endpoint_id)
         _log.debug("Endpoint %s updated", combined_id)
         self.endpoint_ids_per_host[combined_id.host].add(combined_id)
-        endpoint = parse_endpoint(self.config, endpoint_id, response.value)
+        endpoint = parse_endpoint(self._config, endpoint_id, response.value)
         self.splitter.on_endpoint_update(combined_id, endpoint, async=True)
 
     def on_endpoint_delete(self, response, hostname, orchestrator,
@@ -589,6 +579,25 @@ class _EtcdWatcher(gevent.Greenlet):
                 self.endpoint_ids_per_host[hostname].discard(endpoint_id)
         if not self.endpoint_ids_per_host[hostname]:
             del self.endpoint_ids_per_host[hostname]
+
+
+def _reconnect(etcd_communicator, copy_cluster_id=True):
+    etcd_addr = etcd_communicator._config.ETCD_ADDR
+    if ":" in etcd_addr:
+        host, port = etcd_addr.split(":")
+        port = int(port)
+    else:
+        host = etcd_addr
+        port = 4001
+    if etcd_communicator.client and copy_cluster_id:
+        old_cluster_id = etcd_communicator.client.expected_cluster_id
+        _log.info("(Re)connecting to etcd. Old etcd cluster ID was %s.",
+                  old_cluster_id)
+    else:
+        _log.info("(Re)connecting to etcd. No previous cluster ID.")
+        old_cluster_id = None
+    etcd_communicator.client = etcd.Client(host=host, port=port,
+                              expected_cluster_id=old_cluster_id)
 
 
 def _build_config_dict(cfg_node):

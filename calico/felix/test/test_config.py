@@ -211,6 +211,8 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.IFACE_PREFIX, "whatever")
             self.assertEqual(config.METADATA_PORT, 246)
             self.assertEqual(config.METADATA_IP, "1.2.3.4")
+            self.assertEqual(config.HEARTBEAT_INTERVAL_SECS, 5)
+            self.assertEqual(config.HEARTBEAT_TTL_SECS, 12)
 
     def test_env_var_override(self):
         """
@@ -224,7 +226,8 @@ class TestConfig(unittest.TestCase):
         host_dict = { "InterfacePrefix": "blah",
                       "StartupCleanupDelay": "42",
                       "MetadataAddr": "4.3.2.1",
-                      "MetadataPort": "123" }
+                      "MetadataPort": "123",
+                      "HeartbeatTTLSecs": 12}
 
         global_dict = { "InterfacePrefix": "blah",
                         "StartupCleanupDelay": "99",
@@ -240,34 +243,104 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.METADATA_PORT, 999)
         self.assertEqual(config.METADATA_IP, "1.2.3.4")
         self.assertEqual(config.STARTUP_CLEANUP_DELAY, 42)
+        self.assertEqual(config.HEARTBEAT_INTERVAL_SECS, 5)
+        self.assertEqual(config.HEARTBEAT_TTL_SECS, 12)
+
+    def test_heartbeat_ttl_not_int(self):
+        with mock.patch('calico.common.complete_logging'):
+            config = Config("calico/felix/test/data/felix_missing.cfg")
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "HeartbeatTTLSecs": "NaN"}
+        with self.assertRaisesRegexp(ConfigException,
+                                     "Field was not integer.*"):
+            config.report_etcd_config({}, cfg_dict)
 
     def test_heartbeat_interval_not_int(self):
         with mock.patch('calico.common.complete_logging'):
             config = Config("calico/felix/test/data/felix_missing.cfg")
         cfg_dict = { "InterfacePrefix": "blah",
-                     "MetadataAddr": "127.0.0.1",
-                     "MetadataPort": "bloop"
                      "HeartbeatIntervalSecs": "NaN"}
         with self.assertRaisesRegexp(ConfigException,
-                                     "Field was not integer.*HeatbeatIntervalSecs"):
-            config.report_etcd_config({}, cfg_dict)
-
-        cfg_dict = { "InterfacePrefix": "blah",
-                     "MetadataAddr": "127.0.0.1",
-                     "MetadataPort": "bloop"
-                     "HeartbeatIntervalSecs": "42"}
-        self.assertEqual(config.HEARTBEAT_INTERVAL_SECS, 42)
-
-    def test_heartbeat_ttl_not_int(self):
-        with mock.patch('calico.common.complete_logging'):
-            config = Config("calico/felix/test/data/felix_missing.cfg")
-        cfg_dict = { "HeartbeatTTLSecs": "NaN"}
-        with self.assertRaisesRegexp(ConfigException,
-                                     "Field was not integer.*HeatbeatTTLSecs"):
+                                     "Field was not integer.*"):
             config.report_etcd_config({}, cfg_dict)
 
     def test_negative_heartbeat_interval(self):
         with mock.patch('calico.common.complete_logging'):
             config = Config("calico/felix/test/data/felix_missing.cfg")
-        cfg_dict = { "HeartbeatTTLSecs": -42}
-        self.assertEqual(congig.)
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "HeartbeatIntervalSecs": -42,
+                     "HeartbeatTTLSecs": 7 }
+        with mock.patch('calico.common.complete_logging'):
+            config.report_etcd_config({}, cfg_dict)
+
+        self.assertEqual(config.HEARTBEAT_INTERVAL_SECS, 0)
+        self.assertEqual(config.HEARTBEAT_TTL_SECS, 0)
+
+    def test_negative_heartbeat_ttl(self):
+        with mock.patch('calico.common.complete_logging'):
+            config = Config("calico/felix/test/data/felix_missing.cfg")
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "HeartbeatIntervalSecs": 42,
+                     "HeartbeatTTLSecs": -47 }
+        with mock.patch('calico.common.complete_logging'):
+            config.report_etcd_config({}, cfg_dict)
+
+        self.assertEqual(config.HEARTBEAT_INTERVAL_SECS, 0)
+        self.assertEqual(config.HEARTBEAT_TTL_SECS, 0)
+
+    def test_default_ttl(self):
+        with mock.patch('calico.common.complete_logging'):
+            config = Config("calico/felix/test/data/felix_missing.cfg")
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "HeartbeatIntervalSecs": "21" }
+        with mock.patch('calico.common.complete_logging'):
+            config.report_etcd_config({}, cfg_dict)
+
+        self.assertEqual(config.HEARTBEAT_TTL_SECS, 52)
+
+    def test_ok_values(self):
+        with mock.patch('calico.common.complete_logging'):
+            config = Config("calico/felix/test/data/felix_missing.cfg")
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "HeartbeatIntervalSecs": 42,
+                     "HeartbeatTTLSecs": 47}
+        with mock.patch('calico.common.complete_logging'):
+            config.report_etcd_config({}, cfg_dict)
+
+        self.assertEqual(config.HEARTBEAT_INTERVAL_SECS, 42)
+        self.assertEqual(config.HEARTBEAT_TTL_SECS, 47)
+
+    def test_heartbeat_interval_less_than_ttl(self):
+        with mock.patch('calico.common.complete_logging'):
+            config = Config("calico/felix/test/data/felix_missing.cfg")
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "HeartbeatIntervalSecs": 47,
+                     "HeartbeatTTLSecs": 4 }
+
+        with self.assertRaisesRegexp(ConfigException,
+                                     "Heartbeat TTL .*less then heartbeat interval.*"):
+            config.report_etcd_config({}, cfg_dict)
+
+    def test_heartbeat_interval_and_ttl_zero(self):
+        with mock.patch('calico.common.complete_logging'):
+            config = Config("calico/felix/test/data/felix_missing.cfg")
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "HeartbeatIntervalSecs": 0,
+                     "HeartbeatTTLSecs": 0}
+        with mock.patch('calico.common.complete_logging'):
+            config.report_etcd_config({}, cfg_dict)
+
+        self.assertEqual(config.HEARTBEAT_INTERVAL_SECS, 0)
+        self.assertEqual(config.HEARTBEAT_TTL_SECS, 0)
+
+    def test_heartbeat_float(self):
+        with mock.patch('calico.common.complete_logging'):
+            config = Config("calico/felix/test/data/felix_missing.cfg")
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "HeartbeatIntervalSecs": 21.75,
+                     "HeartbeatTTLSecs": 63.248}
+        with mock.patch('calico.common.complete_logging'):
+            config.report_etcd_config({}, cfg_dict)
+
+        self.assertEqual(config.HEARTBEAT_INTERVAL_SECS, 21)
+        self.assertEqual(config.HEARTBEAT_TTL_SECS, 63)

@@ -172,10 +172,10 @@ class Config(object):
                            "Log severity for logging to syslog", "ERROR")
         self.add_parameter("LogSeverityScreen",
                            "Log severity for logging to screen", "ERROR")
-        self.add_parameter("HeartbeatIntervalSecs", "Heartbeat Interval",
+        self.add_parameter("HeartbeatIntervalSecs", "Heartbeat Interval in seconds",
                            0, value_is_int=True)
-        self.add_parameter("HeartbeatTTLSecs", "Heartbeat time to live",
-                           2*self.parameters["HeartbeatIntervalSecs"].value, value_is_int=True)
+        self.add_parameter("HeartbeatTTLSecs", "Heartbeat time to live in seconds",
+                           self.parameters["HeartbeatIntervalSecs"].value * 5/2, value_is_int=True)
 
 
         # Read the environment variables, then the configuration file.
@@ -354,15 +354,18 @@ class Config(object):
                 raise ConfigException("Invalid field value",
                                       self.parameters["MetadataPort"])
 
+        # For negative time we set both interval and TTL to 0 - i.e. no heartbeating
         if self.HEARTBEAT_TTL_SECS < 0 or self.HEARTBEAT_INTERVAL_SECS <= 0:
             self.HEARTBEAT_TTL_SECS = 0
             self.HEARTBEAT_INTERVAL_SECS = 0
 
-        if self.parameters["HeartbeatTTLSecs"].active_source == DEFAULT:
-            self.HEARTBEAT_TTL_SECS = 2 * self.HEARTBEAT_INTERVAL_SECS
+        if self.HEARTBEAT_TTL_SECS == 0:
+            self.HEARTBEAT_TTL_SECS = self.HEARTBEAT_INTERVAL_SECS * 5/2
 
         if self.HEARTBEAT_TTL_SECS < self.HEARTBEAT_INTERVAL_SECS:
-            raise ConfigException("Invalid heartbeat interval",
+            raise ConfigException("Heartbeat TTL ({} sec) less then heartbeat interval ({} sec). "\
+                                  .format(self.HEARTBEAT_INTERVAL_SECS,
+                                          self.HEARTBEAT_TTL_SECS),
                                   self.parameters["HeartbeatIntervalSecs"])
 
         if not final:
