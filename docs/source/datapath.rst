@@ -62,6 +62,16 @@ the gateway IP, and thereby still sends the packet to its host.
 Note that no Proxy ARP is required on the data center fabric itself - once the
 packet has reached the host, normal IP routing takes over.
 
+IPv6
+~~~~
+
+IPv6 operates similarly to IPv4.
+
+We use the L-bit in the router advertisements sent by dnsmasq (controller by
+the DHCP agent) to tell compatible workloads to use the gateway for all traffic
+(even in the same subnet), as well as running Proxy NDP (similar to Proxy ARP)
+for workloads that don't understand the L-bit.
+
 Inter-host routing
 ------------------
 
