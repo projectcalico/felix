@@ -25,6 +25,7 @@ from socket import timeout as SocketTimeout
 import httplib
 import json
 import logging
+import datetime
 
 from etcd import (EtcdException, EtcdClusterIdChanged, EtcdKeyNotFound,
                   EtcdEventIndexCleared)
@@ -72,9 +73,9 @@ class EtcdAPI(Actor):
     Since the python-etcd API is blocking, we defer API watches to
     a worker greenlet and communicate with it via Events.
 
-    As and when we add status reporting, to avoid needing to interrupt
-    in-progress polls, I expect we'll want a second  worker greenlet that
-    manages an "upstream" connection to etcd.
+    To avoid needing to interupt in-progress polls, another working
+    greenlet is introduced to manage status updating and writing to
+    etcd.
     """
 
     def __init__(self, config):
@@ -91,12 +92,12 @@ class EtcdAPI(Actor):
         self._resync_greenlet = gevent.spawn(self._periodically_resync)
         self._resync_greenlet.link_exception(self._on_worker_died)
 
-        # Create an client to write to etcd
+        # Create an client to write to etcd.
         self.client = None
         _reconnect(self)
 
-        # Start up a heartbeat greenlet
-        self._heartbeat_greenlet = gevent.spawn(self.update_felix_status)
+        # Start up a heartbeat greenlet.
+        self._heartbeat_greenlet = gevent.spawn(self._status_report_greenlet)
         self._heartbeat_greenlet.link_exception(self._on_worker_died)
 
     @logging_exceptions
@@ -104,7 +105,7 @@ class EtcdAPI(Actor):
         """
         Greenlet: periodically triggers a resync from etcd.
 
-        :return: Does not return.
+        :return: Does not return, unless periodic resync disabled.
         """
         _log.info("Started periodic resync thread, waiting for config.")
         self._watcher.configured.wait()
@@ -123,24 +124,42 @@ class EtcdAPI(Actor):
             self.force_resync(reason="periodic resync", async=True)
 
     @logging_exceptions
-    def update_felix_status(self):
+    def _status_report_greenlet(self):
         """
-        Greenlet: periodically writes a heartbeat to etcd
+        Greenlet: periodically writes to etcd
 
-        :return: Does not return.
+        :return: Does not return, unless heartbeating disabled.
         """
-        _log.info("Started heartbeating thread. ")
-        key = key_for_status(self._config.HOSTNAME)
+        _log.info("Started write status reporting thread.")
         ttl = self._config.HEARTBEAT_TTL_SECS
         interval = self._config.HEARTBEAT_INTERVAL_SECS
-        _log.info("Config loaded, heartbeat interval %s, TTL: %s", interval, ttl)
+        _log.info("Config loaded, heartbeat interval: %s, TTL: %s", interval, ttl)
         if interval == 0:
             _log.info("Interval is 0, heartbeating disabled.")
             return
         while True:
-            value = time.time()
-            client.write(key, value, ttl=ttl)
-            gevent.sleep(interval)
+            try:
+                self.update_felix_status(ttl)
+                _log.info("Status updated.")
+                gevent.sleep(interval)
+            except EtcdException as e:
+                _log.info("Status updating failed. {}. Reconnecting... ".format(e))
+                _reconnect(self)
+                gevent.sleep(RETRY_DELAY)
+
+
+    def update_felix_status(self, ttl):
+        """
+        Writes a status info (heartbeat) to etcd
+        (value: current time in ISO 8601 Zulu format)
+
+        :param: Time to live (in sec)
+        :return: Does not return.
+        """
+        key = key_for_status(self._config.HOSTNAME)
+        value = datetime.datetime.now().replace(microsecond=0).isoformat()+'Z'
+        self.client.write(key, value, ttl=ttl)
+
 
     @actor_message()
     def load_config(self):
@@ -229,7 +248,6 @@ class _EtcdWatcher(gevent.Greenlet):
         # Top-level directories etc.  If these go away, stop polling and
         # resync.
         reg(VERSION_DIR, on_del=self._resync)
-        reg(STATUS_DIR, on_del=self._resync)
         reg(POLICY_DIR, on_del=self._resync)
         reg(PROFILE_DIR, on_del=self._resync)
         reg(CONFIG_DIR, on_del=self._resync)
@@ -582,6 +600,8 @@ class _EtcdWatcher(gevent.Greenlet):
 
 
 def _reconnect(etcd_communicator, copy_cluster_id=True):
+    # Parameter etcd_communicator can be either etcd_watcher or etcd_api
+    _log.info("(Re)connecting...")
     etcd_addr = etcd_communicator._config.ETCD_ADDR
     if ":" in etcd_addr:
         host, port = etcd_addr.split(":")

@@ -141,7 +141,7 @@ class TestExcdWatcher(BaseTestCase):
 
     def test_per_profile_del(self):
         """
-        Test profile deletion triggers dleetion for tags and rules.
+        Test profile deletion triggers deletion for tags and rules.
         """
         self.dispatch("/calico/v1/policy/profile/profA", action="delete")
         self.m_splitter.on_tags_update.assert_called_once_with("profA", None,

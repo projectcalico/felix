@@ -354,16 +354,15 @@ class Config(object):
                 raise ConfigException("Invalid field value",
                                       self.parameters["MetadataPort"])
 
-        # For negative time we set both interval and TTL to 0 - i.e. no heartbeating
+        # For negative time we set both interval and TTL to 0 - i.e. no
+        # heartbeating
         if self.HEARTBEAT_TTL_SECS < 0 or self.HEARTBEAT_INTERVAL_SECS <= 0:
             self.HEARTBEAT_TTL_SECS = 0
             self.HEARTBEAT_INTERVAL_SECS = 0
 
-        if self.HEARTBEAT_TTL_SECS == 0:
-            self.HEARTBEAT_TTL_SECS = self.HEARTBEAT_INTERVAL_SECS * 5/2
-
-        if self.HEARTBEAT_TTL_SECS < self.HEARTBEAT_INTERVAL_SECS:
-            raise ConfigException("Heartbeat TTL ({} sec) less then heartbeat interval ({} sec). "\
+        if self.HEARTBEAT_TTL_SECS <= self.HEARTBEAT_INTERVAL_SECS:
+            raise ConfigException("Heartbeat TTL ({} sec) less then heartbeat "
+                                  "interval ({} sec). "
                                   .format(self.HEARTBEAT_INTERVAL_SECS,
                                           self.HEARTBEAT_TTL_SECS),
                                   self.parameters["HeartbeatIntervalSecs"])
