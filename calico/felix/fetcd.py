@@ -121,7 +121,7 @@ class EtcdAPI(Actor):
             _log.debug("After jitter, next periodic resync will be in %.1f "
                        "seconds.", sleep_time)
             gevent.sleep(sleep_time)
-            self.force_resync(reason="periodic resync", async=True)
+            self.force_resync(reason="periodic resync", async=False)
 
     @logging_exceptions
     def _status_report_greenlet(self):
@@ -147,19 +147,30 @@ class EtcdAPI(Actor):
                 _reconnect(self)
                 gevent.sleep(RETRY_DELAY)
 
-
     def update_felix_status(self, ttl):
         """
         Writes a status info (heartbeat) to etcd
         (value: current time in ISO 8601 Zulu format)
 
-        :param: Time to live (in sec)
+        :param: ttl int: time to live in sec (optional)
         :return: Does not return.
         """
         key = key_for_status(self._config.HOSTNAME)
         value = datetime.datetime.now().replace(microsecond=0).isoformat()+'Z'
-        self.client.write(key, value, ttl=ttl)
+        self.write_to_etcd(key, value, ttl=ttl, async=True)
 
+    @actor_message()
+    def write_to_etcd(self, key, value, **kwdargs):
+        """
+        Writes to etcd
+
+        :param: key str: etcd key
+        :param: value obj: value to set
+        :param: ttl int: time to live in sec (optional)
+
+        other optional parameters - same as in etct client write method
+        """
+        self.client.write(key, value, **kwdargs)
 
     @actor_message()
     def load_config(self):

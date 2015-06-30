@@ -34,13 +34,15 @@ class TestEtcdAPI(BaseTestCase):
         self.m_config.HEARTBEAT_INTERVAL_SECS = 0
         self.m_config.HEARTBEAT_TTL_SECS = 0
 
+    @patch('calico.felix.fetcd.EtcdAPI.write_to_etcd')
     @patch('calico.felix.fetcd._EtcdWatcher')
     @patch('calico.felix.fetcd.etcd')
-    def finish_setup(self, etcd, _EtcdWatcher, **kwargs):
+    def finish_setup(self, etcd, _EtcdWatcher, write_to_etcd, **kwargs):
         # Set configuration attributes and start etcd_api
         for key, value in kwargs.iteritems():
             setattr(self.m_config, key, value)
         self.etcd_api = EtcdAPI(self.m_config)
+        self.etcd_api.write_to_etcd = Mock()
 
     def test_update_felix_status_disabled(self):
         """
@@ -62,7 +64,7 @@ class TestEtcdAPI(BaseTestCase):
         ttl = self.etcd_api._config.HEARTBEAT_TTL_SECS
 
         gevent.sleep(1)
-        self.etcd_api.client.write.assert_called_with(key, SameTime(), ttl=ttl)
+        self.etcd_api.write_to_etcd.assert_called_with(key, SameTime(), ttl=ttl, async=True)
 
     def test_update_felix_status_continuous(self):
         """
@@ -75,7 +77,7 @@ class TestEtcdAPI(BaseTestCase):
         ttl = self.etcd_api._config.HEARTBEAT_TTL_SECS
 
         gevent.sleep(50)
-        self.etcd_api.client.write.assert_has_calls(15 * [call(key, SameTime(), ttl=ttl)])
+        self.etcd_api.write_to_etcd.assert_has_calls(15 * [call(key, SameTime(), ttl=ttl, async=True)])
 
     @patch('calico.felix.fetcd.EtcdAPI._on_worker_died')
     def test_update_felix_status_dies_on_exception(self, _on_worker_died):
