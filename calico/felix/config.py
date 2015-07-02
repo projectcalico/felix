@@ -135,7 +135,7 @@ class Config(object):
         """
         Create a config. This reads data from the following sources.
         - Environment variables
-        - Configuration file
+        - Configuration file - /etc/calico/felix.cfg
         - per-host etcd (/calico/vX/config)
         - global etcd (/calico/vX/host/<host>/config)
 
@@ -172,10 +172,10 @@ class Config(object):
                            "Log severity for logging to syslog", "ERROR")
         self.add_parameter("LogSeverityScreen",
                            "Log severity for logging to screen", "ERROR")
-        self.add_parameter("HeartbeatIntervalSecs", "Heartbeat Interval in seconds",
+        self.add_parameter("ReportingIntervalSecs", "Reporting Interval in seconds",
                            0, value_is_int=True)
-        self.add_parameter("HeartbeatTTLSecs", "Heartbeat time to live in seconds",
-                           self.parameters["HeartbeatIntervalSecs"].value * 5/2, value_is_int=True)
+        self.add_parameter("ReportingTTLSecs", "Reporting status time to live in seconds",
+                           self.parameters["ReportingIntervalSecs"].value * 5/2, value_is_int=True)
 
 
         # Read the environment variables, then the configuration file.
@@ -222,8 +222,8 @@ class Config(object):
         self.LOGLEVFILE = self.parameters["LogSeverityFile"].value
         self.LOGLEVSYS = self.parameters["LogSeveritySys"].value
         self.LOGLEVSCR = self.parameters["LogSeverityScreen"].value
-        self.HEARTBEAT_INTERVAL_SECS = self.parameters["HeartbeatIntervalSecs"].value
-        self.HEARTBEAT_TTL_SECS = self.parameters["HeartbeatTTLSecs"].value
+        self.REPORTING_INTERVAL_SECS = self.parameters["ReportingIntervalSecs"].value
+        self.REPORTING_TTL_SECS = self.parameters["ReportingTTLSecs"].value
 
         self._validate_cfg(final=final)
 
@@ -355,17 +355,20 @@ class Config(object):
                                       self.parameters["MetadataPort"])
 
         # For negative time we set both interval and TTL to 0 - i.e. no
-        # heartbeating
-        if self.HEARTBEAT_TTL_SECS < 0 or self.HEARTBEAT_INTERVAL_SECS <= 0:
-            self.HEARTBEAT_TTL_SECS = 0
-            self.HEARTBEAT_INTERVAL_SECS = 0
+        # reporting
+        if self.REPORTING_TTL_SECS < 0 or self.REPORTING_INTERVAL_SECS <= 0:
+            self.REPORTING_TTL_SECS = 0
+            self.REPORTING_INTERVAL_SECS = 0
 
-        if self.HEARTBEAT_TTL_SECS <= self.HEARTBEAT_INTERVAL_SECS:
-            raise ConfigException("Heartbeat TTL ({} sec) less then heartbeat "
+        if  self.REPORTING_TTL_SECS == 0:
+            self.REPORTING_TTL_SECS = self.REPORTING_INTERVAL_SECS * 5/2
+
+        if self.REPORTING_TTL_SECS < self.REPORTING_INTERVAL_SECS:
+            raise ConfigException("Reporting TTL ({} sec) less than reporting "
                                   "interval ({} sec). "
-                                  .format(self.HEARTBEAT_INTERVAL_SECS,
-                                          self.HEARTBEAT_TTL_SECS),
-                                  self.parameters["HeartbeatIntervalSecs"])
+                                  .format(self.REPORTING_INTERVAL_SECS,
+                                          self.REPORTING_TTL_SECS),
+                                  self.parameters["ReportingIntervalSecs"])
 
         if not final:
             # Do not check that unset parameters are defaulted; we have more

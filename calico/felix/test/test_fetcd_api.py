@@ -6,8 +6,8 @@ import socket
 import gevent
 from etcd import EtcdException
 from mock import Mock, call, patch
-from calico.datamodel_v1 import key_for_status
-from calico.felix.fetcd import EtcdAPI,  _EtcdWatcher, ResyncRequired
+from calico.datamodel_v1 import key_for_status, key_for_uptime
+from calico.felix.fetcd import EtcdAPI,  _EtcdWatcher, ResyncRequired, _reconnect
 from calico.felix.test.base import BaseTestCase
 
 import gevent
@@ -31,8 +31,8 @@ class TestEtcdAPI(BaseTestCase):
         self.m_config.ETCD_ADDR = "localhost:4001"
         self.m_config.HOSTNAME = socket.gethostname()
         self.m_config.RESYNC_INTERVAL = 0
-        self.m_config.HEARTBEAT_INTERVAL_SECS = 0
-        self.m_config.HEARTBEAT_TTL_SECS = 0
+        self.m_config.REPORTING_INTERVAL_SECS = 0
+        self.m_config.REPORTING_TTL_SECS = 0
 
     @patch('calico.felix.fetcd.EtcdAPI.write_to_etcd')
     @patch('calico.felix.fetcd._EtcdWatcher')
@@ -44,54 +44,66 @@ class TestEtcdAPI(BaseTestCase):
         self.etcd_api = EtcdAPI(self.m_config)
         self.etcd_api.write_to_etcd = Mock()
 
+    def test_write_to_etcd_actor_message(self):
+        self.etcd_api = EtcdAPI(self.m_config)
+        self.etcd_api.client.write = Mock()
+        self.etcd_api.write_to_etcd('key', 'value', async=True)
+        self.etcd_api._step()
+        self.assertTrue(self.etcd_api.client.write.called)
+
     def test_update_felix_status_disabled(self):
         """
-        Test heartbeating is disabled for heartbeat interval 0
+        Test reporting is disabled for reporting interval 0
         """
         self.finish_setup()
         gevent.sleep(1)
-        self.assertFalse(self.etcd_api.client.write.called)
+        self.assertFalse(self.etcd_api.write_to_etcd.called)
 
     def test_update_felix_status_single(self):
         """
         Test felix status is updated
         """
-        self.finish_setup(HEARTBEAT_INTERVAL_SECS=15,
-                          HEARTBEAT_TTL_SECS=37)
+        self.finish_setup(REPORTING_INTERVAL_SECS=15,
+                          REPORTING_TTL_SECS=37)
 
         hostname = self.etcd_api._config.HOSTNAME
-        key = key_for_status(hostname)
-        ttl = self.etcd_api._config.HEARTBEAT_TTL_SECS
+        status_key = key_for_status(hostname)
+        uptime_key = key_for_uptime(hostname)
+
+        ttl = self.etcd_api._config.REPORTING_TTL_SECS
 
         gevent.sleep(1)
-        self.etcd_api.write_to_etcd.assert_called_with(key, SameTime(), ttl=ttl, async=True)
+
+        self.etcd_api.write_to_etcd.assert_has_calls([call(status_key, SameTime(), async=True),
+                                                          call(uptime_key, SameTimeDiff(), ttl=ttl, async=True)])
 
     def test_update_felix_status_continuous(self):
         """
         Test felix status is being continuously updated
         """
-        self.finish_setup(HEARTBEAT_INTERVAL_SECS=3,
-                          HEARTBEAT_TTL_SECS=10)
+        self.finish_setup(REPORTING_INTERVAL_SECS=3,
+                          REPORTING_TTL_SECS=10)
         hostname = self.etcd_api._config.HOSTNAME
-        key = key_for_status(hostname)
-        ttl = self.etcd_api._config.HEARTBEAT_TTL_SECS
+        status_key = key_for_status(hostname)
+        uptime_key = key_for_uptime(hostname)
+        ttl = self.etcd_api._config.REPORTING_TTL_SECS
 
         gevent.sleep(50)
-        self.etcd_api.write_to_etcd.assert_has_calls(15 * [call(key, SameTime(), ttl=ttl, async=True)])
+        self.etcd_api.write_to_etcd.assert_has_calls(15 * [call(status_key, SameTime(), async=True),
+                                                          call(uptime_key, SameTimeDiff(), ttl=ttl, async=True)])
 
-    @patch('calico.felix.fetcd.EtcdAPI._on_worker_died')
-    def test_update_felix_status_dies_on_exception(self, _on_worker_died):
+    @patch('calico.felix.fetcd._reconnect')
+    def test_update_felix_status_reconnects_on_etcd_exception(self, _reconnect):
         """
         Test felix status handles exceptions
         """
-        self.finish_setup(HEARTBEAT_INTERVAL_SECS=4,
-                          HEARTBEAT_TTL_SECS=12)
-        self.etcd_api.client.write = Mock(side_effect = EtcdException)
+        self.finish_setup(REPORTING_INTERVAL_SECS=4,
+                          REPORTING_TTL_SECS=12)
+        self.etcd_api.write_to_etcd = Mock(side_effect=EtcdException)
+
         gevent.sleep(1)
 
-        self.etcd_api._on_worker_died.assert_called_once()
-
-        self.etcd_api.client.write = Mock()
+        self.assertTrue(_reconnect.called)
 
 
 
@@ -101,3 +113,7 @@ class SameTime(object):
         import re
         format_match = re.compile('\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z').match(str(other)) is not None
         return format_match
+
+class SameTimeDiff(object):
+    def __eq__(self, other):
+        return type(other)

@@ -36,7 +36,7 @@ ROOT_DIR = "/calico"
 # OpenStack data is stored under this path.
 OPENSTACK_DIR = ROOT_DIR + "/openstack"
 
-# Status Data and heartbeat
+# Status Data and reporting
 STATUS_DIR = ROOT_DIR + "/status/v1/host"
 
 # Data that flows from orchestrator to felix is stored under a versioned
@@ -79,14 +79,19 @@ def dir_for_per_host_config(hostname):
     return dir_for_host(hostname) + "/config"
 
 
-def key_for_status(hostname):
+def dir_for_status(hostname):
     return STATUS_DIR+ "/%s" % hostname
+
+def key_for_status(hostname):
+    return dir_for_status(hostname) + "/last_reported_status"
+
+def key_for_uptime(hostname):
+    return dir_for_status(hostname) + "/uptime"
 
 
 def key_for_endpoint(host, orchestrator, workload_id, endpoint_id):
     return (HOST_DIR + "/%s/workload/%s/%s/endpoint/%s" %
             (host, orchestrator, workload_id, endpoint_id))
-
 
 def key_for_profile(profile_id):
     return PROFILE_DIR + "/" + profile_id
