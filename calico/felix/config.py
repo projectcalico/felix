@@ -135,7 +135,7 @@ class Config(object):
         """
         Create a config. This reads data from the following sources.
         - Environment variables
-        - Configuration file - /etc/calico/felix.cfg
+        - Configuration file - (/etc/calico/felix.cfg)
         - per-host etcd (/calico/vX/config)
         - global etcd (/calico/vX/host/<host>/config)
 
@@ -172,10 +172,10 @@ class Config(object):
                            "Log severity for logging to syslog", "ERROR")
         self.add_parameter("LogSeverityScreen",
                            "Log severity for logging to screen", "ERROR")
-        self.add_parameter("ReportingIntervalSecs", "Reporting Interval in seconds",
+        self.add_parameter("ReportingIntervalSecs", "Status reporting interval in seconds",
                            0, value_is_int=True)
-        self.add_parameter("ReportingTTLSecs", "Reporting status time to live in seconds",
-                           self.parameters["ReportingIntervalSecs"].value * 5/2, value_is_int=True)
+        self.add_parameter("ReportingTTLSecs", "Status report time to live in seconds",
+                           0, value_is_int=True)
 
 
         # Read the environment variables, then the configuration file.
@@ -354,21 +354,37 @@ class Config(object):
                 raise ConfigException("Invalid field value",
                                       self.parameters["MetadataPort"])
 
-        # For negative time we set both interval and TTL to 0 - i.e. no
-        # reporting
-        if self.REPORTING_TTL_SECS < 0 or self.REPORTING_INTERVAL_SECS <= 0:
+        # Reporting interval and TTL need to be integers.
+        try:
+            self.REPORTING_TTL_SECS = int(self.REPORTING_TTL_SECS)
+        except ValueError:
+            raise ConfigException("Reporting interval was not integer.",
+                                  self.parameters["ReportingIntervalSecs"])
+        try:
+            self.REPORTING_INTERVAL_SECS = int(self.REPORTING_INTERVAL_SECS)
+        except ValueError:
+            raise ConfigException("Reporting TTL was not integer.",
+                                  self.parameters["ReportingTTLSecs"])
+
+        # For non-positive time values of reporting interval we set both
+        # interval and ttl set to 0 - i.e. status reporting is disabled.
+        if self.REPORTING_INTERVAL_SECS <= 0:
             self.REPORTING_TTL_SECS = 0
             self.REPORTING_INTERVAL_SECS = 0
 
-        if  self.REPORTING_TTL_SECS == 0:
-            self.REPORTING_TTL_SECS = self.REPORTING_INTERVAL_SECS * 5/2
-
-        if self.REPORTING_TTL_SECS < self.REPORTING_INTERVAL_SECS:
-            raise ConfigException("Reporting TTL ({} sec) less than reporting "
+        # Status report time to live must be more than status reporting interval.
+        if self.REPORTING_TTL_SECS <= self.REPORTING_INTERVAL_SECS\
+                and self.REPORTING_TTL_SECS != 0:
+            raise ConfigException("Reporting TTL ({} sec) less or equal reporting "
                                   "interval ({} sec). "
                                   .format(self.REPORTING_INTERVAL_SECS,
                                           self.REPORTING_TTL_SECS),
                                   self.parameters["ReportingIntervalSecs"])
+
+        # If status report ttl is not set or set to 0,
+        # it's vlaue is set to 2.5 times interval
+        if self.REPORTING_TTL_SECS == 0:
+            self.REPORTING_TTL_SECS = self.REPORTING_INTERVAL_SECS * 5/2
 
         if not final:
             # Do not check that unset parameters are defaulted; we have more

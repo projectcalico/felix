@@ -20,7 +20,6 @@ Etcd polling functions.
 """
 from collections import defaultdict
 import random
-import time
 from socket import timeout as SocketTimeout
 import httplib
 import json
@@ -44,7 +43,7 @@ from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  RULES_KEY_RE, TAGS_KEY_RE, ENDPOINT_KEY_RE,
                                  dir_for_per_host_config,
                                  PROFILE_DIR, HOST_DIR, EndpointId, POLICY_DIR,
-                                 STATUS_DIR, key_for_status, key_for_uptime)
+                                 key_for_status, key_for_uptime)
 from calico.etcdutils import PathDispatcher
 from calico.felix.actor import Actor, actor_message
 from calico.felix.futils import logging_exceptions
@@ -83,6 +82,8 @@ class EtcdAPI(Actor):
         super(EtcdAPI, self).__init__()
         self._config = config
 
+        # Timestamp storing when the EtcdAPI started. This info is needed
+        # in order to report uptime to etcd.
         self._start_time = time.time()
 
         # Start up the main etcd-watching greenlet.  It will wait for an
@@ -95,13 +96,13 @@ class EtcdAPI(Actor):
         self._resync_greenlet = gevent.spawn(self._periodically_resync)
         self._resync_greenlet.link_exception(self._on_worker_died)
 
-        # Create an client to write to etcd.
+        # Create a client to write to etcd.
         self.client = None
         _reconnect(self)
 
         # Start up a reporting greenlet.
-        self._reporting_greenlet = gevent.spawn(self._status_reporting)
-        self._reporting_greenlet.link_exception(self._on_worker_died)
+        self._status_reporting_greenlet = gevent.spawn(self._status_reporting)
+        self._status_reporting_greenlet.link_exception(self._on_worker_died)
 
     @logging_exceptions
     def _periodically_resync(self):
@@ -124,7 +125,7 @@ class EtcdAPI(Actor):
             _log.debug("After jitter, next periodic resync will be in %.1f "
                        "seconds.", sleep_time)
             gevent.sleep(sleep_time)
-            self.force_resync(reason="periodic resync", async=False)
+            self.force_resync(reason="periodic resync", async=True)
 
     @logging_exceptions
     def _status_reporting(self):
@@ -133,12 +134,12 @@ class EtcdAPI(Actor):
 
         :return: Does not return, unless reporting disabled.
         """
-        _log.info("Started write status reporting thread.")
+        _log.info("Started status reporting thread.")
         ttl = self._config.REPORTING_TTL_SECS
         interval = self._config.REPORTING_INTERVAL_SECS
         _log.info("Config loaded, reporting interval: %s, TTL: %s", interval, ttl)
         if interval == 0:
-            _log.info("Interval is 0, reporting disabled.")
+            _log.info("Interval is 0, status reporting disabled.")
             return
         while True:
             try:
@@ -146,32 +147,36 @@ class EtcdAPI(Actor):
                 _log.info("Status updated.")
                 gevent.sleep(interval)
             except EtcdException as e:
-                _log.info("Status updating failed. {}. Reconnecting... ".format(e))
+                _log.info("Status updating failed. %r. Reconnecting... ", e)
                 _reconnect(self)
                 gevent.sleep(RETRY_DELAY)
 
 
     def update_felix_status(self, ttl):
         """
-        Writes a status info to etcd
+        Writes status info to etcd
         Current time in ISO 8601 Zulu format
         Uptime in secs
 
-        :param: ttl int: time to live in sec (optional)
-        :return: Does not return.
+        :param: ttl int: (optional) time to live in sec - lifetime of the status report
         """
+        status_key = key_for_status(self._config.HOSTNAME)
+        status = {}
+
+        time_now = datetime.datetime.fromtimestamp(time.time())
+        time_formatted = time_now.replace(microsecond=0).isoformat()+'Z'
+        status['status_time'] = time_formatted
+
+        status_value = json.dumps(status)
 
         uptime_key = key_for_uptime(self._config.HOSTNAME)
         uptime_value = int(time.time() - self._start_time)
-
-        status_key = key_for_status(self._config.HOSTNAME)
-        status_value = datetime.datetime.fromtimestamp(time.time()).replace(microsecond=0).isoformat()+'Z'
 
         self.write_to_etcd(status_key, status_value, async=True)
         self.write_to_etcd(uptime_key, uptime_value, ttl=ttl, async=True)
 
     @actor_message()
-    def write_to_etcd(self, key, value, **kwdargs):
+    def write_to_etcd(self, key, value, **kwargs):
         """
         Writes to etcd
 
@@ -179,9 +184,9 @@ class EtcdAPI(Actor):
         :param: value obj: value to set
         :param: ttl int: time to live in sec (optional)
 
-        other optional parameters - same as in etct client write method
+        other optional parameters - same as in etcd client write method
         """
-        self.client.write(key, value, **kwdargs)
+        self.client.write(key, value, **kwargs)
 
     @actor_message()
     def load_config(self):
@@ -622,8 +627,7 @@ class _EtcdWatcher(gevent.Greenlet):
 
 
 def _reconnect(etcd_communicator, copy_cluster_id=True):
-    # Parameter etcd_communicator can be either etcd_watcher or etcd_api
-    _log.info("(Re)connecting...")
+    """ Parameter etcd_communicator can be either etcd_watcher or etcd_api"""
     etcd_addr = etcd_communicator._config.ETCD_ADDR
     if ":" in etcd_addr:
         host, port = etcd_addr.split(":")

@@ -33,15 +33,18 @@ _log = logging.getLogger(__name__)
 # All Calico data is stored under this path.
 ROOT_DIR = "/calico"
 
+# Current version
+VERSION = "/v1"
+
 # OpenStack data is stored under this path.
 OPENSTACK_DIR = ROOT_DIR + "/openstack"
 
-# Status Data and reporting
-STATUS_DIR = ROOT_DIR + "/status/v1/host"
+# Status data and reporting
+STATUS_DIR = ROOT_DIR + "/status" + VERSION + "/host"
 
 # Data that flows from orchestrator to felix is stored under a versioned
 # sub-tree.
-VERSION_DIR = ROOT_DIR + "/v1"
+VERSION_DIR = ROOT_DIR + VERSION
 # Global ready flag.  Stores 'true' or 'false'.
 READY_KEY = VERSION_DIR + "/Ready"
 # Global config (directory).
@@ -80,10 +83,12 @@ def dir_for_per_host_config(hostname):
 
 
 def dir_for_status(hostname):
-    return STATUS_DIR+ "/%s" % hostname
+    return STATUS_DIR + "/%s" % hostname
+
 
 def key_for_status(hostname):
     return dir_for_status(hostname) + "/last_reported_status"
+
 
 def key_for_uptime(hostname):
     return dir_for_status(hostname) + "/uptime"
