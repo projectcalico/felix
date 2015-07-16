@@ -107,6 +107,7 @@ import sys
 import traceback
 import uuid
 import weakref
+import time
 
 from gevent.event import AsyncResult
 from gevent.queue import Queue
@@ -114,7 +115,8 @@ from calico.felix import futils
 from calico.felix.futils import StatCounter
 
 _log = logging.getLogger(__name__)
-
+_message_log = logging.getLogger(".".join([__name__,"message_log"]))
+_message_log.setLevel(logging.DEBUG)
 
 ResultOrExc = collections.namedtuple("ResultOrExc", ("result", "exception"))
 
@@ -188,6 +190,8 @@ class Actor(object):
 
         batch = [msg]
         batches = []
+        msg_retries = {}
+        msg_log_output = []
 
         if not msg.needs_own_batch:
             # Try to pull some more work off the queue to combine into a
@@ -226,6 +230,18 @@ class Actor(object):
                 actor_storage.msg_uuid = msg.uuid
                 actor_storage.msg_name = msg.name
                 try:
+
+                    # Keeps track of how many times we retry a message.
+                    try:
+                        # Increment the counter if it already exists
+                        msg_retries[msg.uuid] += 1
+                    except KeyError:
+                        # Else set it up, along with storing the message info.
+                        msg_retries[msg.uuid] = 1
+                        msg_log_output.append({'uuid': msg.uuid,
+                                                    'recipient': msg.recipient,
+                                                    'time': time.time() * 1000})
+
                     # Actually execute the per-message method and record its
                     # result.
                     result = msg.method()
@@ -273,6 +289,14 @@ class Actor(object):
                         future.set(result)
                     _stats.increment("Messages completed")
 
+            # Log the messages in order.
+            for msg_dict in msg_log_output:
+                msg_uuid = msg_dict['uuid']
+                _message_log.info('|'.join([str(msg_retries[msg_uuid]),
+                                            str(msg_uuid),
+                                            str(msg_dict['time']),
+                                            str(msg_dict['recipient']),
+                                            ]))
             _stats.increment("Batches processed")
         if num_splits > 0:
             _log.warn("Split batches complete. Number of splits: %s",
@@ -444,9 +468,21 @@ def actor_message(needs_own_batch=False):
             async_set = "async" in kwargs
             async = kwargs.pop("async", False)
             on_same_greenlet = (self.greenlet == gevent.getcurrent())
+            msg_id = uuid.uuid4().hex[:12]
             if on_same_greenlet and not async:
                 # Bypass the queue if we're already on the same greenlet, or we
                 # would deadlock by waiting for ourselves.
+
+                # But first log that the message is being sent. '-1' indicates
+                # that this is an instant function call.
+                _message_log.info('|'.join(['-1',
+                                            str(msg_id),
+                                            str(time.time() * 1000),
+                                            str(caller),
+                                            self.name,
+                                            method_name
+                                            ]))
+
                 return fn(self, *args, **kwargs)
             else:
                 # Only log a stat if we're not simulating a normal method call.
@@ -463,7 +499,6 @@ def actor_message(needs_own_batch=False):
 
             # async must be specified, unless on the same actor.
             assert async_set, "All cross-actor event calls must specify async arg."
-            msg_id = uuid.uuid4().hex[:12]
             if not on_same_greenlet and not async:
                 _stats.increment("Blocking calls started")
                 _log.debug("BLOCKING CALL: [%s] %s -> %s", msg_id,
@@ -475,6 +510,15 @@ def actor_message(needs_own_batch=False):
                                          self.name, method_name))
             msg = Message(msg_id, partial, [result], caller, self.name,
                           needs_own_batch=needs_own_batch)
+
+            # Log that the message was sent. The '0' indicates that this is a
+            # Message-sent log.
+            _message_log.info('|'.join(['0',
+                                        str(msg_id),
+                                        str(time.time() * 1000),
+                                        str(caller),
+                                        method_name
+                                        ]))
 
             _log.debug("Message %s sent by %s to %s, queue length %d",
                        msg, caller, self.name, self._event_queue.qsize())

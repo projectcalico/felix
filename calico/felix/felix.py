@@ -229,6 +229,13 @@ def main():
         _log.exception("Exception loading configuration")
         raise
 
+    # We enable or disable the logs for message tracking based on the config
+    # setting.
+    if config.MESSAGE_TRACKING:
+        logging.getLogger("calico.felix.actor.message_log").disabled = False
+    else:
+        logging.getLogger("calico.felix.actor.message_log").disabled = True
+
     _log.info("Felix initializing")
 
     try:
