@@ -3,9 +3,12 @@ import json
 
 import logging
 from etcd import EtcdResult
-from mock import Mock, call
+from gevent.event import Event
+from mock import Mock, call, patch, ANY
 from calico.datamodel_v1 import EndpointId
-from calico.felix.fetcd import _EtcdWatcher, ResyncRequired
+from calico.felix.config import Config
+from calico.felix.ipsets import IpsetActor
+from calico.felix.fetcd import _EtcdWatcher, ResyncRequired, EtcdAPI
 from calico.felix.splitter import UpdateSplitter
 from calico.felix.test.base import BaseTestCase
 
@@ -36,15 +39,90 @@ TAGS = ["a", "b"]
 TAGS_STR = json.dumps(TAGS)
 
 
+class TestEtcdAPI(BaseTestCase):
+
+    @patch("calico.felix.fetcd._EtcdWatcher", autospec=True)
+    @patch("gevent.spawn", autospec=True)
+    def test_create(self, m_spawn, m_etcd_watcher):
+        m_config = Mock(spec=Config)
+        m_config.ETCD_ADDR = 'localhost:4001'
+        m_hosts_ipset = Mock(spec=IpsetActor)
+        api = EtcdAPI(m_config, m_hosts_ipset)
+        m_etcd_watcher.assert_has_calls([
+            call(m_config, m_hosts_ipset).link(api._on_worker_died),
+            call(m_config, m_hosts_ipset).start(),
+        ])
+        m_spawn.assert_has_calls([
+            call(api._periodically_resync),
+            call(api._periodically_resync).link_exception(api._on_worker_died)
+        ])
+
+    @patch("calico.felix.fetcd._EtcdWatcher", autospec=True)
+    @patch("gevent.spawn", autospec=True)
+    @patch("gevent.sleep", autospec=True)
+    def test_periodic_resync_mainline(self, m_sleep, m_spawn, m_etcd_watcher):
+        m_configured = Mock(spec=Event)
+        m_etcd_watcher.return_value.configured = m_configured
+        m_config = Mock(spec=Config)
+        m_config.ETCD_ADDR = 'localhost:4001'
+        m_hosts_ipset = Mock(spec=IpsetActor)
+        api = EtcdAPI(m_config, m_hosts_ipset)
+        m_config.RESYNC_INTERVAL = 10
+        with patch.object(api, "force_resync") as m_force_resync:
+            m_force_resync.side_effect = ExpectedException()
+            self.assertRaises(ExpectedException, api._periodically_resync)
+        m_configured.wait.assert_called_once_with()
+        m_sleep.assert_called_once_with(ANY)
+        sleep_time = m_sleep.call_args[0][0]
+        self.assertTrue(sleep_time >= 10)
+        self.assertTrue(sleep_time <= 12)
+
+    @patch("calico.felix.fetcd._EtcdWatcher", autospec=True)
+    @patch("gevent.spawn", autospec=True)
+    @patch("gevent.sleep", autospec=True)
+    def test_periodic_resync_disabled(self, m_sleep, m_spawn, m_etcd_watcher):
+        m_etcd_watcher.return_value.configured = Mock(spec=Event)
+        m_config = Mock(spec=Config)
+        m_config.ETCD_ADDR = 'localhost:4001'
+        m_hosts_ipset = Mock(spec=IpsetActor)
+        api = EtcdAPI(m_config, m_hosts_ipset)
+        m_config.RESYNC_INTERVAL = 0
+        with patch.object(api, "force_resync") as m_force_resync:
+            m_force_resync.side_effect = Exception()
+            api._periodically_resync()
+
+    @patch("calico.felix.fetcd._EtcdWatcher", autospec=True)
+    @patch("gevent.spawn", autospec=True)
+    def test_force_resync(self, m_spawn, m_etcd_watcher):
+        m_config = Mock(spec=Config)
+        m_config.ETCD_ADDR = 'localhost:4001'
+        m_hosts_ipset = Mock(spec=IpsetActor)
+        api = EtcdAPI(m_config, m_hosts_ipset)
+        api.force_resync(async=True)
+        self.step_actor(api)
+        self.assertTrue(m_etcd_watcher.return_value.resync_after_current_poll)
+
+
+class ExpectedException(Exception):
+    pass
+
+
 class TestExcdWatcher(BaseTestCase):
 
     def setUp(self):
         super(TestExcdWatcher, self).setUp()
-        m_config = Mock()
-        m_config.IFACE_PREFIX = "tap"
-        self.watcher = _EtcdWatcher(m_config)
+        self.m_config = Mock()
+        self.m_config.IFACE_PREFIX = "tap"
+        self.m_config.ETCD_ADDR = 'localhost:4001'
+        self.m_hosts_ipset = Mock(spec=IpsetActor)
+        self.watcher = _EtcdWatcher(self.m_config, self.m_hosts_ipset)
         self.m_splitter = Mock(spec=UpdateSplitter)
         self.watcher.splitter = self.m_splitter
+
+    def test_resync_flag(self):
+        self.watcher.resync_after_current_poll = True
+        self.assertRaises(ResyncRequired, self.watcher._wait_for_etcd_event)
+        self.assertFalse(self.watcher.resync_after_current_poll)
 
     def test_ready_flag_set(self):
         self.dispatch("/calico/v1/Ready", "set", value="true")
@@ -59,6 +137,24 @@ class TestExcdWatcher(BaseTestCase):
         self.m_splitter.on_endpoint_update.assert_called_once_with(
             EndpointId("h1", "o1", "w1", "e1"),
             VALID_ENDPOINT,
+            async=True,
+        )
+
+    def test_endpoint_set_bad_json(self):
+        self.dispatch("/calico/v1/host/h1/workload/o1/w1/endpoint/e1",
+                      "set", value="{")
+        self.m_splitter.on_endpoint_update.assert_called_once_with(
+            EndpointId("h1", "o1", "w1", "e1"),
+            None,
+            async=True,
+        )
+
+    def test_endpoint_set_invalid(self):
+        self.dispatch("/calico/v1/host/h1/workload/o1/w1/endpoint/e1",
+                      "set", value="{}")
+        self.m_splitter.on_endpoint_update.assert_called_once_with(
+            EndpointId("h1", "o1", "w1", "e1"),
+            None,
             async=True,
         )
 
@@ -94,7 +190,7 @@ class TestExcdWatcher(BaseTestCase):
             self.m_splitter.on_endpoint_update.reset_mock()
             # Delete one of its parent dirs, should delete the endpoint.
             self.dispatch(path, "delete")
-            exp_calls = [
+            exp_calls = [-
                 call(EndpointId("h1", "o1", "w1", "e1"), None, async=True),
                 call(EndpointId("h1", "o1", "w1", "e2"), None, async=True),
             ]
@@ -119,12 +215,44 @@ class TestExcdWatcher(BaseTestCase):
     def test_rules_set(self):
         self.dispatch("/calico/v1/policy/profile/prof1/rules", "set",
                       value=RULES_STR)
-        self.m_splitter.on_rules_update("prof1", RULES, async=True)
+        self.m_splitter.on_rules_update.assert_called_once_with("prof1",
+                                                                RULES,
+                                                                async=True)
+
+    def test_rules_set_bad_json(self):
+        self.dispatch("/calico/v1/policy/profile/prof1/rules", "set",
+                      value="{")
+        self.m_splitter.on_rules_update.assert_called_once_with("prof1",
+                                                                None,
+                                                                async=True)
+
+    def test_rules_set_invalid(self):
+        self.dispatch("/calico/v1/policy/profile/prof1/rules", "set",
+                      value='{}')
+        self.m_splitter.on_rules_update.assert_called_once_with("prof1",
+                                                                None,
+                                                                async=True)
 
     def test_tags_set(self):
         self.dispatch("/calico/v1/policy/profile/prof1/tags", "set",
                       value=TAGS_STR)
-        self.m_splitter.on_tags_update("prof1", TAGS, async=True)
+        self.m_splitter.on_tags_update.assert_called_once_with("prof1",
+                                                               TAGS,
+                                                               async=True)
+
+    def test_tags_set_bad_json(self):
+        self.dispatch("/calico/v1/policy/profile/prof1/tags", "set",
+                      value="{")
+        self.m_splitter.on_tags_update.assert_called_once_with("prof1",
+                                                               None,
+                                                               async=True)
+
+    def test_tags_set_invalid(self):
+        self.dispatch("/calico/v1/policy/profile/prof1/tags", "set",
+                      value="[{}]")
+        self.m_splitter.on_tags_update.assert_called_once_with("prof1",
+                                                               None,
+                                                               async=True)
 
     def test_dispatch_delete_resync(self):
         """
@@ -147,7 +275,7 @@ class TestExcdWatcher(BaseTestCase):
         self.m_splitter.on_tags_update.assert_called_once_with("profA", None,
                                                                async=True)
         self.m_splitter.on_rules_update.assert_called_once_with("profA", None,
-                                                               async=True)
+                                                                async=True)
 
     def test_tags_del(self):
         """
@@ -164,7 +292,7 @@ class TestExcdWatcher(BaseTestCase):
         """
         self.dispatch("/calico/v1/policy/profile/profA/rules", action="delete")
         self.m_splitter.on_rules_update.assert_called_once_with("profA", None,
-                                                               async=True)
+                                                                async=True)
         self.assertFalse(self.m_splitter.on_tags_update.called)
 
     def test_endpoint_del(self):
@@ -176,6 +304,71 @@ class TestExcdWatcher(BaseTestCase):
         self.m_splitter.on_endpoint_update.assert_called_once_with(
             EndpointId("h1", "o1", "w1", "e1"),
             None,
+            async=True,
+        )
+
+    def test_host_ip_set(self):
+        """
+        Test set for the IP of a host.
+        """
+        self.dispatch("/calico/v1/host/foo/bird_ip",
+                      action="set", value="10.0.0.1")
+        self.m_hosts_ipset.replace_members.assert_called_once_with(
+            ["10.0.0.1"],
+            async=True,
+        )
+
+    def test_host_ip_ipip_disabled(self):
+        """
+        Test set for the IP of a host.
+        """
+        self.m_config.IP_IN_IP_ENABLED = False
+        self.dispatch("/calico/v1/host/foo/bird_ip",
+                      action="set", value="10.0.0.1")
+        self.assertFalse(self.m_hosts_ipset.replace_members.called)
+        self.dispatch("/calico/v1/host/foo/bird_ip",
+                      action="delete")
+        self.assertFalse(self.m_hosts_ipset.replace_members.called)
+
+    def test_host_ip_del(self):
+        """
+        Test set for the IP of a host.
+        """
+        self.dispatch("/calico/v1/host/foo/bird_ip",
+                      action="set", value="10.0.0.1")
+        self.m_hosts_ipset.reset_mock()
+        self.dispatch("/calico/v1/host/foo/bird_ip",
+                      action="delete")
+        self.m_hosts_ipset.replace_members.assert_called_once_with(
+            [],
+            async=True,
+        )
+
+    def test_host_ip_invalid(self):
+        """
+        Test set for the IP of a host.
+        """
+        self.dispatch("/calico/v1/host/foo/bird_ip",
+                      action="set", value="10.0.0.1")
+        self.m_hosts_ipset.reset_mock()
+        self.dispatch("/calico/v1/host/foo/bird_ip",
+                      action="set", value="gibberish")
+        self.m_hosts_ipset.replace_members.assert_called_once_with(
+            [],
+            async=True,
+        )
+
+    def test_host_del_clears_ip(self):
+        """
+        Test set for the IP of a host.
+        """
+        self.dispatch("/calico/v1/host/foo/bird_ip",
+                      action="set", value="10.0.0.1")
+        self.m_hosts_ipset.reset_mock()
+        self.dispatch("/calico/v1/host/foo",
+                      action="delete")
+        self.m_hosts_ipset.replace_members.assert_called_once_with(
+            [],
             async=True,
         )
 

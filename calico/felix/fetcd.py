@@ -19,6 +19,7 @@ felix.fetcd
 Etcd polling functions.
 """
 from collections import defaultdict
+import functools
 import random
 from socket import timeout as SocketTimeout
 import httplib
@@ -38,15 +39,16 @@ import urllib3.exceptions
 from urllib3.exceptions import ReadTimeoutError, ConnectTimeoutError
 
 from calico import common
-from calico.common import ValidationFailed
+from calico.common import ValidationFailed, validate_ip_addr, canonicalise_ip
 from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  RULES_KEY_RE, TAGS_KEY_RE, ENDPOINT_KEY_RE,
                                  dir_for_per_host_config,
                                  PROFILE_DIR, HOST_DIR, EndpointId, POLICY_DIR,
+                                 HOST_IP_KEY_RE, IPAM_V4_CIDR_KEY_RE,
                                  key_for_status, key_for_uptime)
 from calico.etcdutils import PathDispatcher
 from calico.felix.actor import Actor, actor_message
-from calico.felix.futils import logging_exceptions
+from calico.felix.futils import intern_dict, intern_list, logging_exceptions
 
 _log = logging.getLogger(__name__)
 
@@ -59,11 +61,28 @@ PER_PROFILE_DIR = PROFILE_DIR + "/<profile_id>"
 TAGS_KEY = PER_PROFILE_DIR + "/tags"
 RULES_KEY = PER_PROFILE_DIR + "/rules"
 PER_HOST_DIR = HOST_DIR + "/<hostname>"
+HOST_IP_KEY = PER_HOST_DIR + "/bird_ip"
 WORKLOAD_DIR = PER_HOST_DIR + "/workload"
 PER_ORCH_DIR = WORKLOAD_DIR + "/<orchestrator>"
 PER_WORKLOAD_DIR = PER_ORCH_DIR + "/<workload_id>"
 ENDPOINT_DIR = PER_WORKLOAD_DIR + "/endpoint"
 PER_ENDPOINT_KEY = ENDPOINT_DIR + "/<endpoint_id>"
+
+IPAM_DIR = VERSION_DIR + "/ipam"
+IPAM_V4_DIR = IPAM_DIR + "/v4"
+POOL_V4_DIR = IPAM_V4_DIR + "/pool"
+CIDR_V4_KEY = POOL_V4_DIR + "/<pool_id>"
+
+RESYNC_KEYS = [
+    VERSION_DIR,
+    POLICY_DIR,
+    PROFILE_DIR,
+    CONFIG_DIR,
+    HOST_DIR,
+    IPAM_DIR,
+    IPAM_V4_DIR,
+    POOL_V4_DIR,
+]
 
 
 class EtcdAPI(Actor):
@@ -73,12 +92,12 @@ class EtcdAPI(Actor):
     Since the python-etcd API is blocking, we defer API watches to
     a worker greenlet and communicate with it via Events.
 
-    To avoid needing to interupt in-progress polls, another working
-    greenlet is introduced to manage status updating and writing to
-    etcd.
+    As and when we add status reporting, to avoid needing to interrupt
+    in-progress polls, I expect we'll want a second  worker greenlet that
+    manages an "upstream" connection to etcd.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, hosts_ipset):
         super(EtcdAPI, self).__init__()
         self._config = config
 
@@ -88,7 +107,7 @@ class EtcdAPI(Actor):
 
         # Start up the main etcd-watching greenlet.  It will wait for an
         # event from us before doing anything.
-        self._watcher = _EtcdWatcher(config)
+        self._watcher = _EtcdWatcher(config, hosts_ipset)
         self._watcher.link(self._on_worker_died)
         self._watcher.start()
 
@@ -104,13 +123,16 @@ class EtcdAPI(Actor):
         self._status_reporting_greenlet = gevent.spawn(self._status_reporting)
         self._status_reporting_greenlet.link_exception(self._on_worker_died)
 
+
     @logging_exceptions
     def _periodically_resync(self):
         """
-        Greenlet: periodically triggers a resync from etcd.
+        Greenlet: if enabled, periodically triggers a resync from etcd.
 
         :return: Does not return, unless periodic resync disabled.
         """
+
+
         _log.info("Started periodic resync thread, waiting for config.")
         self._watcher.configured.wait()
         interval = self._config.RESYNC_INTERVAL
@@ -199,7 +221,8 @@ class EtcdAPI(Actor):
         return self._watcher.configured
 
     @actor_message()
-    def start_etcd_watch(self, splitter):
+
+    def start_watch(self, splitter):
         """
         Starts watching etcd for changes.  Implicitly loads the config
         if it hasn't been loaded yet.
@@ -231,16 +254,24 @@ class _EtcdWatcher(gevent.Greenlet):
     """
     Greenlet that watches the etcd data model for changes.
 
-    Loads the initial dump from etcd and applies it as a snapshot.
-    Then, watches etcd for changes and sends them to the update
-    splitter for processing.
+    (1) Waits for the load_config event to be triggered.
+    (2) Connects to etcd and waits for the Ready flag to be set,
+        indicating the data model is consistent.
+    (3) Loads the config from etcd and passes it to the config object.
+    (4) Waits for the begin_polling Event to be triggered.
+    (5) Loads a complete snapshot from etcd and passes it to the
+        UpdateSplitter.
+    (6) Watches etcd for changes, sending them incrementally to the
+        UpdateSplitter.
+    (On etcd error) starts again from step (5)
 
     This greenlet is expected to be managed by the EtcdAPI Actor.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, hosts_ipset):
         super(_EtcdWatcher, self).__init__()
         self._config = config
+        self.hosts_ipset = hosts_ipset
 
         # Events triggered by the EtcdAPI Actor to tell us to load the config
         # and start polling.  These are one-way flags.
@@ -266,6 +297,9 @@ class _EtcdWatcher(gevent.Greenlet):
         # directory trees.
         self.endpoint_ids_per_host = defaultdict(set)
 
+        # Next-hop IP addresses of our hosts, if populated in etcd.
+        self.ipv4_by_hostname = {}
+
         # Program the dispatcher with the paths we care about.  Since etcd
         # gives us a single event for a recursive directory deletion, we have
         # to handle deletes for lots of directories that we otherwise wouldn't
@@ -274,24 +308,27 @@ class _EtcdWatcher(gevent.Greenlet):
         reg = self.dispatcher.register
         # Top-level directories etc.  If these go away, stop polling and
         # resync.
-        reg(VERSION_DIR, on_del=self._resync)
-        reg(POLICY_DIR, on_del=self._resync)
-        reg(PROFILE_DIR, on_del=self._resync)
-        reg(CONFIG_DIR, on_del=self._resync)
+        for key in RESYNC_KEYS:
+            reg(key, on_del=self._resync)
         reg(READY_KEY, on_set=self.on_ready_flag_set, on_del=self._resync)
         # Profiles and their contents.
         reg(PER_PROFILE_DIR, on_del=self.on_profile_delete)
         reg(TAGS_KEY, on_set=self.on_tags_set, on_del=self.on_tags_delete)
         reg(RULES_KEY, on_set=self.on_rules_set, on_del=self.on_rules_delete)
         # Hosts, workloads and endpoints.
-        reg(HOST_DIR, on_del=self._resync)
         reg(PER_HOST_DIR, on_del=self.on_host_delete)
+        reg(HOST_IP_KEY,
+            on_set=self.on_host_ip_set,
+            on_del=self.on_host_ip_delete)
         reg(WORKLOAD_DIR, on_del=self.on_host_delete)
         reg(PER_ORCH_DIR, on_del=self.on_orch_delete)
         reg(PER_WORKLOAD_DIR, on_del=self.on_workload_delete)
         reg(ENDPOINT_DIR, on_del=self.on_workload_delete)
         reg(PER_ENDPOINT_KEY,
             on_set=self.on_endpoint_set, on_del=self.on_endpoint_delete)
+        reg(CIDR_V4_KEY,
+            on_set=self.on_ipam_v4_pool_set,
+            on_del=self.on_ipam_v4_pool_delete)
 
     @logging_exceptions
     def _run(self):
@@ -302,10 +339,12 @@ class _EtcdWatcher(gevent.Greenlet):
         self.load_config.wait()
         while True:
             _log.info("Reconnecting and loading snapshot from etcd...")
+
             _reconnect(self, copy_cluster_id=False)
+
             self._wait_for_ready()
 
-            while not self.configured.is_set():
+            while not self._configured.is_set():
                 self._load_config()
                 # Unblock anyone who's waiting on the config.
                 self.configured.set()
@@ -380,7 +419,9 @@ class _EtcdWatcher(gevent.Greenlet):
                            "retry.", e)
                 gevent.sleep(RETRY_DELAY)
             else:
+
                 self._config.report_etcd_config(host_dict, global_dict)
+
                 return
 
     def _load_initial_dump(self):
@@ -395,7 +436,9 @@ class _EtcdWatcher(gevent.Greenlet):
         rules_by_id = {}
         tags_by_id = {}
         endpoints_by_id = {}
+        ipv4_pools_by_id = {}
         self.endpoint_ids_per_host.clear()
+        self.ipv4_by_hostname.clear()
         still_ready = False
         for child in initial_dump.children:
             profile_id, rules = parse_if_rules(child)
@@ -411,6 +454,15 @@ class _EtcdWatcher(gevent.Greenlet):
                 endpoints_by_id[endpoint_id] = endpoint
                 self.endpoint_ids_per_host[endpoint_id.host].add(endpoint_id)
                 continue
+            pool_id, pool = parse_if_ipam_v4_pool(child)
+            if pool_id and pool:
+                ipv4_pools_by_id[pool_id] = pool
+                continue
+            if self._config.IP_IN_IP_ENABLED:
+                hostname, ip = parse_if_host_ip(child)
+                if hostname and ip:
+                    self.ipv4_by_hostname[hostname] = ip
+                    continue
 
             # Double-check the flag hasn't changed since we read it before.
             if child.key == READY_KEY:
@@ -432,7 +484,17 @@ class _EtcdWatcher(gevent.Greenlet):
         self.splitter.apply_snapshot(rules_by_id,
                                      tags_by_id,
                                      endpoints_by_id,
+                                     ipv4_pools_by_id,
                                      async=True)
+        if self._config.IP_IN_IP_ENABLED:
+            # We only support IPv4 for host tracking right now so there's not
+            # much point in going via the splitter.
+            # FIXME Support IP-in-IP for IPv6.
+            _log.info("Sending (%d) host IPs to ipset.",
+                      len(self.ipv4_by_hostname))
+            self.hosts_ipset.replace_members(self.ipv4_by_hostname.values(),
+                                             async=True)
+
         # The etcd_index is the high-water-mark for the snapshot, record that
         # we want to poll starting at the next index.
         self.next_etcd_index = initial_dump.etcd_index + 1
@@ -475,10 +537,14 @@ class _EtcdWatcher(gevent.Greenlet):
                 _reconnect(self)
             except (ConnectTimeoutError,
                     urllib3.exceptions.HTTPError,
-                    httplib.HTTPException):
+                    httplib.HTTPException) as e:
+                # We don't log out the stack trace here because it can spam the
+                # logs heavily if the requests keep failing.  The errors are
+                # very descriptive anyway.
                 _log.warning("Low-level HTTP error, reconnecting to "
-                             "etcd.", exc_info=True)
+                             "etcd: %r.", e)
                 _reconnect(self)
+
             except (EtcdClusterIdChanged, EtcdEventIndexCleared) as e:
                 _log.warning("Out of sync with etcd (%r).  Reconnecting "
                              "for full sync.", e)
@@ -552,6 +618,7 @@ class _EtcdWatcher(gevent.Greenlet):
         """Handler for rules updates, passes the update to the splitter."""
         _log.debug("Rules for %s set", profile_id)
         rules = parse_rules(profile_id, response.value)
+        profile_id = intern(profile_id.encode("utf8"))
         self.splitter.on_rules_update(profile_id, rules, async=True)
 
     def on_rules_delete(self, response, profile_id):
@@ -563,6 +630,7 @@ class _EtcdWatcher(gevent.Greenlet):
         """Handler for tags updates, passes the update to the splitter."""
         _log.debug("Tags for %s set", profile_id)
         rules = parse_tags(profile_id, response.value)
+        profile_id = intern(profile_id.encode("utf8"))
         self.splitter.on_tags_update(profile_id, rules, async=True)
 
     def on_tags_delete(self, response, profile_id):
@@ -592,6 +660,38 @@ class _EtcdWatcher(gevent.Greenlet):
                   hostname, len(ids_on_that_host))
         for endpoint_id in ids_on_that_host:
             self.splitter.on_endpoint_update(endpoint_id, None, async=True)
+        self.on_host_ip_delete(response, hostname)
+
+    def on_host_ip_set(self, response, hostname):
+        if not self._config.IP_IN_IP_ENABLED:
+            _log.debug("Ignoring update to %s because IP-in-IP is disabled",
+                       response.key)
+            return
+        ip = parse_host_ip(hostname, response.value)
+        if ip:
+            self.ipv4_by_hostname[hostname] = ip
+        else:
+            _log.warning("Invalid IP for hostname %s: %s, treating as "
+                         "deletion", hostname, response.value)
+            self.ipv4_by_hostname.pop(hostname, None)
+        self.hosts_ipset.replace_members(self.ipv4_by_hostname.values(),
+                                         async=True)
+
+    def on_host_ip_delete(self, response, hostname):
+        if not self._config.IP_IN_IP_ENABLED:
+            _log.debug("Ignoring update to %s because IP-in-IP is disabled",
+                       response.key)
+            return
+        if self.ipv4_by_hostname.pop(hostname, None):
+            self.hosts_ipset.replace_members(self.ipv4_by_hostname.values(),
+                                             async=True)
+
+    def on_ipam_v4_pool_set(self, response, pool_id):
+        pool = parse_ipam_pool(pool_id, response.value)
+        self.splitter.on_ipam_pool_update(pool_id, pool, async=True)
+
+    def on_ipam_v4_pool_delete(self, response, pool_id):
+        self.splitter.on_ipam_pool_update(pool_id, None, async=True)
 
     def on_orch_delete(self, response, hostname, orchestrator):
         """
@@ -601,6 +701,7 @@ class _EtcdWatcher(gevent.Greenlet):
         """
         _log.info("Orchestrator dir %s/%s deleted, removing contained hosts",
                   hostname, orchestrator)
+        orchestrator = intern(orchestrator.encode("utf8"))
         for endpoint_id in list(self.endpoint_ids_per_host[hostname]):
             if endpoint_id.orchestrator == orchestrator:
                 self.splitter.on_endpoint_update(endpoint_id, None, async=True)
@@ -617,6 +718,8 @@ class _EtcdWatcher(gevent.Greenlet):
         """
         _log.debug("Workload dir %s/%s/%s deleted, removing endpoints",
                    hostname, orchestrator, workload_id)
+        orchestrator = intern(orchestrator.encode("utf8"))
+        workload_id = intern(workload_id.encode("utf8"))
         for endpoint_id in list(self.endpoint_ids_per_host[hostname]):
             if (endpoint_id.orchestrator == orchestrator and
                     endpoint_id.workload == workload_id):
@@ -660,9 +763,25 @@ def _build_config_dict(cfg_node):
 
 
 # Intern JSON keys as we load them to reduce occupancy.
-def intern_dict(d):
-    return dict((intern(str(k)), v) for k, v in d.iteritems())
-json_decoder = json.JSONDecoder(object_hook=intern_dict)
+FIELDS_TO_INTERN = set([
+    # Endpoint dicts.  It doesn't seem worth interning items like the MAC
+    # address or TAP name, which are rarely (if ever) shared.
+    "profile_id",
+    "profile_ids",
+    "state",
+    "ipv4_gateway",
+    "ipv6_gateway",
+
+    # Rules dicts.
+    "protocol",
+    "src_tag",
+    "dst_tag",
+    "action",
+])
+json_decoder = json.JSONDecoder(
+    object_hook=functools.partial(intern_dict,
+                                  fields_to_intern=FIELDS_TO_INTERN)
+)
 
 
 def parse_if_endpoint(config, etcd_node):
@@ -673,22 +792,25 @@ def parse_if_endpoint(config, etcd_node):
         orch = m.group("orchestrator")
         workload_id = m.group("workload_id")
         endpoint_id = m.group("endpoint_id")
+        combined_id = EndpointId(host, orch, workload_id, endpoint_id)
         if etcd_node.action == "delete":
             _log.debug("Found deleted endpoint %s", endpoint_id)
             endpoint = None
         else:
-            endpoint = parse_endpoint(config, endpoint_id, etcd_node.value)
-        return EndpointId(host, orch, workload_id, endpoint_id), endpoint
+            endpoint = parse_endpoint(config, combined_id, etcd_node.value)
+        # EndpointId does the interning for us.
+        return combined_id, endpoint
     return None, None
 
 
-def parse_endpoint(config, endpoint_id, raw_json):
-    endpoint = json_decoder.decode(raw_json)
+def parse_endpoint(config, combined_id, raw_json):
+    endpoint = safe_decode_json(raw_json,
+                                log_tag="endpoint %s" % combined_id.endpoint)
     try:
-        common.validate_endpoint(config, endpoint_id, endpoint)
+        common.validate_endpoint(config, combined_id, endpoint)
     except ValidationFailed as e:
         _log.warning("Validation failed for endpoint %s, treating as "
-                     "missing: %s", endpoint_id, e.message)
+                     "missing: %s", combined_id, e.message)
         endpoint = None
     else:
         _log.debug("Validated endpoint : %s", endpoint)
@@ -697,7 +819,6 @@ def parse_endpoint(config, endpoint_id, raw_json):
 
 def parse_if_rules(etcd_node):
     m = RULES_KEY_RE.match(etcd_node.key)
-    rules = None
     if m:
         # Got some rules.
         profile_id = m.group("profile_id")
@@ -705,17 +826,17 @@ def parse_if_rules(etcd_node):
             rules = None
         else:
             rules = parse_rules(profile_id, etcd_node.value)
-        return profile_id, rules
+        return intern(profile_id.encode("utf8")), rules
     return None, None
 
 
 def parse_rules(profile_id, raw_json):
-    rules = json_decoder.decode(raw_json)
+    rules = safe_decode_json(raw_json, log_tag="rules %s" % profile_id)
     try:
         common.validate_rules(profile_id, rules)
-    except ValidationFailed:
-        _log.exception("Validation failed for profile %s rules: %s",
-                       profile_id, rules)
+    except ValidationFailed as e:
+        _log.exception("Validation failed for profile %s rules: %s; %r",
+                       profile_id, rules, e)
         return None
     else:
         return rules
@@ -730,12 +851,12 @@ def parse_if_tags(etcd_node):
             tags = None
         else:
             tags = parse_tags(profile_id, etcd_node.value)
-        return profile_id, tags
+        return intern(profile_id.encode("utf8")), tags
     return None, None
 
 
 def parse_tags(profile_id, raw_json):
-    tags = json_decoder.decode(raw_json)
+    tags = safe_decode_json(raw_json, log_tag="tags %s" % profile_id)
     try:
         common.validate_tags(profile_id, tags)
     except ValidationFailed:
@@ -743,8 +864,64 @@ def parse_tags(profile_id, raw_json):
                        profile_id, tags)
         return None
     else:
-        return tags
+        # The tags aren't in a top-level object so we need to manually
+        # intern them here.
+        return intern_list(tags)
 
+
+def parse_if_host_ip(etcd_node):
+    m = HOST_IP_KEY_RE.match(etcd_node.key)
+    if m:
+        # Got some rules.
+        hostname = m.group("hostname")
+        if etcd_node.action == "delete":
+            ip = None
+        else:
+            ip = parse_host_ip(hostname, etcd_node.value)
+        return hostname, ip
+    return None, None
+
+
+def parse_host_ip(hostname, raw_value):
+    if raw_value is None or validate_ip_addr(raw_value):
+        return canonicalise_ip(raw_value, None)
+    else:
+        _log.debug("%s has invalid IP: %r", hostname, raw_value)
+        return None
+
+
+def parse_if_ipam_v4_pool(etcd_node):
+    m = IPAM_V4_CIDR_KEY_RE.match(etcd_node.key)
+    if m:
+        # Got some rules.
+        pool_id = m.group("encoded_cidr")
+        if etcd_node.action == "delete":
+            pool = None
+        else:
+            pool = parse_ipam_pool(pool_id, etcd_node.value)
+        return pool_id, pool
+    return None, None
+
+
+def parse_ipam_pool(pool_id, raw_json):
+    pool = safe_decode_json(raw_json, log_tag="ipam pool %s" % pool_id)
+    try:
+        common.validate_ipam_pool(pool_id, pool, 4)
+    except ValidationFailed as e:
+        _log.exception("Validation failed for ipam pool %s: %s; %r",
+                       pool_id, pool, e)
+        return None
+    else:
+        return pool
+
+
+def safe_decode_json(raw_json, log_tag=None):
+    try:
+        return json_decoder.decode(raw_json)
+    except (TypeError, ValueError):
+        _log.warning("Failed to decode JSON for %s: %r.  Returning None.",
+                     log_tag, raw_json)
+        return None
 
 class ResyncRequired(Exception):
     pass

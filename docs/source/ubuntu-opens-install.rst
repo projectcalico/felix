@@ -38,7 +38,7 @@ Common Steps
 ------------
 
 Some steps need to be taken on all machines being installed with Calico.
-These steps are detailed here.
+These steps are detailed in this section.
 
 Install OpenStack
 ~~~~~~~~~~~~~~~~~
@@ -47,7 +47,7 @@ If you haven't already done so, you should install OpenStack with
 Neutron and ML2 networking. Instructions for installing OpenStack can be
 found here --
 `Icehouse <http://docs.openstack.org/icehouse/install-guide/install/apt/content/index.html>`__ /
-`Juno <http://docs.openstack.org/juno/install-guide/install/apt/content/index.html>`__ / 
+`Juno <http://docs.openstack.org/juno/install-guide/install/apt/content/index.html>`__ /
 `Kilo <http://docs.openstack.org/kilo/install-guide/install/apt/content/index.html>`__.
 
 
@@ -98,7 +98,7 @@ Once that's done, update your package manager on each machine:
 Etcd Install
 ------------
 
-Calico requires an etcd database to operate - this may be installed on a single
+Calico requires an etcd database to operate -- this may be installed on a single
 machine or as a cluster.
 
 These instructions cover installing a single node etcd database.  You may wish
@@ -133,14 +133,11 @@ please get in touch with us and we'll be happy to help you through the process.
 
     tmpfs /var/lib/etcd tmpfs nodev,nosuid,noexec,nodiratime,size=512M 0 0
 
-
 6. Edit ``/etc/init/etcd.conf``:
 
    - Find the line which begins ``exec /usr/bin/etcd`` and edit it,
-     substituting for ``<controller_fqdn>``, ``<controller_ip>``, and
-     ``<cluster_token>`` appropriately. Each time you create a new etcd cluster
-     you should use a new cluster_token, as this is checked by Calico
-     components to check whether etcd has moved.
+     substituting for ``<controller_fqdn>`` and ``<controller_ip>``
+     appropriately.
 
      ::
 
@@ -149,7 +146,7 @@ please get in touch with us and we'll be happy to help you through the process.
                           --listen-client-urls="http://0.0.0.0:2379,http://0.0.0.0:4001"                     \
                           --listen-peer-urls "http://0.0.0.0:2380"                                           \
                           --initial-advertise-peer-urls "http://<controller_ip>:2380"                        \
-                          --initial-cluster-token "<cluster_token>"                                          \
+                          --initial-cluster-token $(uuidgen)                                                 \
                           --initial-cluster "<controller_fqdn>=http://<controller_ip>:2380"                  \
                           --initial-cluster-state "new"
 
@@ -185,12 +182,12 @@ running the etcd database itself (both control and compute nodes).
    - Find the line which begins ``exec /usr/bin/etcd`` and edit it,
      substituting for ``<etcd_fqdn>`` and ``<etcd_ip>`` appropriately:
 
-   ::
+     ::
 
-       exec /usr/bin/etcd --proxy on                                             \
-                          --initial-cluster "<etcd_fqdn>=http://<etcd_ip>:2380"  \
+         exec /usr/bin/etcd --proxy on                                             \
+                            --initial-cluster "<etcd_fqdn>=http://<etcd_ip>:2380"  \
 
-5. Start etcd service
+5. Start the etcd service:
 
    ::
 
@@ -236,6 +233,7 @@ perform the following steps:
 
         sudo service neutron-server restart
 
+
 Compute Node Install
 --------------------
 
@@ -247,7 +245,7 @@ perform the following steps:
    to allow VM interfaces with ``type='ethernet'``.
 
    Disable SELinux if it's running. SELinux isn't installed by default
-   on Ubuntu - you can check its status by running ``sestatus``. If this
+   on Ubuntu -- you can check its status by running ``sestatus``. If this
    is installed and the current mode is ``enforcing``, then disable it
    by running ``setenforce permissive`` and setting
    ``SELINUX=permissive`` in ``/etc/selinux/config``.
@@ -303,6 +301,16 @@ perform the following steps:
            sudo sh -c "echo 'manual' > /etc/init/openvswitch-force-reload-kmod.override"
            sudo sh -c "echo 'manual' > /etc/init/neutron-plugin-openvswitch-agent.override"
 
+   Then, on your control node, run the following command to find the agents
+   that you just stopped::
+
+       neutron agent-list
+
+   For each agent, delete them with the following command on your control node,
+   replacing ``<agent-id>`` with the ID of the agent::
+
+       neutron agent-delete <agent-id>
+
 4. Install some extra packages:
 
    ::
@@ -326,17 +334,17 @@ perform the following steps:
    will bring in Calico-specific updates to the OpenStack packages and
    to ``dnsmasq``.
 
-.. warning:: Check the version of libvirt-bin that is installed using
-             ``dpkg -s libvirt-bin``. For Kilo, the version of libvirt-bin
-             should be at least ``1.2.12-0ubuntu13``.   This will become part
-             of the standard Ubuntu Kilo repository, but at the time of writing
-             needs to be installed as follows:
+   .. warning:: Check the version of libvirt-bin that is installed using
+                ``dpkg -s libvirt-bin``. For Kilo, the version of libvirt-bin
+                should be at least ``1.2.12-0ubuntu13``. This will become part
+                of the standard Ubuntu Kilo repository, but at the time of
+                writing needs to be installed as follows:
 
-             ::
+                ::
 
-                 sudo add-apt-repository cloud-archive:kilo-proposed
-                 sudo apt-get update
-                 sudo apt-get upgrade
+                    sudo add-apt-repository cloud-archive:kilo-proposed
+                    sudo apt-get update
+                    sudo apt-get upgrade
 
 7. Install the ``calico-compute`` package:
 
@@ -345,7 +353,7 @@ perform the following steps:
        sudo apt-get install calico-compute
 
    This step may prompt you to save your IPTables rules to make them
-   persistent on restart – hit yes.
+   persistent on restart -- hit yes.
 
 8. Configure BIRD. By default Calico assumes that you'll be deploying a
    route reflector to avoid the need for a full BGP mesh. To this end,

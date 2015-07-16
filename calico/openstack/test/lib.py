@@ -30,14 +30,15 @@ sys.modules['etcd'] = m_etcd = mock.MagicMock()
 sys.modules['neutron'] = m_neutron = mock.MagicMock()
 sys.modules['neutron.common'] = m_neutron.common
 sys.modules['neutron.common.exceptions'] = m_neutron.common.exceptions
+sys.modules['neutron.db'] = m_neutron.db
 sys.modules['neutron.openstack'] = m_neutron.openstack
 sys.modules['neutron.openstack.common'] = m_neutron.openstack.common
 sys.modules['neutron.plugins'] = m_neutron.plugins
 sys.modules['neutron.plugins.ml2'] = m_neutron.plugins.ml2
 sys.modules['neutron.plugins.ml2.drivers'] = m_neutron.plugins.ml2.drivers
+sys.modules['neutron.plugins.ml2.rpc'] = m_neutron.plugins.ml2.rpc
 sys.modules['oslo'] = m_oslo = mock.Mock()
 sys.modules['oslo.config'] = m_oslo.config
-sys.modules['time'] = m_time = mock.Mock()
 
 port1 = {'binding:vif_type': 'tap',
          'binding:host_id': 'felix-host-1',
@@ -134,11 +135,16 @@ class Lib(object):
         self.maxDiff = None
 
         # Create an instance of CalicoMechanismDriver.
+        mech_calico.mech_driver = None
         self.driver = mech_calico.CalicoMechanismDriver()
 
         # Hook the (mock) Neutron database.
         self.db = mech_calico.manager.NeutronManager.get_plugin()
         self.db_context = mech_calico.ctx.get_admin_context()
+
+        self.db_context.session.query.return_value.filter_by.side_effect = (
+            self.ips_for_port
+        )
 
         # Arrange what the DB's get_ports will return.
         self.db.get_ports.side_effect = self.get_ports
@@ -229,7 +235,8 @@ class Lib(object):
         self.current_time = 0
 
         # Make time.time() return current_time.
-        m_time.time.side_effect = lambda: self.current_time
+        self.old_time = sys.modules['time'].time
+        sys.modules['time'].time = lambda: self.current_time
 
         # Reset the dict of current sleepers.  In each dict entry, the key is
         # an eventlet.Queue object and the value is the time at which the sleep
@@ -320,6 +327,9 @@ class Lib(object):
         eventlet.spawn = self.real_eventlet_spawn
         eventlet.spawn_after = self.real_eventlet_spawn_after
 
+        # Repair time.time()
+        sys.modules['time'].time = self.old_time
+
     # Method for the test code to call when it wants to advance the simulated
     # time.
     def simulated_time_advance(self, secs):
@@ -404,13 +414,8 @@ class Lib(object):
 
         if type == 'rule':
             # Call security_groups_rule_updated with the new or changed ID.
-            self.db.notifier.security_groups_rule_updated(
-                mock.MagicMock(), [id]
-            )
-        else:
-            # Call security_groups_member_updated with the new or changed ID.
-            self.db.notifier.security_groups_member_updated(
-                mock.MagicMock(), [id]
+            mech_calico.security_groups_rule_updated(
+                mock.MagicMock(), mock.MagicMock(), [id]
             )
 
     def get_port_security_group_bindings(self, context, filters):
@@ -422,3 +427,12 @@ class Lib(object):
 
         return [b for b in self.port_security_group_bindings
                 if b['port_id'] in allowed_ids]
+
+    def ips_for_port(self, port_id):
+        for port in self.osdb_ports:
+            if port['id'] == port_id:
+                break
+        else:
+            return None
+
+        return port['fixed_ips']

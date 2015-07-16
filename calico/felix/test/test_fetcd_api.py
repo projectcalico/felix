@@ -27,6 +27,7 @@ from calico.datamodel_v1 import key_for_status, key_for_uptime
 from calico.felix.fetcd import EtcdAPI
 from calico.felix.test.base import BaseTestCase
 
+
 _log = logging.getLogger(__name__)
 
 # To make testing continuous status reporting more convenient,
@@ -55,7 +56,10 @@ class TestEtcdAPI(BaseTestCase):
         # Set configuration attributes and start etcd_api
         for key, value in kwargs.iteritems():
             setattr(self.m_config, key, value)
-        self.etcd_api = EtcdAPI(self.m_config)
+
+        self.m_hosts_ipset = Mock()
+        self.etcd_api = EtcdAPI(self.m_config, self.m_hosts_ipset)
+
         self.etcd_api.write_to_etcd = Mock()
 
     def run_actor_loop(self):
@@ -65,7 +69,9 @@ class TestEtcdAPI(BaseTestCase):
         """
         Test write_to_etcd actor message calls client.write
         """
-        self.etcd_api = EtcdAPI(self.m_config)
+        self.m_hosts_ipset = Mock()
+        self.etcd_api = EtcdAPI(self.m_config, self.m_hosts_ipset)
+
         with patch.object(self.etcd_api.client, 'write'):
             self.etcd_api.write_to_etcd('key', 'value', async=True)
             self.run_actor_loop()

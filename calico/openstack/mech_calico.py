@@ -23,6 +23,7 @@
 # document at http://docs.projectcalico.org/en/latest/architecture.html).
 #
 # It is implemented as a Neutron/ML2 mechanism driver.
+import json
 import os
 import eventlet
 
@@ -31,10 +32,14 @@ from functools import wraps
 
 # OpenStack imports.
 from neutron.common import constants
+from neutron.db import models_v2
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import mech_agent
 from neutron import context as ctx
 from neutron import manager
+
+# Monkeypatch import
+import neutron.plugins.ml2.rpc as rpc
 
 try:  # Icehouse, Juno
     from neutron.openstack.common import log
@@ -43,7 +48,9 @@ except ImportError:  # Kilo
 
 # Calico imports.
 import etcd
-from calico.openstack.t_etcd import CalicoTransportEtcd
+from calico.openstack.t_etcd import (
+    CalicoTransportEtcd, port_etcd_data, profile_rules, profile_tags
+)
 
 LOG = log.getLogger(__name__)
 
@@ -65,6 +72,15 @@ STARTUP_DELAY_SECS = 30
 SecurityProfile = namedtuple(
     'SecurityProfile', ['id', 'inbound_rules', 'outbound_rules']
 )
+
+
+# This terrible global variable points to the running instance of the
+# Calico Mechanism Driver. This variable relies on the basic assertion that
+# any Neutron process, forked or not, should only ever have *one* Calico
+# Mechanism Driver in it. It's used by our monkeypatch of the
+# security_groups_rule_updated method below to locate the mechanism driver.
+# TODO: Let's not do this any more. Please?
+mech_driver = None
 
 
 def requires_state(f):
@@ -138,6 +154,11 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self._periodic_resync_greenlet = None
         self._epoch = 0
 
+        # Tell the monkeypatch where we are.
+        global mech_driver
+        assert mech_driver is None
+        mech_driver = self
+
         # Make sure we initialise even if we don't see any API calls.
         eventlet.spawn_after(STARTUP_DELAY_SECS, self._init_state)
 
@@ -160,13 +181,6 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             LOG.warning("PID changed; unexpected fork after initialisation.  "
                         "Reinitialising Calico driver.")
 
-        # Start our resynchronization process.  Just in case we ever get two
-        # threads running, use an epoch counter to tell the old thread to die.
-        # This is defensive: our greenlets don't actually seem to get forked
-        # with the process.
-        self._epoch += 1
-        eventlet.spawn(self.periodic_resync_thread, self._epoch)
-
         # (Re)init the DB.
         self.db = None
         self._get_db()
@@ -181,27 +195,34 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
         self._my_pid = current_pid
 
+        # Start our resynchronization process.  Just in case we ever get two
+        # threads running, use an epoch counter to tell the old thread to die.
+        # This is defensive: our greenlets don't actually seem to get forked
+        # with the process.
+        # We deliberately do this last, to ensure that all of the setup above
+        # is complete before we start running.
+        self._epoch += 1
+        eventlet.spawn(self.periodic_resync_thread, self._epoch)
+
     def _get_db(self):
         if not self.db:
             self.db = manager.NeutronManager.get_plugin()
             LOG.info("db = %s" % self.db)
 
-            # Installer a notifier proxy in order to catch security group
-            # changes, if we haven't already.
-            if self.db.notifier.__class__ != CalicoNotifierProxy:
-                self.db.notifier = CalicoNotifierProxy(self.db.notifier, self)
-            else:
-                # In case the notifier proxy already exists but the current
-                # CalicoMechanismDriver instance has changed, ensure that the
-                # notifier proxy will delegate to the current
-                # CalicoMechanismDriver instance.
-                self.db.notifier.calico_driver = self
+            # Update the reference to ourselves.
+            global mech_driver
+            mech_driver = self
 
     def check_segment_for_agent(self, segment, agent):
         LOG.debug("Checking segment %s with agent %s" % (segment, agent))
         if segment[api.NETWORK_TYPE] in ['local', 'flat']:
             return True
         else:
+            LOG.warning(
+                "Calico does not support network type %s, on network %s",
+                segment[api.NETWORK_TYPE],
+                segment[api.ID],
+            )
             return False
 
     def get_allowed_network_types(self, agent=None):
@@ -274,9 +295,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             port = self.db.get_port(context._plugin_context, port['id'])
 
             # Next, fill out other information we need on the port.
-            self.add_port_gateways(port, context._plugin_context)
-            self.add_port_interface_name(port)
-            port['security_groups'] = self.get_security_groups_for_port(
+            port = self.add_extra_port_information(
                 context._plugin_context, port
             )
 
@@ -420,11 +439,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         # a separate port update event occur?
         LOG.info("Port becoming bound: create.")
         port = self.db.get_port(context._plugin_context, port['id'])
-        self.add_port_gateways(port, context._plugin_context)
-        self.add_port_interface_name(port)
-        port['security_groups'] = self.get_security_groups_for_port(
-            context._plugin_context, port
-        )
+        port = self.add_extra_port_information(context._plugin_context, port)
         profiles = self.get_security_profiles(
             context._plugin_context, port
         )
@@ -472,9 +487,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
             with context._plugin_context.session.begin(subtransactions=True):
                 port = self.db.get_port(context._plugin_context, port['id'])
-                self.add_port_gateways(port, context._plugin_context)
-                self.add_port_interface_name(port)
-                port['security_groups'] = self.get_security_groups_for_port(
+                port = self.add_extra_port_information(
                     context._plugin_context, port
                 )
                 profiles = self.get_security_profiles(
@@ -589,11 +602,9 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         endpoints = list(self.transport.get_endpoints())
         endpoint_ids = set(ep.id for ep in endpoints)
 
-        # Then, grab all the ports from Neutron. Quickly work out whether
-        # a given port is missing from etcd, or if etcd has too many ports.
-        # Then, add all missing ports and remove all extra ones.
-        # This explicit with statement is technically unnecessary, but it helps
-        # keep our transaction scope really clear.
+        # Then, grab all the ports from Neutron.
+        # TODO(lukasa): We can reduce the amount of data we load from Neutron
+        # here by filtering in the get_ports call.
         with context.session.begin(subtransactions=True):
             ports = dict((port['id'], port)
                          for port in self.db.get_ports(context)
@@ -602,11 +613,15 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         port_ids = set(ports.keys())
         missing_ports = port_ids - endpoint_ids
         extra_ports = endpoint_ids - port_ids
+        changes_ports = set()
 
         # We need to do one more check: are any ports in the wrong place? The
         # way we handle this is to treat this as a port that is both missing
         # and extra, where the old version is extra and the new version is
         # missing.
+        #
+        # While we're here, anything that's not extra, missing, or in the wrong
+        # place should be added to the list of ports to check for changes.
         for endpoint in endpoints:
             try:
                 port = ports[endpoint.id]
@@ -623,40 +638,111 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 )
                 missing_ports.add(endpoint.id)
                 extra_ports.add(endpoint.id)
+            else:
+                # Port is common to both: add to changes_ports.
+                changes_ports.add(endpoint.id)
 
         if missing_ports or extra_ports:
-            LOG.info("Missing ports: %s", missing_ports)
-            LOG.info("Extra ports: %s", extra_ports)
+            LOG.warning("Missing ports: %s", missing_ports)
+            LOG.warning("Extra ports: %s", extra_ports)
 
-        # First, handle the extra ports. Each of them needs to be atomically
-        # deleted.
+        # First, handle the extra ports.
         eps_to_delete = (e for e in endpoints if e.id in extra_ports)
+        self._resync_extra_ports(eps_to_delete)
 
-        for endpoint in eps_to_delete:
-            try:
-                self.transport.atomic_delete_endpoint(endpoint)
-            except (ValueError, etcd.EtcdKeyNotFound):
-                # If the atomic CAD doesn't successfully delete, that's ok, it
-                # means the endpoint was created or updated elsewhere.
-                continue
+        # Next, the missing ports.
+        self._resync_missing_ports(context, missing_ports)
 
-        # Next, for each missing port, do a quick port creation. This takes out
-        # a db transaction and regains all the ports. Note that this
-        # transaction is potentially held for quite a while.
+        # Finally, scan each of the ports in changes_ports. Work out if there
+        # are any differences. If there are, write out to etcd.
+        common_endpoints = (e for e in endpoints if e.id in changes_ports)
+        self._resync_changed_ports(context, common_endpoints)
+
+    def _resync_missing_ports(self, context, missing_port_ids):
+        """
+        For each missing port, do a quick port creation. This takes out a DB
+        transaction and regains all the ports. Note that this transaction is
+        potentially held for quite a while.
+
+        :param context: A Neutron DB context.
+        :param missing_port_ids: A set of IDs for ports missing from etcd.
+        :returns: Nothing.
+        """
         with context.session.begin(subtransactions=True):
             missing_ports = self.db.get_ports(
-                context, filters={'id': missing_ports}
+                context, filters={'id': missing_port_ids}
             )
 
             for port in missing_ports:
                 # Fill out other information we need on the port and write to
                 # etcd.
-                self.add_port_gateways(port, context)
-                self.add_port_interface_name(port)
-                port['security_groups'] = self.get_security_groups_for_port(
-                    context, port
-                )
+                port = self.add_extra_port_information(context, port)
                 self.transport.endpoint_created(port)
+
+    def _resync_extra_ports(self, ports_to_delete):
+        """
+        Atomically delete ports that are in etcd, but shouldn't be.
+
+        :param ports_to_delete: An iterable of Endpoint objects to be
+            deleted.
+        :returns: Nothing.
+        """
+        for endpoint in ports_to_delete:
+            try:
+                self.transport.atomic_delete_endpoint(endpoint)
+            except (ValueError, etcd.EtcdKeyNotFound):
+                # If the atomic CAD doesn't successfully delete, that's ok, it
+                # means the endpoint was created or updated elsewhere.
+                LOG.info('Endpoint %s was deleted elsewhere', endpoint)
+                continue
+
+    def _resync_changed_ports(self, context, common_endpoints):
+        """
+        Reconcile all changed profiles by checking whether Neutron and etcd
+        agree.
+
+        :param context: A Neutron DB context.
+        :param common_endpoints: An iterable of Endpoint objects that should
+            be checked for changes.
+        :returns: Nothing.
+        """
+        for endpoint in common_endpoints:
+            # Get the endpoint data from etcd.
+            try:
+                endpoint = self.transport.get_endpoint_data(endpoint)
+            except etcd.EtcdKeyNotFound:
+                # The endpoint is gone. That's fine.
+                LOG.info("Failed to update deleted endpoint %s", endpoint.id)
+                continue
+
+            with context.session.begin(subtransactions=True):
+                port = self.db.get_port(context, endpoint.id)
+
+            # Get the data for both.
+            try:
+                etcd_data = json.loads(endpoint.data)
+            except (ValueError, TypeError):
+                # If the JSON data is bad, we need to fix it up. Set a value
+                # that is impossible for Neutron to be returning: nothing at
+                # all.
+                LOG.exception("Bad JSON data in key %s", endpoint.key)
+                etcd_data = None
+
+            port = self.add_extra_port_information(context, port)
+            neutron_data = port_etcd_data(port)
+
+            if etcd_data != neutron_data:
+                # Write to etcd.
+                LOG.warning("Resolving error in port %s", endpoint.id)
+                try:
+                    self.transport.write_port_to_etcd(
+                        port, prev_index=endpoint.modified_index
+                    )
+                except ValueError:
+                    # If someone wrote to etcd they probably have more recent
+                    # data than us, let it go.
+                    LOG.info("Atomic CAS failed, no action.")
+                    continue
 
     def resync_profiles(self, context):
         """
@@ -672,6 +758,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         # Next, grab all the security groups from Neutron. Quickly work out
         # whether a given group is missing from etcd, or if etcd has too many
         # groups. Then, add all missing groups and remove all extra ones.
+        # Anything not in either group is added to the 'reconcile' set.
         # This explicit with statement is technically unnecessary, but it helps
         # keep our transaction scope really clear.
         with context.session.begin(subtransactions=True):
@@ -680,31 +767,59 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         sgids = set(sg['id'] for sg in sgs)
         missing_groups = sgids - profile_ids
         extra_groups = profile_ids - sgids
+        reconcile_groups = profile_ids & sgids
 
         if missing_groups or extra_groups:
-            LOG.info("Missing groups: %s", missing_groups)
-            LOG.info("Extra groups: %s", extra_groups)
+            LOG.warning("Missing groups: %s", missing_groups)
+            LOG.warning("Extra groups: %s", extra_groups)
 
-        # For each missing profile, do a quick profile creation. This takes out
-        # a db transaction and regains all the rules. Note that this
-        # transaction is potentially held for quite a while.
+        # First, resync the missing security profiles.
+        self._resync_missing_profiles(context, missing_groups)
+
+        # Next, handle the extra profiles. Each of them needs to be atomically
+        # deleted.
+        profiles_to_delete = (p for p in profiles if p.id in extra_groups)
+        self._resync_additional_profiles(profiles_to_delete)
+
+        # Finally, reconcile the security profiles. This involves looping over
+        # them, grabbing their data, and then comparing that to what Neutron
+        # has.
+        profiles_to_reconcile = (
+            p for p in profiles if p.id in reconcile_groups
+        )
+        self._resync_changed_profiles(context, profiles_to_reconcile)
+
+    def _resync_missing_profiles(self, context, missing_group_ids):
+        """
+        For each missing profile, do a quick profile creation. This takes out a
+        db transaction and regains all the rules. Note that this transaction is
+        potentially held for quite a while.
+
+        :param context: A Neutron DB context.
+        :param missing_group_ids: The IDs of the missing security groups.
+        :returns: Nothing.
+        """
         with context.session.begin(subtransactions=True):
             rules = self.db.get_security_group_rules(
-                context, filters={'security_group_id': missing_groups}
+                context, filters={'security_group_id': missing_group_ids}
             )
 
             profiles_to_write = (
                 profile_from_neutron_rules(sgid, rules)
-                for sgid in missing_groups
+                for sgid in missing_group_ids
             )
 
             for profile in profiles_to_write:
                 self.transport.write_profile_to_etcd(profile)
 
-        # Next, handle the extra profiles. Each of them needs to be atomically
-        # deleted.
-        profiles_to_delete = (p for p in profiles if p.id in extra_groups)
+    def _resync_additional_profiles(self, profiles_to_delete):
+        """
+        Atomically delete profiles that are in etcd, but shouldn't be.
 
+        :param missing_group_ids: An iterable of profile objects to be
+            deleted.
+        :returns: Nothing.
+        """
         for profile in profiles_to_delete:
             try:
                 self.transport.atomic_delete_profile(profile)
@@ -712,6 +827,49 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 # If the atomic CAD doesn't successfully delete, that's ok, it
                 # means the profile was created or updated elsewhere.
                 continue
+
+    def _resync_changed_profiles(self, context, profiles_to_reconcile):
+        """
+        Reconcile all changed profiles by checking whether Neutron and etcd
+        agree.
+        """
+        for etcd_profile in profiles_to_reconcile:
+            # Get the data from etcd.
+            try:
+                etcd_profile = self.transport.get_profile_data(etcd_profile)
+            except etcd.EtcdKeyNotFound:
+                # The profile is gone. That's fine.
+                LOG.info(
+                    "Failed to update deleted profile %s", etcd_profile.id
+                )
+                continue
+
+            # Get the data from Neutron.
+            with context.session.begin(subtransactions=True):
+                rules = self.db.get_security_group_rules(
+                    context, filters={'security_group_id': etcd_profile.id}
+                )
+
+            # Do the same conversion for the Neutron profile.
+            neutron_profile = profile_from_neutron_rules(
+                etcd_profile.id, rules
+            )
+
+            if not profiles_match(etcd_profile, neutron_profile):
+                # Write to etcd.
+                LOG.warning("Resolving error in profile %s", etcd_profile.id)
+
+                try:
+                    self.transport.write_profile_to_etcd(
+                        neutron_profile,
+                        prev_rules_index=etcd_profile.rules_modified_index,
+                        prev_tags_index=etcd_profile.tags_modified_index,
+                    )
+                except ValueError:
+                    # If someone wrote to etcd they probably have more recent
+                    # data than us, let it go.
+                    LOG.info("Atomic CAS failed, no action.")
+                    continue
 
     def add_port_interface_name(self, port):
         port['interface_name'] = 'tap' + port['id'][:11]
@@ -743,23 +901,58 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         )
         return [binding['security_group_id'] for binding in bindings]
 
+    def get_fixed_ips_for_port(self, context, port):
+        """
+        Obtains a complete list of fixed IPs for a port.
 
-class CalicoNotifierProxy(object):
-    """Proxy pattern class used to intercept security-related notifications
-    from the ML2 plugin.
-    """
+        Much like with security groups, for some insane reason we're given an
+        out of date port dictionary when we call get_port. This forces an
+        explicit query of the IPAllocation table to get the right data out of
+        Neutron.
+        """
+        return [
+            {'subnet_id': ip['subnet_id'], 'ip_address': ip['ip_address']}
+            for ip in context.session.query(
+                models_v2.IPAllocation
+            ).filter_by(
+                port_id=port['id']
+            )
+        ]
 
-    def __init__(self, ml2_notifier, calico_driver):
-        self.ml2_notifier = ml2_notifier
-        self.calico_driver = calico_driver
+    def add_extra_port_information(self, context, port):
+        """
+        Gets extra information for a port that is needed before sending it to
+        etcd.
+        """
+        port['fixed_ips'] = self.get_fixed_ips_for_port(
+            context, port
+        )
+        port['security_groups'] = self.get_security_groups_for_port(
+            context, port
+        )
+        self.add_port_gateways(port, context)
+        self.add_port_interface_name(port)
+        return port
 
-    def __getattr__(self, name):
-        return getattr(self.ml2_notifier, name)
 
-    def security_groups_rule_updated(self, context, sgids):
-        LOG.info("security_groups_rule_updated: %s %s" % (context, sgids))
-        self.calico_driver.send_sg_updates(sgids, context)
-        self.ml2_notifier.security_groups_rule_updated(context, sgids)
+# This section monkeypatches the AgentNotifierApi.security_groups_rule_updated
+# method to ensure that the Calico driver gets told about security group
+# updates at all times. This is a deeply unpleasant hack. Please, do as I say,
+# not as I do.
+#
+# For more info, please see issues #635 and #641.
+original_sgr_updated = rpc.AgentNotifierApi.security_groups_rule_updated
+
+
+def security_groups_rule_updated(self, context, sgids):
+    LOG.info("security_groups_rule_updated: %s %s" % (context, sgids))
+    mech_driver.send_sg_updates(sgids, context)
+    original_sgr_updated(self, context, sgids)
+
+
+rpc.AgentNotifierApi.security_groups_rule_updated = (
+    security_groups_rule_updated
+)
 
 
 def profile_from_neutron_rules(profile_id, rules):
@@ -810,3 +1003,32 @@ def port_bound(port):
     Returns true if the port is bound.
     """
     return port['binding:vif_type'] != 'unbound'
+
+
+def profiles_match(etcd_profile, neutron_profile):
+    """
+    Given a set of Neutron security group rules and a Profile read from etcd,
+    compare if they're the same.
+
+    :param etcd_profile: A Profile object from etcd.
+    :param neutron_profile: A SecurityProfile object from Neutron.
+    :returns: True if the rules are identical, False otherwise.
+    """
+    # Convert the etcd data into in-memory data structures.
+    try:
+        etcd_rules = json.loads(etcd_profile.rules_data)
+        etcd_tags = json.loads(etcd_profile.tags_data)
+    except (ValueError, TypeError):
+        # If the JSON data is bad, log it then treat this as not matching
+        # Neutron.
+        LOG.exception("Bad JSON data in key %s", etcd_profile.key)
+        return False
+
+    # Do the same conversion for the Neutron profile.
+    neutron_group_rules = profile_rules(neutron_profile)
+    neutron_group_tags = profile_tags(neutron_profile)
+
+    return (
+        (etcd_rules == neutron_group_rules) and
+        (etcd_tags == neutron_group_tags)
+    )

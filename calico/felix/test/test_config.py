@@ -115,7 +115,6 @@ class TestConfig(unittest.TestCase):
 
         self.assertEqual(config.LOGFILE, None)
 
-
     def test_no_metadata(self):
         # Metadata can be excluded by explicitly saying "none"
         with mock.patch('calico.common.complete_logging'):
@@ -248,6 +247,43 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.STARTUP_CLEANUP_DELAY, 42)
         self.assertEqual(config.REPORTING_INTERVAL_SECS, 10)
         self.assertEqual(config.REPORTING_TTL_SECS, 20)
+
+    def test_ip_in_ip_enabled(self):
+        test_values = [
+            ("true", True),
+            ("t", True),
+            ("True", True),
+            ("1", True),
+            (1, True),
+            ("yes", True),
+            ("y", True),
+            ("false", False),
+            ("f", False),
+            ("False", False),
+            ("0", False),
+            (0, False),
+            ("no", False),
+            ("n", False),
+        ]
+        for value, expected in test_values:
+            with mock.patch('calico.common.complete_logging'):
+                config = Config("calico/felix/test/data/felix_missing.cfg")
+                cfg_dict = { "InterfacePrefix": "blah",
+                             "IpInIpEnabled": value }
+                config.report_etcd_config({}, cfg_dict)
+                self.assertEqual(config.IP_IN_IP_ENABLED, expected,
+                                 "%r was mis-interpreted as %r" %
+                                 (value, config.IP_IN_IP_ENABLED))
+
+    def test_ip_in_ip_enabled_bad(self):
+        with mock.patch('calico.common.complete_logging'):
+            config = Config("calico/felix/test/data/felix_missing.cfg")
+        cfg_dict = { "InterfacePrefix": "blah",
+                     "IpInIpEnabled": "blah" }
+        with self.assertRaisesRegexp(ConfigException,
+                                     "Field was not a valid Boolean"
+                                     ".*IpInIpEnabled"):
+            config.report_etcd_config({}, cfg_dict)
 
     def test_reporting_ttl_not_int(self):
         """
