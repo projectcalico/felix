@@ -303,11 +303,10 @@ class Actor(object):
             # Log the messages in order.
             for msg_dict in msg_log_output:
                 msg_uuid = msg_dict['uuid']
-                _message_log.info('|'.join(['',
-                                            str(msg_retries[msg_uuid]),
+                _message_log.info('|'.join([str(msg_dict['time']),
                                             str(msg_uuid),
-                                            str(msg_dict['time']),
-                                            str(msg_dict['recipient']),
+                                            str(msg_retries[msg_uuid]),
+                                            str(msg_dict['recipient'])
                                             ]))
             _stats.increment("Batches processed")
         if num_splits > 0:
@@ -489,10 +488,9 @@ def actor_message(needs_own_batch=False):
 
                 # But first log that the message is being sent. '-1' indicates
                 # that this is an instant function call.
-                _message_log.info('|'.join(['',
-                                            '-1',
+                _message_log.info('|'.join([str(time.time() * 1000),  # Milliseconds
                                             str(msg_id),
-                                            str(time.time() * 1000),  # Milliseconds
+                                            '-1',
                                             str(caller),
                                             self.name,
                                             method_name
@@ -528,10 +526,9 @@ def actor_message(needs_own_batch=False):
 
             # Log that the message was sent. The '0' indicates that this is a
             # Message-sent log.
-            _message_log.info('|'.join(['',
-                                        '0',
+            _message_log.info('|'.join([str(time.time() * 1000),  # Milliseconds
                                         str(msg_id),
-                                        str(time.time() * 1000),  # Milliseconds
+                                        '0',
                                         str(caller),
                                         method_name
                                         ]))
