@@ -190,7 +190,7 @@ class TestExcdWatcher(BaseTestCase):
             self.m_splitter.on_endpoint_update.reset_mock()
             # Delete one of its parent dirs, should delete the endpoint.
             self.dispatch(path, "delete")
-            exp_calls = [-
+            exp_calls = [
                 call(EndpointId("h1", "o1", "w1", "e1"), None, async=True),
                 call(EndpointId("h1", "o1", "w1", "e2"), None, async=True),
             ]

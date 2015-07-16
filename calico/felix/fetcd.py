@@ -92,9 +92,9 @@ class EtcdAPI(Actor):
     Since the python-etcd API is blocking, we defer API watches to
     a worker greenlet and communicate with it via Events.
 
-    As and when we add status reporting, to avoid needing to interrupt
-    in-progress polls, I expect we'll want a second  worker greenlet that
-    manages an "upstream" connection to etcd.
+    To avoid needing to interupt in-progress polls, another working
+    greenlet is introduced to manage status updating and writing to
+    etcd.
     """
 
     def __init__(self, config, hosts_ipset):
@@ -600,7 +600,7 @@ class _EtcdWatcher(gevent.Greenlet):
                                  endpoint_id)
         _log.debug("Endpoint %s updated", combined_id)
         self.endpoint_ids_per_host[combined_id.host].add(combined_id)
-        endpoint = parse_endpoint(self._config, endpoint_id, response.value)
+        endpoint = parse_endpoint(self._config, combined_id, response.value)
         self.splitter.on_endpoint_update(combined_id, endpoint, async=True)
 
     def on_endpoint_delete(self, response, hostname, orchestrator,
