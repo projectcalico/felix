@@ -115,8 +115,19 @@ from calico.felix import futils
 from calico.felix.futils import StatCounter
 
 _log = logging.getLogger(__name__)
-_message_log = logging.getLogger(".".join([__name__,"message_log"]))
-_message_log.setLevel(logging.DEBUG)
+
+MESSAGE_LOG_NAME = ".".join([__name__, "message_log"])  # Set up our logger
+_message_log = logging.getLogger(MESSAGE_LOG_NAME)
+_message_log.setLevel(logging.DEBUG)  # Ensure all log messages are passed
+
+# Ensure it doesn't pass on messages, since this is intended to be seperate
+# functionality from the general logging process.
+_message_log.propagate = False
+# Now set up what logging functionality we do want.
+_fh = logging.FileHandler('/var/log/calico/calico-message-tracker.log')
+_fh.setLevel(logging.DEBUG)
+_fh.setFormatter(logging.Formatter('%(message)s'))
+_message_log.addHandler(_fh)
 
 ResultOrExc = collections.namedtuple("ResultOrExc", ("result", "exception"))
 
@@ -239,8 +250,8 @@ class Actor(object):
                         # Else set it up, along with storing the message info.
                         msg_retries[msg.uuid] = 1
                         msg_log_output.append({'uuid': msg.uuid,
-                                                    'recipient': msg.recipient,
-                                                    'time': time.time() * 1000})
+                                               'recipient': msg.recipient,
+                                               'time': time.time() * 1000})  # Milliseconds
 
                     # Actually execute the per-message method and record its
                     # result.
@@ -292,7 +303,8 @@ class Actor(object):
             # Log the messages in order.
             for msg_dict in msg_log_output:
                 msg_uuid = msg_dict['uuid']
-                _message_log.info('|'.join([str(msg_retries[msg_uuid]),
+                _message_log.info('|'.join(['',
+                                            str(msg_retries[msg_uuid]),
                                             str(msg_uuid),
                                             str(msg_dict['time']),
                                             str(msg_dict['recipient']),
@@ -410,7 +422,8 @@ class Message(object):
     """
     Message passed to an actor.
     """
-    def __init__(self, msg_id,  method, results, caller_path, recipient,
+
+    def __init__(self, msg_id, method, results, caller_path, recipient,
                  needs_own_batch):
         self.uuid = msg_id
         self.method = method
@@ -446,6 +459,7 @@ def actor_message(needs_own_batch=False):
     :param bool needs_own_batch: True if this message should be processed
         in its own batch.
     """
+
     def decorator(fn):
         method_name = fn.__name__
 
@@ -475,9 +489,10 @@ def actor_message(needs_own_batch=False):
 
                 # But first log that the message is being sent. '-1' indicates
                 # that this is an instant function call.
-                _message_log.info('|'.join(['-1',
+                _message_log.info('|'.join(['',
+                                            '-1',
                                             str(msg_id),
-                                            str(time.time() * 1000),
+                                            str(time.time() * 1000),  # Milliseconds
                                             str(caller),
                                             self.name,
                                             method_name
@@ -513,9 +528,10 @@ def actor_message(needs_own_batch=False):
 
             # Log that the message was sent. The '0' indicates that this is a
             # Message-sent log.
-            _message_log.info('|'.join(['0',
+            _message_log.info('|'.join(['',
+                                        '0',
                                         str(msg_id),
-                                        str(time.time() * 1000),
+                                        str(time.time() * 1000),  # Milliseconds
                                         str(caller),
                                         method_name
                                         ]))
@@ -538,10 +554,11 @@ def actor_message(needs_own_batch=False):
                                msg_id, calling_path, method_name,
                                blocking_result)
                 return blocking_result
+
         queue_fn.func = fn
         return queue_fn
-    return decorator
 
+    return decorator
 
 # Each time we create a TrackedAsyncResult, me make a weak reference to it
 # so that we can get a callback (_on_ref_reaped()) when the TrackedAsyncResult
@@ -560,6 +577,8 @@ def dump_actor_diags(log):
     log.info("Current ref index: %s", _ref_idx)
     log.info("Number of tracked messages outstanding: %s",
              len(_tracked_refs_by_idx))
+
+
 futils.register_diags("Actor framework", dump_actor_diags)
 
 
@@ -617,6 +636,7 @@ class TrackedAsyncResult(AsyncResult):
     """
     An AsyncResult that tracks if any exceptions are leaked.
     """
+
     def __init__(self, tag):
         super(TrackedAsyncResult, self).__init__()
         # Avoid keeping a reference to the weak ref directly; look it up
