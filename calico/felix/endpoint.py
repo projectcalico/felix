@@ -297,8 +297,6 @@ class LocalEndpoint(RefCountedActor):
             missing_deps.append("endpoint")
         elif self.endpoint.get("state", "active") != "active":
             missing_deps.append("endpoint active")
-        elif not self.endpoint.get("profile_ids"):
-            missing_deps.append("profile")
         return missing_deps
 
     @property
@@ -318,7 +316,8 @@ class LocalEndpoint(RefCountedActor):
         """
         is_ready = self._ready
         if not is_ready:
-            _log.debug("%s not ready, waiting on %s", self, self._missing_deps)
+            _log.info("%s not ready, waiting on %s", self, self._missing_deps)
+
         if self._failed or self._dirty or is_ready != was_ready:
             ifce_name = self._iface_name
             if is_ready:
@@ -327,6 +326,10 @@ class LocalEndpoint(RefCountedActor):
                     _log.warn("Retrying programming after a failure")
                 self._failed = False  # Ready to try again...
                 _log.info("%s became ready to program.", self)
+                if not self.endpoint.get("profile_ids"):
+                    _log.info("%s has no profiles attached; all "
+                              "traffic to/from endpoint will be dropped.",
+                              self)
                 self._update_chains()
                 self.dispatch_chains.on_endpoint_added(
                     self._iface_name, async=True)
@@ -457,6 +460,10 @@ def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
         to_chain.append('--append %s --match mark ! --mark 1/1 '
                         '--match comment --comment "No mark means profile '
                         'accepted packet" --jump RETURN' % to_chain_name)
+    if not profile_ids:
+        to_chain.append('--append %s --match comment '
+                        '--comment "INFO: No profiles, all traffic '
+                        'dropped"' % to_chain_name)
 
     # Default drop rule.
     to_chain.append(commented_drop_fragment(to_chain_name,
@@ -493,6 +500,10 @@ def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
                           '--match comment --comment "No mark means profile '
                           'accepted packet" --jump RETURN' %
                           from_chain_name)
+    if not profile_ids:
+        from_chain.append('--append %s --match comment '
+                          '--comment "INFO: No profiles, all traffic '
+                          'dropped"' % from_chain_name)
 
     # Final default DROP if no profile RETURNed or no MAC matched.
     drop_frag = commented_drop_fragment(from_chain_name,
