@@ -495,7 +495,7 @@ class IpsetActor(Actor):
         :param Ipset ipset: Ipset object to wrap.
         :param str qualifier: Actor qualifier string for logging.
         """
-        super(IpsetActor, self).__init__(qualifier=qualifier)
+        super(IpsetActor, self).__init__(qualifier=ipset.set_name + qualifier)
 
         self._ipset = ipset
         # Members - which entries should be in the ipset.

@@ -200,7 +200,7 @@ class RefMgrForTesting(ReferenceManager):
 
 class RefCountedActorForTesting(RefCountedActor, ActorForTesting):
     def __init__(self, idx, ref_actions):
-        super(RefCountedActorForTesting, self).__init__()
+        super(RefCountedActorForTesting, self).__init__(qualifier=str(idx))
         self.idx = idx
         self.ref_actions = ref_actions
 
