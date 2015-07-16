@@ -380,35 +380,25 @@ class Config(object):
                 self.parameters["DefaultEndpointToHostAction"]
             )
 
-        # Reporting interval and TTL need to be integers.
-        try:
-            self.REPORTING_TTL_SECS = int(self.REPORTING_TTL_SECS)
-        except ValueError:
-            raise ConfigException("Reporting interval was not integer.",
-                                  self.parameters["ReportingIntervalSecs"])
-        try:
-            self.REPORTING_INTERVAL_SECS = int(self.REPORTING_INTERVAL_SECS)
-        except ValueError:
-            raise ConfigException("Reporting TTL was not integer.",
-                                  self.parameters["ReportingTTLSecs"])
 
         # For non-positive time values of reporting interval we set both
-        # interval and ttl set to 0 - i.e. status reporting is disabled.
+        # interval and ttl to 0 - i.e. status reporting is disabled.
         if self.REPORTING_INTERVAL_SECS <= 0:
             self.REPORTING_TTL_SECS = 0
             self.REPORTING_INTERVAL_SECS = 0
 
-        # Status report time to live must be more than status reporting interval.
+        # Status report time to live must be more than status reporting interval,
+        # unless TTL is default.
         if self.REPORTING_TTL_SECS <= self.REPORTING_INTERVAL_SECS\
                 and self.REPORTING_TTL_SECS != 0:
-            raise ConfigException("Reporting TTL ({} sec) less or equal reporting "
-                                  "interval ({} sec). "
+            raise ConfigException("Reporting TTL ({} sec) is less than or equal "
+                                  "to reporting interval ({} sec). "
                                   .format(self.REPORTING_INTERVAL_SECS,
                                           self.REPORTING_TTL_SECS),
                                   self.parameters["ReportingIntervalSecs"])
 
-        # If status report ttl is not set or set to 0,
-        # it's vlaue is set to 2.5 times interval
+        # If status report ttl is not set or is set to 0,
+        # its value is set to 2.5 times interval
         if self.REPORTING_TTL_SECS == 0:
             self.REPORTING_TTL_SECS = self.REPORTING_INTERVAL_SECS * 5/2
 

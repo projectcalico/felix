@@ -92,9 +92,8 @@ class EtcdAPI(Actor):
     Since the python-etcd API is blocking, we defer API watches to
     a worker greenlet and communicate with it via Events.
 
-    As and when we add status reporting, to avoid needing to interrupt
-    in-progress polls, I expect we'll want a second  worker greenlet that
-    manages an "upstream" connection to etcd.
+    To avoid needing to interupt in-progress polls, a different worker
+    greenlet is used to manage status updating and writing to etcd.
     """
 
     def __init__(self, config, hosts_ipset):
@@ -123,7 +122,6 @@ class EtcdAPI(Actor):
         self._status_reporting_greenlet = gevent.spawn(self._status_reporting)
         self._status_reporting_greenlet.link_exception(self._on_worker_died)
 
-
     @logging_exceptions
     def _periodically_resync(self):
         """
@@ -131,8 +129,6 @@ class EtcdAPI(Actor):
 
         :return: Does not return, unless periodic resync disabled.
         """
-
-
         _log.info("Started periodic resync thread, waiting for config.")
         self._watcher.configured.wait()
         interval = self._config.RESYNC_INTERVAL
@@ -159,28 +155,28 @@ class EtcdAPI(Actor):
         _log.info("Started status reporting thread.")
         ttl = self._config.REPORTING_TTL_SECS
         interval = self._config.REPORTING_INTERVAL_SECS
-        _log.info("Config loaded, reporting interval: %s, TTL: %s", interval, ttl)
+        _log.debug("Reporting interval: %s, TTL: %s", interval, ttl)
+
         if interval == 0:
             _log.info("Interval is 0, status reporting disabled.")
             return
+
         while True:
             try:
                 self.update_felix_status(ttl)
-                _log.info("Status updated.")
                 gevent.sleep(interval)
             except EtcdException as e:
-                _log.info("Status updating failed. %r. Reconnecting... ", e)
+                _log.debug("Status updating failed. %r. Reconnecting... ", e)
                 _reconnect(self)
                 gevent.sleep(RETRY_DELAY)
 
-
     def update_felix_status(self, ttl):
         """
-        Writes status info to etcd
-        Current time in ISO 8601 Zulu format
-        Uptime in secs
+        Writes two keys to etcd:
+        uptime in secs
+        felix status in JSON - containing current time in ISO 8601 Zulu format
 
-        :param: ttl int: (optional) time to live in sec - lifetime of the status report
+        :param: ttl int: time to live in sec - lifetime of the status report
         """
         status_key = key_for_status(self._config.HOSTNAME)
         status = {}
@@ -221,7 +217,6 @@ class EtcdAPI(Actor):
         return self._watcher.configured
 
     @actor_message()
-
     def start_watch(self, splitter):
         """
         Starts watching etcd for changes.  Implicitly loads the config
@@ -339,12 +334,10 @@ class _EtcdWatcher(gevent.Greenlet):
         self.load_config.wait()
         while True:
             _log.info("Reconnecting and loading snapshot from etcd...")
-
             _reconnect(self, copy_cluster_id=False)
-
             self._wait_for_ready()
 
-            while not self._configured.is_set():
+            while not self.configured.is_set():
                 self._load_config()
                 # Unblock anyone who's waiting on the config.
                 self.configured.set()
@@ -419,9 +412,7 @@ class _EtcdWatcher(gevent.Greenlet):
                            "retry.", e)
                 gevent.sleep(RETRY_DELAY)
             else:
-
                 self._config.report_etcd_config(host_dict, global_dict)
-
                 return
 
     def _load_initial_dump(self):
@@ -600,7 +591,7 @@ class _EtcdWatcher(gevent.Greenlet):
                                  endpoint_id)
         _log.debug("Endpoint %s updated", combined_id)
         self.endpoint_ids_per_host[combined_id.host].add(combined_id)
-        endpoint = parse_endpoint(self._config, endpoint_id, response.value)
+        endpoint = parse_endpoint(self._config, combined_id, response.value)
         self.splitter.on_endpoint_update(combined_id, endpoint, async=True)
 
     def on_endpoint_delete(self, response, hostname, orchestrator,
@@ -730,7 +721,11 @@ class _EtcdWatcher(gevent.Greenlet):
 
 
 def _reconnect(etcd_communicator, copy_cluster_id=True):
-    """ Parameter etcd_communicator can be either etcd_watcher or etcd_api"""
+    """
+    Reconnects the etcd client.
+
+    Parameter etcd_communicator can be either etcd_watcher or etcd_api
+    """
     etcd_addr = etcd_communicator._config.ETCD_ADDR
     if ":" in etcd_addr:
         host, port = etcd_addr.split(":")
@@ -746,7 +741,7 @@ def _reconnect(etcd_communicator, copy_cluster_id=True):
         _log.info("(Re)connecting to etcd. No previous cluster ID.")
         old_cluster_id = None
     etcd_communicator.client = etcd.Client(host=host, port=port,
-                              expected_cluster_id=old_cluster_id)
+                                           expected_cluster_id=old_cluster_id)
 
 
 def _build_config_dict(cfg_node):

@@ -18,6 +18,7 @@ felix.test.test_etcd_api
 
 Top level tests for EtcdAPI.
 """
+import json
 import logging
 import socket
 import gevent
@@ -30,13 +31,15 @@ from calico.felix.test.base import BaseTestCase
 
 _log = logging.getLogger(__name__)
 
-# To make testing continuous status reporting more convenient,
-# we speed up sleeping.
-_oldsleep = gevent.sleep
-def _newsleep(duration):
-    _oldsleep(duration * 0.01)
-gevent.sleep = _newsleep
-
+def sleep_speed_up():
+    '''
+    To make testing (e.g. continuous status reporting test) more convenient,
+    we speed up sleeping.
+    '''
+    _oldsleep = gevent.sleep
+    def _newsleep(duration):
+        _oldsleep(duration * 0.01)
+    gevent.sleep = _newsleep
 
 class TestEtcdAPI(BaseTestCase):
     def setUp(self):
@@ -82,6 +85,9 @@ class TestEtcdAPI(BaseTestCase):
         Test reporting is disabled for reporting interval 0
         """
         self.finish_setup()
+        # We call gevent.sleep so that _status_reporting thread is executed -
+        # since no interval and ttl is given, _status_reporting thread returns
+        # instead of writing to etcd.
         gevent.sleep(1)
         self.assertFalse(self.etcd_api.write_to_etcd.called)
 
@@ -95,9 +101,9 @@ class TestEtcdAPI(BaseTestCase):
         hostname = self.etcd_api._config.HOSTNAME
         status_key = key_for_status(hostname)
         uptime_key = key_for_uptime(hostname)
-
         ttl = self.etcd_api._config.REPORTING_TTL_SECS
 
+        # We call gevent.sleep so that _status_reporting thread is executed
         gevent.sleep(1)
 
         status_call = call(status_key, TestIfStatus(), async=True)
@@ -109,19 +115,26 @@ class TestEtcdAPI(BaseTestCase):
         """
         Test felix status is being continuously updated
         """
-        self.finish_setup(REPORTING_INTERVAL_SECS=3,
-                          REPORTING_TTL_SECS=10)
+        #sleep_speed_up()
+        self.finish_setup(REPORTING_INTERVAL_SECS=5,
+                          REPORTING_TTL_SECS=17)
         hostname = self.etcd_api._config.HOSTNAME
         status_key = key_for_status(hostname)
         uptime_key = key_for_uptime(hostname)
         ttl = self.etcd_api._config.REPORTING_TTL_SECS
 
-        gevent.sleep(50)
-
         status_call = call(status_key, TestIfStatus(), async=True)
         uptime_call = call(uptime_key, TestIfUptime(), ttl=ttl, async=True)
-        self.etcd_api.write_to_etcd.assert_has_calls(16 * [status_call,
-                                                           uptime_call])
+
+        last_status_call = None
+        for update in range(75):
+            sleep_speed_up()
+            gevent.sleep(5)
+            # Check that both uptime and status were updated
+            self.etcd_api.write_to_etcd.assert_has_calls([status_call, uptime_call])
+            # Update last_status_call and reset write_to_etcd calls
+            last_status_call = self.etcd_api.write_to_etcd.mock_calls[0]
+            self.etcd_api.write_to_etcd.reset_mock()
 
     @patch('calico.felix.fetcd._reconnect')
     def test_update_felix_status_reconnects_on_etcd_exception(self, _reconnect):
@@ -139,16 +152,17 @@ class TestEtcdAPI(BaseTestCase):
 
 class TestIfStatus(object):
     """
-    Used to check whether status has expected format
-    i.e. whether timestamp is in ISO 8601 Zulu format
+    Used to check whether status has JSON format and contains expected
+    attributes, whis are:
+    - timestamp in ISO 8601 Zulu format
     """
     def __eq__(self, other):
         import re
         timestamp_regex = re.compile('.*"status_time": "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?".*')
-        is_timestamp =  timestamp_regex.match(str(other)) is not None
-        return is_timestamp
+        has_timestamp =  timestamp_regex.match(str(other)) is not None
+        return is_json(other) and has_timestamp
     def __repr__(self):
-        return "<TestIfStatus()>"
+        return '%s()' % self.__class__.__name__
 
 class TestIfUptime(object):
     """
@@ -160,4 +174,11 @@ class TestIfUptime(object):
         is_non_negative = other >= 0
         return is_int and is_non_negative
     def __repr__(self):
-        return "<TestIfUptime()>"
+        return '%s()' % self.__class__.__name__
+
+def is_json(object):
+  try:
+    json.loads(object)
+  except ValueError, e:
+    return False
+  return True

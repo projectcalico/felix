@@ -38,6 +38,7 @@ RULES_STR = json.dumps(RULES)
 TAGS = ["a", "b"]
 TAGS_STR = json.dumps(TAGS)
 
+ETCD_ADDRESS = 'localhost:4001'
 
 class TestEtcdAPI(BaseTestCase):
 
@@ -45,7 +46,7 @@ class TestEtcdAPI(BaseTestCase):
     @patch("gevent.spawn", autospec=True)
     def test_create(self, m_spawn, m_etcd_watcher):
         m_config = Mock(spec=Config)
-        m_config.ETCD_ADDR = 'localhost:4001'
+        m_config.ETCD_ADDR = ETCD_ADDRESS
         m_hosts_ipset = Mock(spec=IpsetActor)
         api = EtcdAPI(m_config, m_hosts_ipset)
         m_etcd_watcher.assert_has_calls([
@@ -64,7 +65,7 @@ class TestEtcdAPI(BaseTestCase):
         m_configured = Mock(spec=Event)
         m_etcd_watcher.return_value.configured = m_configured
         m_config = Mock(spec=Config)
-        m_config.ETCD_ADDR = 'localhost:4001'
+        m_config.ETCD_ADDR = ETCD_ADDRESS
         m_hosts_ipset = Mock(spec=IpsetActor)
         api = EtcdAPI(m_config, m_hosts_ipset)
         m_config.RESYNC_INTERVAL = 10
@@ -83,7 +84,7 @@ class TestEtcdAPI(BaseTestCase):
     def test_periodic_resync_disabled(self, m_sleep, m_spawn, m_etcd_watcher):
         m_etcd_watcher.return_value.configured = Mock(spec=Event)
         m_config = Mock(spec=Config)
-        m_config.ETCD_ADDR = 'localhost:4001'
+        m_config.ETCD_ADDR = ETCD_ADDRESS
         m_hosts_ipset = Mock(spec=IpsetActor)
         api = EtcdAPI(m_config, m_hosts_ipset)
         m_config.RESYNC_INTERVAL = 0
@@ -95,7 +96,7 @@ class TestEtcdAPI(BaseTestCase):
     @patch("gevent.spawn", autospec=True)
     def test_force_resync(self, m_spawn, m_etcd_watcher):
         m_config = Mock(spec=Config)
-        m_config.ETCD_ADDR = 'localhost:4001'
+        m_config.ETCD_ADDR = ETCD_ADDRESS
         m_hosts_ipset = Mock(spec=IpsetActor)
         api = EtcdAPI(m_config, m_hosts_ipset)
         api.force_resync(async=True)
@@ -113,7 +114,7 @@ class TestExcdWatcher(BaseTestCase):
         super(TestExcdWatcher, self).setUp()
         self.m_config = Mock()
         self.m_config.IFACE_PREFIX = "tap"
-        self.m_config.ETCD_ADDR = 'localhost:4001'
+        self.m_config.ETCD_ADDR = ETCD_ADDRESS
         self.m_hosts_ipset = Mock(spec=IpsetActor)
         self.watcher = _EtcdWatcher(self.m_config, self.m_hosts_ipset)
         self.m_splitter = Mock(spec=UpdateSplitter)
@@ -190,7 +191,7 @@ class TestExcdWatcher(BaseTestCase):
             self.m_splitter.on_endpoint_update.reset_mock()
             # Delete one of its parent dirs, should delete the endpoint.
             self.dispatch(path, "delete")
-            exp_calls = [-
+            exp_calls = [
                 call(EndpointId("h1", "o1", "w1", "e1"), None, async=True),
                 call(EndpointId("h1", "o1", "w1", "e2"), None, async=True),
             ]

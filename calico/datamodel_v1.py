@@ -38,7 +38,7 @@ VERSION = "/v1"
 
 # OpenStack data is stored under this path.
 OPENSTACK_DIR = ROOT_DIR + "/openstack"
-OPENSTACK_VERSION_DIR = OPENSTACK_DIR + "/v1"
+OPENSTACK_VERSION_DIR = OPENSTACK_DIR + VERSION
 
 # Status data and reporting
 STATUS_DIR = ROOT_DIR + "/status" + VERSION + "/host"
@@ -103,6 +103,7 @@ def key_for_uptime(hostname):
 def key_for_endpoint(host, orchestrator, workload_id, endpoint_id):
     return (HOST_DIR + "/%s/workload/%s/%s/endpoint/%s" %
             (host, orchestrator, workload_id, endpoint_id))
+
 
 def key_for_profile(profile_id):
     return PROFILE_DIR + "/" + profile_id
