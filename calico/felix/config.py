@@ -408,7 +408,7 @@ class Config(object):
                                   self.parameters["ReportingIntervalSecs"])
 
         # If status report ttl is not set or set to 0,
-        # it's vlaue is set to 2.5 times interval
+        # its value is set to 2.5 times interval
         if self.REPORTING_TTL_SECS == 0:
             self.REPORTING_TTL_SECS = self.REPORTING_INTERVAL_SECS * 5/2
 

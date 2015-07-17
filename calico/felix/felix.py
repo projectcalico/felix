@@ -48,7 +48,7 @@ from calico.felix.masq import MasqueradeManager
 from calico.felix.fetcd import EtcdAPI
 
 _log = logging.getLogger(__name__)
-
+_log.setLevel(logging.DEBUG)
 
 def _main_greenlet(config):
     """
@@ -191,6 +191,7 @@ def _main_greenlet(config):
 
 
 def main():
+    _log.debug("felix main started")
     # Initialise the logging with default parameters.
     common.default_logging()
 
@@ -203,6 +204,7 @@ def main():
 
     try:
         config = Config(options.config_file)
+        _log.debug("felix cfg loaded")
     except Exception:
         # Config loading error, and not just invalid parameters (from optparse)
         # as they generate a SystemExit. Attempt to open a log file, ignoring
