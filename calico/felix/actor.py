@@ -116,13 +116,12 @@ from calico.felix.futils import StatCounter
 
 _log = logging.getLogger(__name__)
 
-MESSAGE_LOG_NAME = ".".join([__name__, "message_log"])  # Set up our logger
+# Here we set up a custom logger to record all the messages that have been
+# passed, so that we can track them.
+MESSAGE_LOG_NAME = "message_tracking_log"
 _message_log = logging.getLogger(MESSAGE_LOG_NAME)
 _message_log.setLevel(logging.DEBUG)  # Ensure all log messages are passed
 
-# Ensure it doesn't pass on messages, since this is intended to be seperate
-# functionality from the general logging process.
-_message_log.propagate = False
 # Now set up what logging functionality we do want.
 _fh = logging.FileHandler('/var/log/calico/calico-message-tracker.log')
 _fh.setLevel(logging.DEBUG)
@@ -201,8 +200,8 @@ class Actor(object):
 
         batch = [msg]
         batches = []
+        # Will store the number of times a message is retried.
         msg_retries = {}
-        msg_log_output = []
 
         if not msg.needs_own_batch:
             # Try to pull some more work off the queue to combine into a
@@ -233,6 +232,10 @@ class Actor(object):
             batch = self._start_msg_batch(batch)
             assert batch is not None, "_start_msg_batch() should return batch."
             results = []  # Will end up same length as batch.
+
+            # Will store the logs for the messages from this batch.
+            msg_log_output = []
+
             for msg in batch:
                 _log.debug("Message %s recd by %s from %s, queue length %d",
                            msg, msg.recipient, msg.caller,
@@ -247,11 +250,14 @@ class Actor(object):
                         # Increment the counter if it already exists
                         msg_retries[msg.uuid] += 1
                     except KeyError:
-                        # Else set it up, along with storing the message info.
+                        # Else set it up
                         msg_retries[msg.uuid] = 1
-                        msg_log_output.append({'uuid': msg.uuid,
-                                               'recipient': msg.recipient,
-                                               'time': time.time() * 1000})  # Milliseconds
+                    # Store the message info for this batch.
+                    msg_log_output.append({'uuid': msg.uuid,
+                                           'recipient': msg.recipient,
+                                           'time': int(time.time() * 1000)  # Milliseconds
+                                           'exception': None
+                                           })
 
                     # Actually execute the per-message method and record its
                     # result.
@@ -259,6 +265,8 @@ class Actor(object):
                 except BaseException as e:
                     _log.exception("Exception processing %s", msg)
                     results.append(ResultOrExc(None, e))
+                    msg_log_output[-1]['exception'] = exc.__class__.__name__ +\
+                                                      ': ' + str(exc)
                     _stats.increment("Messages executed with exception")
                 else:
                     results.append(ResultOrExc(result, None))
@@ -286,6 +294,8 @@ class Actor(object):
                 # Most-likely a bug.  Report failure to all callers.
                 _log.exception("_finish_msg_batch failed.")
                 results = [(None, e)] * len(results)
+                for msg_dict in msg_log_output:
+                    msg_dict['exception'] = exc.__class__.__name__ + ': ' + str(exc)
                 _stats.increment("_finish_msg_batch() exception")
             finally:
                 actor_storage.msg_name = None
@@ -300,13 +310,15 @@ class Actor(object):
                         future.set(result)
                     _stats.increment("Messages completed")
 
-            # Log the messages in order.
+            # Log the messages in the order they are received.
             for msg_dict in msg_log_output:
                 msg_uuid = msg_dict['uuid']
                 _message_log.info('|'.join([str(msg_dict['time']),
                                             str(msg_uuid),
-                                            str(msg_retries[msg_uuid]),
+                                            'received',
                                             str(msg_dict['recipient']),
+                                            str(msg_retries[msg_uuid])
+                                            msg_dict['exception']
                                             ]))
             _stats.increment("Batches processed")
         if num_splits > 0:
@@ -486,14 +498,13 @@ def actor_message(needs_own_batch=False):
                 # Bypass the queue if we're already on the same greenlet, or we
                 # would deadlock by waiting for ourselves.
 
-                # But first log that the message is being sent. '-1' indicates
-                # that this is an instant function call.
-                _message_log.info('|'.join([str(time.time() * 1000),  # Milliseconds
+                # But first log that the message is being sent.
+                _message_log.info('|'.join([str(int(time.time() * 1000)),  # Milliseconds
                                             str(msg_id),
-                                            '-1',
+                                            'function call',
                                             str(caller),
                                             self.name,
-                                            method_name,
+                                            method_name
                                             ]))
 
                 return fn(self, *args, **kwargs)
@@ -524,11 +535,10 @@ def actor_message(needs_own_batch=False):
             msg = Message(msg_id, partial, [result], caller, self.name,
                           needs_own_batch=needs_own_batch)
 
-            # Log that the message was sent. The '0' indicates that this is a
-            # Message-sent log.
-            _message_log.info('|'.join([str(time.time() * 1000),  # Milliseconds
+            # Log that the message was sent.
+            _message_log.info('|'.join([str(int(time.time() * 1000)),  # Milliseconds
                                         str(msg_id),
-                                        '0',
+                                        'sent',
                                         str(caller),
                                         method_name,
                                         ]))
