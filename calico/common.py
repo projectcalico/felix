@@ -35,6 +35,8 @@ import sys
 from types import StringTypes
 from netaddr.strategy import eui48
 
+MESSAGE_LOG_NAME = "message_tracking_log"
+
 _log = logging.getLogger(__name__)
 
 AGENT_TYPE_CALICO = 'Calico agent'
@@ -233,7 +235,9 @@ def default_logging():
 def complete_logging(logfile=None,
                      file_level=logging.DEBUG,
                      syslog_level=logging.ERROR,
-                     stream_level=logging.ERROR):
+                     stream_level=logging.ERROR,
+                     enable_message_logging=False,
+                     messagelogfile=None):
     """
     Updates the logging configuration based on learned configuration.
 
@@ -271,6 +275,7 @@ def complete_logging(logfile=None,
                 handler.setLevel(file_level)
 
     # If we've been given a log file, log to file as well.
+
     if logfile and file_level is not None:
         if not file_handler:
             mkdir_p(os.path.dirname(logfile))
@@ -280,6 +285,19 @@ def complete_logging(logfile=None,
             file_handler.setLevel(file_level)
             file_handler.setFormatter(formatter)
             root_logger.addHandler(file_handler)
+
+        # Enable message logging, but only if we're logging other stuff anyway.
+        _message_log = logging.getLogger(MESSAGE_LOG_NAME)
+        if enable_message_logging and messagelogfile is not None:
+            mkdir_p(os.path.dirname(messagelogfile))
+            _message_log.setLevel(logging.DEBUG)
+            _fh = logging.handlers.WatchedFileHandler(messagelogfile)
+            _fh.setLevel(logging.DEBUG)
+            _fh.setFormatter(logging.Formatter('%(message)s'))
+            _message_log.addHandler(_fh)
+            _message_log.disabled = False
+        else:
+            _message_log.disabled = True
 
     _log.info("Logging initialized")
 

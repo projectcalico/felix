@@ -113,20 +113,13 @@ from gevent.event import AsyncResult
 from gevent.queue import Queue
 from calico.felix import futils
 from calico.felix.futils import StatCounter
+from calico.common import MESSAGE_LOG_NAME
 
 _log = logging.getLogger(__name__)
 
 # Here we set up a custom logger to record all the messages that have been
 # passed, so that we can track them.
-MESSAGE_LOG_NAME = "message_tracking_log"
 _message_log = logging.getLogger(MESSAGE_LOG_NAME)
-_message_log.setLevel(logging.DEBUG)  # Ensure all log messages are passed
-
-# Now set up what logging functionality we do want.
-_fh = logging.FileHandler('/var/log/calico/calico-message-tracker.log')
-_fh.setLevel(logging.DEBUG)
-_fh.setFormatter(logging.Formatter('%(message)s'))
-_message_log.addHandler(_fh)
 
 ResultOrExc = collections.namedtuple("ResultOrExc", ("result", "exception"))
 
@@ -255,7 +248,7 @@ class Actor(object):
                     # Store the message info for this batch.
                     msg_log_output.append({'uuid': msg.uuid,
                                            'recipient': msg.recipient,
-                                           'time': int(time.time() * 1000)  # Milliseconds
+                                           'time': int(time.time() * 1000),  # Milliseconds
                                            'exception': None
                                            })
 
@@ -265,8 +258,8 @@ class Actor(object):
                 except BaseException as e:
                     _log.exception("Exception processing %s", msg)
                     results.append(ResultOrExc(None, e))
-                    msg_log_output[-1]['exception'] = exc.__class__.__name__ +\
-                                                      ': ' + str(exc)
+                    msg_log_output[-1]['exception'] = e.__class__.__name__ +\
+                                                      ': ' + str(e)
                     _stats.increment("Messages executed with exception")
                 else:
                     results.append(ResultOrExc(result, None))
@@ -295,7 +288,7 @@ class Actor(object):
                 _log.exception("_finish_msg_batch failed.")
                 results = [(None, e)] * len(results)
                 for msg_dict in msg_log_output:
-                    msg_dict['exception'] = exc.__class__.__name__ + ': ' + str(exc)
+                    msg_dict['exception'] = e.__class__.__name__ + ': ' + str(e)
                 _stats.increment("_finish_msg_batch() exception")
             finally:
                 actor_storage.msg_name = None
@@ -317,8 +310,8 @@ class Actor(object):
                                             str(msg_uuid),
                                             'received',
                                             str(msg_dict['recipient']),
-                                            str(msg_retries[msg_uuid])
-                                            msg_dict['exception']
+                                            str(msg_retries[msg_uuid]),
+                                            str(msg_dict['exception'])
                                             ]))
             _stats.increment("Batches processed")
         if num_splits > 0:

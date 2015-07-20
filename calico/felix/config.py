@@ -198,6 +198,9 @@ class Config(object):
                            value_is_int=True)
         self.add_parameter("MessageTracking", "Log messages between actors.",
                            False, value_is_bool=True)
+        self.add_parameter("MessageTrackingLogFilePath",
+                           "Path to message tracking log file",
+                           "/var/log/calico/calico-message-tracker.log")
 
         # Read the environment variables, then the configuration file.
         self._read_env_vars()
@@ -248,7 +251,8 @@ class Config(object):
         self.LOGLEVSCR = self.parameters["LogSeverityScreen"].value
         self.IP_IN_IP_ENABLED = self.parameters["IpInIpEnabled"].value
         self.IP_IN_IP_MTU = self.parameters["IpInIpMtu"].value
-        self.MESSAGE_TRACKING = self.parameters["MessageTracking"].value
+        self.MESSAGETRACKING = self.parameters["MessageTracking"].value
+        self.MESSAGELOGFILE = self.parameters["MessageTrackingLogFilePath"].value
 
         self._validate_cfg(final=final)
 
@@ -256,7 +260,9 @@ class Config(object):
         common.complete_logging(self.LOGFILE,
                                 self.LOGLEVFILE,
                                 self.LOGLEVSYS,
-                                self.LOGLEVSCR)
+                                self.LOGLEVSCR,
+                                self.MESSAGETRACKING,
+                                self.MESSAGELOGFILE)
 
         if final:
             # Log configuration - the whole lot of it.
