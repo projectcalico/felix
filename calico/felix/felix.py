@@ -48,7 +48,7 @@ from calico.felix.masq import MasqueradeManager
 from calico.felix.fetcd import EtcdAPI
 
 _log = logging.getLogger(__name__)
-_log.setlevel(logging.DEBUG)
+_log.setLevel(logging.DEBUG)
 
 def _main_greenlet(config):
     """
