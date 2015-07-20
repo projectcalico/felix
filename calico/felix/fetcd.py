@@ -746,7 +746,7 @@ def _reconnect(etcd_communicator, copy_cluster_id=True):
         _log.info("(Re)connecting to etcd. No previous cluster ID.")
         old_cluster_id = None
     etcd_communicator.client = etcd.Client(host=host, port=port,
-                              expected_cluster_id=old_cluster_id)
+                                           expected_cluster_id=old_cluster_id)
 
 
 def _build_config_dict(cfg_node):

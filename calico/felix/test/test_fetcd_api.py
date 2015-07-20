@@ -54,8 +54,7 @@ class TestEtcdAPI(BaseTestCase):
     @patch('calico.felix.fetcd.etcd')
     def finish_setup(self, m_etcd, m_EtcdWatcher, m_write_to_etcd, **kwargs):
         # Set configuration attributes and start etcd_api
-        for key, value in kwargs.iteritems():
-            setattr(self.m_config, key, value)
+        self.m_config.update(kwargs)
 
         self.m_hosts_ipset = Mock()
         self.etcd_api = EtcdAPI(self.m_config, self.m_hosts_ipset)
@@ -148,7 +147,7 @@ class TestIfStatus(object):
         is_timestamp =  timestamp_regex.match(str(other)) is not None
         return is_timestamp
     def __repr__(self):
-        return "<TestIfStatus()>"
+        return '%s()' % self.__class__.__name__
 
 class TestIfUptime(object):
     """
@@ -160,4 +159,4 @@ class TestIfUptime(object):
         is_non_negative = other >= 0
         return is_int and is_non_negative
     def __repr__(self):
-        return "<TestIfUptime()>"
+        return '%s()' % self.__class__.__name__

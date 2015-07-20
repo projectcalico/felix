@@ -204,7 +204,7 @@ def main():
 
     try:
         config = Config(options.config_file)
-        _log.debug("config loaded")
+        _log.debug("felix cfg loaded")
     except Exception:
         # Config loading error, and not just invalid parameters (from optparse)
         # as they generate a SystemExit. Attempt to open a log file, ignoring
@@ -217,12 +217,12 @@ def main():
         except Exception:
             pass
 
-    _log.debug("config parameters: {}".format(config.parameters))
-
         # Log the exception with logging in whatever state we managed to get it
         # to, then reraise it, taking Felix down.
         _log.exception("Exception loading configuration")
         raise
+
+    _log.debug("felix cfg parameters: %s", config.parameters)
 
     _log.info("Felix initializing")
 
