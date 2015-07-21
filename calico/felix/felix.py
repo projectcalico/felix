@@ -222,7 +222,7 @@ def main():
         _log.exception("Exception loading configuration")
         raise
 
-    _log.debug("felix cfg parameters: %s", config.parameters)
+    _log.info("Felix configuration parameters: %s", config.parameters)
 
     _log.info("Felix initializing")
 
