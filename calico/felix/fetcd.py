@@ -344,7 +344,7 @@ class _EtcdWatcher(gevent.Greenlet):
 
             self._wait_for_ready()
 
-            while not self._configured.is_set():
+            while not self.configured.is_set():
                 self._load_config()
                 # Unblock anyone who's waiting on the config.
                 self.configured.set()
