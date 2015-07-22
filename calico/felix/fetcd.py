@@ -197,7 +197,6 @@ class EtcdAPI(Actor):
         self.write_to_etcd(status_key, status_value, async=True)
         self.write_to_etcd(uptime_key, uptime_value, ttl=ttl, async=True)
 
-
     @actor_message()
     def write_to_etcd(self, key, value, **kwargs):
         """
