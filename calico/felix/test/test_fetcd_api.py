@@ -54,7 +54,8 @@ class TestEtcdAPI(BaseTestCase):
     @patch('calico.felix.fetcd.etcd')
     def finish_setup(self, m_etcd, m_EtcdWatcher, m_write_to_etcd, **kwargs):
         # Set configuration attributes and start etcd_api
-        self.m_config.update(kwargs)
+        for key, value in kwargs.iteritems():
+            setattr(self.m_config, key, value)
 
         self.m_hosts_ipset = Mock()
         self.etcd_api = EtcdAPI(self.m_config, self.m_hosts_ipset)
