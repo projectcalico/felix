@@ -247,6 +247,7 @@ class Actor(object):
                         msg_retries[msg.uuid] = 1
                     # Store the message info for this batch.
                     msg_log_output.append({'uuid': msg.uuid,
+                                           'sender': msg.caller,
                                            'recipient': msg.recipient,
                                            'time': int(time.time() * 1000),  # Milliseconds
                                            'exception': None
@@ -309,6 +310,7 @@ class Actor(object):
                 _message_log.info('|'.join([str(msg_dict['time']),
                                             str(msg_uuid),
                                             'received',
+                                            str(msg_dict['sender']),
                                             str(msg_dict['recipient']),
                                             str(msg_retries[msg_uuid]),
                                             str(msg_dict['exception'])
@@ -533,6 +535,7 @@ def actor_message(needs_own_batch=False):
                                         str(msg_id),
                                         'sent',
                                         str(caller),
+                                        str(self.name),
                                         method_name,
                                         ]))
 

@@ -289,13 +289,14 @@ def complete_logging(logfile=None,
         # Enable message logging, but only if we're logging other stuff anyway.
         _message_log = logging.getLogger(MESSAGE_LOG_NAME)
         if enable_message_logging and messagelogfile is not None:
-            mkdir_p(os.path.dirname(messagelogfile))
-            _message_log.setLevel(logging.DEBUG)
-            _fh = logging.handlers.WatchedFileHandler(messagelogfile)
-            _fh.setLevel(logging.DEBUG)
-            _fh.setFormatter(logging.Formatter('%(message)s'))
-            _message_log.addHandler(_fh)
-            _message_log.disabled = False
+            if not _message_log.handlers:
+                mkdir_p(os.path.dirname(messagelogfile))
+                _message_log.setLevel(logging.DEBUG)
+                _fh = logging.handlers.WatchedFileHandler(messagelogfile)
+                _fh.setLevel(logging.DEBUG)
+                _fh.setFormatter(logging.Formatter('%(message)s'))
+                _message_log.addHandler(_fh)
+                _message_log.disabled = False
         else:
             _message_log.disabled = True
 
