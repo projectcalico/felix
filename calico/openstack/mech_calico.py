@@ -37,6 +37,7 @@ from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import mech_agent
 from neutron import context as ctx
 from neutron import manager
+from oslo.config import cfg
 
 # Monkeypatch import
 import neutron.plugins.ml2.rpc as rpc
@@ -48,6 +49,7 @@ except ImportError:  # Kilo
 
 # Calico imports.
 import etcd
+from calico.datamodel_v1 import STATUS_DIR
 from calico.openstack.t_etcd import (
     CalicoTransportEtcd, port_etcd_data, profile_rules, profile_tags
 )
@@ -195,14 +197,115 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
         self._my_pid = current_pid
 
-        # Start our resynchronization process.  Just in case we ever get two
-        # threads running, use an epoch counter to tell the old thread to die.
+        # Start our resynchronization process and status updating.  Just in
+        # case we ever get two same threads running, use an epoch counter to
+        # tell the old thread to die.
         # This is defensive: our greenlets don't actually seem to get forked
         # with the process.
         # We deliberately do this last, to ensure that all of the setup above
         # is complete before we start running.
         self._epoch += 1
         eventlet.spawn(self.periodic_resync_thread, self._epoch)
+        ##    Should this thread handle PID change in the same way as periodic_resync_thread?
+        eventlet.spawn(self.handle_status_updating_thread, self._epoch)
+
+    def handle_status_updating_thread(self, expected_epoch):
+        """
+        This method acts as a status updates handler logic for the
+        Calico mechanism driver. Watches for felix updates in etcd
+        and passes info to Neutron database.
+        """
+        LOG.info("Handle status updating thread started")
+        self.db_context = ctx.get_admin_context()
+
+        # If master, read initial felix instances in etcd
+        if self.transport.is_master:
+            self._register_initial_felixes()
+
+        while self._epoch == expected_epoch:
+            self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+                                       port=cfg.CONF.calico.etcd_port)
+
+            # Only handle updates if we are the master node.
+            if self.transport.is_master:
+                LOG.info("I am master: polling felix updates in etcd")
+                try:
+                    while True:
+                        # Get an update.
+                        response = self._client.read(STATUS_DIR,
+                                                     wait=True,
+                                                     recursive=True)
+                        # Now, handle the update.
+                        self._handle_status_update(response)
+                except:
+                    LOG.info("Handling status update failed, reconnecting...")
+            else:
+                # Short sleep interval before we check if we've become
+                # the maste.
+                eventlet.sleep(MASTER_CHECK_INTERVAL_SECS)
+        else:
+            LOG.warning("Handling status updates thread exiting.")
+
+    def _handle_status_update(self, response, start_flag=False):
+        """
+        Handle updetes of felix instances written to etcd. Passes status
+        updates to neutron database.
+
+        :param start_flag: True if new felix status is created, when etcd
+        is read the first time
+        :param response: update written to etcd by one of felix instances
+        """
+        # response format:
+        # <class 'etcd.EtcdResult'>(
+        # {
+        # 'newKey': False,
+        # 'raft_index': 1269756,
+        # '_children': [],
+        # 'createdIndex': 21968,
+        # 'modifiedIndex': 21968,
+        # 'value': u'{"status_time": "2015-08-10T14:44:18Z"}',
+        # 'etcd_index': 22119,
+        # 'expiration': None,
+        # 'key': u'/calico/status/v1/host/calico-cidev22/last_reported_status',
+        # 'ttl': None,
+        # 'action': u'get',
+        # 'dir': False
+        # })
+
+        key = response.key
+        hostname = _hostname_from_status_key(key)
+
+        agent_state = {'agent_type': AGENT_TYPE_FELIX,
+                       'binary': '',
+                       'host': hostname,
+                       'topic': constants.L2_AGENT_TOPIC}
+
+        if response.action == 'set' or start_flag:
+            agent_state['start_flag'] = True
+
+        self.db.create_or_update_agent(self.db_context, agent_state)
+
+    def _register_initial_felixes(self):
+        '''
+        Read through etcd status subtree and pass agent update of hosts which
+        have an uptime key (i.e. felix is heartbeating).
+        '''
+        response = self._client.read(STATUS_DIR, recursive=True)
+        # Read through hosts
+        for host in response._children:
+            # Read through status updates of the node
+            for state in host['nodes']:
+                key = state['key']
+                # If host has uptime key, we pass the host to the neutron
+                # database with start_flag set True
+                if key[-7:] == '/uptime':
+                    hostname = _hostname_from_status_key(dict['key'])
+                    agent_state = {'agent_type': AGENT_TYPE_FELIX,
+                                   'binary': '',
+                                   'host': hostname,
+                                   'topic': constants.L2_AGENT_TOPIC,
+                                   'start_flag': True}
+                    self.db.create_or_update_agent(self.db_context, agent_state)
 
     def _get_db(self):
         if not self.db:
@@ -1032,3 +1135,17 @@ def profiles_match(etcd_profile, neutron_profile):
         (etcd_rules == neutron_group_rules) and
         (etcd_tags == neutron_group_tags)
     )
+
+def _hostname_from_status_key(key):
+    '''
+    Help function to get hostname from status key
+    '''
+    # expected key format: <STATUS_DIR>/<hostname>/<rest of key>
+    key = list(key)
+    in_host_dir = key[len(STATUS_DIR + '/'):]
+    hostname = ''
+    for l in in_host_dir:
+        if l == '/':
+            return hostname
+            break
+        hostname += l
