@@ -211,7 +211,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         # is complete before we start running.
         self._epoch += 1
         eventlet.spawn(self.periodic_resync_thread, self._epoch)
-        ##    Should this thread handle PID change in the same way as periodic_resync_thread?
+        ##       Should this thread handle PID change in the same way as periodic_resync_thread?
         eventlet.spawn(self._handle_status_updating_thread, self._epoch)
 
     def _handle_status_updating_thread(self, expected_epoch):
@@ -254,9 +254,10 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 # the maste.
                 eventlet.sleep(MASTER_CHECK_INTERVAL_SECS)
         else:
-            LOG.warning("Handling status updates thread exiting.")
+            LOG.warning("Unexpected fork. "
+                        "Handling status updates thread exiting.")
 
-    def _handle_status_update(self, response, start_flag=False):
+    def _handle_status_update(self, response):
         """
         Handle updetes of felix instances written to etcd. Passes status
         updates to neutron database.
@@ -281,7 +282,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         # 'action': u'get',
         # 'dir': False
         # })
-
+        action = response.action
         key = response.key
         hostname = _hostname_from_status_key(key)
 
@@ -290,9 +291,10 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                        'host': hostname,
                        'topic': constants.L2_AGENT_TOPIC}
 
-        if response.action == 'set' or start_flag:
+        if action == 'set' or action == "create":
             agent_state['start_flag'] = True
 
+        if action != "delete" and action != "expire"
         self.db.create_or_update_agent(self.db_context, agent_state)
 
     def _register_initial_felixes(self):
