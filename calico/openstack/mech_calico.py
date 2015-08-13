@@ -29,6 +29,8 @@ import eventlet
 
 from collections import namedtuple
 from functools import wraps
+from socket import timeout as SocketTimeout
+from urllib3.exceptions import ReadTimeoutError
 
 # OpenStack imports.
 from neutron.common import constants
@@ -156,6 +158,9 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self._periodic_resync_greenlet = None
         self._epoch = 0
 
+        # Prepare client for accessing status updates in etcd.
+        self._client = None
+
         # Tell the monkeypatch where we are.
         global mech_driver
         assert mech_driver is None
@@ -207,9 +212,9 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self._epoch += 1
         eventlet.spawn(self.periodic_resync_thread, self._epoch)
         ##    Should this thread handle PID change in the same way as periodic_resync_thread?
-        eventlet.spawn(self.handle_status_updating_thread, self._epoch)
+        eventlet.spawn(self._handle_status_updating_thread, self._epoch)
 
-    def handle_status_updating_thread(self, expected_epoch):
+    def _handle_status_updating_thread(self, expected_epoch):
         """
         This method acts as a status updates handler logic for the
         Calico mechanism driver. Watches for felix updates in etcd
@@ -237,6 +242,11 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                                                      recursive=True)
                         # Now, handle the update.
                         self._handle_status_update(response)
+                except (ReadTimeoutError, SocketTimeout) as e:
+                    # This is expected when we're doing a poll and nothing
+                    # happened. socket timeout doesn't seem to be caught by
+                    # urllib3 1.7.1. Simply reconnect.
+                    LOG.debug("Read from etcd timed out (%r), retrying.", e)
                 except:
                     LOG.info("Handling status update failed, reconnecting...")
             else:
