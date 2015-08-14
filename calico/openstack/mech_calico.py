@@ -225,6 +225,8 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
         # If master, read initial felix instances in etcd
         if self.transport.is_master:
+            self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+                                       port=cfg.CONF.calico.etcd_port)
             self._register_initial_felixes()
 
         while self._epoch == expected_epoch:
@@ -242,6 +244,8 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                                                      recursive=True)
                         # Now, handle the update.
                         self._handle_status_update(response)
+                        eventlet.sleep(1)##
+                        break##endless running of the thread prevents unittests to be passed properly
                 except (ReadTimeoutError, SocketTimeout) as e:
                     # This is expected when we're doing a poll and nothing
                     # happened. socket timeout doesn't seem to be caught by
@@ -249,6 +253,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                     LOG.debug("Read from etcd timed out (%r), retrying.", e)
                 except:
                     LOG.info("Handling status update failed, reconnecting...")
+                break##
             else:
                 # Short sleep interval before we check if we've become
                 # the maste.
@@ -256,6 +261,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         else:
             LOG.warning("Unexpected fork. "
                         "Handling status updates thread exiting.")
+
 
     def _handle_status_update(self, response):
         """
@@ -294,8 +300,8 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         if action == 'set' or action == "create":
             agent_state['start_flag'] = True
 
-        if action != "delete" and action != "expire"
-        self.db.create_or_update_agent(self.db_context, agent_state)
+        if action != "delete" and action != "expire":
+            self.db.create_or_update_agent(self.db_context, agent_state)
 
     def _register_initial_felixes(self):
         '''

@@ -24,6 +24,7 @@ import json
 import mock
 import unittest
 from calico import common
+from calico.datamodel_v1 import STATUS_DIR
 
 import calico.openstack.test.lib as lib
 import calico.openstack.mech_calico as mech_calico
@@ -100,6 +101,9 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         """
         self.maybe_reset_etcd()
 
+        self.etcd_data[STATUS_DIR + "/vm1/status"] = {"status_time": "2015-08-14T10:37:54"}
+        self.etcd_data[STATUS_DIR + "/vm1/uptime"] = 12
+
         # Prepare a read result object.
         read_result = mock.Mock()
         read_result.key = key
@@ -119,6 +123,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         if recursive:
             # Also see if this key has any children, and read those.
             read_result.children = []
+            read_result._children = []##actual direct children of the dir in etcd response. needed for status_dir, where children are dirs and gotta be iterated
             keylen = len(key) + 1
             for k in self.etcd_data.keys():
                 if k[:keylen] == key + '/':
@@ -129,7 +134,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
             print "children: %s" % [child.key
                                     for child in read_result.children]
             if read_result.value is None and read_result.children == []:
-                raise lib.m_etcd.EtcdKeyNotFound()
+                raise lib.m_etcd.EtcdKeyNotFound(self.etcd_data)##
         else:
             read_result.children = None
 
@@ -138,6 +143,9 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
     def setUp(self):
         """Setup before each test case.
         """
+        # Start with an empty etcd database.
+        self.etcd_data = {}
+
         # Do common plugin test setup.
         super(TestPluginEtcd, self).setUp()
 
@@ -146,9 +154,6 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         self.client.read.side_effect = self.etcd_read
         self.client.write.side_effect = self.check_etcd_write
         self.client.delete.side_effect = self.check_etcd_delete
-
-        # Start with an empty etcd database.
-        self.etcd_data = {}
 
         # Start with an empty set of recent writes and deletes.
         self.recent_writes = {}
