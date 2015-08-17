@@ -153,6 +153,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         # Initialize fields for the database object and transport.  We will
         # initialize these properly when we first need them.
         self.db = None
+        self.db_context = None
         self.transport = None
         self._my_pid = None
         self._periodic_resync_greenlet = None
@@ -160,6 +161,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
         # Prepare client for accessing status updates in etcd.
         self._client = None
+        self.next_etcd_index = None
 
         # Tell the monkeypatch where we are.
         global mech_driver
@@ -211,10 +213,9 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         # is complete before we start running.
         self._epoch += 1
         eventlet.spawn(self.periodic_resync_thread, self._epoch)
-        ##       Should this thread handle PID change in the same way as periodic_resync_thread?
-        eventlet.spawn(self._handle_status_updating_thread, self._epoch)
+        eventlet.spawn(self._status_updating_thread, self._epoch)
 
-    def _handle_status_updating_thread(self, expected_epoch):
+    def _status_updating_thread(self, expected_epoch):
         """
         This method acts as a status updates handler logic for the
         Calico mechanism driver. Watches for felix updates in etcd
@@ -223,7 +224,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         LOG.info("Handle status updating thread started")
         self.db_context = ctx.get_admin_context()
 
-        # If master, read initial felix instances in etcd
+        # We only read initial felix instances in etcd if we are master.
         if self.transport.is_master:
             self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
                                        port=cfg.CONF.calico.etcd_port)
@@ -236,72 +237,94 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             # Only handle updates if we are the master node.
             if self.transport.is_master:
                 LOG.info("I am master: polling felix updates in etcd")
-                try:
-                    while True:
-                        # Get an update.
-                        response = self._client.read(STATUS_DIR,
-                                                     wait=True,
-                                                     recursive=True)
-                        # Now, handle the update.
-                        self._handle_status_update(response)
-                        eventlet.sleep(1)##
-                        break##endless running of the thread prevents unittests to be passed properly
-                except (ReadTimeoutError, SocketTimeout) as e:
-                    # This is expected when we're doing a poll and nothing
-                    # happened. socket timeout doesn't seem to be caught by
-                    # urllib3 1.7.1. Simply reconnect.
-                    LOG.debug("Read from etcd timed out (%r), retrying.", e)
-                except:
-                    LOG.info("Handling status update failed, reconnecting...")
-                break##
+                self._poll_and_handle_felix_updates()
             else:
                 # Short sleep interval before we check if we've become
-                # the maste.
+                # the master.
                 eventlet.sleep(MASTER_CHECK_INTERVAL_SECS)
         else:
             LOG.warning("Unexpected fork. "
                         "Handling status updates thread exiting.")
 
 
+    def _poll_and_handle_felix_updates(self):
+        """
+        In infinite loop read new statuses in etcd status directory. Then
+        pass updates to Neutron database. On exception reconnect the etcd
+        client and do complete resync when necessary.
+        """
+        try:
+            while True:
+                # Get and handle an update.
+                response = self._client.read(STATUS_DIR,
+                                             wait=True,
+                                             waitIndex = self.next_etcd_index,
+                                             recursive=True)
+                self._handle_status_update(response)
+                # Since we're polling on a subtree, we can't just
+                # increment the index, we have to look at the
+                # modifiedIndex.
+                self.next_etcd_index = max(self.next_etcd_index,
+                                           response.modifiedIndex) + 1
+        except (ReadTimeoutError, SocketTimeout) as e:
+            # This is expected when we're doing a poll and nothing
+            # happened. socket timeout doesn't seem to be caught by
+            # urllib3 1.7.1. Simply reconnect.
+            LOG.debug("Read from etcd timed out (%r), retrying.", e)
+            self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+                                       port=cfg.CONF.calico.etcd_port)
+        except (etcd.EtcdClusterIdChanged, etcd.EtcdEventIndexCleared) as e:
+            # Complete resync is needed.
+            LOG.warning("Out of sync with etcd (%r).  Reconnecting "
+                     "for full sync.", e)
+            try:
+                # Connect the client
+                self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+                                           port=cfg.CONF.calico.etcd_port)
+                context = ctx.get_admin_context()
+                # Resync endpoints.
+                self.resync_endpoints(context)
+                # Resync profiles.
+                self.resync_profiles(context)
+                # Now, set the config flags.
+                self.transport.provide_felix_config()
+            except Exception:
+                LOG.exception("Error in full resync.")
+        except Exception as e:
+            ## What other exceptions do we expect?
+            ## Is full resync needed on unexpected exception?
+            LOG.info("Handling status update failed. ({})".format(e))
+            self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+                                       port=cfg.CONF.calico.etcd_port)
+
+
     def _handle_status_update(self, response):
         """
-        Handle updetes of felix instances written to etcd. Passes status
+        Handle updates of felix instances written to etcd. Pass status
         updates to neutron database.
 
-        :param start_flag: True if new felix status is created, when etcd
-        is read the first time
         :param response: update written to etcd by one of felix instances
         """
-        # response format:
-        # <class 'etcd.EtcdResult'>(
-        # {
-        # 'newKey': False,
-        # 'raft_index': 1269756,
-        # '_children': [],
-        # 'createdIndex': 21968,
-        # 'modifiedIndex': 21968,
-        # 'value': u'{"status_time": "2015-08-10T14:44:18Z"}',
-        # 'etcd_index': 22119,
-        # 'expiration': None,
-        # 'key': u'/calico/status/v1/host/calico-cidev22/last_reported_status',
-        # 'ttl': None,
-        # 'action': u'get',
-        # 'dir': False
-        # })
-        action = response.action
+        # Only get info from uptime keys - since those have ttl, we know
+        # if key was updated or created.
+        if response.key[-7:] != '/uptime':
+            return
+        # Ignore deleted and expired keys - their deletion is noticed by
+        # other timeout algorithm before reaching the horizon UI.
+        if response.action == "delete" or response.action == "expire":
+            return
+
         key = response.key
         hostname = _hostname_from_status_key(key)
-
         agent_state = {'agent_type': AGENT_TYPE_FELIX,
                        'binary': '',
                        'host': hostname,
                        'topic': constants.L2_AGENT_TOPIC}
-
-        if action == 'set' or action == "create":
+        if response.newKey:
             agent_state['start_flag'] = True
 
-        if action != "delete" and action != "expire":
-            self.db.create_or_update_agent(self.db_context, agent_state)
+        self.db.create_or_update_agent(self.db_context, agent_state)
+
 
     def _register_initial_felixes(self):
         '''
@@ -309,21 +332,27 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         have an uptime key (i.e. felix is heartbeating).
         '''
         response = self._client.read(STATUS_DIR, recursive=True)
+
         # Read through hosts
         for host in response._children:
-            # Read through status updates of the node
-            for state in host['nodes']:
-                key = state['key']
+            # Read through status updates of the node.
+            for status in host['nodes']:
+                key = status['key']
                 # If host has uptime key, we pass the host to the neutron
-                # database with start_flag set True
+                # database with start_flag set True.
                 if key[-7:] == '/uptime':
-                    hostname = _hostname_from_status_key(dict['key'])
+                    hostname = _hostname_from_status_key(key)
                     agent_state = {'agent_type': AGENT_TYPE_FELIX,
                                    'binary': '',
                                    'host': hostname,
                                    'topic': constants.L2_AGENT_TOPIC,
                                    'start_flag': True}
                     self.db.create_or_update_agent(self.db_context, agent_state)
+
+        # The etcd_index tells us, where we want to start polling for new
+        # updates.
+        self.next_etcd_index = response.etcd_index + 1
+
 
     def _get_db(self):
         if not self.db:
@@ -1156,14 +1185,15 @@ def profiles_match(etcd_profile, neutron_profile):
 
 def _hostname_from_status_key(key):
     '''
-    Help function to get hostname from status key
+    Help function to get hostname from a status key.
+
+    :param: key for felix status
+            expected key format: <STATUS_DIR>/<hostname>/<rest of status key>
     '''
-    # expected key format: <STATUS_DIR>/<hostname>/<rest of key>
     key = list(key)
     in_host_dir = key[len(STATUS_DIR + '/'):]
     hostname = ''
     for l in in_host_dir:
         if l == '/':
             return hostname
-            break
         hostname += l

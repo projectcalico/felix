@@ -25,7 +25,6 @@ import inspect
 import mock
 import sys
 import traceback
-from calico.datamodel_v1 import STATUS_DIR
 
 sys.modules['etcd'] = m_etcd = mock.MagicMock()
 sys.modules['neutron'] = m_neutron = mock.MagicMock()
