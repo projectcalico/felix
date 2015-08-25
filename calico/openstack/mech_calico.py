@@ -34,6 +34,7 @@ from urllib3.exceptions import ReadTimeoutError
 
 # OpenStack imports.
 from neutron.common import constants
+from neutron.common.exceptions import PortNotFound
 from neutron.db import models_v2
 from neutron.plugins.ml2 import driver_api as api
 from neutron.plugins.ml2.drivers import mech_agent
@@ -866,7 +867,12 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 continue
 
             with context.session.begin(subtransactions=True):
-                port = self.db.get_port(context, endpoint.id)
+                try:
+                    port = self.db.get_port(context, endpoint.id)
+                except PortNotFound:
+                    # The endpoint got deleted.
+                    LOG.info("Failed to update deleted port %s", endpoint.id)
+                    continue
 
             # Get the data for both.
             try:
@@ -875,7 +881,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 # If the JSON data is bad, we need to fix it up. Set a value
                 # that is impossible for Neutron to be returning: nothing at
                 # all.
-                LOG.exception("Bad JSON data in key %s", endpoint.key)
+                LOG.warning("Bad JSON data in key %s", endpoint.key)
                 etcd_data = None
 
             port = self.add_extra_port_information(context, port)
@@ -997,7 +1003,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             # Get the data from Neutron.
             with context.session.begin(subtransactions=True):
                 rules = self.db.get_security_group_rules(
-                    context, filters={'security_group_id': etcd_profile.id}
+                    context, filters={'security_group_id': [etcd_profile.id]}
                 )
 
             # Do the same conversion for the Neutron profile.

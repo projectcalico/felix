@@ -1,7 +1,15 @@
 # Changelog
 
-## 0.28-dev
+## 1.0.0
 
+- Add support for setting MTU on IP-in-IP device.
+- Enhance BIRD configuration and documentation for graceful restart.
+
+## 0.28
+
+- Felix now restarts if its etcd configuration changes.
+- Felix now periodically refreshes iptables to be robust to other processes
+  corrupting its chains.
 - More thorough resynchronization of etcd from the Neutron mechanism driver.
 - Added process-specific information to the diagnostics dumps from Felix.
 

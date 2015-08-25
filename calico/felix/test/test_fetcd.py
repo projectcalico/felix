@@ -3,12 +3,14 @@ import json
 
 import logging
 from etcd import EtcdResult
+import etcd
 from gevent.event import Event
 from mock import Mock, call, patch, ANY
 from calico.datamodel_v1 import EndpointId
 from calico.felix.config import Config
 from calico.felix.ipsets import IpsetActor
-from calico.felix.fetcd import _EtcdWatcher, ResyncRequired, EtcdAPI
+from calico.felix.fetcd import _EtcdWatcher, ResyncRequired, EtcdAPI, \
+    die_and_restart
 from calico.felix.splitter import UpdateSplitter
 from calico.felix.test.base import BaseTestCase
 
@@ -113,12 +115,70 @@ class TestExcdWatcher(BaseTestCase):
     def setUp(self):
         super(TestExcdWatcher, self).setUp()
         self.m_config = Mock()
+        self.m_config.HOSTNAME = "hostname"
         self.m_config.IFACE_PREFIX = "tap"
         self.m_config.ETCD_ADDR = ETCD_ADDRESS
         self.m_hosts_ipset = Mock(spec=IpsetActor)
         self.watcher = _EtcdWatcher(self.m_config, self.m_hosts_ipset)
         self.m_splitter = Mock(spec=UpdateSplitter)
         self.watcher.splitter = self.m_splitter
+        self.client = Mock(spec=etcd.Client)
+        self.watcher.client = self.client
+
+    @patch("gevent.sleep", autospec=True)
+    @patch("calico.felix.fetcd._build_config_dict", autospec=True)
+    @patch("calico.felix.fetcd.die_and_restart", autospec=True)
+    def test_load_config(self, m_die, m_build_dict, m_sleep):
+        # First call, loads the config.
+        global_cfg = {"foo": "bar"}
+        m_build_dict.side_effect = iter([
+            # First call, global-only.
+            global_cfg,
+            # Second call, no change.
+            global_cfg,
+            # Third call, change of config.
+            {"foo": "baz"}, {"biff": "bop"}])
+        self.client.read.side_effect = iter([
+            # First time round the loop, fail to read global config, should
+            # retry.
+            etcd.EtcdKeyNotFound,
+            # Then get the global config but there's not host-only config.
+            None, etcd.EtcdKeyNotFound,
+            # Twice...
+            None, etcd.EtcdKeyNotFound,
+            # Then some host-only config shows up.
+            None, None])
+
+        # First call.
+        self.watcher._load_config()
+
+        m_sleep.assert_called_once_with(5)
+        self.assertFalse(m_die.called)
+
+        m_report = self.m_config.report_etcd_config
+        rpd_host_cfg, rpd_global_cfg = m_report.mock_calls[0][1]
+        self.assertEqual(rpd_host_cfg, {})
+        self.assertEqual(rpd_global_cfg, global_cfg)
+        self.assertTrue(rpd_host_cfg is not self.watcher.last_host_config)
+        self.assertTrue(rpd_global_cfg is not self.watcher.last_global_config)
+        self.assertEqual(rpd_host_cfg, self.watcher.last_host_config)
+        self.assertEqual(rpd_global_cfg, self.watcher.last_global_config)
+
+        self.assertEqual(self.watcher.last_host_config, {})
+        self.assertEqual(self.watcher.last_global_config, global_cfg)
+        self.watcher.configured.set()  # Normally done by the caller.
+        self.client.read.assert_has_calls([
+            call("/calico/v1/config", recursive=True),
+            call("/calico/v1/host/hostname/config", recursive=True),
+        ])
+
+        # Second call, no change.
+        self.watcher._load_config()
+        self.assertFalse(m_die.called)
+
+        # Third call, should detect the config change and die.
+        self.watcher._load_config()
+        m_die.assert_called_once_with()
 
     def test_resync_flag(self):
         self.watcher.resync_after_current_poll = True
@@ -265,6 +325,7 @@ class TestExcdWatcher(BaseTestCase):
                     "/calico/v1/policy",
                     "/calico/v1/policy/profile",
                     "/calico/v1/config",
+                    "/calico/v1/config/Foo",
                     "/calico/v1/Ready",]:
             self.assertRaises(ResyncRequired, self.dispatch, key, "delete")
 
@@ -372,6 +433,19 @@ class TestExcdWatcher(BaseTestCase):
             [],
             async=True,
         )
+
+    def test_config_update_triggers_resync(self):
+        self.assertRaises(ResyncRequired, self.dispatch,
+                          "/calico/v1/config/Foo", "set", "bar")
+        self.assertRaises(ResyncRequired, self.dispatch,
+                          "/calico/v1/host/foo/config/Foo", "set", "bar")
+
+    @patch("os._exit", autospec=True)
+    @patch("gevent.sleep", autospec=True)
+    def test_die_and_restart(self, m_sleep, m_exit):
+        die_and_restart()
+        m_sleep.assert_called_once_with(2)
+        m_exit.assert_called_once_with(1)
 
     def dispatch(self, key, action, value=None):
         """

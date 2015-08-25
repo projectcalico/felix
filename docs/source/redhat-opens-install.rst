@@ -51,7 +51,7 @@ Install OpenStack
 ~~~~~~~~~~~~~~~~~
 
 If you haven't already done so, install Openstack with Neutron and ML2 networking.
-Instructions for installing OpenStack on RHEL can be found here -
+Instructions for installing OpenStack on RHEL can be found here --
 `Juno <http://docs.openstack.org/juno/install-guide/install/yum/content/index.html>`__ /
 `Kilo <http://docs.openstack.org/kilo/install-guide/install/yum/content/index.html>`__.
 
@@ -91,9 +91,9 @@ For Kilo::
     EOF
 
 
-Note: The priority setting in ``calico.repo`` is needed so that the
-Calico repository can install Calico-enhanced versions of some of the
-OpenStack Nova and Neutron packages.
+.. note:: The priority setting in ``calico.repo`` is needed so that the
+          Calico repository can install Calico-enhanced versions of some of the
+          OpenStack Nova and Neutron packages.
 
 .. _etcd-install:
 
@@ -193,9 +193,16 @@ please get in touch with us and we'll be happy to help you through the process.
 
 4. Install python-etcd::
 
-        curl -L https://github.com/Metaswitch/python-etcd/archive/master.tar.gz -o python-etcd.tar.gz
+        curl -L https://github.com/projectcalico/python-etcd/archive/master.tar.gz -o python-etcd.tar.gz
         tar xvf python-etcd.tar.gz
         cd python-etcd-master
+        python setup.py install
+
+5. Install python-posix-spawn::
+
+        curl -L https://github.com/projectcalico/python-posix-spawn/releases/download/v0.2.post6/posix-spawn-0.2.post6.tar.gz -o posix-spawn.tar.gz
+        tar xvf posix-spawn.tar.gz
+        cd posix-spawn-0.2.post6
         python setup.py install
 
 Etcd Proxy Install
@@ -263,7 +270,7 @@ running the etcd database itself (both control and compute nodes).
 
 4. Install python-etcd::
 
-        curl -L https://github.com/Metaswitch/python-etcd/archive/master.tar.gz -o python-etcd.tar.gz
+        curl -L https://github.com/projectcalico/python-etcd/archive/master.tar.gz -o python-etcd.tar.gz
         tar xvf python-etcd.tar.gz
         cd python-etcd-master
         python setup.py install
@@ -290,7 +297,8 @@ On each control node, perform the following steps:
 2. Run ``yum update``. This will bring in Calico-specific updates to the
    OpenStack packages and to ``dnsmasq``.
 
-3. Edit the ``/etc/neutron/plugins/ml2/ml2_conf.ini`` file:
+3. Edit the ``/etc/neutron/plugins/ml2/ml2_conf.ini`` file.  In the `[ml2]`
+   section:
 
    -  Find the ``type_drivers`` setting and change it to read
       ``type_drivers = local, flat``.
@@ -299,7 +307,7 @@ On each control node, perform the following steps:
    -  Find the ``mechanism_drivers`` setting and change it to read
       ``mechanism_drivers = calico``.
 
-4. Edit the ``/etc/neutron/neutron.conf`` file:
+4. Edit the ``/etc/neutron/neutron.conf`` file.  In the `[DEFAULT]` section:
 
    -  Find the line for the ``dhcp_agents_per_network`` setting,
       uncomment it, and set its value to the number of compute nodes
@@ -363,14 +371,15 @@ On each compute node, perform the following steps:
 
            service libvirtd restart
 
-2. Open ``/etc/nova/nova.conf`` and remove the line that reads:
+2. Open ``/etc/nova/nova.conf`` and remove the line from the `[DEFAULT]` section
+   that reads:
 
    ::
 
        linuxnet_interface_driver = nova.network.linux_net.LinuxOVSInterfaceDriver
 
-   Remove the line setting ``service_neutron_metadata_proxy`` or
-   ``service_metadata_proxy`` to ``True``, if there is one. Additionally, if
+   Remove the lines from the `[neutron]` section setting ``service_neutron_metadata_proxy``
+   or ``service_metadata_proxy`` to ``True``, if there are any. Additionally, if
    there is a line setting ``metadata_proxy_shared_secret``, comment that line
    out as well.
 
@@ -493,6 +502,14 @@ On each compute node, perform the following steps:
     ``<route_reflector_ip>`` with the IP of one other compute host -- this will
     generate the configuration for a single peer connection, which you can
     duplicate and update for each compute host in your mesh.
+
+    To maintain connectivity between VMs if BIRD crashes or is upgraded, configure
+    BIRD graceful restart.  Edit the systemd unit file `/usr/lib/systemd/system/bird.service`
+    (and `bird6.service` for IPv6):
+
+    - Add `-R` to the end of the `ExecStart` line.
+
+    - Add `KillSignal=SIGKILL` as a new line in the `[Service]` section.
 
     Ensure BIRD (and/or BIRD 6 for IPv6) is running and starts on reboot:
 

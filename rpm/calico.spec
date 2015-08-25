@@ -2,7 +2,7 @@
 
 Name:           calico
 Summary:        Project Calico virtual networking for cloud data centers
-Version:        0.27.1
+Version:        1.0.0
 Release:        1%{?dist}
 License:        Apache-2
 URL:            http://projectcalico.org
@@ -209,6 +209,19 @@ rm -rf $RPM_BUILD_ROOT
 
 
 %changelog
+* Fri Aug 14 2015 Matt Dupre <matt@projectcalico.org> 1.0.0-1
+  - Calico version 1.0.0 release
+
+* Tue Aug 10 2015 Matt Dupre <matt@projectcalico.org> 0.29~rc1
+  - First release candidate
+
+* Tue Aug 04 2015 Matt Dupre <matt@projectcalico.org> 0.28
+  - Felix now restarts if its etcd configuration changes.
+  - Felix now periodically refreshes iptables to be robust to other processes
+    corrupting its chains.
+  - More thorough resynchronization of etcd from the Neutron mechanism driver.
+  - Added process-specific information to the diagnostics dumps from Felix.
+
 * Wed Jul 15 2015 Matt Dupre <matt@projectcalico.org> 0.27.1
   - Interim bug-fix release - reinstate DHCP checksum calculation rule.
 

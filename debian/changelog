@@ -1,3 +1,25 @@
+calico (1.0.0-1) trusty; urgency=medium
+
+  * Calico version 1.0.0 release
+
+ -- Matt Dupre <matt@projectcalico.org>  Fri, 14 Aug 2015 13:40:28 +0100
+
+calico (0.29~rc1) trusty; urgency=medium
+
+  * First release candidate
+
+ -- Matt Dupre <matt@projectcalico.org>  Wed, 05 Aug 2015 16:46:08 +0100
+
+calico (0.28) trusty; urgency=medium
+
+  * Felix now restarts if its etcd configuration changes.
+  * Felix now periodically refreshes iptables to be robust to other processes
+    corrupting its chains.
+  * More thorough resynchronization of etcd from the Neutron mechanism driver.
+  * Added process-specific information to the diagnostics dumps from Felix.
+
+ -- Matt Dupre <matt@projectcalico.org>  Tue, 04 Aug 2015 17:36:13 +0100
+
 calico (0.27.1) trusty; urgency=medium
 
   * Interim bug-fix release - reinstate DHCP checksum calculation rule.

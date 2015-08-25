@@ -25,10 +25,10 @@ Mailing Lists
 -------------
 Project Calico runs two mailing lists:
 
--  `calico-announce <http://lists.projectcalico.org/listinfo/calico-announce>`__
+-  `calico-announce <http://lists.projectcalico.org/mailman/listinfo/calico-announce_lists.projectcalico.org>`__
    provides a read-only list providing a regular update on Project Calico.
    Please subscribe so that you can keep up to date on the project.
--  `calico-tech <http://lists.projectcalico.org/listinfo/calico-tech>`__
+-  `calico-tech <http://lists.projectcalico.org/mailman/listinfo/calico-tech_lists.projectcalico.org>`__
    provides a list for technical discussions and queries about the project.
    You're welcome to subscribe and to post any Calico-related discussion to
    this list, including problems, ideas, or requirements.
@@ -44,30 +44,30 @@ correctly.
 Read the Source, Luke!
 ----------------------
 
-All Calico's code is on `GitHub <https://github.com/Metaswitch>`__, in the
+All Calico's code is on `GitHub <https://github.com/projectcalico>`__, in the
 following repositories, separated by function.
 
-- `calico <https://github.com/Metaswitch/calico>`__ - All of the core Calico
+- `calico <https://github.com/projectcalico/calico>`__ - All of the core Calico
   code except for that specific to Docker/container environments: the Felix
   agent, the OpenStack plugin; testing for all of those; and
   the source for Calico's documentation.
 
-- `calico-docker <https://github.com/Metaswitch/calico-docker>`__ - Calico code
-  and components specific to Docker/container environments: the lightweight
+- `calico-docker <https://github.com/projectcalico/calico-docker>`__ - Calico
+  code and components specific to Docker/container environments: the lightweight
   orchestrator for Docker environments, Powerstrip adapter, and so on; and
   instructions for demonstrating Calico networking in various container
   environments.
 
-- `calico-neutron <https://github.com/Metaswitch/calico-neutron>`__ -
+- `calico-neutron <https://github.com/projectcalico/calico-neutron>`__ -
   Calico-specific patched version of OpenStack Neutron.
 
-- `calico-nova <https://github.com/Metaswitch/calico-nova>`__ - Calico-specific
+- `calico-nova <https://github.com/projectcalico/calico-nova>`__ - Calico-specific
   patched version of OpenStack Nova.
 
-- `calico-dnsmasq <https://github.com/Metaswitch/calico-dnsmasq>`__ -
+- `calico-dnsmasq <https://github.com/projectcalico/calico-dnsmasq>`__ -
   Calico-specific patched version of Dnsmasq.
 
-- `calico-chef <https://github.com/Metaswitch/calico-chef>`__ - Chef cookbooks
+- `calico-chef <https://github.com/projectcalico/calico-chef>`__ - Chef cookbooks
   for installing test versions of OpenStack-using-Calico.
 
 Contributing

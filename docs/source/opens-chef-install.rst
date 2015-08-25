@@ -80,7 +80,7 @@ starting the bootstrap process:
       -  Set your hostname IP address to your static IP.
    -  Configure the hostnames / IPs of the other OpenStack nodes.
 
-If you are using VMWare and VMs for each of these machines (for
+If you are using VMware and VMs for each of these machines (for
 testing), ensure the VM setting allows the VM to expose hardware
 assisted virtualization to the guest OS (setting under the CPU
 configuration).
@@ -100,7 +100,7 @@ Prepare Chef
 
    ::
 
-       git clone https://github.com/Metaswitch/calico-chef.git
+       git clone https://github.com/projectcalico/calico-chef.git
 
 -  Create a directory for the chef installation configuration. The
    following instructions assume you created a ``.chef`` directory under
@@ -154,7 +154,7 @@ How To Use It: For Experienced Chef Users
 -----------------------------------------
 
 We provide a single ``calico`` cookbook in `this
-repository <https://github.com/Metaswitch/calico-chef>`__. This cookbook
+repository <https://github.com/projectcalico/calico-chef>`__. This cookbook
 can be cloned in git and then added to the Chef server in the usual way.
 
 The cookbook defines two roles: ``controller`` and ``compute``. To set

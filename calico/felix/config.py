@@ -171,6 +171,9 @@ class Config(object):
         self.add_parameter("PeriodicResyncInterval",
                            "How often to do cleanups, seconds",
                            60 * 60, value_is_int=True)
+        self.add_parameter("IptablesRefreshInterval",
+                           "How often to refresh iptables state, in seconds",
+                           60, value_is_int=True)
         self.add_parameter("MetadataAddr", "Metadata IP address or hostname",
                            "127.0.0.1")
         self.add_parameter("MetadataPort", "Metadata Port",
@@ -190,6 +193,10 @@ class Config(object):
         self.add_parameter("IpInIpEnabled",
                            "IP-in-IP device support enabled", False,
                            value_is_bool=True)
+        self.add_parameter("IpInIpMtu",
+                           "MTU to set on the IP-in-IP device", 1440,
+                           value_is_int=True)
+
         self.add_parameter("ReportingIntervalSecs", "Status reporting interval in seconds",
                            0, value_is_int=True)
         self.add_parameter("ReportingTTLSecs", "Status report time to live in seconds",
@@ -232,6 +239,7 @@ class Config(object):
         self.HOSTNAME = self.parameters["FelixHostname"].value
         self.STARTUP_CLEANUP_DELAY = self.parameters["StartupCleanupDelay"].value
         self.RESYNC_INTERVAL = self.parameters["PeriodicResyncInterval"].value
+        self.REFRESH_INTERVAL = self.parameters["IptablesRefreshInterval"].value
         self.METADATA_IP = self.parameters["MetadataAddr"].value
         self.METADATA_PORT = self.parameters["MetadataPort"].value
         self.IFACE_PREFIX = self.parameters["InterfacePrefix"].value
@@ -242,6 +250,7 @@ class Config(object):
         self.LOGLEVSYS = self.parameters["LogSeveritySys"].value
         self.LOGLEVSCR = self.parameters["LogSeverityScreen"].value
         self.IP_IN_IP_ENABLED = self.parameters["IpInIpEnabled"].value
+        self.IP_IN_IP_MTU = self.parameters["IpInIpMtu"].value
         self.REPORTING_INTERVAL_SECS = self.parameters["ReportingIntervalSecs"].value
         self.REPORTING_TTL_SECS = self.parameters["ReportingTTLSecs"].value
 
