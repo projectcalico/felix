@@ -57,7 +57,6 @@ def _main_greenlet(config):
     """
     try:
         _log.info("Connecting to etcd to get our configuration.")
-
         hosts_ipset_v4 = IpsetActor(HOSTS_IPSET_V4)
 
         etcd_api = EtcdAPI(config, hosts_ipset_v4)
@@ -158,7 +157,6 @@ def _main_greenlet(config):
         _log.info("Starting polling for interface and etcd updates.")
         f = iface_watcher.watch_interfaces(async=True)
         monitored_items.append(f)
-
         etcd_api.start_watch(update_splitter, async=True)
 
         # Register a SIG_USR handler to trigger a diags dump.
@@ -194,7 +192,7 @@ def _main_greenlet(config):
 
 
 def main():
-    _log.debug("felix main started")
+    _log.debug("Felix main started.")
     # Initialise the logging with default parameters.
     common.default_logging()
 

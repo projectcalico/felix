@@ -109,13 +109,14 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
             self.assertEqual(self.recent_deletes, expected)
         self.recent_deletes = set()
 
-    def etcd_read(self, key, wait=False, waitIndex=None, recursive=False, timeout=None):##add wait&waitIndex
-        """Read from the accumulated etcd database.
+    def etcd_read(self, key, wait=False, waitIndex=None, recursive=False, timeout=None):
+        """
+        Read from the accumulated etcd database.
         """
         self.maybe_reset_etcd()
 
-        ## Slow down reading from etcd status subtree to allow threads to run more often
-        if wait and key == STATUS_DIR:##
+        # Slow down reading from etcd status subtree to allow threads to run more often
+        if wait and key == STATUS_DIR:
             eventlet.sleep(30)
             self.driver.db.create_or_update_agent = mock.Mock()
 
@@ -153,14 +154,12 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                                     for child in read_result.children]
             if read_result.value is None and read_result.children == []:
                 raise lib.m_etcd.EtcdKeyNotFound(self.etcd_data)
-
-            read_result._children = []##actual direct children of the dir in etcd response. needed for status_dir, where children are dirs and gotta be iterated
+            # Actual direct children of the dir in etcd response.
+            # Needed for status_dir, where children are dirs and
+            # needs to be iterated.
+            read_result._children = []
             list_of_statuses = [{"key": K} for K in self.etcd_data.keys()]
             read_result._children.append({"nodes": list_of_statuses})
-            #takto vyzeraju _children
-            # {'nodes': [list of status]}
-            # kde status:  {'key': '/../uptime'}
-
         else:
             read_result.children = None
 
@@ -215,7 +214,6 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
             '/calico/v1/policy/profile/SGID-default/tags':
                 ["SGID-default"]
         })
-
 
     def test_etcd_reset(self):
         for n in range(1, 20):
@@ -363,6 +361,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                  "state": "active",
                  "ipv6_nets": []}
         }
+
         self.assertEtcdWrites(expected_writes)
         self.assertEtcdDeletes(set(['/calico/v1/host/new-host/workload/openstack/instance-1/endpoint/DEADBEEF-1234-5678']))
 
@@ -832,7 +831,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                                      newKey=True)
         self.driver._handle_status_update(status_create)
         create_agent_state = TestIfAgentState(host="VM_1", start_flag=True)
-        create_or_update_agent.assert_called_once(self.driver.db_context,
+        create_or_update_agent.assert_called_once(self.driver._db_context,
                                                   create_agent_state)
         create_or_update_agent.reset_mock()
 
@@ -840,7 +839,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         status_update = FakeResponse(key=STATUS_DIR+"/VM_2/uptime")
         self.driver._handle_status_update(status_update)
         update_agent_state = TestIfAgentState(host="VM_2", start_flag=False)
-        create_or_update_agent.assert_called_once(self.driver.db_context,
+        create_or_update_agent.assert_called_once(self.driver._db_context,
                                                   update_agent_state)
         create_or_update_agent.reset_mock()
 
@@ -865,52 +864,59 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         """
         Test that index value is tracked when watching for status update.
         """
-        old_etcd_index = self.driver.next_etcd_index
+        old_etcd_index = self.driver._next_etcd_index
         for new_update in xrange(15):
             self.give_way()
             self.simulated_time_advance(31)
             self.assertNotEqual(old_etcd_index,
-                                self.driver.next_etcd_index,
+                                self.driver._next_etcd_index,
                                 "etcd_index tracking error.")
-            old_etcd_index = self.driver.next_etcd_index
+            old_etcd_index = self.driver._next_etcd_index
 
 
     def test_status_update_exceptions(self):
         """
-        Test that exceptions causes reconnection/resync.
+        Test that exceptions causes reconnect/resync.
         """
+        self.driver.transport = mock.Mock()
+        self.client.read = mock.Mock()
+
         self.driver.resync_endpoints = mock.Mock()
         self.driver.resync_profiles = mock.Mock()
-        self.driver.transport = mock.Mock()
         self.driver.transport.provide_felix_config = mock.Mock()
-        self.driver._client = mock.Mock()
 
         # Test ReadTimeoutError
         self.driver._handle_status_update = mock.Mock(side_effect=ReadTimeoutError('pool', 'url', 'Test ReadTimeoutError'))
         self.driver._client = mock.Mock()
-        lib.m_etcd.Client.reset_mock()
+        self.driver.resync_endpoints.reset_mock()
+        self.driver.resync_profiles.reset_mock()
+        self.driver.transport.provide_felix_config.reset_mock()
         # Poll - ReadTimeoutError is raised as side effect
-        self.driver._poll_and_handle_felix_updates()
-        self.assertTrue(lib.m_etcd.Client.called)
+        self.driver._poll_and_handle_felix_updates(self.driver._epoch)
+        self.assertFalse(self.driver.resync_endpoints.called)
+        self.assertFalse(self.driver.resync_profiles.called)
+        self.assertFalse(self.driver.transport.provide_felix_config.called)
 
         # Test SocketTimeout
         self.driver._handle_status_update = mock.Mock(side_effect=SocketTimeout('Test SocketTimeout'))
         self.driver._client = mock.Mock()
-        lib.m_etcd.Client.reset_mock()
+        self.driver.resync_endpoints.reset_mock()
+        self.driver.resync_profiles.reset_mock()
+        self.driver.transport.provide_felix_config.reset_mock()
         # Poll - SocketTimeout is raised as as side effect
-        self.driver._poll_and_handle_felix_updates()
-        self.assertTrue(lib.m_etcd.Client.called)
+        self.driver._poll_and_handle_felix_updates(self.driver._epoch)
+        self.assertFalse(self.driver.resync_endpoints.called)
+        self.assertFalse(self.driver.resync_profiles.called)
+        self.assertFalse(self.driver.transport.provide_felix_config.called)
 
         # Test EtcdClusterIdChanged
         self.driver._handle_status_update = mock.Mock(side_effect=EtcdClusterIdChanged("Test EtcdClusterIdChanged"))
         self.driver._client = mock.Mock()
-        lib.m_etcd.Client.reset_mock()
         self.driver.resync_endpoints.reset_mock()
         self.driver.resync_profiles.reset_mock()
         self.driver.transport.provide_felix_config.reset_mock()
-        # Poll - EtcdClusterIdChanged is raised as as side effect
-        self.driver._poll_and_handle_felix_updates()
-        self.assertTrue(lib.m_etcd.Client.called)
+        # Poll - EtcdClusterIdChanged is raised as side effect
+        self.driver._poll_and_handle_felix_updates(self.driver._epoch)
         self.assertTrue(self.driver.resync_endpoints.called)
         self.assertTrue(self.driver.resync_profiles.called)
         self.assertTrue(self.driver.transport.provide_felix_config.called)
@@ -918,25 +924,26 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         # Test EtcdEventIndexCleared
         self.driver._handle_status_update = mock.Mock(side_effect=EtcdEventIndexCleared("Test EtcdEventIndexCleared"))
         self.driver._client = mock.Mock()
-        lib.m_etcd.Client.reset_mock()
         self.driver.resync_endpoints.reset_mock()
         self.driver.resync_profiles.reset_mock()
         self.driver.transport.provide_felix_config.reset_mock()
-        # Poll - EtcdEventIndexCleared is raised as as side effect
-        self.driver._poll_and_handle_felix_updates()
-        self.assertTrue(lib.m_etcd.Client.called)
+        # Poll - EtcdEventIndexCleared is raised as side effect
+        self.driver._poll_and_handle_felix_updates(self.driver._epoch)
         self.assertTrue(self.driver.resync_endpoints.called)
         self.assertTrue(self.driver.resync_profiles.called)
         self.assertTrue(self.driver.transport.provide_felix_config.called)
 
         # Test general exception
-        self.driver._handle_status_update = mock.Mock(side_effect=Exception("Test general exception"))
+        self.driver._handle_status_update = mock.Mock(side_effect=[Exception("Test general exception")])
         self.driver._client = mock.Mock()
-        lib.m_etcd.Client.reset_mock()
+        self.driver.resync_endpoints.reset_mock()
+        self.driver.resync_profiles.reset_mock()
+        self.driver.transport.provide_felix_config.reset_mock()
         # Poll - ReadTimeoutError is raised as side effect
-        self.driver._poll_and_handle_felix_updates()
-        self.assertTrue(lib.m_etcd.Client.called)
-
+        self.driver._poll_and_handle_felix_updates(self.driver._epoch)
+        self.assertFalse(self.driver.resync_endpoints.called)
+        self.assertFalse(self.driver.resync_profiles.called)
+        self.assertFalse(self.driver.transport.provide_felix_config.called)
 
     def assertNeutronToEtcd(self, neutron_rule, exp_etcd_rule):
         etcd_rule = t_etcd._neutron_rule_to_etcd_rule(neutron_rule)

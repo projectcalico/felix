@@ -31,15 +31,6 @@ from calico.felix.test.base import BaseTestCase
 
 _log = logging.getLogger(__name__)
 
-def sleep_speed_up():
-    '''
-    To make testing (e.g. continuous status reporting test) more convenient,
-    we speed up sleeping.
-    '''
-    _oldsleep = gevent.sleep
-    def _newsleep(duration):
-        _oldsleep(duration * 0.01)
-    gevent.sleep = _newsleep
 
 class TestEtcdAPI(BaseTestCase):
     def setUp(self):
@@ -115,7 +106,6 @@ class TestEtcdAPI(BaseTestCase):
         """
         Test felix status is being continuously updated
         """
-        #sleep_speed_up()
         self.finish_setup(REPORTING_INTERVAL_SECS=5,
                           REPORTING_TTL_SECS=17)
         hostname = self.etcd_api._config.HOSTNAME
@@ -126,9 +116,11 @@ class TestEtcdAPI(BaseTestCase):
         status_call = call(status_key, TestIfStatus(), async=True)
         uptime_call = call(uptime_key, TestIfUptime(), ttl=ttl, async=True)
 
+        # We call gevent.sleep so that _status_reporting thread is executed
+        gevent.sleep(5)
+
         last_status_call = None
-        for update in range(75):
-            sleep_speed_up()
+        for update in range(5):
             gevent.sleep(5)
             # Check that both uptime and status were updated
             self.etcd_api.write_to_etcd.assert_has_calls([status_call, uptime_call])
@@ -157,10 +149,14 @@ class TestIfStatus(object):
     - timestamp in ISO 8601 Zulu format
     """
     def __eq__(self, other):
-        import re
-        timestamp_regex = re.compile('.*"status_time": "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?".*')
-        has_timestamp =  timestamp_regex.match(str(other)) is not None
-        return is_json(other) and has_timestamp
+        try:
+            status = json.loads(other)
+            time = status['status_time']
+            parsed_time = datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%SZ")
+        except (ValueError, KeyError):
+            return False
+        return True
+
     def __repr__(self):
         return '%s()' % self.__class__.__name__
 
@@ -170,16 +166,20 @@ class TestIfUptime(object):
     non-negative integer)
     """
     def __eq__(self, other):
-        is_int = type(other) == int
-        is_non_negative = other >= 0
+        is_int = (type(other) == int)
+        is_non_negative = (other >= 0)
         return is_int and is_non_negative
+
     def __repr__(self):
         return '%s()' % self.__class__.__name__
 
 def is_json(object):
-  try:
-    json.loads(object)
-  except ValueError, e:
-    return False
-  return True
+    """
+    Help function, returns wheteher given object is json.
+    """
+    try:
+        json.loads(object)
+    except ValueError:
+        return False
+    return True
 
