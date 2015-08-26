@@ -261,6 +261,13 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                                              wait=True,
                                              waitIndex = self.next_etcd_index,
                                              recursive=True)
+
+                # Before status is passed to Neutron db, check whether we
+                # are still master (if not, we loop until we become one)
+                # and whether epoch is as expected (if not, thread exits).
+                if self._epoch != expected_epoch or not self.transport.is_master:
+                    break
+
                 self._handle_status_update(response)
                 # Since we're polling on a subtree, we can't just
                 # increment the index, we have to look at the
