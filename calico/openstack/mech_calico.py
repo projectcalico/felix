@@ -728,6 +728,8 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             LOG.warning("Periodic resync thread exiting.")
 
     def complete_resync(self, context):
+        """Go through complete resync.
+        """
         if not self.in_resync:
             self.in_resync = True
 
