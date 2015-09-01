@@ -437,42 +437,43 @@ def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
 
     # First build the chain that manages packets to the interface.
     # Common chain prefixes.
-    to_chain = []
+    to_chain = [
+        "--append %s --jump MARK --set-mark 0" % to_chain_name
+    ]
 
     # Jump to each profile in turn.  The profile will do one of the
     # following:
     # * DROP the packet; in which case we won't see it again.
-    # * RETURN without MARKing the packet; indicates that the packet was
-    #   accepted.
-    # * RETURN with a mark on the packet, indicates reaching the end
-    #   of the chain.
+    # * RETURN the packet with MARK==1, indicating it accepted the packet.
+    # * RETURN the packet with MARK==0, indicating it did not match the packet.
     to_deps = set()
     for profile_id in profile_ids:
         profile_in_chain = profile_to_chain_name("inbound", profile_id)
         to_deps.add(profile_in_chain)
-        to_chain.append("--append %s --jump MARK --set-mark 0" %
-                        to_chain_name)
         to_chain.append("--append %s --jump %s" %
                         (to_chain_name, profile_in_chain))
-        to_chain.append('--append %s --match mark ! --mark 1/1 '
-                        '--match comment --comment "No mark means profile '
-                        'accepted packet" --jump RETURN' % to_chain_name)
+        to_chain.append('--append %s --match mark --mark 1/1 '
+                        '--match comment --comment "Profile accepted packet" '
+                        '--jump RETURN' % to_chain_name)
 
     # Default drop rule.
     to_chain.append(commented_drop_fragment(to_chain_name,
                                             "Endpoint %s:" % endpoint_id))
 
     # Now the chain that manages packets from the interface...
-    from_chain = []
+    from_chain = [
+        # Un-set the mark.  This ensures that a packet that is not matched by
+        # the anti-spoofing rules will be dropped.
+        "--append %s --jump MARK --set-mark 0" % from_chain_name
+    ]
 
     # Combined anti-spoofing and jump to profile rules.  The only way to
-    # get to a profile chain is to have the correct IP and MAC address.
+    # get to a profile chain is to have the correct IP and MAC address.  If a
+    # packet falls through, it will still have MARK==0 so it will be dropped.
     from_deps = set()
     for profile_id in profile_ids:
         profile_out_chain = profile_to_chain_name("outbound", profile_id)
         from_deps.add(profile_out_chain)
-        from_chain.append("--append %s --jump MARK --set-mark 0" %
-                          from_chain_name)
         for ip in local_ips:
             if "/" in ip:
                 cidr = ip
@@ -481,23 +482,27 @@ def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
             # Jump to each profile in turn.  The profile will do one of the
             # following:
             # * DROP the packet; in which case we won't see it again.
-            # * RETURN without MARKing the packet; indicates that the packet
-            #   was accepted.
-            # * RETURN with a mark on the packet, indicates reaching the end
-            #   of the chain.
+            # * RETURN the packet with MARK==1, indicating it accepted the
+            #   packet.
+            # * RETURN the packet with MARK==0, indicating it did not
+            #   match the packet.
             from_chain.append("--append %s --src %s --match mac "
                               "--mac-source %s --jump %s" %
                               (from_chain_name, cidr, mac.upper(),
                                profile_out_chain))
-        from_chain.append('--append %s --match mark ! --mark 1/1 '
-                          '--match comment --comment "No mark means profile '
-                          'accepted packet" --jump RETURN' %
+        from_chain.append('--append %s --match mark --mark 1/1 '
+                          '--match comment --comment "Profile matched packet" '
+                          '--jump RETURN' %
                           from_chain_name)
 
-    # Final default DROP if no profile RETURNed or no MAC matched.
-    drop_frag = commented_drop_fragment(from_chain_name,
-                                        "Default DROP if no match (endpoint %s):" %
-                                        endpoint_id)
+    # Final default DROP; hit if
+    # * no (IP, MAC) matched in the anti-spoofing rules
+    # * no profiles matched.
+    drop_frag = commented_drop_fragment(
+        from_chain_name,
+        "Default DROP if no match (endpoint %s):" %
+        endpoint_id
+    )
     from_chain.append(drop_frag)
 
     updates = {to_chain_name: to_chain, from_chain_name: from_chain}

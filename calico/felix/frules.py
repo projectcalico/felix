@@ -169,7 +169,20 @@ def install_global_rules(config, v4_filter_updater, v6_filter_updater,
 def rules_to_chain_rewrite_lines(chain_name, rules, ip_version, tag_to_ipset,
                                  on_allow="ACCEPT", on_deny="DROP",
                                  comment_tag=None):
-    fragments = []
+    """
+    Convert our JSON representation of rules into iptables fragments.
+
+    :returns list[str] a list of fragments.
+    """
+    # Start by marking all packets.
+    # * If we hit an allow rule, we'll return with the mark still set, to
+    #   indicate that we matched.
+    # * If we hit a deny rule, we'll drop the packet immediately.
+    # * If we reach the end of the chain, we'll un-mark the packet again to
+    #   indicate no match.
+    fragments = [
+        '--append %s --jump MARK --set-mark 1' % chain_name
+    ]
     for r in rules:
         rule_version = r.get('ip_version')
         if rule_version is None or rule_version == ip_version:
@@ -178,11 +191,14 @@ def rules_to_chain_rewrite_lines(chain_name, rules, ip_version, tag_to_ipset,
                                                         tag_to_ipset,
                                                         on_allow=on_allow,
                                                         on_deny=on_deny))
-    # If we get to the end of the chain without a match, we mark the packet
-    # to let the caller know that we haven't accepted the packet.
-    fragments.append('--append %s --match comment '
-                     '--comment "Mark as not matched" '
-                     '--jump MARK --set-mark 1' % chain_name)
+
+    # If we get to the end of the chain without a match, we remove the mark
+    # again to indicate that the packet wasn't matched.
+    fragments.append(
+        '--append %s '
+        '--match comment --comment "No match, fall through to next profile" '
+        '--jump MARK --set-mark 0' % chain_name
+    )
     return fragments
 
 
