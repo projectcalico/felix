@@ -101,6 +101,7 @@ import collections
 import functools
 import gevent
 import gevent.local
+import json
 import logging
 import os
 import sys
@@ -259,20 +260,17 @@ class Actor(object):
                     batch_uuids.add(msg.uuid)
                     # Log the message info
                     # Strings are enclosed in quotes. Numbers aren't.
-                    _message_log.info("'%s': {"
-                                      "'received-time': %s, "
-                                      "'sender': '%s', "
-                                      "'receiver': '%s', "
-                                      "'function': '%s', "
-                                      "'tries': %s, "
-                                      "'exception': '%s'"
-                                      "}" % (msg.uuid,
-                                             int(time.time() * 1000),
-                                             msg.caller,
-                                             msg.recipient,
-                                             msg.name,
-                                             msg_tries[msg.uuid],
-                                             message_exception))
+                    _message_log.info('"{uuid}": {data}'.format(
+                        uuid=msg.uuid,
+                        data=json.dumps({
+                            "received-time": int(time.time() * 1000),
+                            "sender": msg.caller,
+                            "receiver": msg.recipient,
+                            "function": msg.name,
+                            "tries": msg_tries[msg.uuid],
+                            "exception": message_exception
+                        })
+                    ))
                     self._current_msg = None
                     actor_storage.msg_uuid = None
                     actor_storage.msg_name = None
@@ -296,8 +294,12 @@ class Actor(object):
                 _log.exception("_finish_msg_batch failed.")
                 results = [(None, e)] * len(results)
                 for uuid in batch_uuids:
-                    _message_log.info("'%s': {'bug-exception': '%s'}" %
-                                      (uuid, e.__class__.__name__ + ': ' + str(e)))
+                    _message_log.info('"{uuid}": {data}'.format(
+                        uuid=msg.uuid,
+                        data=json.dumps({
+                            "bug-exception": e.__class__.__name__ + ': ' + str(e),
+                        })
+                    ))
                 _stats.increment("_finish_msg_batch() exception")
             finally:
                 actor_storage.msg_name = None
@@ -489,16 +491,15 @@ def actor_message(needs_own_batch=False):
                 # would deadlock by waiting for ourselves.
 
                 # But first log that the message is being sent.
-                _message_log.info("'%s': {"
-                                  "'sent-time': %s, "
-                                  "'sender': '%s', "
-                                  "'receiver': '%s', "
-                                  "'function': '%s'"
-                                  "}" % (msg_id,
-                                         int(time.time() * 1000),
-                                         caller,
-                                         self.name,
-                                         method_name))
+                _message_log.info('"{msg_id}": {data}'.format(
+                    msg_id=msg_id,
+                    data=json.dumps({
+                        "sent-time": int(time.time() * 1000),
+                        "sender": caller,
+                        "receiver": self.name,
+                        "function": method_name,
+                    })
+                ))
 
                 return fn(self, *args, **kwargs)
             else:
@@ -529,16 +530,15 @@ def actor_message(needs_own_batch=False):
                           needs_own_batch=needs_own_batch)
 
             # Log that the message was sent.
-            _message_log.info("'%s': {"
-                              "'sent-time': %s, "
-                              "'sender': '%s', "
-                              "'receiver': '%s', "
-                              "'function': '%s'"
-                              "}" % (msg_id,
-                                     int(time.time() * 1000),
-                                     caller,
-                                     self.name,
-                                     method_name))
+            _message_log.info('"{msg_id}": {data}'.format(
+                msg_id=msg_id,
+                data=json.dumps({
+                    "sent-time": int(time.time() * 1000),
+                    "sender": caller,
+                    "receiver": self.name,
+                    "function": method_name,
+                })
+            ))
 
             _log.debug("Message %s sent by %s to %s, queue length %d",
                        msg, caller, self.name, self._event_queue.qsize())
