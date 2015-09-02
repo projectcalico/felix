@@ -193,8 +193,9 @@ class Actor(object):
 
         batch = [msg]
         batches = []
+
         # Will store the number of times a message is retried.
-        msg_tries = {}
+        msg_tries = collections.defaultdict(int)
 
         if not msg.needs_own_batch:
             # Try to pull some more work off the queue to combine into a
@@ -236,13 +237,10 @@ class Actor(object):
                 self._current_msg = msg
                 actor_storage.msg_uuid = msg.uuid
                 actor_storage.msg_name = msg.name
-                # Keeps track of how many times we retry a message.
-                try:
-                    # Increment the counter if it already exists
-                    msg_tries[msg.uuid] += 1
-                except KeyError:
-                    # Else set it up
-                    msg_tries[msg.uuid] = 1
+
+                # Keep track of how many times we retry a message.
+                msg_tries[msg.uuid] += 1
+
                 try:
                     # Actually execute the per-message method and record its
                     # result.
