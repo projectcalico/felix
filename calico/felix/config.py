@@ -185,7 +185,7 @@ class Config(object):
         self.add_parameter("LogFilePath",
                            "Path to log file", "/var/log/calico/felix.log")
         self.add_parameter("LogSeverityFile",
-                           "Log severity for logging to file", "INFO")
+                           "Log severity for logging to file", "DEBUG")
         self.add_parameter("LogSeveritySys",
                            "Log severity for logging to syslog", "ERROR")
         self.add_parameter("LogSeverityScreen",
