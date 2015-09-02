@@ -427,7 +427,6 @@ class Message(object):
     """
     Message passed to an actor.
     """
-
     def __init__(self, msg_id, method, results, caller_path, recipient,
                  needs_own_batch):
         self.uuid = msg_id
@@ -464,7 +463,6 @@ def actor_message(needs_own_batch=False):
     :param bool needs_own_batch: True if this message should be processed
         in its own batch.
     """
-
     def decorator(fn):
         method_name = fn.__name__
 
@@ -562,11 +560,10 @@ def actor_message(needs_own_batch=False):
                                msg_id, calling_path, method_name,
                                blocking_result)
                 return blocking_result
-
         queue_fn.func = fn
         return queue_fn
-
     return decorator
+
 
 # Each time we create a TrackedAsyncResult, me make a weak reference to it
 # so that we can get a callback (_on_ref_reaped()) when the TrackedAsyncResult
@@ -585,8 +582,6 @@ def dump_actor_diags(log):
     log.info("Current ref index: %s", _ref_idx)
     log.info("Number of tracked messages outstanding: %s",
              len(_tracked_refs_by_idx))
-
-
 futils.register_diags("Actor framework", dump_actor_diags)
 
 
@@ -644,7 +639,6 @@ class TrackedAsyncResult(AsyncResult):
     """
     An AsyncResult that tracks if any exceptions are leaked.
     """
-
     def __init__(self, tag):
         super(TrackedAsyncResult, self).__init__()
         # Avoid keeping a reference to the weak ref directly; look it up

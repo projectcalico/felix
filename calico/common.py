@@ -275,7 +275,6 @@ def complete_logging(logfile=None,
                 handler.setLevel(file_level)
 
     # If we've been given a log file, log to file as well.
-
     if logfile and file_level is not None:
         if not file_handler:
             mkdir_p(os.path.dirname(logfile))
