@@ -123,7 +123,7 @@ class EtcdAPI(Actor):
         _reconnect(self)
 
         # Start up a reporting greenlet.
-        self._status_reporting_greenlet = gevent.spawn(self._status_reporting)
+        self._status_reporting_greenlet = gevent.spawn(self._periodically_report_status)
         self._status_reporting_greenlet.link_exception(self._on_worker_died)
 
     @logging_exceptions
@@ -150,7 +150,7 @@ class EtcdAPI(Actor):
             self.force_resync(reason="periodic resync", async=True)
 
     @logging_exceptions
-    def _status_reporting(self):
+    def _periodically_report_status(self):
         """
         Greenlet: periodically writes to etcd
 
@@ -168,11 +168,22 @@ class EtcdAPI(Actor):
         while True:
             try:
                 self.update_felix_status(ttl)
-                gevent.sleep(interval)
-            except EtcdException as e:
+                # Jitter by 10% of interval.
+                jitter = random.random() * 0.1 * interval
+                sleep_time = interval + jitter
+                gevent.sleep(sleep_time)
+            except (ReadTimeoutError, SocketTimeout) as e:
+                # This is expected when we're doing a poll and nothing
+                # happened. socket timeout doesn't seem to be caught by
+                # urllib3 1.7.1. Simply reconnect.
+                LOG.debug("Read from etcd timed out (%r), retrying.", e)
+                _reconnect(self)
+                gevent.sleep(RETRY_DELAY)
+            except Exception as e:
                 _log.debug("Status updating failed. %r. Reconnecting... ", e)
                 _reconnect(self)
                 gevent.sleep(RETRY_DELAY)
+
 
     def update_felix_status(self, ttl):
         """
@@ -185,7 +196,7 @@ class EtcdAPI(Actor):
         status_key = key_for_status(self._config.HOSTNAME)
         status = {}
 
-        time_now = datetime.datetime.fromtimestamp(time.time())
+        time_now = datetime.datetime.utcnow()
         time_formatted = time_now.replace(microsecond=0).isoformat()+'Z'
         status['status_time'] = time_formatted
 

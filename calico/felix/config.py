@@ -147,7 +147,7 @@ class Config(object):
         """
         Create a config. This reads data from the following sources.
         - Environment variables
-        - Configuration file - (/etc/calico/felix.cfg)
+        - Configuration file (/etc/calico/felix.cfg)
         - per-host etcd (/calico/vX/config)
         - global etcd (/calico/vX/host/<host>/config)
 
@@ -393,22 +393,15 @@ class Config(object):
         # For non-positive time values of reporting interval we set both
         # interval and ttl to 0 - i.e. status reporting is disabled.
         if self.REPORTING_INTERVAL_SECS <= 0:
+            log.warning("Reporting disabled.")
             self.REPORTING_TTL_SECS = 0
             self.REPORTING_INTERVAL_SECS = 0
 
         # Status report time to live must be more than status reporting interval,
-        # unless TTL is default.
+        # unless TTL is default. Set TTL to default if it's not.
         if self.REPORTING_TTL_SECS <= self.REPORTING_INTERVAL_SECS\
-                and self.REPORTING_TTL_SECS != 0:
-            raise ConfigException("Reporting TTL ({} sec) is less than or equal "
-                                  "to reporting interval ({} sec). "
-                                  .format(self.REPORTING_INTERVAL_SECS,
-                                          self.REPORTING_TTL_SECS),
-                                  self.parameters["ReportingIntervalSecs"])
-
-        # If status report ttl is not set or is set to 0,
-        # its value is set to 2.5 times interval
-        if self.REPORTING_TTL_SECS == 0:
+                or self.REPORTING_TTL_SECS == 0:
+            log.warning("Reporting TTL set to {}.".format(self.REPORTING_TTL_SECS))
             self.REPORTING_TTL_SECS = self.REPORTING_INTERVAL_SECS * 5/2
 
         if not final:

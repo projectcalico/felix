@@ -192,7 +192,6 @@ def _main_greenlet(config):
 
 
 def main():
-    _log.debug("Felix main started.")
     # Initialise the logging with default parameters.
     common.default_logging()
 

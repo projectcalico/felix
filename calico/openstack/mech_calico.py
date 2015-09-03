@@ -52,7 +52,8 @@ except ImportError:  # Kilo
 
 # Calico imports.
 import etcd
-from calico.datamodel_v1 import STATUS_DIR
+from calico.etcdutils import ACTION_MAPPING
+from calico.datamodel_v1 import STATUS_DIR, hostname_from_status_key
 from calico.openstack.t_etcd import (
     CalicoTransportEtcd, port_etcd_data, profile_rules, profile_tags
 )
@@ -223,9 +224,11 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         Calico mechanism driver. Watches for felix updates in etcd
         and passes info to Neutron database.
         """
-        LOG.info("Handle status updating thread started")
+        LOG.info("Handle status updating thread started.")
         self._db_context = ctx.get_admin_context()
 
+        # Give some time for master to be elected.
+        eventlet.sleep(30)
         # We only read initial felix instances in etcd if we are master.
         if self.transport.is_master:
             self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
@@ -243,7 +246,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 # the master.
                 eventlet.sleep(MASTER_CHECK_INTERVAL_SECS)
         else:
-            LOG.warning("Unexpected fork. "
+            LOG.warning("Unexpected: epoch changed. "
                         "Handling status updates thread exiting.")
 
 
@@ -282,8 +285,8 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             LOG.debug("Read from etcd timed out (%r), retrying.", e)
         except (etcd.EtcdClusterIdChanged, etcd.EtcdEventIndexCleared) as e:
             # Complete resync is needed.
-            LOG.warning("Out of sync with etcd (%r).  Reconnecting "
-                     "for full sync.", e)
+            LOG.warning("Out of sync with etcd (%r). "
+                        "Reconnecting for full sync.", e)
             try:
                 context = ctx.get_admin_context()
                 self.complete_resync(context)
@@ -306,15 +309,11 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             return
         # Ignore deleted and expired keys - their deletion is noticed by
         # other timeout algorithm before reaching the horizon UI.
-        if response.action == "delete" or response.action == "expire":
+        if ACTION_MAPPING[response.action] == "delete":
             return
 
-
-        hostname = _hostname_from_status_key(key)
-        agent_state = {'agent_type': AGENT_TYPE_FELIX,
-                       'binary': '',
-                       'host': hostname,
-                       'topic': constants.L2_AGENT_TOPIC}
+        hostname = hostname_from_status_key(key)
+        agent_state = felix_agent_state(hostname)
         if response.newKey:
             agent_state['start_flag'] = True
 
@@ -335,13 +334,10 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 key = status['key']
                 # If host has uptime key, we pass the host to the neutron
                 # database with start_flag set True.
-                if key[-7:] == '/uptime':
-                    hostname = _hostname_from_status_key(key)
-                    agent_state = {'agent_type': AGENT_TYPE_FELIX,
-                                   'binary': '',
-                                   'host': hostname,
-                                   'topic': constants.L2_AGENT_TOPIC,
-                                   'start_flag': True}
+
+                if key.split('/')[-1] == 'felix_uptime':
+                    hostname = hostname_from_status_key(key)
+                    agent_state = felix_agent_state(hostname, start_flag=True)
                     self.db.create_or_update_agent(self._db_context, agent_state)
 
         # The etcd_index tells us, where we want to start polling for new
@@ -1192,23 +1188,23 @@ def profiles_match(etcd_profile, neutron_profile):
         (etcd_tags == neutron_group_tags)
     )
 
-def _hostname_from_status_key(key):
-    '''
-    Help function to get hostname from a status key.
-
-    :param: key for felix status
-            expected key format: STATUS_DIR/<hostname>/<some path or not>/<actual key name>
-    '''
-    in_host_dir = key[len(STATUS_DIR + '/'):]
-    path = in_host_dir.split('/')
-    hostname = path[0]
-    return  hostname
+def felix_agent_state(hostname, start_flag=False):
+    """
+    Help function that returns agent_state for felix.
+    """
+    state = {'agent_type': AGENT_TYPE_FELIX,
+             'binary': 'felix-calico-agent',
+             'host': hostname,
+             'topic': constants.L2_AGENT_TOPIC}
+    if start_flag:
+        state['start_flag'] = True
+    return state
 
 def is_uptime_key(key):
     '''Help function - return whether given key is uptime key'''
     if key[:len(STATUS_DIR)] != STATUS_DIR:
         return False
     path = key.split('/')
-    if path[-1] != 'uptime':
+    if path[-1] != 'felix_uptime':
         return False
     return True
