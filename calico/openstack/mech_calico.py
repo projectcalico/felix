@@ -227,8 +227,6 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         LOG.info("Handle status updating thread started.")
         self._db_context = ctx.get_admin_context()
 
-        # Give some time for master to be elected.
-        eventlet.sleep(30)
         # We only read initial felix instances in etcd if we are master.
         if self.transport.is_master:
             self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
@@ -309,7 +307,8 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             return
         # Ignore deleted and expired keys - their deletion is noticed by
         # other timeout algorithm before reaching the horizon UI.
-        if ACTION_MAPPING[response.action] == "delete":
+        action = response.action
+        if action and ACTION_MAPPING[action] == "delete":
             return
 
         hostname = hostname_from_status_key(key)

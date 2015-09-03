@@ -873,7 +873,6 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
                                 "etcd_index tracking error.")
             old_etcd_index = self.driver._next_etcd_index
 
-
     def test_status_update_exceptions(self):
         """
         Test that exceptions causes reconnect/resync.
