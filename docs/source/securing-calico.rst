@@ -81,3 +81,12 @@ etcd release to improve this dramatically.  However, until that work is done,
 we recommend blocking access to etcd from all but the IP range(s) used by the
 compute nodes and plugin.
 
+Other security options
+----------------------
+
+Calico uses iptables rules to prevent workloads form spoofing IP addresses
+However, the kernel also has a stronger reverse path filtering check that
+drops spoofed packets sooner in the pipeline.  We recommend turning that on
+in all producting deployments.  The kernel's RPF check is controlled by the
+global and per-interface rp_filter sysctls.
+
