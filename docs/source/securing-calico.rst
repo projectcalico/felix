@@ -84,9 +84,9 @@ compute nodes and plugin.
 Other security options
 ----------------------
 
-Calico uses iptables rules to prevent workloads form spoofing IP addresses
+Calico uses iptables rules to prevent workloads from spoofing IP addresses
 However, the kernel also has a stronger reverse path filtering check that
 drops spoofed packets sooner in the pipeline.  We recommend turning that on
-in all producting deployments.  The kernel's RPF check is controlled by the
+in all production deployments.  The kernel's RPF check is controlled by the
 global and per-interface rp_filter sysctls.
 
