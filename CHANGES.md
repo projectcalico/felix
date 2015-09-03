@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- Fix that packets that failed to match anti-spoofing rules were incorrectly
+  accepted.
+
 ## 1.0.0
 
 - Add support for setting MTU on IP-in-IP device.

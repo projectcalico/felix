@@ -435,8 +435,9 @@ def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
                         profile_ids):
     to_chain_name, from_chain_name = chain_names(suffix)
 
-    # First build the chain that manages packets to the interface.
-    # Common chain prefixes.
+    # First build the chain that manages packets to the interface.  We always
+    # start with MARK==0.  The MARK is only set to 1 by a profile accepting
+    # the packet.  We drop packets that have MARK!=1 at the end of this chain.
     to_chain = [
         "--append %s --jump MARK --set-mark 0" % to_chain_name
     ]
@@ -444,14 +445,18 @@ def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
     # Jump to each profile in turn.  The profile will do one of the
     # following:
     # * DROP the packet; in which case we won't see it again.
-    # * RETURN the packet with MARK==1, indicating it accepted the packet.
+    # * RETURN the packet with MARK==1, indicating it accepted the packet. In
+    #   which case, we RETURN and skip further profiles.
     # * RETURN the packet with MARK==0, indicating it did not match the packet.
+    #   In which case, we carry on and process the next profile.
     to_deps = set()
     for profile_id in profile_ids:
         profile_in_chain = profile_to_chain_name("inbound", profile_id)
         to_deps.add(profile_in_chain)
         to_chain.append("--append %s --jump %s" %
                         (to_chain_name, profile_in_chain))
+        # If the profile accepted the packet, it sets MARK==1.  Immediately
+        # RETURN the packet to signal that it's been accepted.
         to_chain.append('--append %s --match mark --mark 1/1 '
                         '--match comment --comment "Profile accepted packet" '
                         '--jump RETURN' % to_chain_name)
@@ -490,6 +495,8 @@ def _get_endpoint_rules(endpoint_id, suffix, ip_version, local_ips, mac,
                               "--mac-source %s --jump %s" %
                               (from_chain_name, cidr, mac.upper(),
                                profile_out_chain))
+        # Check if the profile matched the packet (setting MARK==1).  If so,
+        # immediately RETURN to indicate that the packet was accepted.
         from_chain.append('--append %s --match mark --mark 1/1 '
                           '--match comment --comment "Profile matched packet" '
                           '--jump RETURN' %
