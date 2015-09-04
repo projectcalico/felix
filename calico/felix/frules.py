@@ -52,13 +52,11 @@ care about:
 * Packets from a local workload to another local workload traverse the
   FORWARD chain only.  Felix must ensure that those packets have *both*
   the outbound policy of the sending workload and the inbound policy
-  of the receiving workload applied.  In addition, it must prevent the
-  sender from spoofing its source address.
+  of the receiving workload applied.
 
 * Packets from a local workload to a remote address traverse the FORWARD
   chain only.  Felix must ensure that those packets have the outbound
-  policy of the local workload applied.  In addition, it must prevent the
-  sender from spoofing its source address.
+  policy of the local workload applied.
 
 * Packets from a remote address to a local workload traverse the FORWARD
   chain only.  Felix must apply the inbound policy of the local workload.
