@@ -282,7 +282,9 @@ class TestDevices(unittest.TestCase):
         tap = "tap" + str(uuid.uuid4())[:11]
         with mock.patch('__builtin__.open', m_open, create=True):
             devices.configure_interface_ipv4(tap)
-        calls = [mock.call('/proc/sys/net/ipv4/conf/%s/route_localnet' % tap, 'wb'),
+        calls = [mock.call('/proc/sys/net/ipv4/conf/%s/rp_filter' % tap, 'wb'),
+                 M_ENTER, mock.call().write('1'), M_CLEAN_EXIT,
+                 mock.call('/proc/sys/net/ipv4/conf/%s/route_localnet' % tap, 'wb'),
                  M_ENTER, mock.call().write('1'), M_CLEAN_EXIT,
                  mock.call('/proc/sys/net/ipv4/conf/%s/proxy_arp' % tap, 'wb'),
                  M_ENTER, mock.call().write('1'), M_CLEAN_EXIT,
@@ -310,7 +312,10 @@ class TestDevices(unittest.TestCase):
 
         with nested(open_patch, m_check_call) as (_, m_check_call):
             devices.configure_interface_ipv6(if_name, proxy_target)
-            calls = [mock.call('/proc/sys/net/ipv6/conf/%s/proxy_ndp' %
+            calls = [mock.call('/proc/sys/net/ipv6/conf/%s/rp_filter' %
+                               if_name, 'wb'),
+                     M_ENTER, mock.call().write('1'), M_CLEAN_EXIT,
+                     mock.call('/proc/sys/net/ipv6/conf/%s/proxy_ndp' %
                                if_name,
                                'wb'),
                      M_ENTER,

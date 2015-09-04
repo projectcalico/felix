@@ -285,31 +285,23 @@ class TestEndpoint(BaseTestCase):
                 [
                     # Always start with a 0 MARK.
                     from_pfx + ' --jump MARK --set-mark 0',
+                    # From chain polices the MAC address.
+                    from_pfx + ' --match mac ! --mac-source aa:22:33:44:55:66 '
+                               '--jump DROP --match comment --comment '
+                               '"Incorrect source MAC"',
 
-                    # Jump to the first profile iff the IP and MAC matches
-                    # the whitelist.
-                    from_pfx + ' --src 10.0.0.1/32 --match mac '
-                               '--mac-source AA:22:33:44:55:66 '
-                               '--jump felix-p-prof-1-o',
-                    from_pfx + ' --src 11.1.2.0/24 --match mac '
-                               '--mac-source AA:22:33:44:55:66 '
-                               '--jump felix-p-prof-1-o',
+                    # Jump to the first profile.
+                    from_pfx + ' --jump felix-p-prof-1-o',
                     # Short-circuit: return if the first profile matched.
                     from_pfx + ' --match mark --mark 1/1 --match comment '
-                               '--comment "Profile matched packet" '
+                               '--comment "Profile accepted packet" '
                                '--jump RETURN',
 
-                    # Jump to second profile iff the IP and MAC matches
-                    # the whitelist.
-                    from_pfx + ' --src 10.0.0.1/32 --match mac '
-                               '--mac-source AA:22:33:44:55:66 '
-                               '--jump felix-p-prof-2-o',
-                    from_pfx + ' --src 11.1.2.0/24 --match mac '
-                               '--mac-source AA:22:33:44:55:66 '
-                               '--jump felix-p-prof-2-o',
+                    # Jump to second profile.
+                    from_pfx + ' --jump felix-p-prof-2-o',
                     # Return if the second profile matched.
                     from_pfx + ' --match mark --mark 1/1 --match comment '
-                               '--comment "Profile matched packet" '
+                               '--comment "Profile accepted packet" '
                                '--jump RETURN',
 
                     # Drop the packet if nothing matched.
@@ -334,7 +326,8 @@ class TestEndpoint(BaseTestCase):
                              '--jump RETURN',
 
                     # Drop anything that doesn't match.
-                    to_pfx + ' --jump DROP -m comment --comment "Endpoint e1:"'
+                    to_pfx + ' --jump DROP -m comment --comment '
+                             '"Default DROP if no match (endpoint e1):"'
                 ]
             },
             {
@@ -346,8 +339,7 @@ class TestEndpoint(BaseTestCase):
                                       'felix-p-prof-2-i'])
             }
         )
-        result = endpoint._get_endpoint_rules("e1", "abcd", 4,
-                                              ["10.0.0.1", "11.1.2.0/24"],
+        result = endpoint._get_endpoint_rules("e1", "abcd",
                                               "aa:22:33:44:55:66",
                                               ["prof-1", "prof-2"])
 

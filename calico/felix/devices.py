@@ -97,12 +97,19 @@ def configure_interface_ipv4(if_name):
     Configure the various proc file system parameters for the interface for
     IPv4.
 
-    Specifically, allow packets from controlled interfaces to be directed to
-    localhost, and enable proxy ARP.
+    Specifically,
+      - Allow packets from controlled interfaces to be directed to localhost
+      - Enable proxy ARP
+      - Enable the kernel's RPF check.
 
     :param if_name: The name of the interface to configure.
     :returns: None
     """
+    # Enable the kernel's RPF check, which ensures that a VM cannot spoof
+    # its IP address.
+    with open('/proc/sys/net/ipv4/conf/%s/rp_filter' % if_name, 'wb') as f:
+        f.write('1')
+
     with open('/proc/sys/net/ipv4/conf/%s/route_localnet' % if_name,
               'wb') as f:
         f.write('1')
@@ -119,6 +126,7 @@ def configure_interface_ipv6(if_name, proxy_target):
     Configure an interface to support IPv6 traffic from an endpoint.
       - Enable proxy NDP on the interface.
       - Program the given proxy target (gateway the endpoint will use).
+      - Enable the kernel's RPF check.
 
     :param if_name: The name of the interface to configure.
     :param proxy_target: IPv6 address which is proxied on this interface for
@@ -126,6 +134,11 @@ def configure_interface_ipv6(if_name, proxy_target):
     :returns: None
     :raises: FailedSystemCall
     """
+    # Enable the kernel's RPF check, which ensures that a VM cannot spoof
+    # its IP address.
+    with open('/proc/sys/net/ipv6/conf/%s/rp_filter' % if_name, 'wb') as f:
+        f.write('1')
+
     with open("/proc/sys/net/ipv6/conf/%s/proxy_ndp" % if_name, 'wb') as f:
         f.write('1')
 
