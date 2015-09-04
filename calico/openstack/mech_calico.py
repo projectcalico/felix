@@ -162,10 +162,6 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self._epoch = 0
         self.in_resync = False
 
-        # Prepare client for accessing status updates in etcd.
-        self._client = None
-        self._next_etcd_index = 0
-
         # Tell the monkeypatch where we are.
         global mech_driver
         assert mech_driver is None
@@ -227,16 +223,18 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         LOG.info("Handle status updating thread started.")
         self._db_context = ctx.get_admin_context()
 
-        # We only read initial felix instances in etcd if we are master.
-        if self.transport.is_master:
-            self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
-                                       port=cfg.CONF.calico.etcd_port)
-            if self._epoch == expected_epoch:
-                self._register_initial_felixes()
+        initial_felixes_registered = False
 
         while self._epoch == expected_epoch:
             # Only handle updates if we are the master node.
             if self.transport.is_master:
+                # Read through initial felix instances, if it's not been done.
+                if not initial_felixes_registered:
+                    self.transport.status_client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+                                               port=cfg.CONF.calico.etcd_port)
+                    self._register_initial_felixes()
+                    initial_felixes_registered = True
+
                 LOG.info("I am master: polling felix updates in etcd")
                 self._poll_and_handle_felix_updates(expected_epoch)
             else:
@@ -255,13 +253,13 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         client and do complete resync when necessary.
         """
         try:
-            self._client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+            self.transport.status_client = etcd.Client(host=cfg.CONF.calico.etcd_host,
                                        port=cfg.CONF.calico.etcd_port)
             while True:
                 # Get and handle an update.
-                response = self._client.read(STATUS_DIR,
+                response = self.transport.status_client.read(STATUS_DIR,
                                              wait=True,
-                                             waitIndex = self._next_etcd_index,
+                                             waitIndex = self.transport.next_etcd_index,
                                              recursive=True)
 
                 # Before status is passed to Neutron db, check whether we
@@ -274,7 +272,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 # Since we're polling on a subtree, we can't just
                 # increment the index, we have to look at the
                 # modifiedIndex.
-                self._next_etcd_index = max(self._next_etcd_index,
+                self.transport.next_etcd_index = max(self.transport.next_etcd_index,
                                            int(response.modifiedIndex)) + 1
         except (ReadTimeoutError, SocketTimeout) as e:
             # This is expected when we're doing a poll and nothing
@@ -324,7 +322,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         Read through etcd status subtree and pass agent update of hosts which
         have an uptime key (i.e. felix is heartbeating).
         '''
-        response = self._client.read(STATUS_DIR, recursive=True)
+        response = self.transport.status_client.read(STATUS_DIR, recursive=True)
 
         # Read through hosts
         for host in response._children:
@@ -341,7 +339,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
         # The etcd_index tells us, where we want to start polling for new
         # updates.
-        self._next_etcd_index = response.etcd_index + 1
+        self.transport.next_etcd_index = response.etcd_index + 1
 
 
     def _get_db(self):
@@ -701,8 +699,16 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 if self.transport.is_master:
                     LOG.info("I am master: doing periodic resync")
                     context = ctx.get_admin_context()
+
                     try:
-                        self.complete_resync(context)
+                        # First, resync endpoints.
+                        self.resync_endpoints(context)
+
+                        # Second, profiles.
+                        self.resync_profiles(context)
+
+                        # Now, set the config flags.
+                        self.transport.provide_felix_config()
                     except Exception:
                         LOG.exception("Error in periodic resync thread.")
                     # Reschedule ourselves.
@@ -722,22 +728,12 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         else:
             LOG.warning("Periodic resync thread exiting.")
 
-    def complete_resync(self, context):
-        """Go through complete resync.
+    def resync_status_tree(self, context):
         """
-        if not self.in_resync:
-            self.in_resync = True
-
-            # First, resync endpoints.
-            self.resync_endpoints(context)
-
-            # Second, profiles.
-            self.resync_profiles(context)
-
-            # Now, set the config flags.
-            self.transport.provide_felix_config()
-
-            self.in_resync = False
+        Resync status subtree of etcd.
+        """
+        ## TODO
+        pass
 
     def resync_endpoints(self, context):
         """

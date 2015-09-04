@@ -124,8 +124,10 @@ class CalicoTransportEtcd(object):
         # alive.
         self.driver = weakref.proxy(driver)
 
-        # Prepare client for accessing etcd data.
+        # Prepare clients for accessing etcd data.
         self.client = None
+        self.status_client = None
+        self.next_etcd_index = 0
 
         # Elector, for performing leader election.
         self.elector = None
