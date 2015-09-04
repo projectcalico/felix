@@ -232,7 +232,10 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 if not initial_felixes_registered:
                     self.transport.status_client = etcd.Client(host=cfg.CONF.calico.etcd_host,
                                                port=cfg.CONF.calico.etcd_port)
-                    self._register_initial_felixes()
+                    try:
+                        self._register_initial_felixes()
+                    except:
+                        LOG.debug("Loading initial Felixes failed.")
                     initial_felixes_registered = True
 
                 LOG.info("I am master: polling felix updates in etcd")
