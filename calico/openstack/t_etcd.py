@@ -26,11 +26,15 @@ import re
 import socket
 import weakref
 
+from socket import timeout as SocketTimeout
+from urllib3.exceptions import ReadTimeoutError
+
 # OpenStack imports.
 try:
     from oslo.config import cfg
 except ImportError:
     from oslo_config import cfg
+from neutron import context as ctx
 
 try:  # Icehouse, Juno
     from neutron.openstack.common import log
@@ -45,7 +49,7 @@ from calico.datamodel_v1 import (READY_KEY, CONFIG_DIR, TAGS_KEY_RE, HOST_DIR,
                                  key_for_endpoint, PROFILE_DIR, RULES_KEY_RE,
                                  key_for_profile, key_for_profile_rules,
                                  key_for_profile_tags, key_for_config,
-                                 NEUTRON_ELECTION_KEY)
+                                 NEUTRON_ELECTION_KEY, STATUS_DIR)
 from calico.election import Elector
 
 
@@ -524,10 +528,60 @@ class CalicoTransportEtcd(object):
             except etcd.EtcdException as e:
                 LOG.debug("Failed to delete %s (%r), skipping.", delete_key, e)
 
+    def _poll_and_handle_felix_updates(self, expected_epoch):
+        """
+        In infinite loop read new statuses in etcd status directory. Then
+        pass updates to Neutron database. On exception reconnect the etcd
+        client and do complete resync when necessary.
+        """
+        try:
+            self.status_client = etcd.Client(host=cfg.CONF.calico.etcd_host,
+                                             port=cfg.CONF.calico.etcd_port)
+            while True:
+                # Get and handle an update.
+                response = self.status_client.read(STATUS_DIR,
+                                                   wait=True,
+                                                   waitIndex=self.next_etcd_index,
+                                                   recursive=True)
+                # Before status is passed to Neutron db, check whether we
+                # are still master (if not, we loop until we become one)
+                # and whether epoch is as expected (if not, thread exits).
+                if self.driver._epoch != expected_epoch or not self.is_master:
+                    break
+
+                self.driver._handle_status_update(response)
+                # Since we're polling on a subtree, we can't just
+                # increment the index, we have to look at the
+                # modifiedIndex.
+                self.next_etcd_index = max(self.next_etcd_index,
+                                           int(response.modifiedIndex)) + 1
+        except (ReadTimeoutError, SocketTimeout) as e:
+            # This is expected when we're doing a poll and nothing
+            # happened. socket timeout doesn't seem to be caught by
+            # urllib3 1.7.1. Simply reconnect.
+            LOG.debug("Read from etcd timed out (%r), retrying.", e)
+        except (etcd.EtcdClusterIdChanged, etcd.EtcdEventIndexCleared) as e:
+            # Complete resync is needed.
+            LOG.warning("Out of sync with etcd (%r). "
+                        "Reconnecting for full sync.", e)
+            try:
+                context = ctx.get_admin_context()
+                self.resync_status_tree(context)
+            except Exception:
+                LOG.exception("Error in status subtree resync.")
+        except Exception as e:
+            LOG.info("Handling status update failed. ({})".format(e))
+
     def stop(self):
         LOG.info("Stopping transport %s", self)
         self.elector.stop()
 
+    def resync_status_tree(self, context):
+        """
+        Resync status subtree of etcd.
+        """
+        ## TODO
+        pass
 
 def _neutron_rule_to_etcd_rule(rule):
     """

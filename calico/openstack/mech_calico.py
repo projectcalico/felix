@@ -29,8 +29,6 @@ import eventlet
 
 from collections import namedtuple
 from functools import wraps
-from socket import timeout as SocketTimeout
-from urllib3.exceptions import ReadTimeoutError
 
 # OpenStack imports.
 from neutron.common import constants
@@ -239,7 +237,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                     initial_felixes_registered = True
 
                 LOG.info("I am master: polling felix updates in etcd")
-                self._poll_and_handle_felix_updates(expected_epoch)
+                self.transport._poll_and_handle_felix_updates(expected_epoch)
             else:
                 # Short sleep interval before we check if we've become
                 # the master.
@@ -247,52 +245,6 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         else:
             LOG.warning("Unexpected: epoch changed. "
                         "Handling status updates thread exiting.")
-
-
-    def _poll_and_handle_felix_updates(self, expected_epoch):
-        """
-        In infinite loop read new statuses in etcd status directory. Then
-        pass updates to Neutron database. On exception reconnect the etcd
-        client and do complete resync when necessary.
-        """
-        try:
-            self.transport.status_client = etcd.Client(host=cfg.CONF.calico.etcd_host,
-                                       port=cfg.CONF.calico.etcd_port)
-            while True:
-                # Get and handle an update.
-                response = self.transport.status_client.read(STATUS_DIR,
-                                             wait=True,
-                                             waitIndex = self.transport.next_etcd_index,
-                                             recursive=True)
-
-                # Before status is passed to Neutron db, check whether we
-                # are still master (if not, we loop until we become one)
-                # and whether epoch is as expected (if not, thread exits).
-                if self._epoch != expected_epoch or not self.transport.is_master:
-                    break
-
-                self._handle_status_update(response)
-                # Since we're polling on a subtree, we can't just
-                # increment the index, we have to look at the
-                # modifiedIndex.
-                self.transport.next_etcd_index = max(self.transport.next_etcd_index,
-                                           int(response.modifiedIndex)) + 1
-        except (ReadTimeoutError, SocketTimeout) as e:
-            # This is expected when we're doing a poll and nothing
-            # happened. socket timeout doesn't seem to be caught by
-            # urllib3 1.7.1. Simply reconnect.
-            LOG.debug("Read from etcd timed out (%r), retrying.", e)
-        except (etcd.EtcdClusterIdChanged, etcd.EtcdEventIndexCleared) as e:
-            # Complete resync is needed.
-            LOG.warning("Out of sync with etcd (%r). "
-                        "Reconnecting for full sync.", e)
-            try:
-                context = ctx.get_admin_context()
-                self.complete_resync(context)
-            except Exception:
-                LOG.exception("Error in full resync.")
-        except Exception as e:
-            LOG.info("Handling status update failed. ({})".format(e))
 
     def _handle_status_update(self, response):
         """
@@ -730,13 +682,6 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             raise
         else:
             LOG.warning("Periodic resync thread exiting.")
-
-    def resync_status_tree(self, context):
-        """
-        Resync status subtree of etcd.
-        """
-        ## TODO
-        pass
 
     def resync_endpoints(self, context):
         """
