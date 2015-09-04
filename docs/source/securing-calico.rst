@@ -64,6 +64,10 @@ that is heading to or from a local endpoint is processed through the relevant
 security policy.  Then, if the policy accepts the traffic, it is accepted.
 If the policy rejects the traffic it is immediately dropped.
 
+To prevent IPv6-enabled endpoints from spoofing their IP addresses, Felix
+inserts a reverse path filtering rule in the iptables "raw" PREROUTING chain.
+(For IPv4, it enables the rp_filter sysctl on each interface that it controls.)
+
 Securing iptables
 -----------------
 
@@ -80,13 +84,3 @@ access to its REST interface.  We plan to use the RBAC feature of an upcoming
 etcd release to improve this dramatically.  However, until that work is done,
 we recommend blocking access to etcd from all but the IP range(s) used by the
 compute nodes and plugin.
-
-Other security options
-----------------------
-
-Calico uses iptables rules to prevent workloads from spoofing IP addresses
-However, the kernel also has a stronger reverse path filtering check that
-drops spoofed packets sooner in the pipeline.  We recommend turning that on
-in all production deployments.  The kernel's RPF check is controlled by the
-global and per-interface rp_filter sysctls.
-
