@@ -2,8 +2,8 @@
 
 ## 1.0.1
 
-- Fix that packets that failed to match anti-spoofing rules were incorrectly
-  accepted.
+- Explicitly use and enable the kernel's reverse path filtering function,
+  remove our iptables anti-spoofing rules, which were not as robust.
 
 ## 1.0.0
 
