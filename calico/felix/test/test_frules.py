@@ -228,9 +228,15 @@ class TestRules(BaseTestCase):
 
         m_v4_upd = Mock(spec=IptablesUpdater)
         m_v6_upd = Mock(spec=IptablesUpdater)
+        m_v6_raw_upd = Mock(spec=IptablesUpdater)
         m_v4_nat_upd = Mock(spec=IptablesUpdater)
 
-        frules.install_global_rules(m_config, m_v4_upd, m_v6_upd, m_v4_nat_upd)
+        frules.install_global_rules(m_config, m_v4_upd, m_v6_upd, m_v4_nat_upd,
+                                    m_v6_raw_upd)
+
+        m_v6_raw_upd.ensure_rule_inserted.assert_called_once_with(
+            'PREROUTING --in-interface tap+ --match rpfilter --invert -j DROP'
+        )
 
         m_ipset.ensure_exists.assert_called_once_with()
         self.assertEqual(

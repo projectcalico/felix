@@ -49,6 +49,25 @@ class TestDevices(unittest.TestCase):
     def tearDown(self):
         pass
 
+    def test_check_kernel_config(self):
+        with mock.patch("calico.felix.devices._read_proc_sys",
+                        autospec=True, return_value="1") as m_read_proc_sys:
+            devices.check_kernel_config()
+
+    def test_check_kernel_config_bad_rp_filter(self):
+        with mock.patch("calico.felix.devices._read_proc_sys",
+                        autospec=True, return_value="2") as m_read_proc_sys:
+            self.assertRaises(devices.BadKernelConfig,
+                              devices.check_kernel_config)
+
+    def test_read_proc_sys(self):
+        m_open = mock.mock_open()
+        with mock.patch('__builtin__.open', m_open, create=True):
+            devices._read_proc_sys("/proc/sys/foo/bar")
+        calls = [mock.call('/proc/sys/foo/bar', 'rb'),
+                 M_ENTER, mock.call().read(), M_CLEAN_EXIT]
+        m_open.assert_has_calls(calls)
+
     def test_interface_exists(self):
         tap = "tap" + str(uuid.uuid4())[:11]
 
@@ -312,10 +331,7 @@ class TestDevices(unittest.TestCase):
 
         with nested(open_patch, m_check_call) as (_, m_check_call):
             devices.configure_interface_ipv6(if_name, proxy_target)
-            calls = [mock.call('/proc/sys/net/ipv6/conf/%s/rp_filter' %
-                               if_name, 'wb'),
-                     M_ENTER, mock.call().write('1'), M_CLEAN_EXIT,
-                     mock.call('/proc/sys/net/ipv6/conf/%s/proxy_ndp' %
+            calls = [mock.call('/proc/sys/net/ipv6/conf/%s/proxy_ndp' %
                                if_name,
                                'wb'),
                      M_ENTER,

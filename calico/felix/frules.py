@@ -151,7 +151,7 @@ def profile_to_chain_name(inbound_or_outbound, profile_id):
 
 
 def install_global_rules(config, v4_filter_updater, v6_filter_updater,
-                         v4_nat_updater):
+                         v4_nat_updater, v6_raw_updater):
     """
     Set up global iptables rules. These are rules that do not change with
     endpoint, and are expected never to change (such as the rules that send all
@@ -184,6 +184,13 @@ def install_global_rules(config, v4_filter_updater, v6_filter_updater,
             _log.info("Tunnel device wasn't up; enabling.")
             futils.check_call(["ip", "link", "set", IP_IN_IP_DEV_NAME, "up"])
 
+    # Ensure that Calico-controlled IPv6 hosts cannot spoof their IP addresses.
+    # (For IPv4, this is controlled by a per-interface sysctl.)
+    v6_raw_updater.ensure_rule_inserted(
+        "PREROUTING --in-interface %s --match rpfilter --invert -j DROP" %
+        iface_match
+    )
+
     # The IPV4 nat table first. This must have a felix-PREROUTING chain.
     nat_pr = []
     if config.METADATA_IP is not None:
@@ -200,9 +207,8 @@ def install_global_rules(config, v4_filter_updater, v6_filter_updater,
     v4_nat_updater.ensure_rule_inserted(
         "PREROUTING --jump %s" % CHAIN_PREROUTING, async=False)
 
-    # Now the filter table. This needs to have calico-filter-FORWARD and
-    # calico-filter-INPUT chains, which we must create before adding any
-    # rules that send to them.
+    # Now the filter table. This needs to have felix-FORWARD and felix-INPUT
+    # chains, which we must create before adding any rules that send to them.
     for iptables_updater, hosts_set in [(v4_filter_updater, HOSTS_IPSET_V4),
                                         # FIXME support IP-in-IP for IPv6.
                                         (v6_filter_updater, None)]:
