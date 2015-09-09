@@ -290,12 +290,12 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 if key.split('/')[-1] == 'uptime':
                     hostname = hostname_from_status_key(key)
                     agent_state = felix_agent_state(hostname, start_flag=True)
-                    self.db.create_or_update_agent(self._db_context, agent_state)
+                    self.db.create_or_update_agent(self._db_context,
+                                                   agent_state)
 
         # The etcd_index tells us, where we want to start polling for new
         # updates.
         self.transport.next_etcd_index = response.etcd_index + 1
-
 
     def _get_db(self):
         if not self.db:

@@ -126,7 +126,7 @@ class TestEtcdWatcher(BaseTestCase):
         self.m_splitter = Mock(spec=UpdateSplitter)
         self.watcher.splitter = self.m_splitter
         self.client = Mock(spec=etcd.Client)
-        self.watcher._client = self.client
+        self.watcher.poll_helper.client = self.client
 
     @patch("gevent.sleep", autospec=True)
     @patch("calico.felix.fetcd._build_config_dict", autospec=True)
@@ -184,9 +184,11 @@ class TestEtcdWatcher(BaseTestCase):
         m_die.assert_called_once_with()
 
     def test_resync_flag(self):
-        self.watcher.resync_after_current_poll = True
-        self.assertRaises(ResyncRequired, self.watcher._wait_for_etcd_event)
-        self.assertFalse(self.watcher.resync_after_current_poll)
+        self.watcher.resync_after_current_poll()
+        self.watcher.poll_helper.next_etcd_index = 1
+        self.assertRaises(ResyncRequired,
+                          self.watcher.poll_helper.wait_for_etcd_event)
+        self.assertFalse(self.watcher.poll_helper.resync_after_current_poll)
 
     def test_ready_flag_set(self):
         self.dispatch("/calico/v1/Ready", "set", value="true")
@@ -509,7 +511,7 @@ class TestEtcdReporting(BaseTestCase):
     @patch("calico.felix.fetcd.monotonic_time", return_value=200)
     def test_update_felix_status(self, m_monotime, m_datetime):
         m_datetime.utcnow.return_value = datetime(2015, 9, 10, 2, 1, 53, 1234)
-        with patch.object(self.api._client, "set") as m_set:
+        with patch.object(self.api.client, "set") as m_set:
             self.api._update_felix_status(10)
         # Should write two keys into etcd, one with a TTL and another with
         # richer status.

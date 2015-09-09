@@ -29,13 +29,10 @@ import logging
 import datetime
 from calico.monotonic import monotonic_time
 
-from etcd import (EtcdException, EtcdClusterIdChanged, EtcdKeyNotFound,
-                  EtcdEventIndexCleared)
-import etcd
+from etcd import EtcdException, EtcdKeyNotFound
 import gevent
 import sys
 from gevent.event import Event
-from urllib3 import Timeout
 import urllib3.exceptions
 from urllib3.exceptions import ReadTimeoutError, ConnectTimeoutError
 
@@ -47,7 +44,9 @@ from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  PROFILE_DIR, HOST_DIR, EndpointId, POLICY_DIR,
                                  HOST_IP_KEY_RE, IPAM_V4_CIDR_KEY_RE,
                                  key_for_status, key_for_uptime)
-from calico.etcdutils import PathDispatcher
+from calico.etcdutils import (
+    PathDispatcher, EtcdClientOwner, EtcdWatchHelper, ResyncRequired
+)
 from calico.felix.actor import Actor, actor_message
 from calico.felix.futils import intern_dict, intern_list, logging_exceptions
 
@@ -88,43 +87,7 @@ RESYNC_KEYS = [
 ]
 
 
-class _EtcdClientOwner(object):
-    """
-    Base class for objects that own an etcd Client.
-    """
-
-    def __init__(self, config):
-        super(_EtcdClientOwner, self).__init__()
-        self._config = config
-        self._client = None
-        self._reconnect()
-
-    def _reconnect(self, copy_cluster_id=True):
-        """
-        Reconnects the etcd client.
-        """
-        etcd_addr = self._config.ETCD_ADDR
-        if ":" in etcd_addr:
-            host, port = etcd_addr.split(":")
-            port = int(port)
-        else:
-            host = etcd_addr
-            port = 4001
-        if self._client and copy_cluster_id:
-            old_cluster_id = self._client.expected_cluster_id
-            _log.info("(Re)connecting to etcd. Old etcd cluster ID was %s.",
-                      old_cluster_id)
-        else:
-            _log.info("(Re)connecting to etcd. No previous cluster ID.")
-            old_cluster_id = None
-        self._client = etcd.Client(
-            host=host,
-            port=port,
-            expected_cluster_id=old_cluster_id
-        )
-
-
-class EtcdAPI(_EtcdClientOwner, Actor):
+class EtcdAPI(EtcdClientOwner, Actor):
     """
     Our API to etcd
 
@@ -169,7 +132,7 @@ class EtcdAPI(_EtcdClientOwner, Actor):
         """
         _log.info("Started periodic resync thread, waiting for config.")
         self._watcher.configured.wait()
-        interval = self._config.RESYNC_INTERVAL
+        interval = self.config.RESYNC_INTERVAL
         _log.info("Config loaded, resync interval %s.", interval)
         if interval == 0:
             _log.info("Interval is 0, periodic resync disabled.")
@@ -191,8 +154,8 @@ class EtcdAPI(_EtcdClientOwner, Actor):
         :return: Does not return, unless reporting disabled.
         """
         _log.info("Started status reporting thread.")
-        ttl = self._config.REPORTING_TTL_SECS
-        interval = self._config.REPORTING_INTERVAL_SECS
+        ttl = self.config.REPORTING_TTL_SECS
+        interval = self.config.REPORTING_INTERVAL_SECS
         _log.debug("Reporting interval: %s, TTL: %s", interval, ttl)
 
         if interval == 0:
@@ -213,7 +176,7 @@ class EtcdAPI(_EtcdClientOwner, Actor):
                 # all and keep trying...
                 _log.warning("Error when trying to check into etcd (%r), "
                              "retrying after %s seconds.", e, RETRY_DELAY)
-                self._reconnect()
+                self.reconnect()
                 gevent.sleep(RETRY_DELAY)
             else:
                 # Jitter by 10% of interval.
@@ -242,11 +205,11 @@ class EtcdAPI(_EtcdClientOwner, Actor):
         status_value = json.dumps(status)
         uptime_value = str(uptime)
 
-        status_key = key_for_status(self._config.HOSTNAME)
-        self._client.set(status_key, status_value)
+        status_key = key_for_status(self.config.HOSTNAME)
+        self.client.set(status_key, status_value)
 
-        uptime_key = key_for_uptime(self._config.HOSTNAME)
-        self._client.set(uptime_key, uptime_value, ttl=ttl)
+        uptime_key = key_for_uptime(self.config.HOSTNAME)
+        self.client.set(uptime_key, uptime_value, ttl=ttl)
 
     @actor_message()
     def load_config(self):
@@ -276,7 +239,7 @@ class EtcdAPI(_EtcdClientOwner, Actor):
         :param str reason: Optional reason to log out.
         """
         _log.info("Forcing a resync from etcd.  Reason: %s.", reason)
-        self._watcher.resync_after_current_poll = True
+        self._watcher.resync_after_current_poll()
 
     def _on_worker_died(self, watch_greenlet):
         """
@@ -287,7 +250,7 @@ class EtcdAPI(_EtcdClientOwner, Actor):
         sys.exit(1)
 
 
-class _EtcdWatcher(_EtcdClientOwner, gevent.Greenlet):
+class _EtcdWatcher(gevent.Greenlet):
     """
     Greenlet that watches the etcd data model for changes.
 
@@ -310,6 +273,8 @@ class _EtcdWatcher(_EtcdClientOwner, gevent.Greenlet):
         self._config = config
         self.hosts_ipset = hosts_ipset
 
+        self.poll_helper = EtcdWatchHelper(config, VERSION_DIR)
+
         # Keep track of the config loaded from etcd so we can spot if it
         # changes.
         self.last_global_config = None
@@ -320,20 +285,14 @@ class _EtcdWatcher(_EtcdClientOwner, gevent.Greenlet):
         self.load_config = Event()
         self.begin_polling = Event()
 
-        # Flag used to trigger a resync.  this is modified from other
-        # greenlets, which is safe in Python.
-        self.resync_after_current_poll = False
-
         # Event that we trigger once the config is loaded.
         self.configured = Event()
 
         # Etcd client, initialised lazily.
-        self._client = None
         self.my_config_dir = dir_for_per_host_config(self._config.HOSTNAME)
 
         # Polling state initialized at poll start time.
         self.splitter = None
-        self.next_etcd_index = None
 
         # Cache of known endpoints, used to resolve deletions of whole
         # directory trees.
@@ -383,6 +342,17 @@ class _EtcdWatcher(_EtcdClientOwner, gevent.Greenlet):
             on_set=self._resync,
             on_del=self._resync)
 
+    @property
+    def _client(self):
+        # We use the EtcdWatchHelper to manage our client.
+        return self.poll_helper.client
+
+    def resync_after_current_poll(self):
+        # Trigger a resync after this poll.  We set this flag from a different
+        # thread than it is read from but that is a safe operation in Python.
+        _log.info("Triggering a resync after this poll")
+        self.poll_helper.resync_after_current_poll = True
+
     @logging_exceptions
     def _run(self):
         """
@@ -392,7 +362,7 @@ class _EtcdWatcher(_EtcdClientOwner, gevent.Greenlet):
         self.load_config.wait()
         while True:
             _log.info("Reconnecting and loading snapshot from etcd...")
-            self._reconnect(copy_cluster_id=False)
+            self.poll_helper.reconnect(copy_cluster_id=False)
             self._wait_for_ready()
 
             # Always reload the config.  This lets us detect if the config has
@@ -415,7 +385,7 @@ class _EtcdWatcher(_EtcdClientOwner, gevent.Greenlet):
                 self._load_initial_dump()
                 while True:
                     # Wait for something to change.
-                    response = self._wait_for_etcd_event()
+                    response = self.poll_helper.wait_for_etcd_event()
                     self.dispatcher.handle_event(response)
             except ResyncRequired:
                 _log.info("Polling aborted, doing resync.")
@@ -510,7 +480,7 @@ class _EtcdWatcher(_EtcdClientOwner, gevent.Greenlet):
 
         :raises ResyncRequired: if the Ready flag is not set in the snapshot.
         """
-        initial_dump = self._client.read(VERSION_DIR, recursive=True)
+        initial_dump = self.poll_helper.load_initial_dump()
         _log.info("Loaded snapshot from etcd cluster %s, parsing it...",
                   self._client.expected_cluster_id)
         rules_by_id = {}
@@ -574,93 +544,6 @@ class _EtcdWatcher(_EtcdClientOwner, gevent.Greenlet):
                       len(self.ipv4_by_hostname))
             self.hosts_ipset.replace_members(self.ipv4_by_hostname.values(),
                                              async=True)
-
-        # The etcd_index is the high-water-mark for the snapshot, record that
-        # we want to poll starting at the next index.
-        self.next_etcd_index = initial_dump.etcd_index + 1
-
-    def _wait_for_etcd_event(self):
-        """
-        Polls etcd until something changes.
-
-        Retries on read timeouts and other non-fatal errors.
-
-        :returns: The etcd response object for the change.
-        :raises ResyncRequired: If we get out of sync with etcd or hit
-            a fatal error.
-        """
-        response = None
-        while not response:
-            if self.resync_after_current_poll:
-                _log.debug("Told to resync, aborting poll.")
-                self.resync_after_current_poll = False
-                raise ResyncRequired()
-
-            try:
-                _log.debug("About to wait for etcd update %s",
-                           self.next_etcd_index)
-                response = self._client.read(VERSION_DIR,
-                                             wait=True,
-                                             waitIndex=self.next_etcd_index,
-                                             recursive=True,
-                                             timeout=Timeout(connect=10,
-                                                             read=90),
-                                             check_cluster_uuid=True)
-                _log.debug("etcd response: %r", response)
-            except (ReadTimeoutError, SocketTimeout) as e:
-                # This is expected when we're doing a poll and nothing
-                # happened. socket timeout doesn't seem to be caught by
-                # urllib3 1.7.1.  Simply reconnect.
-                _log.debug("Read from etcd timed out (%r), retrying.", e)
-                # Force a reconnect to ensure urllib3 doesn't recycle the
-                # connection.  (We were seeing this with urllib3 1.7.1.)
-                self._reconnect()
-            except (ConnectTimeoutError,
-                    urllib3.exceptions.HTTPError,
-                    httplib.HTTPException) as e:
-                # We don't log out the stack trace here because it can spam the
-                # logs heavily if the requests keep failing.  The errors are
-                # very descriptive anyway.
-                _log.warning("Low-level HTTP error, reconnecting to "
-                             "etcd: %r.", e)
-                self._reconnect()
-
-            except (EtcdClusterIdChanged, EtcdEventIndexCleared) as e:
-                _log.warning("Out of sync with etcd (%r).  Reconnecting "
-                             "for full sync.", e)
-                raise ResyncRequired()
-            except EtcdException as e:
-                # Sadly, python-etcd doesn't have a dedicated exception
-                # for the "no more machines in cluster" error. Parse the
-                # message:
-                msg = (e.message or "unknown").lower()
-                # Limit our retry rate in case etcd is down.
-                gevent.sleep(1)
-                if "no more machines" in msg:
-                    # This error comes from python-etcd when it can't
-                    # connect to any servers.  When we retry, it should
-                    # reconnect.
-                    # TODO: We should probably limit retries here and die
-                    # That'd recover from errors caused by resource
-                    # exhaustion/leaks.
-                    _log.error("Connection to etcd failed, will retry.")
-                else:
-                    # Assume any other errors are fatal to our poll and
-                    # do a full resync.
-                    _log.exception("Unknown etcd error %r; doing resync.",
-                                   e.message)
-                    self._reconnect()
-                    raise ResyncRequired()
-            except:
-                _log.exception("Unexpected exception during etcd poll")
-                raise
-
-        # Since we're polling on a subtree, we can't just increment
-        # the index, we have to look at the modifiedIndex to spot
-        # if we've skipped a lot of updates.
-        self.next_etcd_index = max(self.next_etcd_index,
-                                   response.modifiedIndex) + 1
-        return response
 
     def _resync(self, response, **kwargs):
         """
@@ -993,6 +876,3 @@ def safe_decode_json(raw_json, log_tag=None):
                      log_tag, raw_json)
         return None
 
-
-class ResyncRequired(Exception):
-    pass
