@@ -364,9 +364,11 @@ class TestConfig(unittest.TestCase):
                      "ReportingIntervalSecs": 47,
                      "ReportingTTLSecs": 4 }
 
-        with self.assertRaisesRegexp(ConfigException,
-                                     "Reporting TTL.*?less than or equal to reporting interval.*"):
+        with mock.patch('calico.common.complete_logging'):
             config.report_etcd_config({}, cfg_dict)
+
+        self.assertEqual(config.REPORTING_INTERVAL_SECS, 47)
+        self.assertEqual(config.REPORTING_TTL_SECS, 117)
 
     def test_reporting_interval_and_ttl_zero(self):
         """

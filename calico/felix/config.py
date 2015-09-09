@@ -166,7 +166,8 @@ class Config(object):
         self.add_parameter("FelixHostname", "Felix compute host hostname",
                            socket.gethostname(), sources=[ENV, FILE])
 
-        self.add_parameter("StartupCleanupDelay", "Delay before cleanup starts",
+        self.add_parameter("StartupCleanupDelay",
+                           "Delay before cleanup starts",
                            30, value_is_int=True)
         self.add_parameter("PeriodicResyncInterval",
                            "How often to do cleanups, seconds",
@@ -196,10 +197,11 @@ class Config(object):
         self.add_parameter("IpInIpMtu",
                            "MTU to set on the IP-in-IP device", 1440,
                            value_is_int=True)
-
-        self.add_parameter("ReportingIntervalSecs", "Status reporting interval in seconds",
+        self.add_parameter("ReportingIntervalSecs",
+                           "Status reporting interval in seconds",
                            0, value_is_int=True)
-        self.add_parameter("ReportingTTLSecs", "Status report time to live in seconds",
+        self.add_parameter("ReportingTTLSecs",
+                           "Status report time to live in seconds",
                            0, value_is_int=True)
 
         # Read the environment variables, then the configuration file.
@@ -276,7 +278,8 @@ class Config(object):
         Read all of the variables from the environment.
         """
         for name, parameter in self.parameters.iteritems():
-            # All currently defined config parameters have ENV as a valid source.
+            # All currently defined config parameters have ENV as a valid
+            # source.
             assert(ENV in parameter.sources)
             # ENV is the first source, so we can assert that using defaults.
             assert(parameter.active_source is None)
@@ -389,7 +392,6 @@ class Config(object):
                 self.parameters["DefaultEndpointToHostAction"]
             )
 
-
         # For non-positive time values of reporting interval we set both
         # interval and ttl to 0 - i.e. status reporting is disabled.
         if self.REPORTING_INTERVAL_SECS <= 0:
@@ -397,11 +399,11 @@ class Config(object):
             self.REPORTING_TTL_SECS = 0
             self.REPORTING_INTERVAL_SECS = 0
 
-        # Status report time to live must be more than status reporting interval,
-        # unless TTL is default. Set TTL to default if it's not.
-        if self.REPORTING_TTL_SECS <= self.REPORTING_INTERVAL_SECS\
-                or self.REPORTING_TTL_SECS == 0:
-            log.warning("Reporting TTL set to {}.".format(self.REPORTING_TTL_SECS))
+        # Ensure the TTL is longer than the reporting interval, defaulting
+        # it if not.
+        if (self.REPORTING_TTL_SECS <= self.REPORTING_INTERVAL_SECS or
+                self.REPORTING_TTL_SECS == 0):
+            log.warning("Reporting TTL set to %s.", self.REPORTING_TTL_SECS)
             self.REPORTING_TTL_SECS = self.REPORTING_INTERVAL_SECS * 5/2
 
         if not final:
