@@ -56,6 +56,9 @@ class TestCommon(unittest.TestCase):
     def tearDown(self):
         pass
 
+    def test_invalid(self):
+        self.assertFalse(True, "This is supposed to fail")
+
     def test_validate_port(self):
         self.assertFalse(common.validate_port(-1))
         self.assertFalse(common.validate_port(0))
