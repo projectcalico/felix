@@ -48,4 +48,5 @@ MISSING = object()
 class TestCommon(unittest.TestCase):
 
     def test_invalid(self):
+        print "come on jenkins"
         self.assertFalse(True, "This is supposed to fail")
