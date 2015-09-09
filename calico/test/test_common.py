@@ -46,15 +46,6 @@ MISSING = object()
 
 
 class TestCommon(unittest.TestCase):
-    def setUp(self):
-        self.m_config = mock.Mock()
-        self.m_config.IFACE_PREFIX = "tap"
-        self.m_config.HOSTNAME = "localhost"
-        self.m_id = EndpointId("localhost", "orchestrator",
-                               "workload", "endpoint")
-
-    def tearDown(self):
-        pass
 
     def test_invalid(self):
         self.assertFalse(True, "This is supposed to fail")
