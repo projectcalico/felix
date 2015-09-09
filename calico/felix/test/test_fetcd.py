@@ -44,6 +44,7 @@ TAGS_STR = json.dumps(TAGS)
 
 ETCD_ADDRESS = 'localhost:4001'
 
+
 class TestEtcdAPI(BaseTestCase):
 
     @patch("calico.felix.fetcd._EtcdWatcher", autospec=True)
@@ -112,10 +113,10 @@ class ExpectedException(Exception):
     pass
 
 
-class TestExcdWatcher(BaseTestCase):
+class TestEtcdWatcher(BaseTestCase):
 
     def setUp(self):
-        super(TestExcdWatcher, self).setUp()
+        super(TestEtcdWatcher, self).setUp()
         self.m_config = Mock()
         self.m_config.HOSTNAME = "hostname"
         self.m_config.IFACE_PREFIX = "tap"
@@ -471,8 +472,11 @@ class TestEtcdReporting(BaseTestCase):
         self.m_config.REPORTING_INTERVAL_SECS = 1
         self.m_config.REPORTING_TTL_SECS = 10
         self.m_hosts_ipset = Mock(spec=IpsetActor)
-        with patch("calico.felix.fetcd.monotonic_time", return_value=100):
-            self.api = EtcdAPI(self.m_config, self.m_hosts_ipset)
+        with patch("gevent.spawn", autospec=True):
+            with patch("calico.felix.fetcd._EtcdWatcher", autospec=True):
+                with patch("calico.felix.fetcd.monotonic_time",
+                           return_value=100):
+                    self.api = EtcdAPI(self.m_config, self.m_hosts_ipset)
 
     @patch("gevent.sleep", autospec=True)
     def test_reporting_loop_mainline(self, m_sleep):
