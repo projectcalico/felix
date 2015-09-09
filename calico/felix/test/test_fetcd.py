@@ -1,23 +1,20 @@
 # Copyright (c) Metaswitch Networks 2015. All rights reserved.
-import datetime
+from datetime import datetime
 import json
 import logging
+
 from etcd import EtcdResult, EtcdException
 import etcd
 from gevent.event import Event
-import gevent
 from mock import Mock, call, patch, ANY
-import socket
 
-from calico.datamodel_v1 import EndpointId, key_for_status, \
-    key_for_uptime
+from calico.datamodel_v1 import EndpointId
 from calico.felix.config import Config
 from calico.felix.ipsets import IpsetActor
 from calico.felix.fetcd import _EtcdWatcher, ResyncRequired, EtcdAPI, \
     die_and_restart
 from calico.felix.splitter import UpdateSplitter
-from calico.felix.test.base import BaseTestCase
-
+from calico.felix.test.base import BaseTestCase, JSONString
 
 _log = logging.getLogger(__name__)
 
@@ -469,144 +466,53 @@ class TestEtcdReporting(BaseTestCase):
         self.m_config = Mock()
         self.m_config.IFACE_PREFIX = "tap"
         self.m_config.ETCD_ADDR = "localhost:4001"
-        self.m_config.HOSTNAME = socket.gethostname()
+        self.m_config.HOSTNAME = "hostname"
         self.m_config.RESYNC_INTERVAL = 0
+        self.m_config.REPORTING_INTERVAL_SECS = 1
+        self.m_config.REPORTING_TTL_SECS = 10
+        self.m_hosts_ipset = Mock(spec=IpsetActor)
+        with patch("calico.felix.fetcd.monotonic_time", return_value=100):
+            self.api = EtcdAPI(self.m_config, self.m_hosts_ipset)
+
+    @patch("gevent.sleep", autospec=True)
+    def test_reporting_loop_mainline(self, m_sleep):
+        """
+        Test the mainline function of the status reporting loop.
+
+        It should repeatedly call the _update_felix_status method,
+        retrying on various exceptions.
+        """
+        with patch.object(self.api, "_update_felix_status") as m_update:
+            m_update.side_effect = [EtcdException, None, RuntimeError]
+            self.assertRaises(RuntimeError,
+                              self.api._periodically_report_status)
+        self.assertEqual(m_update.mock_calls,
+                         [call(10)] * 3)
+
+        retry_call, jittered_call = m_sleep.mock_calls
+        self.assertEqual(retry_call, call(5))
+        _, (delay,), _ = jittered_call
+        self.assertTrue(delay >= 1)
+        self.assertTrue(delay <= 1.1005)
+
+    def test_reporting_loop_disabled(self):
         self.m_config.REPORTING_INTERVAL_SECS = 0
-        self.m_config.REPORTING_TTL_SECS = 0
+        with patch.object(self.api, "_update_felix_status") as m_update:
+            m_update.side_effect = RuntimeError
+            self.api._periodically_report_status()
 
-    @patch('calico.felix.fetcd.EtcdAPI.write_to_etcd')
-    @patch('calico.felix.fetcd._EtcdWatcher')
-    @patch('calico.felix.fetcd.etcd')
-    def finish_setup(self, m_etcd, m_EtcdWatcher, m_write_to_etcd, **kwargs):
-        # Set configuration attributes and start etcd_api
-        for key, value in kwargs.iteritems():
-            setattr(self.m_config, key, value)
-
-        self.m_hosts_ipset = Mock()
-        self.etcd_api = EtcdAPI(self.m_config, self.m_hosts_ipset)
-
-        self.etcd_api.write_to_etcd = Mock()
-
-    def test_write_to_etcd_actor_message(self):
-        """
-        Test write_to_etcd actor message calls client.write
-        """
-        self.m_hosts_ipset = Mock()
-        self.etcd_api = EtcdAPI(self.m_config, self.m_hosts_ipset)
-
-        with patch.object(self.etcd_api.client, 'write'):
-            self.etcd_api.write_to_etcd('key', 'value', async=True)
-            self.step_actor(self.etcd_api)
-            self.assertTrue(self.etcd_api.client.write.called)
-
-    def test_update_felix_status_disabled(self):
-        """
-        Test reporting is disabled for reporting interval 0
-        """
-        self.finish_setup()
-        # We call gevent.sleep so that _status_reporting thread is executed -
-        # since no interval and ttl is given, _status_reporting thread returns
-        # instead of writing to etcd.
-        gevent.sleep(1)
-        self.assertFalse(self.etcd_api.write_to_etcd.called)
-
-    def test_update_felix_status_single(self):
-        """
-        Test felix status is updated
-        """
-        self.finish_setup(REPORTING_INTERVAL_SECS=15,
-                          REPORTING_TTL_SECS=37)
-
-        hostname = self.etcd_api._config.HOSTNAME
-        status_key = key_for_status(hostname)
-        uptime_key = key_for_uptime(hostname)
-        ttl = self.etcd_api._config.REPORTING_TTL_SECS
-
-        # We call gevent.sleep so that _status_reporting thread is executed
-        gevent.sleep(1)
-
-        status_call = call(status_key, TestIfStatus(), async=True)
-        uptime_call = call(uptime_key, TestIfUptime(), ttl=ttl, async=True)
-        self.etcd_api.write_to_etcd.assert_has_calls([status_call,
-                                                      uptime_call])
-
-    def test_update_felix_status_continuous(self):
-        """
-        Test felix status is being continuously updated
-        """
-        self.finish_setup(REPORTING_INTERVAL_SECS=5,
-                          REPORTING_TTL_SECS=17)
-        hostname = self.etcd_api._config.HOSTNAME
-        status_key = key_for_status(hostname)
-        uptime_key = key_for_uptime(hostname)
-        ttl = self.etcd_api._config.REPORTING_TTL_SECS
-
-        status_call = call(status_key, TestIfStatus(), async=True)
-        uptime_call = call(uptime_key, TestIfUptime(), ttl=ttl, async=True)
-
-        # We call gevent.sleep so that _status_reporting thread is executed
-        gevent.sleep(5)
-
-        last_status_call = None
-        for update in range(5):
-            gevent.sleep(5)
-            # Check that both uptime and status were updated
-            self.etcd_api.write_to_etcd.assert_has_calls([status_call, uptime_call])
-            # Update last_status_call and reset write_to_etcd calls
-            last_status_call = self.etcd_api.write_to_etcd.mock_calls[0]
-            self.etcd_api.write_to_etcd.reset_mock()
-
-    @patch('calico.felix.fetcd._reconnect')
-    def test_update_felix_status_reconnects_on_etcd_exception(self, _reconnect):
-        """
-        Test felix status handles exceptions
-        """
-        self.finish_setup(REPORTING_INTERVAL_SECS=4,
-                          REPORTING_TTL_SECS=12)
-        self.etcd_api.write_to_etcd = Mock(side_effect=EtcdException)
-
-        gevent.sleep(1)
-
-        self.assertTrue(_reconnect.called)
+    @patch("datetime.datetime", autospec=True)
+    @patch("calico.felix.fetcd.monotonic_time", return_value=200)
+    def test_update_felix_status(self, m_monotime, m_datetime):
+        m_datetime.utcnow.return_value = datetime(2015, 9, 10, 2, 1, 53, 1234)
+        with patch.object(self.api.client, "set") as m_set:
+            self.api._update_felix_status(10)
+        # Should write two keys into etcd, one with a TTL and another with
+        # richer status.
+        self.assertEqual(m_set.mock_calls, [
+            call("/calico/felix/v1/host/hostname/last_reported_status",
+                 JSONString({"uptime": 100, "time": "2015-09-10T02:01:53Z"})),
+            call("/calico/felix/v1/host/hostname/uptime", '100', ttl=10),
+        ])
 
 
-class TestIfStatus(object):
-    """
-    Used to check whether status has JSON format and contains expected
-    attributes, whis are:
-    - timestamp in ISO 8601 Zulu format
-    """
-    def __eq__(self, other):
-        try:
-            status = json.loads(other)
-            time = status['status_time']
-            parsed_time = datetime.datetime.strptime(time, "%Y-%m-%dT%H:%M:%SZ")
-        except (ValueError, KeyError):
-            return False
-        return True
-
-    def __repr__(self):
-        return '%s()' % self.__class__.__name__
-
-class TestIfUptime(object):
-    """
-    Used to check whether uptime has correct format (i.e. whether it is
-    non-negative integer)
-    """
-    def __eq__(self, other):
-        is_int = (type(other) == int)
-        is_non_negative = (other >= 0)
-        return is_int and is_non_negative
-
-    def __repr__(self):
-        return '%s()' % self.__class__.__name__
-
-def is_json(object):
-    """
-    Help function, returns whether given object is json.
-    """
-    try:
-        json.loads(object)
-    except ValueError:
-        return False
-    return True

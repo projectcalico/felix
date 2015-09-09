@@ -28,6 +28,7 @@ import json
 import logging
 import datetime
 import time
+from calico.monotonic import monotonic_time
 
 from etcd import (EtcdException, EtcdClusterIdChanged, EtcdKeyNotFound,
                   EtcdEventIndexCleared)
@@ -95,9 +96,8 @@ class EtcdAPI(Actor):
     Since the python-etcd API is blocking, we defer API watches to
     a worker greenlet and communicate with it via Events.
 
-    To avoid needing to interupt in-progress polls, another working
-    greenlet is introduced to manage status updating and writing to
-    etcd.
+    To avoid needing to interrupt in-progress polls, another worker
+    greenlet is used to write status reports into etcd.
     """
 
     def __init__(self, config, hosts_ipset):
@@ -106,7 +106,7 @@ class EtcdAPI(Actor):
 
         # Timestamp storing when the EtcdAPI started. This info is needed
         # in order to report uptime to etcd.
-        self._start_time = time.time()
+        self._start_time = monotonic_time()
 
         # Start up the main etcd-watching greenlet.  It will wait for an
         # event from us before doing anything.
@@ -152,7 +152,7 @@ class EtcdAPI(Actor):
     @logging_exceptions
     def _periodically_report_status(self):
         """
-        Greenlet: periodically writes to etcd
+        Greenlet: periodically writes Felix's status into etcd.
 
         :return: Does not return, unless reporting disabled.
         """
@@ -167,59 +167,54 @@ class EtcdAPI(Actor):
 
         while True:
             try:
-                self.update_felix_status(ttl)
+                self._update_felix_status(ttl)
+            except (ReadTimeoutError,
+                    SocketTimeout,
+                    ConnectTimeoutError,
+                    urllib3.exceptions.HTTPError,
+                    httplib.HTTPException,
+                    EtcdException) as e:
+                # Sadly, we can get exceptions from any one of the layers
+                # below python-etcd or from python-etcd itself.  Catch them
+                # all and keep trying...
+                _log.warning("Error when trying to check into etcd (%r), "
+                             "retrying after %s seconds.", e, RETRY_DELAY)
+                _reconnect(self)
+                gevent.sleep(RETRY_DELAY)
+            else:
                 # Jitter by 10% of interval.
                 jitter = random.random() * 0.1 * interval
                 sleep_time = interval + jitter
                 gevent.sleep(sleep_time)
-            except (ReadTimeoutError, SocketTimeout) as e:
-                # This is expected when we're doing a poll and nothing
-                # happened. socket timeout doesn't seem to be caught by
-                # urllib3 1.7.1. Simply reconnect.
-                LOG.debug("Read from etcd timed out (%r), retrying.", e)
-                _reconnect(self)
-                gevent.sleep(RETRY_DELAY)
-            except Exception as e:
-                _log.debug("Status updating failed. %r. Reconnecting... ", e)
-                _reconnect(self)
-                gevent.sleep(RETRY_DELAY)
 
-
-    def update_felix_status(self, ttl):
+    def _update_felix_status(self, ttl):
         """
         Writes two keys to etcd:
-        uptime in secs
-        felix status in JSON - containing current time in ISO 8601 Zulu format
+
+        * uptime in secs
+        * felix status in JSON - containing current time in ISO 8601 Zulu
+          format
 
         :param: ttl int: time to live in sec - lifetime of the status report
         """
-        status_key = key_for_status(self._config.HOSTNAME)
         status = {}
 
         time_now = datetime.datetime.utcnow()
         time_formatted = time_now.replace(microsecond=0).isoformat()+'Z'
-        status['status_time'] = time_formatted
+        uptime = monotonic_time() - self._start_time
+        status = {
+            "time": time_formatted,
+            "uptime": uptime,
+        }
 
         status_value = json.dumps(status)
+        uptime_value = str(uptime)
+
+        status_key = key_for_status(self._config.HOSTNAME)
+        self.client.set(status_key, status_value)
 
         uptime_key = key_for_uptime(self._config.HOSTNAME)
-        uptime_value = int(time.time() - self._start_time)
-
-        self.write_to_etcd(status_key, status_value, async=True)
-        self.write_to_etcd(uptime_key, uptime_value, ttl=ttl, async=True)
-
-    @actor_message()
-    def write_to_etcd(self, key, value, **kwargs):
-        """
-        Writes to etcd
-
-        :param: key str: etcd key
-        :param: value obj: value to set
-        :param: ttl int: time to live in sec (optional)
-
-        other optional parameters - same as in etcd client write method
-        """
-        self.client.write(key, value, **kwargs)
+        self.client.set(uptime_key, uptime_value, ttl=ttl)
 
     @actor_message()
     def load_config(self):
