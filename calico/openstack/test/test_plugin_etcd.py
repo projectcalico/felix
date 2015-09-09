@@ -24,7 +24,7 @@ import json
 import mock
 import unittest
 from calico import common
-from calico.datamodel_v1 import STATUS_DIR
+from calico.datamodel_v1 import FELIX_STATUS_DIR
 
 import calico.openstack.test.lib as lib
 import calico.openstack.mech_calico as mech_calico
@@ -116,11 +116,11 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         self.maybe_reset_etcd()
 
         # Slow down reading from etcd status subtree to allow threads to run more often
-        if wait and key == STATUS_DIR:
+        if wait and key == FELIX_STATUS_DIR:
             eventlet.sleep(30)
             self.driver.db.create_or_update_agent = mock.Mock()
 
-        self.etcd_data[STATUS_DIR + "/vm1/status"] = {"status_time": "2015-08-14T10:37:54"}
+        self.etcd_data[FELIX_STATUS_DIR + "/vm1/status"] = {"time": "2015-08-14T10:37:54"}
 
         # Prepare a read result object.
         read_result = mock.Mock()
@@ -792,10 +792,10 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         Test that initial read through etcd status subtree notices felixes.
         """
         # Add arbitrary status keys to accumulated etcd db
-        self.etcd_data[STATUS_DIR + "/vm_47/status"] = {"status_time": "2015-08-14T10:37:54"}
-        self.etcd_data[STATUS_DIR + "/vm_47/felix_uptime"] = 12
-        self.etcd_data[STATUS_DIR + "/machine_123/felix_uptime"] = 17
-        self.etcd_data[STATUS_DIR + "/VMachine/status"] = {"status_time": "1994-06-09T05:13:18"}
+        self.etcd_data[FELIX_STATUS_DIR + "/vm_47/status"] = {"time": "2015-08-14T10:37:54"}
+        self.etcd_data[FELIX_STATUS_DIR + "/vm_47/uptime"] = 12
+        self.etcd_data[FELIX_STATUS_DIR + "/machine_123/uptime"] = 17
+        self.etcd_data[FELIX_STATUS_DIR + "/VMachine/status"] = {"time": "1994-06-09T05:13:18"}
 
         expected_calls = [mock.call(None, TestIfAgentState(host="vm_47",
                                                            start_flag=True,
@@ -825,7 +825,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         create_or_update_agent = self.driver.db.create_or_update_agent
 
         # Test status creation
-        status_create = FakeResponse(key=STATUS_DIR+"/VM_1/felix_uptime",
+        status_create = FakeResponse(key=FELIX_STATUS_DIR+"/VM_1/uptime",
                                      newKey=True)
         self.driver._handle_status_update(status_create)
         create_agent_state = TestIfAgentState(host="VM_1", start_flag=True)
@@ -834,7 +834,7 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         create_or_update_agent.reset_mock()
 
         # Test status update
-        status_update = FakeResponse(key=STATUS_DIR+"/VM_2/felix_uptime")
+        status_update = FakeResponse(key=FELIX_STATUS_DIR+"/VM_2/uptime")
         self.driver._handle_status_update(status_update)
         update_agent_state = TestIfAgentState(host="VM_2", start_flag=False)
         create_or_update_agent.assert_called_once(self.driver._db_context,
@@ -842,19 +842,19 @@ class TestPluginEtcd(lib.Lib, unittest.TestCase):
         create_or_update_agent.reset_mock()
 
         # Test deleted status
-        status_delete = FakeResponse(key=STATUS_DIR+"/VM_3/felix_uptime",
+        status_delete = FakeResponse(key=FELIX_STATUS_DIR+"/VM_3/uptime",
                                      action="delete")
         self.driver._handle_status_update(status_delete)
         self.assertFalse(create_or_update_agent.called)
 
         # Test expired status
-        status_expire = FakeResponse(key=STATUS_DIR+"/VM_4/felix_uptime",
+        status_expire = FakeResponse(key=FELIX_STATUS_DIR+"/VM_4/uptime",
                                      action="expire")
         self.driver._handle_status_update(status_expire)
         self.assertFalse(create_or_update_agent.called)
 
         # Test not-uptime status
-        status_not_uptime = FakeResponse(key=STATUS_DIR+"/VM_5/not_uptime")
+        status_not_uptime = FakeResponse(key=FELIX_STATUS_DIR+"/VM_5/not_uptime")
         self.driver._handle_status_update(status_not_uptime)
         self.assertFalse(create_or_update_agent.called)
 

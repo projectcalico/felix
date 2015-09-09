@@ -51,7 +51,7 @@ except ImportError:  # Kilo
 # Calico imports.
 import etcd
 from calico.etcdutils import ACTION_MAPPING
-from calico.datamodel_v1 import STATUS_DIR, hostname_from_status_key
+from calico.datamodel_v1 import FELIX_STATUS_DIR, hostname_from_status_key
 from calico.openstack.t_etcd import (
     CalicoTransportEtcd, port_etcd_data, profile_rules, profile_tags
 )
@@ -277,7 +277,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         Read through etcd status subtree and pass agent update of hosts which
         have an uptime key (i.e. felix is heartbeating).
         '''
-        response = self.transport.status_client.read(STATUS_DIR, recursive=True)
+        response = self.transport.status_client.read(FELIX_STATUS_DIR, recursive=True)
 
         # Read through hosts
         for host in response._children:
@@ -287,7 +287,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 # If host has uptime key, we pass the host to the neutron
                 # database with start_flag set True.
 
-                if key.split('/')[-1] == 'felix_uptime':
+                if key.split('/')[-1] == 'uptime':
                     hostname = hostname_from_status_key(key)
                     agent_state = felix_agent_state(hostname, start_flag=True)
                     self.db.create_or_update_agent(self._db_context, agent_state)
@@ -1145,9 +1145,9 @@ def felix_agent_state(hostname, start_flag=False):
 
 def is_uptime_key(key):
     '''Help function - return whether given key is uptime key'''
-    if key[:len(STATUS_DIR)] != STATUS_DIR:
+    if key[:len(FELIX_STATUS_DIR)] != FELIX_STATUS_DIR:
         return False
     path = key.split('/')
-    if path[-1] != 'felix_uptime':
+    if path[-1] != 'uptime':
         return False
     return True

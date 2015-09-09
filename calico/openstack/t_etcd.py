@@ -49,7 +49,7 @@ from calico.datamodel_v1 import (READY_KEY, CONFIG_DIR, TAGS_KEY_RE, HOST_DIR,
                                  key_for_endpoint, PROFILE_DIR, RULES_KEY_RE,
                                  key_for_profile, key_for_profile_rules,
                                  key_for_profile_tags, key_for_config,
-                                 NEUTRON_ELECTION_KEY, STATUS_DIR)
+                                 NEUTRON_ELECTION_KEY, FELIX_STATUS_DIR)
 from calico.election import Elector
 
 
@@ -539,7 +539,7 @@ class CalicoTransportEtcd(object):
                                              port=cfg.CONF.calico.etcd_port)
             while True:
                 # Get and handle an update.
-                response = self.status_client.read(STATUS_DIR,
+                response = self.status_client.read(FELIX_STATUS_DIR,
                                                    wait=True,
                                                    waitIndex=self.next_etcd_index,
                                                    recursive=True)
