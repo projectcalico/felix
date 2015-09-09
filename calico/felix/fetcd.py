@@ -27,7 +27,6 @@ import httplib
 import json
 import logging
 import datetime
-import time
 from calico.monotonic import monotonic_time
 
 from etcd import (EtcdException, EtcdClusterIdChanged, EtcdKeyNotFound,
@@ -89,20 +88,57 @@ RESYNC_KEYS = [
 ]
 
 
-class EtcdAPI(Actor):
+class _EtcdClientOwner(object):
+    """
+    Base class for objects that own an etcd Client.
+    """
+
+    def __init__(self, config):
+        super(_EtcdClientOwner, self).__init__()
+        self._config = config
+        self._client = None
+        self._reconnect()
+
+    def _reconnect(self, copy_cluster_id=True):
+        """
+        Reconnects the etcd client.
+        """
+        etcd_addr = self._config.ETCD_ADDR
+        if ":" in etcd_addr:
+            host, port = etcd_addr.split(":")
+            port = int(port)
+        else:
+            host = etcd_addr
+            port = 4001
+        if self._client and copy_cluster_id:
+            old_cluster_id = self._client.expected_cluster_id
+            _log.info("(Re)connecting to etcd. Old etcd cluster ID was %s.",
+                      old_cluster_id)
+        else:
+            _log.info("(Re)connecting to etcd. No previous cluster ID.")
+            old_cluster_id = None
+        self._client = etcd.Client(
+            host=host,
+            port=port,
+            expected_cluster_id=old_cluster_id
+        )
+
+
+class EtcdAPI(_EtcdClientOwner, Actor):
     """
     Our API to etcd
 
     Since the python-etcd API is blocking, we defer API watches to
     a worker greenlet and communicate with it via Events.
 
-    To avoid needing to interrupt in-progress polls, another worker
-    greenlet is used to write status reports into etcd.
+    We use a seconds worker for writing our status back to etcd.  This
+    avoids sharing the etcd client between reads and writes, which is
+    problematic because we need to handle EtcdClusterIdChanged for polls
+    but not for writes.
     """
 
     def __init__(self, config, hosts_ipset):
-        super(EtcdAPI, self).__init__()
-        self._config = config
+        super(EtcdAPI, self).__init__(config)
 
         # Timestamp storing when the EtcdAPI started. This info is needed
         # in order to report uptime to etcd.
@@ -118,12 +154,10 @@ class EtcdAPI(Actor):
         self._resync_greenlet = gevent.spawn(self._periodically_resync)
         self._resync_greenlet.link_exception(self._on_worker_died)
 
-        # Create a client to write to etcd.
-        self.client = None
-        _reconnect(self)
-
         # Start up a reporting greenlet.
-        self._status_reporting_greenlet = gevent.spawn(self._periodically_report_status)
+        self._status_reporting_greenlet = gevent.spawn(
+            self._periodically_report_status
+        )
         self._status_reporting_greenlet.link_exception(self._on_worker_died)
 
     @logging_exceptions
@@ -179,7 +213,7 @@ class EtcdAPI(Actor):
                 # all and keep trying...
                 _log.warning("Error when trying to check into etcd (%r), "
                              "retrying after %s seconds.", e, RETRY_DELAY)
-                _reconnect(self)
+                self._reconnect()
                 gevent.sleep(RETRY_DELAY)
             else:
                 # Jitter by 10% of interval.
@@ -197,8 +231,6 @@ class EtcdAPI(Actor):
 
         :param: ttl int: time to live in sec - lifetime of the status report
         """
-        status = {}
-
         time_now = datetime.datetime.utcnow()
         time_formatted = time_now.replace(microsecond=0).isoformat()+'Z'
         uptime = monotonic_time() - self._start_time
@@ -211,10 +243,10 @@ class EtcdAPI(Actor):
         uptime_value = str(uptime)
 
         status_key = key_for_status(self._config.HOSTNAME)
-        self.client.set(status_key, status_value)
+        self._client.set(status_key, status_value)
 
         uptime_key = key_for_uptime(self._config.HOSTNAME)
-        self.client.set(uptime_key, uptime_value, ttl=ttl)
+        self._client.set(uptime_key, uptime_value, ttl=ttl)
 
     @actor_message()
     def load_config(self):
@@ -255,7 +287,7 @@ class EtcdAPI(Actor):
         sys.exit(1)
 
 
-class _EtcdWatcher(gevent.Greenlet):
+class _EtcdWatcher(_EtcdClientOwner, gevent.Greenlet):
     """
     Greenlet that watches the etcd data model for changes.
 
@@ -274,7 +306,7 @@ class _EtcdWatcher(gevent.Greenlet):
     """
 
     def __init__(self, config, hosts_ipset):
-        super(_EtcdWatcher, self).__init__()
+        super(_EtcdWatcher, self).__init__(config)
         self._config = config
         self.hosts_ipset = hosts_ipset
 
@@ -296,7 +328,7 @@ class _EtcdWatcher(gevent.Greenlet):
         self.configured = Event()
 
         # Etcd client, initialised lazily.
-        self.client = None
+        self._client = None
         self.my_config_dir = dir_for_per_host_config(self._config.HOSTNAME)
 
         # Polling state initialized at poll start time.
@@ -360,7 +392,7 @@ class _EtcdWatcher(gevent.Greenlet):
         self.load_config.wait()
         while True:
             _log.info("Reconnecting and loading snapshot from etcd...")
-            _reconnect(self, copy_cluster_id=False)
+            self._reconnect(copy_cluster_id=False)
             self._wait_for_ready()
 
             # Always reload the config.  This lets us detect if the config has
@@ -388,14 +420,13 @@ class _EtcdWatcher(gevent.Greenlet):
             except ResyncRequired:
                 _log.info("Polling aborted, doing resync.")
 
-
     def _wait_for_ready(self):
         _log.info("Waiting for etcd to be ready...")
         ready = False
         while not ready:
             try:
-                db_ready = self.client.read(READY_KEY,
-                                            timeout=10).value
+                db_ready = self._client.read(READY_KEY,
+                                             timeout=10).value
             except EtcdKeyNotFound:
                 _log.warn("Ready flag not present in etcd; felix will pause "
                           "updates until the orchestrator sets the flag.")
@@ -428,13 +459,13 @@ class _EtcdWatcher(gevent.Greenlet):
         """
         while True:
             try:
-                global_cfg = self.client.read(CONFIG_DIR,
-                                              recursive=True)
+                global_cfg = self._client.read(CONFIG_DIR,
+                                               recursive=True)
                 global_dict = _build_config_dict(global_cfg)
 
                 try:
-                    host_cfg = self.client.read(self.my_config_dir,
-                                                recursive=True)
+                    host_cfg = self._client.read(self.my_config_dir,
+                                                 recursive=True)
                     host_dict = _build_config_dict(host_cfg)
                 except EtcdKeyNotFound:
                     # It is not an error for there to be no per-host
@@ -479,9 +510,9 @@ class _EtcdWatcher(gevent.Greenlet):
 
         :raises ResyncRequired: if the Ready flag is not set in the snapshot.
         """
-        initial_dump = self.client.read(VERSION_DIR, recursive=True)
+        initial_dump = self._client.read(VERSION_DIR, recursive=True)
         _log.info("Loaded snapshot from etcd cluster %s, parsing it...",
-                  self.client.expected_cluster_id)
+                  self._client.expected_cluster_id)
         rules_by_id = {}
         tags_by_id = {}
         endpoints_by_id = {}
@@ -568,13 +599,13 @@ class _EtcdWatcher(gevent.Greenlet):
             try:
                 _log.debug("About to wait for etcd update %s",
                            self.next_etcd_index)
-                response = self.client.read(VERSION_DIR,
-                                            wait=True,
-                                            waitIndex=self.next_etcd_index,
-                                            recursive=True,
-                                            timeout=Timeout(connect=10,
-                                                            read=90),
-                                            check_cluster_uuid=True)
+                response = self._client.read(VERSION_DIR,
+                                             wait=True,
+                                             waitIndex=self.next_etcd_index,
+                                             recursive=True,
+                                             timeout=Timeout(connect=10,
+                                                             read=90),
+                                             check_cluster_uuid=True)
                 _log.debug("etcd response: %r", response)
             except (ReadTimeoutError, SocketTimeout) as e:
                 # This is expected when we're doing a poll and nothing
@@ -583,7 +614,7 @@ class _EtcdWatcher(gevent.Greenlet):
                 _log.debug("Read from etcd timed out (%r), retrying.", e)
                 # Force a reconnect to ensure urllib3 doesn't recycle the
                 # connection.  (We were seeing this with urllib3 1.7.1.)
-                _reconnect(self)
+                self._reconnect()
             except (ConnectTimeoutError,
                     urllib3.exceptions.HTTPError,
                     httplib.HTTPException) as e:
@@ -592,7 +623,7 @@ class _EtcdWatcher(gevent.Greenlet):
                 # very descriptive anyway.
                 _log.warning("Low-level HTTP error, reconnecting to "
                              "etcd: %r.", e)
-                _reconnect(self)
+                self._reconnect()
 
             except (EtcdClusterIdChanged, EtcdEventIndexCleared) as e:
                 _log.warning("Out of sync with etcd (%r).  Reconnecting "
@@ -618,7 +649,7 @@ class _EtcdWatcher(gevent.Greenlet):
                     # do a full resync.
                     _log.exception("Unknown etcd error %r; doing resync.",
                                    e.message)
-                    _reconnect(self)
+                    self._reconnect()
                     raise ResyncRequired()
             except:
                 _log.exception("Unexpected exception during etcd poll")
@@ -776,30 +807,6 @@ class _EtcdWatcher(gevent.Greenlet):
                 self.endpoint_ids_per_host[hostname].discard(endpoint_id)
         if not self.endpoint_ids_per_host[hostname]:
             del self.endpoint_ids_per_host[hostname]
-
-
-def _reconnect(etcd_communicator, copy_cluster_id=True):
-    """
-    Reconnects the etcd client.
-
-    Parameter etcd_communicator can be either etcd_watcher or etcd_api
-    """
-    etcd_addr = etcd_communicator._config.ETCD_ADDR
-    if ":" in etcd_addr:
-        host, port = etcd_addr.split(":")
-        port = int(port)
-    else:
-        host = etcd_addr
-        port = 4001
-    if etcd_communicator.client and copy_cluster_id:
-        old_cluster_id = etcd_communicator.client.expected_cluster_id
-        _log.info("(Re)connecting to etcd. Old etcd cluster ID was %s.",
-                  old_cluster_id)
-    else:
-        _log.info("(Re)connecting to etcd. No previous cluster ID.")
-        old_cluster_id = None
-    etcd_communicator.client = etcd.Client(host=host, port=port,
-                                           expected_cluster_id=old_cluster_id)
 
 
 def die_and_restart():
@@ -985,6 +992,7 @@ def safe_decode_json(raw_json, log_tag=None):
         _log.warning("Failed to decode JSON for %s: %r.  Returning None.",
                      log_tag, raw_json)
         return None
+
 
 class ResyncRequired(Exception):
     pass
