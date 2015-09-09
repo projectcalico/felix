@@ -33,6 +33,28 @@ from calico.felix.futils import FailedSystemCall
 _log = logging.getLogger(__name__)
 
 
+def check_kernel_config():
+    """
+    Checks the kernel configuration for problems that would break our
+    security guarantees, for example.
+
+    :raises BadKernelConfig if a problem is detected.
+    """
+
+    # To prevent workloads from spoofing their IP addresses, we need to set the
+    # per-interface rp_filter setting to 1, which enables strict RPF checking.
+    # Verify that the kernel's global setting won't override our per-interface
+    # setting with an insecure value.
+    ps_name = "/proc/sys/net/ipv4/conf/all/rp_filter"
+    rp_filter = int(_read_proc_sys(ps_name))
+    if rp_filter > 1:
+        _log.critical("Kernel's RPF check is set to 'loose'.  This would "
+                      "allow endpoints to spoof their IP address.  Calico "
+                      "requires net.ipv4.conf.all.rp_filter to be set to "
+                      "0 or 1.")
+        raise BadKernelConfig("net.ipv4.conf.all.rp_filter set to 'loose'")
+
+
 def interface_exists(interface):
     """
     Checks if an interface exists.
@@ -97,21 +119,20 @@ def configure_interface_ipv4(if_name):
     Configure the various proc file system parameters for the interface for
     IPv4.
 
-    Specifically, allow packets from controlled interfaces to be directed to
-    localhost, and enable proxy ARP.
+    Specifically,
+      - Allow packets from controlled interfaces to be directed to localhost
+      - Enable proxy ARP
+      - Enable the kernel's RPF check.
 
     :param if_name: The name of the interface to configure.
     :returns: None
     """
-    with open('/proc/sys/net/ipv4/conf/%s/route_localnet' % if_name,
-              'wb') as f:
-        f.write('1')
-
-    with open("/proc/sys/net/ipv4/conf/%s/proxy_arp" % if_name, 'wb') as f:
-        f.write('1')
-
-    with open("/proc/sys/net/ipv4/neigh/%s/proxy_delay" % if_name, 'wb') as f:
-        f.write('0')
+    # Enable the kernel's RPF check, which ensures that a VM cannot spoof
+    # its IP address.
+    _write_proc_sys('/proc/sys/net/ipv4/conf/%s/rp_filter' % if_name, 1)
+    _write_proc_sys('/proc/sys/net/ipv4/conf/%s/route_localnet' % if_name, 1)
+    _write_proc_sys("/proc/sys/net/ipv4/conf/%s/proxy_arp" % if_name, 1)
+    _write_proc_sys("/proc/sys/net/ipv4/neigh/%s/proxy_delay" % if_name, 0)
 
 
 def configure_interface_ipv6(if_name, proxy_target):
@@ -126,13 +147,22 @@ def configure_interface_ipv6(if_name, proxy_target):
     :returns: None
     :raises: FailedSystemCall
     """
-    with open("/proc/sys/net/ipv6/conf/%s/proxy_ndp" % if_name, 'wb') as f:
-        f.write('1')
+    _write_proc_sys("/proc/sys/net/ipv6/conf/%s/proxy_ndp" % if_name, 1)
 
     # Allows None if no IPv6 proxy target is required.
     if proxy_target:
         futils.check_call(["ip", "-6", "neigh", "add",
                            "proxy", str(proxy_target), "dev", if_name])
+
+
+def _read_proc_sys(name):
+    with open(name, "rb") as f:
+        return f.read().strip()
+
+
+def _write_proc_sys(name, value):
+    with open(name, "wb") as f:
+        f.write(str(value))
 
 
 def add_route(ip_type, ip, interface, mac):
@@ -269,6 +299,8 @@ RTM_NEWLINK = 16
 RTM_DELLINK = 17
 
 IFLA_IFNAME = 3
+IFLA_OPERSTATE = 16
+IF_OPER_UP = 6
 
 
 class RTNetlinkError(Exception):
@@ -298,6 +330,11 @@ class InterfaceWatcher(Actor):
                           socket.NETLINK_ROUTE)
         s.bind((os.getpid(), RTMGRP_LINK))
 
+        # A dict that remembers the detailed flags of an interface
+        # when we last signalled it as being up.  We use this to avoid
+        # sending duplicate interface_update signals.
+        if_last_flags = {}
+
         while True:
             # Get the next set of data.
             data = s.recv(65535)
@@ -315,46 +352,73 @@ class InterfaceWatcher(Actor):
                 # process down.
                 raise RTNetlinkError("Netlink error message, header : %s",
                                      futils.hex(hdr))
+            _log.debug("Netlink message type %s len %s", msg_type, msg_len)
 
-            # Now 16 bytes of netlink header.
-            hdr = data[:16]
-            data = data[16:]
-            family, _, if_type, index, flags, change = struct.unpack("=BBHiII",
-                                                                     hdr)
+            if msg_type in [RTM_NEWLINK, RTM_DELLINK]:
+                # A new or removed interface.  Read the struct
+                # ifinfomsg, which is 16 bytes.
+                hdr = data[:16]
+                data = data[16:]
+                _, _, _, index, flags, _ = struct.unpack("=BBHiII", hdr)
+                _log.debug("Interface index %s flags %x", index, flags)
 
-            # Bytes left is the message length minus the two headers of 16
-            # bytes each.
-            remaining = msg_len - 32
+                # Bytes left is the message length minus the two headers of 16
+                # bytes each.
+                remaining = msg_len - 32
 
-            while remaining:
-                # The data content is an array of RTA objects, each of which
-                # has a 4 byte header and some data.
-                rta_len, rta_type = struct.unpack("=HH", data[:4])
+                # Loop through attributes, looking for the pieces of
+                # information that we need.
+                ifname = None
+                operstate = None
+                while remaining:
+                    # The data content is an array of RTA objects, each of
+                    # which has a 4 byte header and some data.
+                    rta_len, rta_type = struct.unpack("=HH", data[:4])
 
-                # This check comes from RTA_OK, and terminates a string of
-                # routing attributes.
-                if rta_len < 4:
-                    break
+                    # This check comes from RTA_OK, and terminates a string of
+                    # routing attributes.
+                    if rta_len < 4:
+                        break
 
-                rta_data = data[4:rta_len]
+                    rta_data = data[4:rta_len]
 
-                # Remove the RTA object from the data. The length to jump is
-                # the rta_len rounded up to the nearest 4 byte boundary.
-                increment = int((rta_len + 3) / 4) * 4
-                data = data[increment:]
-                remaining -= increment
+                    # Remove the RTA object from the data. The length to jump
+                    # is the rta_len rounded up to the nearest 4 byte boundary.
+                    increment = int((rta_len + 3) / 4) * 4
+                    data = data[increment:]
+                    remaining -= increment
 
-                if rta_type == IFLA_IFNAME:
-                    # We only really care about NEWLINK messages; if an
-                    # interface goes away, we don't need to care (since it
-                    # takes its routes with it, and the interface will
-                    # presumably go away too). We do log though, just in case.
-                    rta_data = rta_data[:-1]
-                    if msg_type == RTM_NEWLINK:
-                        _log.debug("Detected new network interface : %s",
-                                   rta_data)
-                        self.update_splitter.on_interface_update(rta_data,
-                                                                 async=True)
-                    else:
-                        _log.debug("Network interface has gone away : %s",
-                                   rta_data)
+                    if rta_type == IFLA_IFNAME:
+                        ifname = rta_data[:-1]
+                        _log.debug("IFLA_IFNAME: %s", ifname)
+                    elif rta_type == IFLA_OPERSTATE:
+                        operstate, = struct.unpack("=B", rta_data[:1])
+                        _log.debug("IFLA_OPERSTATE: %s", operstate)
+
+                if (ifname and
+                    ifname in if_last_flags and
+                    (msg_type == RTM_DELLINK or operstate != IF_OPER_UP)):
+                    # An interface that we've previously signalled is
+                    # being deleted or oper down, so remove our record
+                    # of it.
+                    del if_last_flags[ifname]
+
+                if (ifname and
+                    msg_type == RTM_NEWLINK and
+                    operstate == IF_OPER_UP and
+                    (ifname not in if_last_flags or
+                     if_last_flags[ifname] != flags)):
+                    # We only care about notifying when a new
+                    # interface is usable, which - according to
+                    # https://www.kernel.org/doc/Documentation/networking/
+                    # operstates.txt - is fully conveyed by the
+                    # operstate.  (When an interface goes away, it
+                    # automatically takes its routes with it.)
+                    _log.debug("New network interface : %s %x", ifname, flags)
+                    if_last_flags[ifname] = flags
+                    self.update_splitter.on_interface_update(ifname,
+                                                             async=True)
+
+
+class BadKernelConfig(Exception):
+    pass
