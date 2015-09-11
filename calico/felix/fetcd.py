@@ -16,7 +16,8 @@
 felix.fetcd
 ~~~~~~~~~~~~
 
-Etcd polling functions.
+Our API to etcd.  Contains function to synchronize felix with etcd
+as well as reporting our status into etcd.
 """
 from collections import defaultdict
 import functools
@@ -45,7 +46,7 @@ from calico.datamodel_v1 import (VERSION_DIR, READY_KEY, CONFIG_DIR,
                                  HOST_IP_KEY_RE, IPAM_V4_CIDR_KEY_RE,
                                  key_for_status, key_for_uptime)
 from calico.etcdutils import (
-    PathDispatcher, EtcdClientOwner, EtcdWatchHelper, ResyncRequired
+    EtcdClientOwner, EtcdWatcher, ResyncRequired
 )
 from calico.felix.actor import Actor, actor_message
 from calico.felix.futils import intern_dict, intern_list, logging_exceptions
@@ -109,7 +110,7 @@ class EtcdAPI(EtcdClientOwner, Actor):
 
         # Start up the main etcd-watching greenlet.  It will wait for an
         # event from us before doing anything.
-        self._watcher = _EtcdWatcher(config, hosts_ipset)
+        self._watcher = _FelixEtcdWatcher(config, hosts_ipset)
         self._watcher.link(self._on_worker_died)
         self._watcher.start()
 
@@ -239,7 +240,7 @@ class EtcdAPI(EtcdClientOwner, Actor):
         :param str reason: Optional reason to log out.
         """
         _log.info("Forcing a resync from etcd.  Reason: %s.", reason)
-        self._watcher.resync_after_current_poll()
+        self._watcher.resync_after_current_poll = True
 
     def _on_worker_died(self, watch_greenlet):
         """
@@ -250,7 +251,7 @@ class EtcdAPI(EtcdClientOwner, Actor):
         sys.exit(1)
 
 
-class _EtcdWatcher(gevent.Greenlet):
+class _FelixEtcdWatcher(EtcdWatcher, gevent.Greenlet):
     """
     Greenlet that watches the etcd data model for changes.
 
@@ -269,11 +270,11 @@ class _EtcdWatcher(gevent.Greenlet):
     """
 
     def __init__(self, config, hosts_ipset):
-        super(_EtcdWatcher, self).__init__(config)
+        super(_FelixEtcdWatcher, self).__init__(config, VERSION_DIR)
         self._config = config
         self.hosts_ipset = hosts_ipset
 
-        self.poll_helper = EtcdWatchHelper(config, VERSION_DIR)
+        self._register_paths()
 
         # Keep track of the config loaded from etcd so we can spot if it
         # changes.
@@ -301,12 +302,15 @@ class _EtcdWatcher(gevent.Greenlet):
         # Next-hop IP addresses of our hosts, if populated in etcd.
         self.ipv4_by_hostname = {}
 
-        # Program the dispatcher with the paths we care about.  Since etcd
-        # gives us a single event for a recursive directory deletion, we have
-        # to handle deletes for lots of directories that we otherwise wouldn't
-        # care about.
-        self.dispatcher = PathDispatcher()
-        reg = self.dispatcher.register
+    def _register_paths(self):
+        """
+        Program the dispatcher with the paths we care about.
+
+        Since etcd gives us a single event for a recursive directory
+        deletion, we have to handle deletes for lots of directories that
+        we otherwise wouldn't care about.
+        """
+        reg = self.register_path
         # Top-level directories etc.  If these go away, stop polling and
         # resync.
         for key in RESYNC_KEYS:
@@ -342,17 +346,6 @@ class _EtcdWatcher(gevent.Greenlet):
             on_set=self._resync,
             on_del=self._resync)
 
-    @property
-    def _client(self):
-        # We use the EtcdWatchHelper to manage our client.
-        return self.poll_helper.client
-
-    def resync_after_current_poll(self):
-        # Trigger a resync after this poll.  We set this flag from a different
-        # thread than it is read from but that is a safe operation in Python.
-        _log.info("Triggering a resync after this poll")
-        self.poll_helper.resync_after_current_poll = True
-
     @logging_exceptions
     def _run(self):
         """
@@ -360,61 +353,19 @@ class _EtcdWatcher(gevent.Greenlet):
         monitors for changes and feeds them to the splitter.
         """
         self.load_config.wait()
-        while True:
-            _log.info("Reconnecting and loading snapshot from etcd...")
-            self.poll_helper.reconnect(copy_cluster_id=False)
-            self._wait_for_ready()
+        self.loop()
 
-            # Always reload the config.  This lets us detect if the config has
-            # changed and restart felix if so.
-            self._load_config()
-
-            if not self.configured.is_set():
-                # Unblock anyone who's waiting on the config.
-                self.configured.set()
-
-            if not self.begin_polling.is_set():
-                _log.info("etcd worker about to wait for begin_polling event")
-            self.begin_polling.wait()
-
-            try:
-                # Load initial dump from etcd.  First just get all the
-                # endpoints and profiles by id.  The response contains a
-                # generation ID allowing us to then start polling for updates
-                # without missing any.
-                self._load_initial_dump()
-                while True:
-                    # Wait for something to change.
-                    response = self.poll_helper.wait_for_etcd_event()
-                    self.dispatcher.handle_event(response)
-            except ResyncRequired:
-                _log.info("Polling aborted, doing resync.")
-
-    def _wait_for_ready(self):
-        _log.info("Waiting for etcd to be ready...")
-        ready = False
-        while not ready:
-            try:
-                db_ready = self._client.read(READY_KEY,
-                                             timeout=10).value
-            except EtcdKeyNotFound:
-                _log.warn("Ready flag not present in etcd; felix will pause "
-                          "updates until the orchestrator sets the flag.")
-                db_ready = "false"
-            except EtcdException as e:
-                # Note: we don't log the
-                _log.error("Failed to retrieve ready flag from etcd (%r). "
-                           "Felix will not receive updates until the "
-                           "connection to etcd is restored.", e)
-                db_ready = "false"
-
-            if db_ready == "true":
-                _log.info("etcd is ready.")
-                ready = True
-            else:
-                _log.info("etcd not ready.  Will retry.")
-                gevent.sleep(RETRY_DELAY)
-                continue
+    def _on_pre_resync(self):
+        self.wait_for_ready(RETRY_DELAY)
+        # Always reload the config.  This lets us detect if the config has
+        # changed and restart felix if so.
+        self._load_config()
+        if not self.configured.is_set():
+            # Unblock anyone who's waiting on the config.
+            self.configured.set()
+        if not self.begin_polling.is_set():
+            _log.info("etcd worker about to wait for begin_polling event")
+        self.begin_polling.wait()
 
     def _load_config(self):
         """
@@ -429,13 +380,13 @@ class _EtcdWatcher(gevent.Greenlet):
         """
         while True:
             try:
-                global_cfg = self._client.read(CONFIG_DIR,
-                                               recursive=True)
+                global_cfg = self.client.read(CONFIG_DIR,
+                                              recursive=True)
                 global_dict = _build_config_dict(global_cfg)
 
                 try:
-                    host_cfg = self._client.read(self.my_config_dir,
-                                                 recursive=True)
+                    host_cfg = self.client.read(self.my_config_dir,
+                                                recursive=True)
                     host_dict = _build_config_dict(host_cfg)
                 except EtcdKeyNotFound:
                     # It is not an error for there to be no per-host
@@ -474,15 +425,12 @@ class _EtcdWatcher(gevent.Greenlet):
                     self._config.report_etcd_config(host_dict, global_dict)
                 return
 
-    def _load_initial_dump(self):
+    def _on_snapshot_loaded(self, etcd_snapshot_response):
         """
         Loads a snapshot from etcd and passes it to the update splitter.
 
         :raises ResyncRequired: if the Ready flag is not set in the snapshot.
         """
-        initial_dump = self.poll_helper.load_initial_dump()
-        _log.info("Loaded snapshot from etcd cluster %s, parsing it...",
-                  self._client.expected_cluster_id)
         rules_by_id = {}
         tags_by_id = {}
         endpoints_by_id = {}
@@ -490,7 +438,7 @@ class _EtcdWatcher(gevent.Greenlet):
         self.endpoint_ids_per_host.clear()
         self.ipv4_by_hostname.clear()
         still_ready = False
-        for child in initial_dump.children:
+        for child in etcd_snapshot_response.children:
             profile_id, rules = parse_if_rules(child)
             if profile_id:
                 rules_by_id[profile_id] = rules

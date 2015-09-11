@@ -10,6 +10,7 @@ import gevent
 from urllib3 import Timeout
 import urllib3.exceptions
 from urllib3.exceptions import ReadTimeoutError, ConnectTimeoutError
+from calico.datamodel_v1 import READY_KEY
 
 _log = logging.getLogger(__name__)
 
@@ -113,14 +114,16 @@ class EtcdClientOwner(object):
         )
 
 
-class EtcdWatchHelper(EtcdClientOwner):
+class EtcdWatcher(EtcdClientOwner):
     """
     Helper class for managing an etcd watch session.  Maintains the
     etcd polling index and handles expected exceptions.
     """
 
-    def __init__(self, config, key_to_poll):
-        super(EtcdWatchHelper, self).__init__(config)
+    def __init__(self,
+                 config,
+                 key_to_poll):
+        super(EtcdWatcher, self).__init__(config)
         self.key_to_poll = key_to_poll
         self.next_etcd_index = None
 
@@ -128,6 +131,69 @@ class EtcdWatchHelper(EtcdClientOwner):
         # another thread.  Automatically reset to False after the resync is
         # triggered.
         self.resync_after_current_poll = False
+        self.dispatcher = PathDispatcher()
+
+    def loop(self):
+        while True:
+            try:
+                _log.info("Reconnecting and loading snapshot from etcd...")
+                self.reconnect(copy_cluster_id=False)
+                self._on_pre_resync()
+                try:
+                    # Load initial dump from etcd.  First just get all the
+                    # endpoints and profiles by id.  The response contains a
+                    # generation ID allowing us to then start polling for
+                    # updates without missing any.
+                    initial_dump = self.load_initial_dump()
+                    _log.info("Loaded snapshot from etcd cluster %s, "
+                              "processing it...",
+                              self.client.expected_cluster_id)
+                    self._on_snapshot_loaded(initial_dump)
+                    while True:
+                        # Wait for something to change.
+                        response = self.wait_for_etcd_event()
+                        self.dispatcher.handle_event(response)
+                except ResyncRequired:
+                    _log.info("Polling aborted, doing resync.")
+            except (ReadTimeoutError,
+                    SocketTimeout,
+                    ConnectTimeoutError,
+                    urllib3.exceptions.HTTPError,
+                    httplib.HTTPException,
+                    etcd.EtcdException) as e:
+                # Most likely a timeout or other error in the pre-resync;
+                # start over.  These exceptions have good semantic error text
+                # so the stack trace would just add log spam.
+                _log.error("Unexpected IO or etcd error, triggering "
+                           "resync with etcd: %r.", e)
+
+    def register_path(self, *args, **kwargs):
+        self.dispatcher.register(*args, **kwargs)
+
+    def wait_for_ready(self, retry_delay):
+        _log.info("Waiting for etcd to be ready...")
+        ready = False
+        while not ready:
+            try:
+                db_ready = self.client.read(READY_KEY, timeout=10).value
+            except etcd.EtcdKeyNotFound:
+                _log.warn("Ready flag not present in etcd; felix will pause "
+                          "updates until the orchestrator sets the flag.")
+                db_ready = "false"
+            except etcd.EtcdException as e:
+                # Note: we don't log the
+                _log.error("Failed to retrieve ready flag from etcd (%r). "
+                           "Felix will not receive updates until the "
+                           "connection to etcd is restored.", e)
+                db_ready = "false"
+
+            if db_ready == "true":
+                _log.info("etcd is ready.")
+                ready = True
+            else:
+                _log.info("etcd not ready.  Will retry.")
+                gevent.sleep(retry_delay)
+                continue
 
     def load_initial_dump(self):
         """
@@ -230,6 +296,23 @@ class EtcdWatchHelper(EtcdClientOwner):
         self.next_etcd_index = max(self.next_etcd_index,
                                    response.modifiedIndex) + 1
         return response
+
+    def _on_pre_resync(self):
+        """
+        Called before the initial dump is loaded and passed to
+        _process_initial_dump().
+        """
+        pass
+
+    def _on_snapshot_loaded(self, etcd_snapshot_response):
+        """
+        Called once a snapshot has been loaded, replaces all previous
+        state.
+
+        Responsible for applying the snapshot.
+        :param etcd_snapshot_response: Etcd response containing a complete dump.
+        """
+        pass
 
 
 class ResyncRequired(Exception):

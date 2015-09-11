@@ -271,16 +271,16 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
         self.db.create_or_update_agent(self._db_context, agent_state)
 
-
     def _register_initial_felixes(self):
-        '''
+        """
         Read through etcd status subtree and pass agent update of hosts which
         have an uptime key (i.e. felix is heartbeating).
-        '''
-        response = self.transport.status_client.read(FELIX_STATUS_DIR, recursive=True)
+        """
+        response = self.transport.status_client.read(FELIX_STATUS_DIR,
+                                                     recursive=True)
 
         # Read through hosts
-        for host in response._children:
+        for host in response.leaves():
             # Read through status updates of the node.
             for status in host['nodes']:
                 key = status['key']
