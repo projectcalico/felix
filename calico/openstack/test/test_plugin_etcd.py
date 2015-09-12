@@ -974,7 +974,7 @@ class TestIfAgentState(object):
             return False
         if self.start_flag == False and other.get("start_flag"):
             return False
-        return  True
+        return True
 
 class FakeResponse(object):
     """

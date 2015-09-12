@@ -301,7 +301,7 @@ class TestConfig(unittest.TestCase):
 
     def test_reporting_interval_not_int(self):
         """
-        Test exception is rased ifstatus reporting interval has invalid (non-integer) value.
+        Test exception is raised if status reporting interval has invalid (non-integer) value.
         """
         with mock.patch('calico.common.complete_logging'):
             config = Config("calico/felix/test/data/felix_missing.cfg")
@@ -341,7 +341,7 @@ class TestConfig(unittest.TestCase):
 
     def test_valid_interval_and_ttl(self):
         """
-        Test valid reporting parameters are not chaned.
+        Test valid reporting parameters are not changed.
         """
         with mock.patch('calico.common.complete_logging'):
             config = Config("calico/felix/test/data/felix_missing.cfg")
