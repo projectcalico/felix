@@ -485,12 +485,14 @@ def actor_message(needs_own_batch=False):
                 # would deadlock by waiting for ourselves.
 
                 # But first log that the message is being sent.
-                m = Message(msg_id, None, None, None, None, None)
-                m.log_info({
-                    "sender": caller,
-                    "receiver": self.name,
-                    "function": method_name,
-                })
+                if (not _message_log.disabled) and \
+                   (_message_log.isEnabledFor(logging.INFO)):
+                    _message_log.info(json.dumps({
+                        "uuid": msg_id,
+                        "sender": caller,
+                        "receiver": self.name,
+                        "function": method_name,
+                    }))
 
                 return fn(self, *args, **kwargs)
             else:
