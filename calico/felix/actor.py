@@ -114,12 +114,12 @@ from gevent.event import AsyncResult
 from gevent.queue import Queue
 from calico.felix import futils
 from calico.felix.futils import StatCounter
-from calico.common import MESSAGE_LOG_NAME
 
 _log = logging.getLogger(__name__)
 
 # Here we set up a custom logger to record all the messages that have been
 # passed, so that we can track them.
+MESSAGE_LOG_NAME = "message_tracking_log"
 _message_log = logging.getLogger(MESSAGE_LOG_NAME)
 
 ResultOrExc = collections.namedtuple("ResultOrExc", ("result", "exception"))

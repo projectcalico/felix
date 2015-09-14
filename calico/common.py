@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 # Copyright (c) 2014, 2015 Metaswitch Networks
 # All Rights Reserved.
 #
@@ -35,7 +34,7 @@ import sys
 from types import StringTypes
 from netaddr.strategy import eui48
 
-MESSAGE_LOG_NAME = "message_tracking_log"
+from calico.felix.actor import MESSAGE_LOG_NAME
 
 _log = logging.getLogger(__name__)
 
