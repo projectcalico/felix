@@ -32,13 +32,20 @@ _log = logging.getLogger(__name__)
 # All Calico data is stored under this path.
 ROOT_DIR = "/calico"
 
+# Current versions
+FELIX_VERSION = "/v1"
+OPENSTACK_VERSION = "/v1"
+
 # OpenStack data is stored under this path.
 OPENSTACK_DIR = ROOT_DIR + "/openstack"
-OPENSTACK_VERSION_DIR = OPENSTACK_DIR + "/v1"
+OPENSTACK_VERSION_DIR = OPENSTACK_DIR + OPENSTACK_VERSION
+
+# Status data and reporting
+STATUS_DIR = ROOT_DIR + "/status" + FELIX_VERSION + "/host"
 
 # Data that flows from orchestrator to felix is stored under a versioned
 # sub-tree.
-VERSION_DIR = ROOT_DIR + "/v1"
+VERSION_DIR = ROOT_DIR + FELIX_VERSION
 # Global ready flag.  Stores 'true' or 'false'.
 READY_KEY = VERSION_DIR + "/Ready"
 # Global config (directory).
@@ -81,6 +88,18 @@ def dir_for_per_host_config(hostname):
     return dir_for_host(hostname) + "/config"
 
 
+def dir_for_status(hostname):
+    return STATUS_DIR + "/%s" % hostname
+
+
+def key_for_status(hostname):
+    return dir_for_status(hostname) + "/last_reported_status"
+
+
+def key_for_uptime(hostname):
+    return dir_for_status(hostname) + "/felix_uptime"
+
+
 def key_for_endpoint(host, orchestrator, workload_id, endpoint_id):
     return (HOST_DIR + "/%s/workload/%s/%s/endpoint/%s" %
             (host, orchestrator, workload_id, endpoint_id))
@@ -113,6 +132,17 @@ def get_profile_id_for_profile_dir(key):
     prefix, final_node = key.rsplit("/", 1)
     return final_node if prefix == PROFILE_DIR else None
 
+def hostname_from_status_key(key):
+    '''
+    Help function to get hostname from a status key.
+
+    :param: key for felix status
+            expected key format: STATUS_DIR/<hostname>/<some path or not>/<actual key name>
+    '''
+    in_host_dir = key[len(STATUS_DIR + '/'):]
+    path = in_host_dir.split('/')
+    hostname = path[0]
+    return  hostname
 
 class EndpointId(object):
     __slots__ = ["host", "orchestrator", "workload", "endpoint"]
