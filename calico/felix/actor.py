@@ -227,10 +227,6 @@ class Actor(object):
             batch = self._start_msg_batch(batch)
             assert batch is not None, "_start_msg_batch() should return batch."
             results = []  # Will end up same length as batch.
-
-            # Will store the logs for the messages from this batch.
-            batch_uuids = set()
-
             for msg in batch:
                 _log.debug("Message %s recd by %s from %s, queue length %d",
                            msg, msg.recipient, msg.caller,
@@ -249,15 +245,13 @@ class Actor(object):
                 except BaseException as e:
                     _log.exception("Exception processing %s", msg)
                     results.append(ResultOrExc(None, e))
-                    message_exception = e.__class__.__name__ +\
-                                                      ': ' + str(e)
+                    message_exception = repr(e)
                     _stats.increment("Messages executed with exception")
                 else:
                     message_exception = None
                     results.append(ResultOrExc(result, None))
                     _stats.increment("Messages executed OK")
                 finally:
-                    batch_uuids.add(msg.uuid)
                     # Log the message info
                     # Strings are enclosed in quotes. Numbers aren't.
                     _message_log.info('"{uuid}": {data}'.format(
@@ -293,11 +287,11 @@ class Actor(object):
                 # Most-likely a bug.  Report failure to all callers.
                 _log.exception("_finish_msg_batch failed.")
                 results = [(None, e)] * len(results)
-                for uuid in batch_uuids:
+                for msg in batch:
                     _message_log.info('"{uuid}": {data}'.format(
                         uuid=msg.uuid,
                         data=json.dumps({
-                            "bug-exception": e.__class__.__name__ + ': ' + str(e),
+                            "exception": repr(e),
                         })
                     ))
                 _stats.increment("_finish_msg_batch() exception")
