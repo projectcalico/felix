@@ -428,8 +428,7 @@ class Message(object):
     def log_info(self, data, uuid=None):
         # Return immediately if we're not doing message logging, or if
         # message logging is enabled but set to higher than INFO.
-        if _message_log.disabled or \
-           _message_log.getLevelName() not in ['DEBUG', 'INFO']:
+        if _message_log.disabled or _message_log.isEnabledFor(logging.INFO):
             return
 
         if uuid is None:
