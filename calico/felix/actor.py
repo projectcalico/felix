@@ -108,7 +108,6 @@ import sys
 import traceback
 import uuid
 import weakref
-import time
 
 from gevent.event import AsyncResult
 from gevent.queue import Queue
@@ -254,7 +253,6 @@ class Actor(object):
                     _stats.increment("Messages executed OK")
                 finally:
                     msg.log_info({
-                        "received_time": time.time(),
                         "sender":        msg.caller,
                         "receiver":      msg.recipient,
                         "function":      msg.name,
@@ -490,7 +488,6 @@ def actor_message(needs_own_batch=False):
                 # But first log that the message is being sent.
                 m = Message(msg_id, None, None, None, None, None)
                 m.log_info({
-                    "sent_time": time.time(),
                     "sender": caller,
                     "receiver": self.name,
                     "function": method_name,
@@ -526,10 +523,9 @@ def actor_message(needs_own_batch=False):
 
             # Log that the message was sent.
             msg.log_info({
-                "sent-time": time.time(),
-                "sender": caller,
-                "receiver": self.name,
-                "function": method_name,
+                "sender":    caller,
+                "receiver":  self.name,
+                "function":  method_name,
             })
 
             _log.debug("Message %s sent by %s to %s, queue length %d",
