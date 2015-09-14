@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 # Copyright (c) 2014, 2015 Metaswitch Networks
 # All Rights Reserved.
 #
@@ -34,7 +35,7 @@ import sys
 from types import StringTypes
 from netaddr.strategy import eui48
 
-from calico.felix.actor import MESSAGE_LOG_NAME
+from calico.felix.actor import MESSAGE_LOG_NAME, MESSAGE_LOG_FORMAT_STRING
 
 _log = logging.getLogger(__name__)
 
@@ -292,7 +293,7 @@ def complete_logging(logfile=None,
                 _message_log.setLevel(logging.DEBUG)
                 _fh = logging.handlers.WatchedFileHandler(messagelogfile)
                 _fh.setLevel(logging.DEBUG)
-                _fh.setFormatter(logging.Formatter('%(message)s'))
+                _fh.setFormatter(MESSAGE_LOG_FORMAT_STRING)
                 _message_log.addHandler(_fh)
                 _message_log.disabled = False
         else:

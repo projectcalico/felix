@@ -120,6 +120,7 @@ _log = logging.getLogger(__name__)
 # Here we set up a custom logger to record all the messages that have been
 # passed, so that we can track them.
 MESSAGE_LOG_NAME = "message_tracking_log"
+MESSAGE_LOG_FORMAT_STRING = '%(asctime)s [%(process)s/%(tid)d] %(uuid): %(message)s'
 _message_log = logging.getLogger(MESSAGE_LOG_NAME)
 
 ResultOrExc = collections.namedtuple("ResultOrExc", ("result", "exception"))
@@ -252,19 +253,14 @@ class Actor(object):
                     results.append(ResultOrExc(result, None))
                     _stats.increment("Messages executed OK")
                 finally:
-                    # Log the message info
-                    # Strings are enclosed in quotes. Numbers aren't.
-                    _message_log.info('"{uuid}": {data}'.format(
-                        uuid=msg.uuid,
-                        data=json.dumps({
-                            "received-time": int(time.time() * 1000),
-                            "sender": msg.caller,
-                            "receiver": msg.recipient,
-                            "function": msg.name,
-                            "tries": msg_tries[msg.uuid],
-                            "exception": message_exception
-                        })
-                    ))
+                    msg.log_info({
+                        "received_time": time.time(),
+                        "sender":        msg.caller,
+                        "receiver":      msg.recipient,
+                        "function":      msg.name,
+                        "tries":         msg_tries[msg.uuid],
+                        "exception":     message_exception
+                    })
                     self._current_msg = None
                     actor_storage.msg_uuid = None
                     actor_storage.msg_name = None
@@ -288,12 +284,7 @@ class Actor(object):
                 _log.exception("_finish_msg_batch failed.")
                 results = [(None, e)] * len(results)
                 for msg in batch:
-                    _message_log.info('"{uuid}": {data}'.format(
-                        uuid=msg.uuid,
-                        data=json.dumps({
-                            "exception": repr(e),
-                        })
-                    ))
+                    msg.log_info({"exception": repr(e)})
                 _stats.increment("_finish_msg_batch() exception")
             finally:
                 actor_storage.msg_name = None
@@ -436,6 +427,18 @@ class Message(object):
         data = ("%s (%s)" % (self.uuid, self.name))
         return data
 
+    def log_info(self, data, uuid=None):
+        # Return immediately if we're not doing message logging, or if
+        # message logging is enabled but set to higher than INFO.
+        if _message_log.disabled or \
+           _message_log.getLevelName() not in ['DEBUG', 'INFO']:
+            return
+
+        if uuid is None:
+            uuid = self.uuid
+
+        _message_log.info(json.dumps(data), uuid=uuid)
+
 
 def actor_message(needs_own_batch=False):
     """
@@ -485,15 +488,13 @@ def actor_message(needs_own_batch=False):
                 # would deadlock by waiting for ourselves.
 
                 # But first log that the message is being sent.
-                _message_log.info('"{msg_id}": {data}'.format(
-                    msg_id=msg_id,
-                    data=json.dumps({
-                        "sent-time": int(time.time() * 1000),
-                        "sender": caller,
-                        "receiver": self.name,
-                        "function": method_name,
-                    })
-                ))
+                m = Message(msg_id, None, None, None, None, None)
+                m.log_info({
+                    "sent_time": time.time(),
+                    "sender": caller,
+                    "receiver": self.name,
+                    "function": method_name,
+                })
 
                 return fn(self, *args, **kwargs)
             else:
@@ -524,15 +525,12 @@ def actor_message(needs_own_batch=False):
                           needs_own_batch=needs_own_batch)
 
             # Log that the message was sent.
-            _message_log.info('"{msg_id}": {data}'.format(
-                msg_id=msg_id,
-                data=json.dumps({
-                    "sent-time": int(time.time() * 1000),
-                    "sender": caller,
-                    "receiver": self.name,
-                    "function": method_name,
-                })
-            ))
+            msg.log_info({
+                "sent-time": time.time(),
+                "sender": caller,
+                "receiver": self.name,
+                "function": method_name,
+            })
 
             _log.debug("Message %s sent by %s to %s, queue length %d",
                        msg, caller, self.name, self._event_queue.qsize())
