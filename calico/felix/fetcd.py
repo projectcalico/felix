@@ -270,16 +270,15 @@ class _FelixEtcdWatcher(EtcdWatcher, gevent.Greenlet):
     """
 
     def __init__(self, config, hosts_ipset):
-        super(_FelixEtcdWatcher, self).__init__(config, VERSION_DIR)
+        super(_FelixEtcdWatcher, self).__init__(config.ETCD_ADDR, VERSION_DIR)
         self._config = config
         self.hosts_ipset = hosts_ipset
-
-        self._register_paths()
 
         # Keep track of the config loaded from etcd so we can spot if it
         # changes.
         self.last_global_config = None
         self.last_host_config = None
+        self.my_config_dir = dir_for_per_host_config(self._config.HOSTNAME)
 
         # Events triggered by the EtcdAPI Actor to tell us to load the config
         # and start polling.  These are one-way flags.
@@ -288,9 +287,6 @@ class _FelixEtcdWatcher(EtcdWatcher, gevent.Greenlet):
 
         # Event that we trigger once the config is loaded.
         self.configured = Event()
-
-        # Etcd client, initialised lazily.
-        self.my_config_dir = dir_for_per_host_config(self._config.HOSTNAME)
 
         # Polling state initialized at poll start time.
         self.splitter = None
@@ -301,6 +297,9 @@ class _FelixEtcdWatcher(EtcdWatcher, gevent.Greenlet):
 
         # Next-hop IP addresses of our hosts, if populated in etcd.
         self.ipv4_by_hostname = {}
+
+        # Register for events when values change.
+        self._register_paths()
 
     def _register_paths(self):
         """

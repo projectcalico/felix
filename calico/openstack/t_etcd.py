@@ -30,6 +30,8 @@ from socket import timeout as SocketTimeout
 from urllib3.exceptions import ReadTimeoutError
 
 # OpenStack imports.
+from calico.etcdutils import EtcdWatcher
+
 try:
     from oslo.config import cfg
 except ImportError:
@@ -49,12 +51,14 @@ from calico.datamodel_v1 import (READY_KEY, CONFIG_DIR, TAGS_KEY_RE, HOST_DIR,
                                  key_for_endpoint, PROFILE_DIR, RULES_KEY_RE,
                                  key_for_profile, key_for_profile_rules,
                                  key_for_profile_tags, key_for_config,
-                                 NEUTRON_ELECTION_KEY, FELIX_STATUS_DIR)
+                                 NEUTRON_ELECTION_KEY, FELIX_STATUS_DIR,
+                                 hostname_from_status_key,
+                                 hostname_from_uptime_key)
 from calico.election import Elector
 
 
 # The node hostname is used as the default identity for leader election
-hostname = socket.gethostname()
+_hostname = socket.gethostname()
 
 # The amount of time in seconds to wait for etcd responses.
 ETCD_TIMEOUT = 5
@@ -65,7 +69,7 @@ calico_opts = [
                help="The hostname or IP of the etcd node/proxy"),
     cfg.IntOpt('etcd_port', default=4001,
                help="The port to use for the etcd node/proxy"),
-    cfg.StrOpt('elector_name', default=hostname,
+    cfg.StrOpt('elector_name', default=_hostname,
                help="A unique name to identify this node in leader election"),
 ]
 cfg.CONF.register_opts(calico_opts, 'calico')
@@ -528,60 +532,34 @@ class CalicoTransportEtcd(object):
             except etcd.EtcdException as e:
                 LOG.debug("Failed to delete %s (%r), skipping.", delete_key, e)
 
-    def _poll_and_handle_felix_updates(self, expected_epoch):
-        """
-        In infinite loop read new statuses in etcd status directory. Then
-        pass updates to Neutron database. On exception reconnect the etcd
-        client and do complete resync when necessary.
-        """
-        try:
-            self.status_client = etcd.Client(host=cfg.CONF.calico.etcd_host,
-                                             port=cfg.CONF.calico.etcd_port)
-            while True:
-                # Get and handle an update.
-                response = self.status_client.read(FELIX_STATUS_DIR,
-                                                   wait=True,
-                                                   waitIndex=self.next_etcd_index,
-                                                   recursive=True)
-                # Before status is passed to Neutron db, check whether we
-                # are still master (if not, we loop until we become one)
-                # and whether epoch is as expected (if not, thread exits).
-                if self.driver._epoch != expected_epoch or not self.is_master:
-                    break
-
-                self.driver._handle_status_update(response)
-                # Since we're polling on a subtree, we can't just
-                # increment the index, we have to look at the
-                # modifiedIndex.
-                self.next_etcd_index = max(self.next_etcd_index,
-                                           int(response.modifiedIndex)) + 1
-        except (ReadTimeoutError, SocketTimeout) as e:
-            # This is expected when we're doing a poll and nothing
-            # happened. socket timeout doesn't seem to be caught by
-            # urllib3 1.7.1. Simply reconnect.
-            LOG.debug("Read from etcd timed out (%r), retrying.", e)
-        except (etcd.EtcdClusterIdChanged, etcd.EtcdEventIndexCleared) as e:
-            # Complete resync is needed.
-            LOG.warning("Out of sync with etcd (%r). "
-                        "Reconnecting for full sync.", e)
-            try:
-                context = ctx.get_admin_context()
-                self.resync_status_tree(context)
-            except Exception:
-                LOG.exception("Error in status subtree resync.")
-        except Exception as e:
-            LOG.info("Handling status update failed. ({})".format(e))
-
     def stop(self):
         LOG.info("Stopping transport %s", self)
         self.elector.stop()
+    
+    
+class CalicoEtcdWatcher(EtcdWatcher):
+    
+    def __init__(self, calico_driver):
+        super(CalicoEtcdWatcher, self).__init__(cfg.CONF.calico.etcd_host +
+                                                ":" +
+                                                cfg.CONF.calico.etcd_port,
+                                                FELIX_STATUS_DIR)
+        self.calico_driver = calico_driver
 
-    def resync_status_tree(self, context):
-        """
-        Resync status subtree of etcd.
-        """
-        ## TODO
-        pass
+        # Register for felix uptime updates.
+        self.register_path(FELIX_STATUS_DIR + "/<hostname>/uptime",
+                           on_set=self._on_uptime_set)
+
+    def _on_snapshot_loaded(self, etcd_snapshot_response):
+        for etcd_node in etcd_snapshot_response.leaves():
+            key = etcd_node.key
+            felix_hostname = hostname_from_uptime_key(key)
+            if felix_hostname:
+                self.calico_driver.on_felix_alive(felix_hostname, new=False)
+
+    def _on_uptime_set(self, response, hostname):
+        self.calico_driver.on_felix_alive(hostname)
+
 
 def _neutron_rule_to_etcd_rule(rule):
     """

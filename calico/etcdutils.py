@@ -83,9 +83,9 @@ class EtcdClientOwner(object):
     reconnecting, optionally copying the cluster ID.
     """
 
-    def __init__(self, config):
+    def __init__(self, etcd_authority):
         super(EtcdClientOwner, self).__init__()
-        self.config = config
+        self.etcd_authority = etcd_authority
         self.client = None
         self.reconnect()
 
@@ -93,12 +93,11 @@ class EtcdClientOwner(object):
         """
         Reconnects the etcd client.
         """
-        etcd_addr = self.config.ETCD_ADDR
-        if ":" in etcd_addr:
-            host, port = etcd_addr.split(":")
+        if ":" in self.etcd_authority:
+            host, port = self.etcd_authority.split(":")
             port = int(port)
         else:
-            host = etcd_addr
+            host = self.etcd_authority
             port = 4001
         if self.client and copy_cluster_id:
             old_cluster_id = self.client.expected_cluster_id
@@ -121,9 +120,9 @@ class EtcdWatcher(EtcdClientOwner):
     """
 
     def __init__(self,
-                 config,
+                 etcd_authority,
                  key_to_poll):
-        super(EtcdWatcher, self).__init__(config)
+        super(EtcdWatcher, self).__init__(etcd_authority)
         self.key_to_poll = key_to_poll
         self.next_etcd_index = None
 
@@ -131,10 +130,14 @@ class EtcdWatcher(EtcdClientOwner):
         # another thread.  Automatically reset to False after the resync is
         # triggered.
         self.resync_after_current_poll = False
+
+        # Tells the watcher to stop after this poll.  One-way flag.
+        self._stopped = False
+
         self.dispatcher = PathDispatcher()
 
     def loop(self):
-        while True:
+        while not self._stopped:
             try:
                 _log.info("Reconnecting and loading snapshot from etcd...")
                 self.reconnect(copy_cluster_id=False)
@@ -149,10 +152,11 @@ class EtcdWatcher(EtcdClientOwner):
                               "processing it...",
                               self.client.expected_cluster_id)
                     self._on_snapshot_loaded(initial_dump)
-                    while True:
+                    while not self._stopped:
                         # Wait for something to change.
                         response = self.wait_for_etcd_event()
-                        self.dispatcher.handle_event(response)
+                        if not self._stopped:
+                            self.dispatcher.handle_event(response)
                 except ResyncRequired:
                     _log.info("Polling aborted, doing resync.")
             except (ReadTimeoutError,
@@ -166,6 +170,7 @@ class EtcdWatcher(EtcdClientOwner):
                 # so the stack trace would just add log spam.
                 _log.error("Unexpected IO or etcd error, triggering "
                            "resync with etcd: %r.", e)
+        _log.info("%s.loop() stopped due to self.stop == True", self)
 
     def register_path(self, *args, **kwargs):
         self.dispatcher.register(*args, **kwargs)
@@ -297,8 +302,13 @@ class EtcdWatcher(EtcdClientOwner):
                                    response.modifiedIndex) + 1
         return response
 
+    def stop(self):
+        self._stopped = True
+
     def _on_pre_resync(self):
         """
+        Abstract:
+
         Called before the initial dump is loaded and passed to
         _process_initial_dump().
         """
@@ -306,6 +316,8 @@ class EtcdWatcher(EtcdClientOwner):
 
     def _on_snapshot_loaded(self, etcd_snapshot_response):
         """
+        Abstract:
+
         Called once a snapshot has been loaded, replaces all previous
         state.
 

@@ -134,17 +134,34 @@ def get_profile_id_for_profile_dir(key):
 
 
 def hostname_from_status_key(key):
-    '''
-    Help function to get hostname from a status key.
+    """
+    Get hostname from a status key (or None if this is not a status key).
 
     :param: key for felix status
             expected key format: FELIX_STATUS_DIR/<hostname>/
                                            <some path or not>/<actual key name>
-    '''
+    """
+    if not key.startswith(FELIX_STATUS_DIR):
+        return False
     in_host_dir = key[len(FELIX_STATUS_DIR + '/'):]
-    path = in_host_dir.split('/')
+    path = in_host_dir.split('/', 1)
     hostname = path[0]
     return hostname
+
+
+def hostname_from_uptime_key(key):
+    """
+    Get hostname from a felix uptime key (or None if this is not an uptime
+    key).
+
+    :param: key for felix status
+            expected key format: FELIX_STATUS_DIR/<hostname>/
+                                           <some path or not>/<actual key name>
+    """
+    if not key.endswith("/uptime"):
+        return False
+    else:
+        return hostname_from_status_key(key)
 
 
 class EndpointId(object):

@@ -53,8 +53,8 @@ import etcd
 from calico.etcdutils import ACTION_MAPPING
 from calico.datamodel_v1 import FELIX_STATUS_DIR, hostname_from_status_key
 from calico.openstack.t_etcd import (
-    CalicoTransportEtcd, port_etcd_data, profile_rules, profile_tags
-)
+    CalicoTransportEtcd, port_etcd_data, profile_rules, profile_tags,
+    CalicoEtcdWatcher)
 
 LOG = log.getLogger(__name__)
 
@@ -155,6 +155,8 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self.db = None
         self._db_context = None
         self.transport = None
+        self._etcd_watcher = None
+        self._etcd_watcher_thread = None
         self._my_pid = None
         self._periodic_resync_greenlet = None
         self._epoch = 0
@@ -221,24 +223,23 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         LOG.info("Handle status updating thread started.")
         self._db_context = ctx.get_admin_context()
 
-        initial_felixes_registered = False
-
         while self._epoch == expected_epoch:
             # Only handle updates if we are the master node.
             if self.transport.is_master:
-                # Read through initial felix instances, if it's not been done.
-                if not initial_felixes_registered:
-                    self.transport.status_client = etcd.Client(host=cfg.CONF.calico.etcd_host,
-                                               port=cfg.CONF.calico.etcd_port)
-                    try:
-                        self._register_initial_felixes()
-                    except:
-                        LOG.debug("Loading initial Felixes failed.")
-                    initial_felixes_registered = True
-
-                LOG.info("I am master: polling felix updates in etcd")
-                self.transport._poll_and_handle_felix_updates(expected_epoch)
+                if self._etcd_watcher is None:
+                    self._etcd_watcher = CalicoEtcdWatcher(self)
+                    self._etcd_watcher_thread = eventlet.spawn(
+                        self._etcd_watcher.loop
+                    )
+                elif not self._etcd_watcher_thread:
+                    LOG.error("%s died", self._etcd_watcher)
+                    self._etcd_watcher.stop()
+                    self._etcd_watcher = None
             else:
+                if self._etcd_watcher is not None:
+                    LOG.warning("No longer the master, stopping etcd watcher")
+                    self._etcd_watcher.stop()
+                    self._etcd_watcher = None
                 # Short sleep interval before we check if we've become
                 # the master.
                 eventlet.sleep(MASTER_CHECK_INTERVAL_SECS)
@@ -246,56 +247,9 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             LOG.warning("Unexpected: epoch changed. "
                         "Handling status updates thread exiting.")
 
-    def _handle_status_update(self, response):
-        """
-        Handle updates of felix instances written to etcd. Pass status
-        updates to neutron database.
-
-        :param response: update written to etcd by one of felix instances
-        """
-        # Only get info from uptime keys - since those have ttl, we know
-        # if key was updated or created.
-        key = response.key
-        if not is_uptime_key(key):
-            return
-        # Ignore deleted and expired keys - their deletion is noticed by
-        # other timeout algorithm before reaching the horizon UI.
-        action = response.action
-        if action and ACTION_MAPPING[action] == "delete":
-            return
-
-        hostname = hostname_from_status_key(key)
-        agent_state = felix_agent_state(hostname)
-        if response.newKey:
-            agent_state['start_flag'] = True
-
+    def on_felix_alive(self, felix_hostname, new):
+        agent_state = felix_agent_state(felix_hostname, start_flag=new)
         self.db.create_or_update_agent(self._db_context, agent_state)
-
-    def _register_initial_felixes(self):
-        """
-        Read through etcd status subtree and pass agent update of hosts which
-        have an uptime key (i.e. felix is heartbeating).
-        """
-        response = self.transport.status_client.read(FELIX_STATUS_DIR,
-                                                     recursive=True)
-
-        # Read through hosts
-        for host in response.leaves():
-            # Read through status updates of the node.
-            for status in host['nodes']:
-                key = status['key']
-                # If host has uptime key, we pass the host to the neutron
-                # database with start_flag set True.
-
-                if key.split('/')[-1] == 'uptime':
-                    hostname = hostname_from_status_key(key)
-                    agent_state = felix_agent_state(hostname, start_flag=True)
-                    self.db.create_or_update_agent(self._db_context,
-                                                   agent_state)
-
-        # The etcd_index tells us, where we want to start polling for new
-        # updates.
-        self.transport.next_etcd_index = response.etcd_index + 1
 
     def _get_db(self):
         if not self.db:
@@ -1131,23 +1085,17 @@ def profiles_match(etcd_profile, neutron_profile):
         (etcd_tags == neutron_group_tags)
     )
 
+
 def felix_agent_state(hostname, start_flag=False):
     """
-    Help function that returns agent_state for felix.
+    :param bool start_flag: True if this is a new felix, that is starting up.
+           false if this is a refresh of an existing felix.
+    :returns dict: agent status dict appropriate for inserting into Neutron DB.
     """
     state = {'agent_type': AGENT_TYPE_FELIX,
              'binary': 'felix-calico-agent',
              'host': hostname,
              'topic': constants.L2_AGENT_TOPIC}
     if start_flag:
-        state['start_flag'] = True
+        state['start_flag'] = True  # TODO (SMC) Double check the docs to make sure we understand this flag
     return state
-
-def is_uptime_key(key):
-    '''Help function - return whether given key is uptime key'''
-    if key[:len(FELIX_STATUS_DIR)] != FELIX_STATUS_DIR:
-        return False
-    path = key.split('/')
-    if path[-1] != 'uptime':
-        return False
-    return True
