@@ -1,6 +1,6 @@
 # Changelog
 
-Pull request test!  Do not merge!  Really!
+Pull request test!  Do not merge!
 
 ## 1.1.0
 
