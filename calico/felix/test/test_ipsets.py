@@ -489,6 +489,7 @@ class TestIpsetActor(BaseTestCase):
     def setUp(self):
         super(TestIpsetActor, self).setUp()
         self.ipset = Mock(spec=Ipset)
+        self.ipset.set_name = "mock_ipset"
         self.actor = IpsetActor(self.ipset)
 
     def test_sync_to_ipset(self):

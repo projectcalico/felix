@@ -101,6 +101,7 @@ import collections
 import functools
 import gevent
 import gevent.local
+import json
 import logging
 import os
 import sys
@@ -115,6 +116,11 @@ from calico.felix.futils import StatCounter
 
 _log = logging.getLogger(__name__)
 
+# Here we set up a custom logger to record all the messages that have been
+# passed, so that we can track them.
+MESSAGE_LOG_NAME = "message_tracking_log"
+MESSAGE_LOG_FORMAT_STRING = '%(asctime)s [%(process)s/%(tid)d] %(uuid): %(message)s'
+_message_log = logging.getLogger(MESSAGE_LOG_NAME)
 
 ResultOrExc = collections.namedtuple("ResultOrExc", ("result", "exception"))
 
@@ -189,6 +195,9 @@ class Actor(object):
         batch = [msg]
         batches = []
 
+        # Will store the number of times a message is retried.
+        msg_tries = collections.defaultdict(int)
+
         if not msg.needs_own_batch:
             # Try to pull some more work off the queue to combine into a
             # batch.
@@ -225,6 +234,10 @@ class Actor(object):
                 self._current_msg = msg
                 actor_storage.msg_uuid = msg.uuid
                 actor_storage.msg_name = msg.name
+
+                # Keep track of how many times we retry a message.
+                msg_tries[msg.uuid] += 1
+
                 try:
                     # Actually execute the per-message method and record its
                     # result.
@@ -232,11 +245,20 @@ class Actor(object):
                 except BaseException as e:
                     _log.exception("Exception processing %s", msg)
                     results.append(ResultOrExc(None, e))
+                    message_exception = repr(e)
                     _stats.increment("Messages executed with exception")
                 else:
+                    message_exception = None
                     results.append(ResultOrExc(result, None))
                     _stats.increment("Messages executed OK")
                 finally:
+                    msg.log_info({
+                        "sender":        msg.caller,
+                        "receiver":      msg.recipient,
+                        "function":      msg.name,
+                        "tries":         msg_tries[msg.uuid],
+                        "exception":     message_exception
+                    })
                     self._current_msg = None
                     actor_storage.msg_uuid = None
                     actor_storage.msg_name = None
@@ -259,6 +281,8 @@ class Actor(object):
                 # Most-likely a bug.  Report failure to all callers.
                 _log.exception("_finish_msg_batch failed.")
                 results = [(None, e)] * len(results)
+                for msg in batch:
+                    msg.log_info({"exception": repr(e)})
                 _stats.increment("_finish_msg_batch() exception")
             finally:
                 actor_storage.msg_name = None
@@ -386,7 +410,7 @@ class Message(object):
     """
     Message passed to an actor.
     """
-    def __init__(self, msg_id,  method, results, caller_path, recipient,
+    def __init__(self, msg_id, method, results, caller_path, recipient,
                  needs_own_batch):
         self.uuid = msg_id
         self.method = method
@@ -400,6 +424,17 @@ class Message(object):
     def __str__(self):
         data = ("%s (%s)" % (self.uuid, self.name))
         return data
+
+    def log_info(self, data, uuid=None):
+        # Return immediately if we're not doing message logging, or if
+        # message logging is enabled but set to higher than INFO.
+        if _message_log.disabled or _message_log.isEnabledFor(logging.INFO):
+            return
+
+        if uuid is None:
+            uuid = self.uuid
+
+        _message_log.info(json.dumps(data), uuid=uuid)
 
 
 def actor_message(needs_own_batch=False):
@@ -444,9 +479,21 @@ def actor_message(needs_own_batch=False):
             async_set = "async" in kwargs
             async = kwargs.pop("async", False)
             on_same_greenlet = (self.greenlet == gevent.getcurrent())
+            msg_id = uuid.uuid4().hex[:12]
             if on_same_greenlet and not async:
                 # Bypass the queue if we're already on the same greenlet, or we
                 # would deadlock by waiting for ourselves.
+
+                # But first log that the message is being sent.
+                if (not _message_log.disabled) and \
+                   (_message_log.isEnabledFor(logging.INFO)):
+                    _message_log.info(json.dumps({
+                        "uuid": msg_id,
+                        "sender": caller,
+                        "receiver": self.name,
+                        "function": method_name,
+                    }))
+
                 return fn(self, *args, **kwargs)
             else:
                 # Only log a stat if we're not simulating a normal method call.
@@ -463,7 +510,6 @@ def actor_message(needs_own_batch=False):
 
             # async must be specified, unless on the same actor.
             assert async_set, "All cross-actor event calls must specify async arg."
-            msg_id = uuid.uuid4().hex[:12]
             if not on_same_greenlet and not async:
                 _stats.increment("Blocking calls started")
                 _log.debug("BLOCKING CALL: [%s] %s -> %s", msg_id,
@@ -475,6 +521,13 @@ def actor_message(needs_own_batch=False):
                                          self.name, method_name))
             msg = Message(msg_id, partial, [result], caller, self.name,
                           needs_own_batch=needs_own_batch)
+
+            # Log that the message was sent.
+            msg.log_info({
+                "sender":    caller,
+                "receiver":  self.name,
+                "function":  method_name,
+            })
 
             _log.debug("Message %s sent by %s to %s, queue length %d",
                        msg, caller, self.name, self._event_queue.qsize())
