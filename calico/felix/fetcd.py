@@ -27,7 +27,6 @@ from socket import timeout as SocketTimeout
 import httplib
 import json
 import logging
-import datetime
 from calico.monotonic import monotonic_time
 
 from etcd import EtcdException, EtcdKeyNotFound
@@ -49,7 +48,8 @@ from calico.etcdutils import (
     EtcdClientOwner, EtcdWatcher, ResyncRequired
 )
 from calico.felix.actor import Actor, actor_message
-from calico.felix.futils import intern_dict, intern_list, logging_exceptions
+from calico.felix.futils import (intern_dict, intern_list, logging_exceptions,
+                                 iso_utc_timestamp)
 
 _log = logging.getLogger(__name__)
 
@@ -90,19 +90,20 @@ RESYNC_KEYS = [
 
 class EtcdAPI(EtcdClientOwner, Actor):
     """
-    Our API to etcd
+    Our API to etcd.
 
     Since the python-etcd API is blocking, we defer API watches to
     a worker greenlet and communicate with it via Events.
 
-    We use a seconds worker for writing our status back to etcd.  This
+    We use a second worker for writing our status back to etcd.  This
     avoids sharing the etcd client between reads and writes, which is
     problematic because we need to handle EtcdClusterIdChanged for polls
     but not for writes.
     """
 
     def __init__(self, config, hosts_ipset):
-        super(EtcdAPI, self).__init__(config)
+        super(EtcdAPI, self).__init__(config.ETCD_ADDR)
+        self._config = config
 
         # Timestamp storing when the EtcdAPI started. This info is needed
         # in order to report uptime to etcd.
@@ -133,7 +134,7 @@ class EtcdAPI(EtcdClientOwner, Actor):
         """
         _log.info("Started periodic resync thread, waiting for config.")
         self._watcher.configured.wait()
-        interval = self.config.RESYNC_INTERVAL
+        interval = self._config.RESYNC_INTERVAL
         _log.info("Config loaded, resync interval %s.", interval)
         if interval == 0:
             _log.info("Interval is 0, periodic resync disabled.")
@@ -155,8 +156,8 @@ class EtcdAPI(EtcdClientOwner, Actor):
         :return: Does not return, unless reporting disabled.
         """
         _log.info("Started status reporting thread.")
-        ttl = self.config.REPORTING_TTL_SECS
-        interval = self.config.REPORTING_INTERVAL_SECS
+        ttl = self._config.REPORTING_TTL_SECS
+        interval = self._config.REPORTING_INTERVAL_SECS
         _log.debug("Reporting interval: %s, TTL: %s", interval, ttl)
 
         if interval == 0:
@@ -195,8 +196,7 @@ class EtcdAPI(EtcdClientOwner, Actor):
 
         :param: ttl int: time to live in sec - lifetime of the status report
         """
-        time_now = datetime.datetime.utcnow()
-        time_formatted = time_now.replace(microsecond=0).isoformat()+'Z'
+        time_formatted = iso_utc_timestamp()
         uptime = monotonic_time() - self._start_time
         status = {
             "time": time_formatted,
@@ -206,10 +206,10 @@ class EtcdAPI(EtcdClientOwner, Actor):
         status_value = json.dumps(status)
         uptime_value = str(uptime)
 
-        status_key = key_for_status(self.config.HOSTNAME)
+        status_key = key_for_status(self._config.HOSTNAME)
         self.client.set(status_key, status_value)
 
-        uptime_key = key_for_uptime(self.config.HOSTNAME)
+        uptime_key = key_for_uptime(self._config.HOSTNAME)
         self.client.set(uptime_key, uptime_value, ttl=ttl)
 
     @actor_message()

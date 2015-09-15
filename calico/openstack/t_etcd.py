@@ -538,6 +538,17 @@ class CalicoTransportEtcd(object):
     
     
 class CalicoEtcdWatcher(EtcdWatcher):
+    """
+    An EtcdWatcher that watches our status-reporting subtree.
+
+    Responsible for parsing the events and passing the updates to the
+    mechanism driver.
+
+    We deliberately do not share an etcd client with the transport.
+    The reason is that, if we share a client then managing the lifecycle
+    of the client becomes an awkward shared responsibility (complicated
+    by the EtcdClusterIdChanged exception, which is only thrown once).
+    """
     
     def __init__(self, calico_driver):
         super(CalicoEtcdWatcher, self).__init__(cfg.CONF.calico.etcd_host +
@@ -551,6 +562,11 @@ class CalicoEtcdWatcher(EtcdWatcher):
                            on_set=self._on_uptime_set)
 
     def _on_snapshot_loaded(self, etcd_snapshot_response):
+        """
+        Called whenever a snapshot is loaded from etcd.
+
+        Updates the driver with the current state.
+        """
         for etcd_node in etcd_snapshot_response.leaves():
             key = etcd_node.key
             felix_hostname = hostname_from_uptime_key(key)
@@ -558,6 +574,9 @@ class CalicoEtcdWatcher(EtcdWatcher):
                 self.calico_driver.on_felix_alive(felix_hostname, new=False)
 
     def _on_uptime_set(self, response, hostname):
+        """
+        Called when a felix uptime report is inserted/updated.
+        """
         self.calico_driver.on_felix_alive(hostname)
 
 
