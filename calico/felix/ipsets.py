@@ -94,8 +94,8 @@ class IpsetManager(ReferenceManager):
         """
         assert self._is_starting_or_live(tag_id)
         active_ipset = self.objects_by_id[tag_id]
-        members = self.ip_owners_by_tag.get(tag_id, {}).keys()
-        active_ipset.replace_members(set(members),
+        members = frozenset(self.ip_owners_by_tag.get(tag_id, {}).iterkeys())
+        active_ipset.replace_members(members,
                                      force_reprogram=self._force_reprogram,
                                      async=True)
 
@@ -498,12 +498,13 @@ class IpsetActor(Actor):
         super(IpsetActor, self).__init__(qualifier=qualifier)
 
         self._ipset = ipset
-        # Members - which entries should be in the ipset.
-        self.members = set()
-        # Members which really are in the ipset. None means "matches members"
-        # (allowing us to save some memory and copying).
+        # Members - which entries should be in the ipset.  None means
+        # "unknown".
+        self.members = None
+        # Members which really are in the ipset.
         self.programmed_members = None
-        self._force_reprogram = True
+
+        self._force_reprogram = False
         self.stopped = False
 
     @property
@@ -533,8 +534,6 @@ class IpsetActor(Actor):
         (as this routine keeps a link to it).
         """
         _log.info("Replacing members of ipset %s", self.name)
-        if self.programmed_members is None:
-            self.programmed_members = self.members
         self.members = members
         self._force_reprogram |= force_reprogram
 
@@ -545,11 +544,11 @@ class IpsetActor(Actor):
 
     def _sync_to_ipset(self):
         # Defer to our helper to actually make the changes.
-        if self._force_reprogram:
-            _log.debug("Replacing content of ipset %s with %s", self, self.members)
+        if self.programmed_members is None or self._force_reprogram:
+            _log.debug("Replacing content of ipset %s with %s", self,
+                       self.members)
             self._ipset.replace_members(self.members)
-        elif (self.programmed_members is not None and
-              self.members != self.programmed_members):
+        elif self.programmed_members != self.members:
             _log.debug("Updating ipset %s to %s", self, self.members)
             self._ipset.update_members(self.programmed_members, self.members)
         else:
@@ -557,7 +556,7 @@ class IpsetActor(Actor):
 
         # Now in correct state, with programmed_members matching members, and
         # no need for a forced reprogram.
-        self.programmed_members = None
+        self.programmed_members = self.members
         self._force_reprogram = False
 
     def __str__(self):
