@@ -92,7 +92,7 @@ This package provides common files.
 %package felix
 Group:          Applications/Engineering
 Summary:        Project Calico virtual networking for cloud data centers
-Requires:       calico-common, conntrack-tools, ipset, net-tools, python-devel, python-netaddr, python-gevent
+Requires:       calico-common, conntrack-tools, ipset, net-tools, python-devel, python-netaddr, python-gevent, python-etcd, python-posix-spawn
 
 %description felix
 This package provides the Felix component.
