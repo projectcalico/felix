@@ -100,7 +100,14 @@ Then, still at the root of the calico directory, run:
 
     tox
 
-Tox runs the tests under Python 2.6, 2.7 and PyPy, which you will need to [install separately](http://pypy.readthedocs.org/en/latest/install.html).
+Tox runs the tests under Python 2.6, 2.7 and PyPy, which you will need to
+[install separately](http://pypy.readthedocs.org/en/latest/install.html).
+
+Alternatively, if you have Docker installed, you can use the container-based
+version of the unit tests:
+
+    make calico/ut
+    make ut
 
 ### Fewer dependencies
 
