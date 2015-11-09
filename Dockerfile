@@ -24,13 +24,11 @@ RUN apt-get install pypy pypy-dev
 RUN apt-add-repository ppa:fkrull/deadsnakes && apt-get update
 RUN apt-get install -y python2.6 python2.6-dev
 
-# Install tox
-RUN apt-get install python-pip; \
-    pip install tox; \
-    apt-get remove python-pip
+# Install test dependencies
+RUN apt-get install python-pip
+RUN pip install coverage==4.0a1 eventlet tox
 
 RUN mkdir /calico
 WORKDIR /calico
 
-CMD ["tox"]
-
+CMD ["./run-unit-test.sh", "-r"]
