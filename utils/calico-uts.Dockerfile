@@ -1,4 +1,4 @@
-FROM ubuntu:14.04
+FROM debian:wheezy
 
 MAINTAINER Alex Chan <alexchan@projectcalico.org>
 
@@ -17,7 +17,7 @@ RUN apt-get install python-software-properties software-properties-common
 
 # The python-cryptography module requires PyPy >= 2.6, but the standard
 # repos only go up to 2.2.1.  This repo includes PyPy 2.6.
-RUN apt-add-repository ppa:pypy/ppa && apt-get update
+#RUN apt-add-repository ppa:pypy/ppa && apt-get update
 RUN apt-get install pypy pypy-dev
 
 # Install Python 2.6
@@ -28,7 +28,7 @@ RUN apt-get install -y python2.6 python2.6-dev
 RUN apt-get install python-pip
 RUN pip install coverage==4.0a1 eventlet tox
 
-RUN mkdir /calico
+COPY . /calico
 WORKDIR /calico
 
 CMD ["./run-unit-test.sh", "-r"]
