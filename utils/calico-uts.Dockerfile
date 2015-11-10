@@ -28,7 +28,7 @@ RUN apt-get install -y python2.6 python2.6-dev
 RUN apt-get install python-pip
 RUN pip install coverage==4.0a1 eventlet tox
 
-RUN mkdir /calico
+COPY . /calico
 WORKDIR /calico
 
 CMD ["./run-unit-test.sh", "-r"]
