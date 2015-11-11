@@ -23,6 +23,7 @@
 # document at http://docs.projectcalico.org/en/latest/architecture.html).
 #
 # It is implemented as a Neutron/ML2 mechanism driver.
+import contextlib
 import json
 import os
 import eventlet
@@ -59,9 +60,15 @@ except ImportError:
         # Juno.
         from oslo.db import exception as db_exc
     except ImportError:
-        # Latest.
+        # Later.
         from oslo_db import exception as db_exc
 
+try:
+    # Icehouse/Juno.
+    from neutron.openstack.common import lockutils
+except ImportError:
+    # Later.
+    from oslo_concurrency import lockutils
 
 # Calico imports.
 import etcd
@@ -289,7 +296,12 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         LOG.info("Updating port %s status to %s", port_id, port_status)
         session = self._db_context.session
         try:
-            with session.begin(subtransactions=True):
+            # As per update_port_status(): Serialize this operation with a
+            # semaphore to prevent deadlock waiting to acquire a DB lock
+            # held by another thread in the same process, leading to 'lock wait
+            # timeout' errors.
+            with contextlib.nested(lockutils.lock('db-access'),
+                                   session.begin(subtransactions=True)):
                 # Lock the port for update.  This avoids a race when the port
                 # is being deleted: felix reports the status via this method
                 # but neutron is concurrently deleting the port from the DB.
@@ -300,10 +312,12 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 try:
                     port = (session.query(models_v2.Port).
                             with_lockmode("update").
-                            filter(models_v2.Port.id.startswith(port_id)).
+                            filter(models_v2.Port.status != port_status,
+                                   models_v2.Port.id.startswith(port_id)).
                             one())
                 except orm_exc.NoResultFound:
-                    LOG.info("Port %s not found, nothing to do", port_id)
+                    LOG.debug("Port %s not present or already in correct "
+                              "state, nothing to do", port_id)
                 else:
                     self.db.update_port_status(self._db_context,
                                                port_id,
