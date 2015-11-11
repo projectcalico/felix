@@ -239,6 +239,8 @@ class EtcdAPI(EtcdClientOwner, Actor):
         Starts watching etcd for changes.  Implicitly loads the config
         if it hasn't been loaded yet.
         """
+        #PLW: Why? Isn't it an error to call this before config loading?
+        # I'm all for defensive code, but that seemed like overkill.
         self._watcher.load_config.set()
         self._watcher.splitter = splitter
         self._watcher.begin_polling.set()
@@ -271,7 +273,7 @@ class _FelixEtcdWatcher(gevent.Greenlet):
     """
     Greenlet that communicates with the etcd driver over a socket.
 
-    * Does the initial handshake with the driver, sening it the init
+    * Does the initial handshake with the driver, sending it the init
       message.
     * Receives the pre-loaded config from the driver and uses that
       to do Felix's one-off configuration.
@@ -395,6 +397,7 @@ class _FelixEtcdWatcher(gevent.Greenlet):
             # Yield to ensure that other actors make progress.
             # Sleep must be non-zero to work around gevent
             # issue where we could be immediately rescheduled.
+            #PLW: Why do we need this?
             gevent.sleep(0.000001)
 
     def _on_update_from_driver(self, msg):
@@ -498,6 +501,9 @@ class _FelixEtcdWatcher(gevent.Greenlet):
 
         If it falls out of sync with etcd then it moves back into
         wait-for-ready state and starts again.
+        #PLW: This code doesn't do that; I think just a confusing comment.
+        # (i.e. this code logs the message but does nothing with it, which
+        # seems right).
 
         If the status is in-sync, triggers the relevant processing.
         """
@@ -789,6 +795,9 @@ class EtcdStatusReporter(EtcdClientOwner, Actor):
                                           self._cleanup_pending):
             # Schedule a timer to stop our rate limiting or retry cleanup.
             timeout = self._config.ENDPOINT_REPORT_DELAY
+            #PLW: Surely the precedence here is wrong?
+            # If *= has lower precendence than + then I still think a
+            # bracked round everything on the RHS would make it clearer.
             timeout *= 0.9 + (random.random() * 0.2)  # Jitter by +/- 10%.
             gevent.spawn_later(timeout,
                                self._on_timer_pop,

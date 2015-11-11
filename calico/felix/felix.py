@@ -215,6 +215,7 @@ def main():
     try:
         config = Config(options.config_file)
     except Exception as e:
+        #PLW: Why did you add "as e" when you don't use it? Should probably tidy up
         # Config loading error, and not just invalid parameters (from optparse)
         # as they generate a SystemExit. Attempt to open a log file, ignoring
         # any errors it gets, before we raise the exception.

@@ -143,6 +143,7 @@ class MessageReader(object):
                are generated.
         :raises SocketClosed if the socket is closed.
         """
+        # PLW also raises various socket errors on, well, socket error
         if timeout is not None:
             read_ready, _, _ = select.select([self._sck], [], [], timeout)
             if not read_ready:
@@ -150,6 +151,10 @@ class MessageReader(object):
         try:
             data = self._sck.recv(16384)
         except socket.error as e:
+            #PLW: Should we return or retry in line? Concluded this is OK,
+            # but should comment that can return immediately with 0 messages
+            # in some error cases, which implies that you should retry.
+            # PLW: EAGAIN and EWOULDBLOCK are the same thing.
             if e.errno in (errno.EAGAIN,
                            errno.EWOULDBLOCK,
                            errno.EINTR):

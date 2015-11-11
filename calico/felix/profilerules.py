@@ -104,6 +104,11 @@ class RulesManager(ReferenceManager):
                        profile_id)
             # Pass in_sync=True because we now explicitly know this profile is
             # in sync, even if this is a deletion.
+            #PLW: I can see we could do this - is it worth doing? I worry that
+            # we might program a profile for which the tags are not in place yet
+            # (say). If we do so, are we actually helping at all? Removing
+            # this bit of logic would make things slightly simpler, and
+            # not sure I see the benefit.
             self._maybe_start(profile_id, in_sync=True)
 
 
