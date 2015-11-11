@@ -24,12 +24,14 @@
 #
 # It is implemented as a Neutron/ML2 mechanism driver.
 import json
+
+import time
+
 import os
 import eventlet
 
 from collections import namedtuple
 from functools import wraps
-from sqlalchemy.orm import exc as orm_exc
 from sqlalchemy import exc as sa_exc
 
 # OpenStack imports.
@@ -59,9 +61,8 @@ except ImportError:
         # Juno.
         from oslo.db import exception as db_exc
     except ImportError:
-        # Latest.
+        # Later.
         from oslo_db import exception as db_exc
-
 
 # Calico imports.
 import etcd
@@ -182,6 +183,9 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self._my_pid = None
         self._epoch = 0
         self.in_resync = False
+        self._last_port_status_cleanup_time = time.time()
+        self._port_status_cache = {}
+        self._dirty_port_statuses = set()
 
         # Tell the monkeypatch where we are.
         global mech_driver
@@ -277,8 +281,58 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         self.db.create_or_update_agent(self._db_context, agent_state)
 
     def on_port_status_changed(self, hostname, port_id, status):
+        """
+        Called when etcd tells us that a port status has changed.
+        :param hostname: hostname of the host containing the port.
+        :param port_id: the port ID.
+        :param status: our status for the port.
+        """
+        port_status_key = (intern(hostname), port_id)
+        # Unwrap the dict around the actual status.
+        if status is not None:
+            status = status.get("status")
+        if self._port_status_cache.get(port_status_key) != status:
+            LOG.info("Status of port %s changed to %s",
+                     port_status_key, status)
+            if status is not None:
+                self._port_status_cache[port_status_key] = intern(status)
+            else:
+                self._port_status_cache.pop(port_status_key, None)
+            # Mark the port dirty so we'll retry if we fail to update it now.
+            self._dirty_port_statuses.add(port_status_key)
+            # Try the update right now.
+            self._try_to_update_port_status(port_status_key)
+
+    def maybe_cleanup_port_statuses(self):
+        """
+        Retries updates to any port statuses that we previously failed to
+        update.
+        """
+        now = time.time()
+        time_since_last_cleanup = now - self._last_port_status_cleanup_time
+        if time_since_last_cleanup < 0:
+            LOG.warn("Last cleanup time in future; assuming clock change."
+                     "Resetting time. %s vs %s", time_since_last_cleanup, now)
+            self._last_port_status_cleanup_time = now
+        if time_since_last_cleanup < 5:
+            LOG.debug("Last cleanup was too recent, skipping")
+            return
+        for dirty_port_status in list(self._dirty_port_statuses):
+            LOG.info("Retrying update to port %s", dirty_port_status)
+            self._try_to_update_port_status(dirty_port_status)
+
+    def _try_to_update_port_status(self, port_status_key):
+        """
+        Attempts to update the given port status.  On success, discards it
+        it from self._dirty_port_statuses.  Otherwise, leaves it in that
+        set for future retries.
+
+        :param port_status_key: tuple of hostname, port_id.
+        """
+        hostname, port_id = port_status_key
+        status = self._port_status_cache.get(port_status_key)
         if status:
-            port_status = PORT_STATUS_MAPPING.get(status.get("status"),
+            port_status = PORT_STATUS_MAPPING.get(status,
                                                   constants.PORT_STATUS_ERROR)
             LOG.info("Updating port %s status to %s", port_id, port_status)
         else:
@@ -289,31 +343,25 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             port_status = constants.PORT_STATUS_ERROR
             LOG.info("Reporting port %s deletion", port_id)
 
-        session = self._db_context.session
         try:
-            with session.begin(subtransactions=True):
-                # Lock the port for update.  This avoids a race when the port
-                # is being deleted: felix reports the status via this method
-                # but neutron is concurrently deleting the port from the DB.
-                # update_port_status() does a read of the port to check it
-                # exists before it updates it; that test passes but then the
-                # port gets deleted out from under it before it updates the
-                # port.
-                try:
-                    port = (session.query(models_v2.Port).
-                            with_lockmode("update").
-                            filter(models_v2.Port.id.startswith(port_id)).
-                            one())
-                except orm_exc.NoResultFound:
-                    LOG.info("Port %s not found, nothing to do", port_id)
-                else:
-                    self.db.update_port_status(self._db_context,
-                                               port_id,
-                                               port_status)
+            # Simply try to update the port, this may fail if the port is being
+            # concurrently deleted, in which case we'll retry.  In previous
+            # versions, we tried locking the port for update before calling
+            # update_port_status() but that wasn't sound because we couldn't
+            # respect the "db-access" semaphore, which is used by
+            # update_port_status.
+            self.db.update_port_status(self._db_context,
+                                       port_id,
+                                       port_status)
         except (db_exc.DBError,
-                sa_exc.SQLAlchemyError):
-            LOG.exception("Failed to update port status for %s. Giving up.",
-                          port_id)
+                sa_exc.SQLAlchemyError) as e:
+            # Sadly, we expect this to happen at random if the port changes
+            # under us so log only at warning level and retry later.
+            LOG.warning("Failed to update port status for %s due to %r. "
+                        "Will retry.", port_id, e)
+        else:
+            LOG.debug("Updated port status for %s", port_id)
+            self._dirty_port_statuses.discard(port_status_key)
 
     def _get_db(self):
         if not self.db:

@@ -156,7 +156,8 @@ class EtcdWatcher(EtcdClientOwner):
                  etcd_scheme="http",
                  etcd_key=None,
                  etcd_cert=None,
-                 etcd_ca=None):
+                 etcd_ca=None,
+                 watch_timeout=90):
         super(EtcdWatcher, self).__init__(etcd_authority,
                                           etcd_scheme=etcd_scheme,
                                           etcd_key=etcd_key,
@@ -164,6 +165,7 @@ class EtcdWatcher(EtcdClientOwner):
                                           etcd_ca=etcd_ca)
         self.key_to_poll = key_to_poll
         self.next_etcd_index = None
+        self.watch_timeout = watch_timeout
 
         # Forces a resync after the current poll if set.  Safe to set from
         # another thread.  Automatically reset to False after the resync is
@@ -287,12 +289,14 @@ class EtcdWatcher(EtcdClientOwner):
             try:
                 _log.debug("About to wait for etcd update %s",
                            self.next_etcd_index)
-                response = self.client.read(self.key_to_poll,
-                                            wait=True,
-                                            waitIndex=self.next_etcd_index,
-                                            recursive=True,
-                                            timeout=Timeout(connect=10,
-                                                            read=90))
+                response = self.client.read(
+                    self.key_to_poll,
+                    wait=True,
+                    waitIndex=self.next_etcd_index,
+                    recursive=True,
+                    timeout=Timeout(connect=10,
+                                    read=self.watch_timeout)
+                )
                 _log.debug("etcd response: %r", response)
             except etcd.EtcdConnectionFailed as e:
                 if isinstance(e.cause, (ReadTimeoutError, SocketTimeout)):
@@ -328,6 +332,7 @@ class EtcdWatcher(EtcdClientOwner):
             except:
                 _log.exception("Unexpected exception during etcd poll")
                 raise
+            self._on_loop()
 
         # Since we're polling on a subtree, we can't just increment
         # the index, we have to look at the modifiedIndex to spot
@@ -357,6 +362,15 @@ class EtcdWatcher(EtcdClientOwner):
 
         Responsible for applying the snapshot.
         :param etcd_snapshot_response: Etcd response containing a complete dump.
+        """
+        pass
+
+    def _on_loop(self):
+        """
+        Abstract: this implementation does nothing.
+
+        Called once each time we loop watching etcd.  Useful for doing
+        occasional cleanup/retry work.
         """
         pass
 
