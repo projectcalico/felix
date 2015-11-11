@@ -156,6 +156,7 @@ class EtcdDriver(object):
         So far, this means reading the init message and then dealing
         with the exception if Felix dies.
         """
+        # PLW: Comment above is out of date; it handles more msg types
         try:
             while not self._stop_event.is_set():
                 for msg_type, msg in self._msg_reader.new_messages(timeout=1):
@@ -227,8 +228,7 @@ class EtcdDriver(object):
                 self._send_status(STATUS_WAIT_FOR_READY)
                 self._wait_for_ready()
                 self._preload_config()
-                # Now (on the first run through) wait for Felix to process the
-                # config.
+                # Wait for config if we have not already received it.
                 self._wait_for_config()
                 # Kick off the snapshot request as far as the headers.
                 self._send_status(STATUS_RESYNC)
@@ -252,6 +252,7 @@ class EtcdDriver(object):
                     socket.error) as e:
                 _log.error("Request to etcd failed: %r; resyncing.", e)
                 if monotonic_time() - loop_start < 1:
+                    #PLW: Surely not just a debug log - should never happen!
                     _log.debug("May be tight looping, sleeping...")
                     time.sleep(1)
             except DriverShutdown:
@@ -280,7 +281,8 @@ class EtcdDriver(object):
         """
         ready = False
         while not ready and not self._stop_event.is_set():
-            # Read failure here will be handled by outer loop.
+            #PLW: Why the testing on stop event? Shouldn't it raise an exception if
+            # it the stop event has been set so it can drop out?
             resp = self._etcd_request(self._resync_http_pool, READY_KEY)
             try:
                 etcd_resp = json.loads(resp.data)
@@ -447,6 +449,7 @@ class EtcdDriver(object):
 
     def _handle_etcd_node(self, snap_mod, snap_key, snap_value,
                           snapshot_index=None):
+        # PLW: Needs header comment
         assert snapshot_index is not None
         old_hwm = self._hwms.update_hwm(snap_key, snapshot_index)
         if snap_mod > old_hwm:
@@ -457,6 +460,21 @@ class EtcdDriver(object):
         # several updates from the watcher queue (if there are
         # any).  We limit the number to ensure that we always
         # finish the snapshot eventually.
+        # PLW: what happens if we cannot keep up with the watcher Q, so it gets
+        # longer and longer forever? Should we have a maximum length?
+        # I think we ought to log the length of the queue when we come in here
+        # too, or at least have something so that we know what kind of queue
+        # lengths we have reached.
+        # PLW: This processes (normally) events off the queue (new changes)
+        # in preference to the current set of data. I think that is probably right,
+        # but for the initial load you could definitely argue that we should do
+        # something a bit different. For example, should we try to get to a consistent
+        # out of date state ASAP, rather than letting the new events come through?
+        # After some agonising, I concluded that letting new events win is right unless
+        # the new events are overwhelming the entire server, so this is probably correct.
+        # However, the number 100 then feels very arbitrary. Not sure that I have
+        # a constructive suggestion for how to resolve this one though, just wanted
+        # to ensure we discussed.
         for _ in xrange(100):
             if not self._watcher_queue or self._watcher_queue.empty():
                 # Don't block on the watcher if there's nothing to do.
@@ -497,6 +515,8 @@ class EtcdDriver(object):
         # Find any keys that were deleted while we were unable to
         # keep up with etcd.
         _log.info("Scanning for deletions")
+        #PLW: If there are a lot of these keys, then this could be quite a lot
+        # of memory. I concluded it's hard to do better though, so discretionary.
         deleted_keys = self._hwms.remove_old_keys(snapshot_index)
         for ev_key in deleted_keys:
             # We didn't see the value during the snapshot or via
@@ -512,11 +532,18 @@ class EtcdDriver(object):
         :raises FelixWriteFailed:
         :raises ResyncRequested:
         """
+        # PLW: What happens to the watcher thread if stop() gets called? Or does
+        # it plough on happily until the process goes down?
         if self._watcher_queue is None:
             raise WatcherDied()
         while not self._stop_event.is_set():
             # To make sure we always make progress, only trigger a new resync
             # if we're not in the middle of one.
+            # PLW: This means that when we get a kick to do a resync, we stop
+            # watching for a bit, so could miss an update or two. I think we
+            # should try to close that window, even though it's quite small.
+            # PLW: We could drop a resync because we are already doing one.
+            # Should at least catch and log that case.
             if (not resync_in_progress and
                     self._resync_requested and
                     self._watcher_stop_event):
@@ -552,6 +579,8 @@ class EtcdDriver(object):
         """
         Starts the watcher thread, creating its queue and event in the process.
         """
+        # PLW: Should this stop the existing watcher if the watcher_stop_event
+        # exists? I think it should in the interests of safety.
         self._watcher_queue = Queue()
         self._watcher_stop_event = Event()
         # Note: we pass the queue and event in as arguments so that the thread
@@ -590,6 +619,10 @@ class EtcdDriver(object):
                deletion).
         """
         if key == READY_KEY and value != "true":
+            #PLW: Should we really be starting a resync because the ready key
+            # got nuked? Seems we should sit around waiting for the ready flag.
+            # Actually, that is what we do. Better to have a different exception
+            # to avoid confusion.
             _log.warning("Ready key no longer set to true, triggering resync.")
             raise ResyncRequired()
         self._msg_writer.send_message(
@@ -678,6 +711,9 @@ class EtcdDriver(object):
                                 # deleted, that implies the ready flag is gone
                                 # too; resync rather than generating deletes
                                 # for every key.
+                                #PLW: Shouldn't we treat just as if the ready
+                                # flag got nuked in a response? In other
+                                # words, put a nuke of /ready onto the queue?
                                 _log.warning("Whole %s deleted, resyncing",
                                              VERSION_DIR)
                                 break

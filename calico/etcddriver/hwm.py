@@ -30,6 +30,8 @@ import urllib
 
 _log = logging.getLogger(__name__)
 
+#PLW: You treat % specially because of the urllib.quote stuff below. Comment
+# so that it doesn't get tidied to something that won't work!
 TRIE_SYMBOLS = "/_-:."
 TRIE_CHARS = string.ascii_letters + string.digits + TRIE_SYMBOLS + "%"
 TRIE_CHARS_MATCH = re.compile(r'^[%s]+$' % re.escape(TRIE_CHARS))
@@ -100,6 +102,8 @@ class HighWaterTracker(object):
         self._deletion_hwms = None
         self._latest_deletion = None
 
+    # PLW: Here "hwm" is a bad name. It's not the hwm, but the index which may
+    # or may not be the real hwm.
     def update_hwm(self, key, hwm):
         """
         Updates the HWM for a key if the new value is greater than the old.
@@ -132,6 +136,7 @@ class HighWaterTracker(object):
             self._hwms[key] = hwm
         return old_hwm
 
+    # PLW: hwm is an odd name for the parameter
     def store_deletion(self, key, hwm):
         """
         Store that a given key (or directory) was deleted at a given HWM.
@@ -192,6 +197,8 @@ def encode_key(key):
     operation should be a no-op on most keys but it's better to be tolerant
     here than to blow up.
     """
+    # PLW: is this going to be a painful performance hit? Agree with being
+    # defensive though, so probably got to live with it.
     if key[-1] != "/":
         key += "/"
     key = unicode(urllib.quote(key.encode("utf8"), safe=TRIE_SYMBOLS))
