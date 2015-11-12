@@ -32,6 +32,7 @@ sys.modules['neutron.common.exceptions'] = m_neutron.common.exceptions
 sys.modules['neutron.db'] = m_neutron.db
 sys.modules['neutron.openstack'] = m_neutron.openstack
 sys.modules['neutron.openstack.common'] = m_neutron.openstack.common
+sys.modules['neutron.openstack.common.lockutils'] = m_neutron.openstack.common.lockutils
 sys.modules['neutron.openstack.common.db'] = m_neutron.openstack.common.db
 sys.modules['neutron.openstack.common.db.exception'] = \
     m_neutron.openstack.common.db.exception
