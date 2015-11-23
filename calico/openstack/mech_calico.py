@@ -293,9 +293,9 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         Called when etcd tells us that a port status has changed.
         :param hostname: hostname of the host containing the port.
         :param port_id: the port ID.
-        :param status: our status for the port.
+        :param status: our status dict for the port.
         """
-        port_status_key = (intern(hostname), port_id)
+        port_status_key = (intern(hostname.encode("utf8")), port_id)
         # Unwrap the dict around the actual status.
         if status is not None:
             status = status.get("status")
@@ -303,7 +303,16 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             LOG.info("Status of port %s changed to %s",
                      port_status_key, status)
             if status is not None:
-                self._port_status_cache[port_status_key] = intern(status)
+                if status in PORT_STATUS_MAPPING:
+                    # Intern the status to avoid keeping thousands of copies
+                    # of the status strings.  We know the .encode() is safe
+                    # because we just checked this was one of our expected
+                    # strings.
+                    status = intern(status.encode("utf8"))
+                    self._port_status_cache[port_status_key] = status
+                else:
+                    LOG.error("Unknown port status: %r", status)
+                    self._port_status_cache.pop(port_status_key, None)
             else:
                 self._port_status_cache.pop(port_status_key, None)
             # Mark the port dirty so we'll retry if we fail to update it now.
