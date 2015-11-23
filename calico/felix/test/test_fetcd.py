@@ -74,6 +74,10 @@ class TestEtcdAPI(BaseTestCase):
         super(TestEtcdAPI, self).setUp()
         self.m_config = Mock(spec=Config)
         self.m_config.ETCD_ADDR = ETCD_ADDRESS
+        self.m_config.ETCD_SCHEME = "http"
+        self.m_config.ETCD_KEY_FILE = "none"
+        self.m_config.ETCD_CERT_FILE = "none"
+        self.m_config.ETCD_CA_FILE = "none"
         self.m_hosts_ipset = Mock(spec=IpsetActor)
         with patch("calico.felix.fetcd._FelixEtcdWatcher",
                    autospec=True) as m_etcd_watcher:
@@ -163,6 +167,10 @@ class TestEtcdWatcher(BaseTestCase):
         self.m_config.HOSTNAME = "hostname"
         self.m_config.IFACE_PREFIX = "tap"
         self.m_config.ETCD_ADDR = ETCD_ADDRESS
+        self.m_config.ETCD_SCHEME = "http"
+        self.m_config.ETCD_KEY_FILE = "none"
+        self.m_config.ETCD_CERT_FILE = "none"
+        self.m_config.ETCD_CA_FILE = "none"
         self.m_hosts_ipset = Mock(spec=IpsetActor)
         self.m_api = Mock(spec=EtcdAPI)
         self.m_status_rep = Mock(spec=EtcdStatusReporter)
@@ -303,7 +311,7 @@ class TestEtcdWatcher(BaseTestCase):
         self.assertEqual(self.m_splitter.on_datamodel_in_sync.mock_calls,
                          [call(async=True)])
         self.assertEqual(self.m_hosts_ipset.replace_members.mock_calls,
-                         [call([], async=True)])
+                         [call(frozenset([]), async=True)])
 
     @patch("subprocess.Popen")
     @patch("socket.socket")
@@ -467,7 +475,7 @@ class TestEtcdWatcher(BaseTestCase):
         self.dispatch("/calico/v1/host/foo/bird_ip",
                       action="set", value="10.0.0.1")
         self.m_hosts_ipset.replace_members.assert_called_once_with(
-            ["10.0.0.1"],
+            frozenset(["10.0.0.1"]),
             async=True,
         )
 
@@ -494,7 +502,7 @@ class TestEtcdWatcher(BaseTestCase):
         self.dispatch("/calico/v1/host/foo/bird_ip",
                       action="delete")
         self.m_hosts_ipset.replace_members.assert_called_once_with(
-            [],
+            frozenset([]),
             async=True,
         )
 
@@ -509,7 +517,7 @@ class TestEtcdWatcher(BaseTestCase):
         self.dispatch("/calico/v1/host/foo/bird_ip",
                       action="set", value="gibberish")
         self.m_hosts_ipset.replace_members.assert_called_once_with(
-            [],
+            frozenset([]),
             async=True,
         )
 
@@ -547,6 +555,10 @@ class TestEtcdReporting(BaseTestCase):
         self.m_config = Mock()
         self.m_config.IFACE_PREFIX = "tap"
         self.m_config.ETCD_ADDR = "localhost:4001"
+        self.m_config.ETCD_SCHEME = "http"
+        self.m_config.ETCD_KEY_FILE = "none"
+        self.m_config.ETCD_CERT_FILE = "none"
+        self.m_config.ETCD_CA_FILE = "none"
         self.m_config.HOSTNAME = "hostname"
         self.m_config.RESYNC_INTERVAL = 0
         self.m_config.REPORTING_INTERVAL_SECS = 1
@@ -620,6 +632,10 @@ class TestEtcdStatusReporter(BaseTestCase):
         super(TestEtcdStatusReporter, self).setUp()
         self.m_config = Mock(spec=Config)
         self.m_config.ETCD_ADDR = ETCD_ADDRESS
+        self.m_config.ETCD_SCHEME = "http"
+        self.m_config.ETCD_KEY_FILE = "none"
+        self.m_config.ETCD_CERT_FILE = "none"
+        self.m_config.ETCD_CA_FILE = "none"
         self.m_config.HOSTNAME = "foo"
         self.m_config.REPORT_ENDPOINT_STATUS = True
         self.m_config.ENDPOINT_REPORT_DELAY = 1

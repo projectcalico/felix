@@ -47,7 +47,8 @@ from calico.etcddriver.protocol import (
     MSG_KEY_SEV_SYSLOG, MSG_KEY_SEV_SCREEN, STATUS_IN_SYNC,
     MSG_TYPE_CONFIG_LOADED, MSG_KEY_GLOBAL_CONFIG, MSG_KEY_HOST_CONFIG,
     MSG_TYPE_UPDATE, MSG_KEY_KEY, MSG_KEY_VALUE, MessageWriter,
-    MSG_TYPE_STATUS, MSG_KEY_STATUS
+    MSG_TYPE_STATUS, MSG_KEY_STATUS, MSG_KEY_KEY_FILE, MSG_KEY_CERT_FILE,
+    MSG_KEY_CA_FILE
 )
 from calico.etcdutils import (
     EtcdClientOwner, delete_empty_parents, PathDispatcher, EtcdEvent
@@ -106,7 +107,11 @@ class EtcdAPI(EtcdClientOwner, Actor):
     """
 
     def __init__(self, config, hosts_ipset):
-        super(EtcdAPI, self).__init__(config.ETCD_ADDR)
+        super(EtcdAPI, self).__init__(config.ETCD_ADDR,
+                                      etcd_scheme=config.ETCD_SCHEME,
+                                      etcd_key=config.ETCD_KEY_FILE,
+                                      etcd_cert=config.ETCD_CERT_FILE,
+                                      etcd_ca=config.ETCD_CA_FILE)
         self._config = config
 
         # Timestamp storing when the EtcdAPI started. This info is needed
@@ -560,8 +565,12 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         writer.send_message(
             MSG_TYPE_INIT,
             {
-                MSG_KEY_ETCD_URL: "http://" + self._config.ETCD_ADDR,
+                MSG_KEY_ETCD_URL: self._config.ETCD_SCHEME + "://" +
+                                  self._config.ETCD_ADDR,
                 MSG_KEY_HOSTNAME: self._config.HOSTNAME,
+                MSG_KEY_KEY_FILE: self._config.ETCD_KEY_FILE,
+                MSG_KEY_CERT_FILE: self._config.ETCD_CERT_FILE,
+                MSG_KEY_CA_FILE: self._config.ETCD_CA_FILE
             }
         )
         return reader, writer
@@ -641,8 +650,10 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         if not self._been_in_sync:
             _log.debug("Deferring update to hosts ipset until we're in-sync")
             return
-        self.hosts_ipset.replace_members(self.ipv4_by_hostname.values(),
-                                         async=True)
+        self.hosts_ipset.replace_members(
+            frozenset(self.ipv4_by_hostname.values()),
+            async=True
+        )
 
     def _on_config_updated(self, response, config_param):
         new_value = response.value
@@ -680,7 +691,12 @@ class EtcdStatusReporter(EtcdClientOwner, Actor):
     """
 
     def __init__(self, config):
-        super(EtcdStatusReporter, self).__init__(config.ETCD_ADDR)
+        super(EtcdStatusReporter, self).__init__(
+                                               config.ETCD_ADDR,
+                                               etcd_scheme=config.ETCD_SCHEME,
+                                               etcd_key=config.ETCD_KEY_FILE,
+                                               etcd_cert=config.ETCD_CERT_FILE,
+                                               etcd_ca=config.ETCD_CA_FILE)
         self._config = config
         self._endpoint_status = {IPV4: {}, IPV6: {}}
 
@@ -700,10 +716,10 @@ class EtcdStatusReporter(EtcdClientOwner, Actor):
     def on_endpoint_status_changed(self, endpoint_id, ip_type, status):
         assert isinstance(endpoint_id, EndpointId)
         if status is not None:
-            _stats.increment("Endpoint status deleted")
+            _stats.increment("Endpoint status updated")
             self._endpoint_status[ip_type][endpoint_id] = status
         else:
-            _stats.increment("Endpoint status updated")
+            _stats.increment("Endpoint status deleted")
             self._endpoint_status[ip_type].pop(endpoint_id, None)
         self._mark_endpoint_dirty(endpoint_id)
 

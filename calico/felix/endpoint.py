@@ -427,7 +427,10 @@ class LocalEndpoint(RefCountedActor):
                 if self._device_is_up is None:
                     _log.debug("Learned interface name, checking if device "
                                "is up.")
-                    self._device_is_up = devices.interface_up(self._iface_name)
+                    self._device_is_up = (
+                        devices.interface_exists(self._iface_name) and
+                        devices.interface_up(self._iface_name)
+                    )
 
             # Check if the profile ID or IP addresses have changed, requiring
             # a refresh of the dataplane.
@@ -496,12 +499,11 @@ class LocalEndpoint(RefCountedActor):
     def _configure_interface(self):
         """
         Applies sysctls and routes to the interface.
-
-        :param: bool mac_changed: Has the MAC address changed since it was last
-                     configured? If so, we reconfigure ARP for the interface in
-                     IPv4 (ARP does not exist for IPv6, which uses neighbour
-                     solicitation instead).
         """
+        if not self._device_is_up:
+            _log.debug("Device is known to be down, skipping attempt to "
+                       "configure it.")
+            return
         try:
             if self.ip_type == IPV4:
                 devices.configure_interface_ipv4(self._iface_name)
@@ -519,7 +521,7 @@ class LocalEndpoint(RefCountedActor):
                                self.endpoint["mac"],
                                reset_arp=reset_arp)
 
-        except (IOError, FailedSystemCall):
+        except (IOError, FailedSystemCall) as e:
             if not devices.interface_exists(self._iface_name):
                 _log.info("Interface %s for %s does not exist yet",
                           self._iface_name, self.combined_id)
@@ -527,9 +529,16 @@ class LocalEndpoint(RefCountedActor):
                 _log.info("Interface %s for %s is not up yet",
                           self._iface_name, self.combined_id)
             else:
-                # Interface flapped back up after we failed?
-                _log.warning("Failed to configure interface %s for %s",
-                             self._iface_name, self.combined_id)
+                # Either the interface flapped back up after the failure (in
+                # which case we'll retry when the event reaches us) or there
+                # was a genuine failure due to bad data or some other factor.
+                #
+                # Since the former is fairly common, we log at warning level
+                # rather than error, which avoids false positives.
+                _log.warning("Failed to configure interface %s for %s: %r.  "
+                             "Either the interface is flapping or it is "
+                             "misconfigured.", self._iface_name,
+                             self.combined_id, e)
         else:
             _log.info("Interface %s configured", self._iface_name)
             self._device_in_sync = True
