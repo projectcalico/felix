@@ -680,6 +680,9 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
     def _update_port(self, context, port):
         """
         Called during port updates that have nothing to do with migration.
+
+        This method assumes it's being called from within a database
+        transaction and does not take out another one.
         """
         # TODO: There's a lot of redundant code in these methods, with the only
         # key difference being taking out transactions. Come back and shorten
@@ -694,18 +697,17 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             LOG.info("Port enabled, attempting to update.")
 
             plugin_context = self._plugin_context(context)
-            with self._txn_from_context(plugin_context):
-                port = self.db.get_port(plugin_context, port['id'])
-                port = self.add_extra_port_information(
-                    plugin_context, port
-                )
-                profiles = self.get_security_profiles(
-                    plugin_context, port
-                )
-                self.transport.endpoint_created(port)
+            port = self.db.get_port(plugin_context, port['id'])
+            port = self.add_extra_port_information(
+                plugin_context, port
+            )
+            profiles = self.get_security_profiles(
+                plugin_context, port
+            )
+            self.transport.endpoint_created(port)
 
-                for profile in profiles:
-                    self.transport.write_profile_to_etcd(profile)
+            for profile in profiles:
+                self.transport.write_profile_to_etcd(profile)
         else:
             # Port unbound, attempt to delete.
             LOG.info("Port disabled, attempting delete if needed.")
