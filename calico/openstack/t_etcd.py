@@ -595,6 +595,7 @@ class CalicoEtcdWatcher(EtcdWatcher):
 
         Updates the driver with the current state.
         """
+        LOG.info("Loading status-report snapshot from etcd")
         endpoints_by_host = defaultdict(set)
         hosts_with_live_felix = set()
 
@@ -646,6 +647,7 @@ class CalicoEtcdWatcher(EtcdWatcher):
 
         # Swap in the newly-loaded state.
         self._endpoints_by_host = endpoints_by_host
+        LOG.info("Finished loading status-report snapshot from etcd")
 
     def _on_status_set(self, response, hostname):
         """

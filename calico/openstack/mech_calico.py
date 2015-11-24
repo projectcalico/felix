@@ -273,6 +273,8 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                         "Handling status updates thread exiting.")
 
     def on_felix_alive(self, felix_hostname, new):
+        LOG.info("Felix on host %s checked in; first report: %s",
+                 felix_hostname, new)
         agent_state = felix_agent_state(felix_hostname, start_flag=new)
         self.db.create_or_update_agent(self._db_context, agent_state)
 
