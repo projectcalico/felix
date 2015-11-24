@@ -481,7 +481,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             return
 
         plugin_context = self._plugin_context(context)
-        with self._txn_from_context(plugin_context):
+        with self._txn_from_context(plugin_context, tag="create-port"):
             # First, regain the current port. This protects against concurrent
             # writes breaking our state.
             port = self.db.get_port(plugin_context, port['id'])
@@ -543,7 +543,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
 
         # Now, re-read the port.
         plugin_context = self._plugin_context(context)
-        with self._txn_from_context(plugin_context):
+        with self._txn_from_context(plugin_context, tag="update-port"):
             port = self.db.get_port(plugin_context, port['id'])
 
             # Now, fork execution based on the type of update we're performing.
@@ -600,7 +600,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         2. Write the profile to etcd.
         """
         LOG.info("Updating security group IDs %s", sgids)
-        with self._txn_from_context(context):
+        with self._txn_from_context(context, tag="sg-update"):
             rules = self.db.get_security_group_rules(
                 context, filters={'security_group_id': sgids}
             )
@@ -615,19 +615,21 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
             for profile in profiles:
                 self.transport.write_profile_to_etcd(profile)
 
-    def _txn_from_context(self, context):
+    @contextlib.contextmanager
+    def _txn_from_context(self, context, tag="<unset>"):
         """
         Context manager: opens a DB transaction against the given context.
 
         :return: context manager for use with with:.
         """
-        return contextlib.nested(
-            # To work around a deadlock between the C driver for mysql and
-            # eventlet, take a lock before accessing the DB.
-            # https://github.com/projectcalico/calico/issues/869
-            lockutils.lock('db-access'),
-            context.session.begin(subtransactions=True)
-        )
+        LOG.debug("Waiting for db-access lock tag=%s...", tag)
+        try:
+            with lockutils.lock('db-access'):
+                LOG.debug("...acquired db-access lock tag=%s", tag)
+                with context.session.begin(subtransactions=True) as session:
+                    yield session
+        finally:
+            LOG.debug("Released db-access lock tag=%s", tag)
 
     def _port_unbound_update(self, context, port):
         """
@@ -807,7 +809,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         # Then, grab all the ports from Neutron.
         # TODO(lukasa): We can reduce the amount of data we load from Neutron
         # here by filtering in the get_ports call.
-        with self._txn_from_context(context):
+        with self._txn_from_context(context, "resync-port"):
             ports = dict((port['id'], port)
                          for port in self.db.get_ports(context)
                          if self._port_is_endpoint_port(port))
@@ -870,7 +872,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         :param missing_port_ids: A set of IDs for ports missing from etcd.
         :returns: Nothing.
         """
-        with self._txn_from_context(context):
+        with self._txn_from_context(context, tag="resync-port-missing"):
             missing_ports = self.db.get_ports(
                 context, filters={'id': missing_port_ids}
             )
@@ -917,7 +919,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 LOG.info("Failed to update deleted endpoint %s", endpoint.id)
                 continue
 
-            with self._txn_from_context(context):
+            with self._txn_from_context(context, tag="resync-ports-changed"):
                 try:
                     port = self.db.get_port(context, endpoint.id)
                 except PortNotFound:
@@ -968,7 +970,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         # Anything not in either group is added to the 'reconcile' set.
         # This explicit with statement is technically unnecessary, but it helps
         # keep our transaction scope really clear.
-        with self._txn_from_context(context):
+        with self._txn_from_context(context, tag="resync-prof"):
             sgs = self.db.get_security_groups(context)
 
         sgids = set(sg['id'] for sg in sgs)
@@ -1006,7 +1008,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
         :param missing_group_ids: The IDs of the missing security groups.
         :returns: Nothing.
         """
-        with self._txn_from_context(context):
+        with self._txn_from_context(context, tag="resync-prof-missing"):
             rules = self.db.get_security_group_rules(
                 context, filters={'security_group_id': missing_group_ids}
             )
@@ -1052,7 +1054,7 @@ class CalicoMechanismDriver(mech_agent.SimpleAgentMechanismDriverBase):
                 continue
 
             # Get the data from Neutron.
-            with self._txn_from_context(context):
+            with self._txn_from_context(context, tag="resync-prof-changed"):
                 rules = self.db.get_security_group_rules(
                     context, filters={'security_group_id': [etcd_profile.id]}
                 )
