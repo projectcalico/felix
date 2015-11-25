@@ -557,7 +557,8 @@ class CalicoEtcdWatcher(EtcdWatcher):
         LOG.info("CalicoEtcdWatcher created for %s:%s", host, port)
         super(CalicoEtcdWatcher, self).__init__(
             "%s:%s" % (host, port),
-            FELIX_STATUS_DIR
+            FELIX_STATUS_DIR,
+            watch_timeout=10,  # Small timeout so that _on_loop gets to run.
         )
         self.calico_driver = calico_driver
 
@@ -646,6 +647,9 @@ class CalicoEtcdWatcher(EtcdWatcher):
 
         # Swap in the newly-loaded state.
         self._endpoints_by_host = endpoints_by_host
+
+    def _on_loop(self):
+        self.calico_driver.maybe_cleanup_port_statuses()
 
     def _on_status_set(self, response, hostname):
         """

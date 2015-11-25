@@ -895,9 +895,14 @@ class TestDriverStatusReporting(lib.Lib, unittest.TestCase):
 
     def test_on_port_status_changed(self):
         self.driver._get_db()
-        self.driver._db_context = mock.Mock()
+        self.driver._db_context = mock.Mock(name="DB context")
         self.driver._db_context.session = mock.MagicMock()
         self.db.update_port_status.side_effect = lib.DBError()
+        self.driver.on_port_status_changed("host",
+                                           "port_id",
+                                           {"status": "up"})
+
+        # Subsequent change should be ignored due to cache.
         self.driver.on_port_status_changed("host",
                                            "port_id",
                                            {"status": "up"})
@@ -917,17 +922,6 @@ class TestDriverStatusReporting(lib.Lib, unittest.TestCase):
         )
         self.db.update_port_status.reset_mock()
 
-    def test_on_port_status_changed_not_found(self):
-        self.driver._get_db()
-        self.driver._db_context = mock.Mock()
-        self.driver._db_context.session = mock.MagicMock()
-        self.driver._db_context.session.query.side_effect = lib.NoResultFound()
-        self.db.update_port_status.side_effect = RuntimeError()
-        self.driver.on_port_status_changed("host",
-                                           "port_id",
-                                           {"status": "up"})
-        self.assertEqual(self.db.update_port_status.mock_calls, [])
-        self.db.update_port_status.reset_mock()
 
 
 class TestCalicoEtcdWatcher(unittest.TestCase):
