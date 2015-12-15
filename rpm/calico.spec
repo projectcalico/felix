@@ -26,7 +26,7 @@ Virtualization (NFV).
 %package common
 Group:          Applications/Engineering
 Summary:        Project Calico virtual networking for cloud data centers
-Requires:       python-etcd, posix-spawn, python-setuptools
+Requires:       python-etcd, posix-spawn, python-setuptools, python-six
 
 %description common
 This package provides common files.

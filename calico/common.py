@@ -27,7 +27,7 @@ import logging.handlers
 import os
 import re
 import sys
-from types import StringTypes
+import six
 
 import netaddr
 import netaddr.core
@@ -321,7 +321,7 @@ def validate_endpoint(config, combined_id, endpoint):
     for field in ["name", "mac"]:
         if field not in endpoint:
             issues.append("Missing '%s' field." % field)
-        elif not isinstance(endpoint[field], StringTypes):
+        elif not isinstance(endpoint[field], six.string_types):
             issues.append("Expected '%s' to be a string; got %r." %
                           (field, endpoint[field]))
         elif field == "mac":
@@ -339,14 +339,14 @@ def validate_endpoint(config, combined_id, endpoint):
         issues.append("Missing 'profile_id(s)' field.")
     else:
         for value in endpoint["profile_ids"]:
-            if not isinstance(value, StringTypes):
+            if not isinstance(value, six.string_types):
                 issues.append("Expected profile IDs to be strings.")
                 break
 
             if not VALID_ID_RE.match(value):
                 issues.append("Invalid profile ID '%r'." % value)
 
-    if ("name" in endpoint and isinstance(endpoint['name'], StringTypes)
+    if ("name" in endpoint and isinstance(endpoint['name'], six.string_types)
         and combined_id.host == config.HOSTNAME
         and not endpoint["name"].startswith(config.IFACE_PREFIX)):
         # Only test the interface for local endpoints - remote hosts may have
@@ -565,7 +565,7 @@ def validate_tags(profile_id, tags):
         issues.append("Expected tags to be a list.")
     else:
         for tag in tags:
-            if not isinstance(tag, StringTypes):
+            if not isinstance(tag, six.string_types):
                 issues.append("Expected tag '%s' to be a string." % tag)
                 break
 
