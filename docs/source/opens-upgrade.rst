@@ -151,7 +151,6 @@ node are the following.
 
     calico-common
     calico-compute
-    calico-dhcp-agent
     calico-felix
     dnsmasq
     networking-calico
