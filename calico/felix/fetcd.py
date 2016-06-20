@@ -584,6 +584,7 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         else:
             # Not running under pyinstaller, execute the etcd driver directly.
             cmd = [sys.executable, "-m", "calico.etcddriver"]
+        cmd =["/home/gulfstream/go-work/src/github.com/projectcalico/calico-go/etcd-driver"]
         # etcd driver takes the felix socket name as argument.
         cmd += [sck_filename]
         _log.info("etcd-driver command line: %s", cmd)
@@ -768,7 +769,8 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         if self.last_global_config.get(config_param) != new_value:
             _log.critical("Global config value %s updated.  Felix must be "
                           "restarted.", config_param)
-            die_and_restart()
+            # FIXME Reinstate die_and_restart
+            #die_and_restart()
         _stats.increment("Global config (non) updates")
 
     def _on_host_config_updated(self, response, hostname, config_param):
@@ -780,7 +782,8 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         if self.last_host_config.get(config_param) != new_value:
             _log.critical("Global config value %s updated.  Felix must be "
                           "restarted.", config_param)
-            die_and_restart()
+            # FIXME Reinstate die_and_restart
+            #die_and_restart()
 
     def on_ipam_v4_pool_set(self, response, pool_id):
         _stats.increment("IPAM pool created/updated")
