@@ -1,5 +1,5 @@
 [![Coverage Status](https://coveralls.io/repos/projectcalico/calico/badge.svg?branch=master&service=github)](https://coveralls.io/github/projectcalico/calico?branch=master)
-[![Slack Status](http://slack.projectcalico.org/badge.svg)](http://slack.projectcalico.org)
+[![Slack Status](https://slack.projectcalico.org/badge.svg)](https://slack.projectcalico.org)
 [![IRC Channel](https://img.shields.io/badge/irc-%23calico-blue.svg)](https://kiwiirc.com/client/irc.freenode.net/#calico)
 # Project Calico
 
