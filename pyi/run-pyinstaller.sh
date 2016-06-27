@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-
 # -*- coding: utf-8 -*-
 # Copyright (c) 2016 Tigera, Inc. All rights reserved.
 #

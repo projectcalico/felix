@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Copyright (c) 2016 Tigera, Inc. All rights reserved.
-# Copyright 2015 Metaswitch Networks
+# Copyright (c) 2015 Tigera, Inc. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -1055,4 +1055,3 @@ class TestEtcdStatusReporter(BaseTestCase):
         self.m_client.read.side_effect = self.failureException
         self.rep.clean_up_endpoint_statuses(async=True)
         self.step_actor(self.rep)
-
