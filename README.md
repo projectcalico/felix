@@ -3,35 +3,26 @@
 [![IRC Channel](https://img.shields.io/badge/irc-%23calico-blue.svg)](https://kiwiirc.com/client/irc.freenode.net/#calico)
 # Project Calico
 
-Project Calico represents a new approach to virtual networking, based on the
-same scalable IP networking principles as the Internet.  Unlike other virtual
-networking approaches, Calico does not use overlays, instead providing a pure
-Layer 3 approach to data center networking.  Calico is simple to deploy and
-diagnose, provides a rich security policy, supports both IPv4 and IPv6 and can
-be used across a combination of bare-metal, VM and container workloads.
+Project Calico provides 
 
-Calico implements a highly efficient vRouter in each compute node that
-leverages the existing Linux kernel forwarding engine without the need for
-vSwitches. Each vRouter propagates workload reachability information (routes)
-to the rest of the data center using BGP – either directly in small scale
-deployments or via BGP route reflectors to reach Internet level scales in large
-deployments.
-
-Calico peers directly with the data center’s physical fabric (whether L2 or L3)
-without the need for on/off ramps, NAT, tunnels, or overlays.
-
-Calico supports rich and flexible network policy which it enforces using
-bookended ACLs on each compute node to provide tenant isolation, security
-groups, and external reachability constraints.
+- A simple, pure layer 3 networking approach with no overlays for networking 
+  "workloads" such as VMs and containers.
+- A distributed firewall implementing rich and flexible network policy,
+  imposed at ingress/egress to each workload.
 
 For more information see [the Project Calico website](http://www.projectcalico.org/learn/).
 
+This repository contains the source code for Project Calico's per-host 
+daemon, Felix.
+
 ## How do I get started with Project Calico?
 
-To get started on [OpenStack](http://www.openstack.org/) follow the
-instructions [in our docs](http://docs.projectcalico.org/en/latest/openstack.html).
-To get started on [Docker](http://www.docker.com/) follow the instructions
+Calico can be used with a range of orchestrators:
+
+- To get started with [Docker](http://www.docker.com/), [Kubernetes](http://kubernetes.io/) or [Mesos](http://mesos.apache.org/) follow the instructions
 [in the calico-containers repo](https://github.com/projectcalico/calico-containers/blob/master/README.md).
+- To get started with [OpenStack](http://www.openstack.org/) follow the
+instructions [in our docs](http://docs.projectcalico.org/en/latest/openstack.html).
 
 Technical documentation is at <http://docs.projectcalico.org/>. For
 information about contributing to Calico itself, see the section titled
@@ -39,27 +30,19 @@ information about contributing to Calico itself, see the section titled
 
 ## How can I get support for Project Calico?
 
-There are two options for getting support for Calico. You can simply
-[get in contact](http://www.projectcalico.org/contact/) and ask any question
-you like – there is an active group of users and developers who will usually
-try their best to help you or point you in the right direction. Or you can work
-with one of the commercial vendors and system integrators who provide
-installation, integration, customization and support services for Calico.
+The best place to ask a question or get help from the community is the 
+[calico-users #slack](https://slack.projectcalico.org).  We also have 
+[an IRC channel](https://kiwiirc.com/client/irc.freenode.net/#calico).
 
-Currently, we are aware of the following vendors who provide commercial support
-services:
-
-- Metaswitch Networks.
-
-Please [contact us](http://www.projectcalico.org/contact/) if you are a
-vendor providing commercial support services and wish to be added to this list.
+In addition, the company behind Project Calico, 
+[Tigera, Inc.](https://www.tigera.io/) offers commercial support.
 
 ## Who is behind Project Calico?
 
-Project Calico was founded by Metaswitch Networks, who also contributed the
-original implementation to open source and are responsible for the ongoing
-management of the project. However, it is open to any members of the community
-– individuals or organizations – to get involved and contribute code.
+[Tigera, Inc.](https://www.tigera.io/) is the company behind Project Calico
+and is responsible for the ongoing management of the project. However, it 
+is open to any members of the community – individuals or organizations – 
+to get involved and contribute code.
 
 Please [contact us](http://www.projectcalico.org/contact/) if you are
 interested in getting involved and contributing to the project.
