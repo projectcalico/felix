@@ -136,5 +136,5 @@ To use the bundle,
 ### Debs and RPMs
 
 The Calico team build debs and RPMs for releases of Calico but right now the
-processed involve our build server.  Please get in touch if you need to build 
+processes involve our build server.  Please get in touch if you need to build 
 your own packages.
