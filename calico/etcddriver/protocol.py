@@ -65,6 +65,14 @@ MSG_TYPE_UPDATE = "u"
 MSG_KEY_KEY = "k"
 MSG_KEY_VALUE = "v"
 
+# Selector/IP added/removed message Driver -> Felix.
+MSG_TYPE_SEL_ADDED = "sel_added"
+MSG_TYPE_SEL_REMOVED = "sel_removed"
+MSG_TYPE_IP_ADDED = "ip_added"
+MSG_TYPE_IP_REMOVED = "ip_removed"
+MSG_KEY_SEL_ID = "sel_id"
+MSG_KEY_IP = "ip"
+
 
 FLUSH_THRESHOLD = 200
 

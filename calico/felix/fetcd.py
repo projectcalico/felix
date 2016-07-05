@@ -46,7 +46,9 @@ from calico.etcddriver.protocol import (
     MSG_TYPE_CONFIG_LOADED, MSG_KEY_GLOBAL_CONFIG, MSG_KEY_HOST_CONFIG,
     MSG_TYPE_UPDATE, MSG_KEY_KEY, MSG_KEY_VALUE, MessageWriter,
     MSG_TYPE_STATUS, MSG_KEY_STATUS, MSG_KEY_KEY_FILE, MSG_KEY_CERT_FILE,
-    MSG_KEY_CA_FILE, SocketClosed, MSG_KEY_PROM_PORT)
+    MSG_KEY_CA_FILE, SocketClosed, MSG_KEY_PROM_PORT, MSG_TYPE_SEL_ADDED,
+    MSG_TYPE_SEL_REMOVED, MSG_TYPE_IP_ADDED, MSG_TYPE_IP_REMOVED,
+    MSG_KEY_SEL_ID, MSG_KEY_IP)
 from calico.etcdutils import (
     EtcdClientOwner, delete_empty_parents, PathDispatcher, EtcdEvent,
     safe_decode_json, intern_list
@@ -421,6 +423,18 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         elif msg_type == MSG_TYPE_STATUS:
             _stats.increment("Status messages from driver")
             self._on_status_from_driver(msg)
+        elif msg_type == MSG_TYPE_SEL_ADDED:
+            _stats.increment("Selector added messages from driver")
+            self._on_sel_added_msg_from_driver(msg)
+        elif msg_type == MSG_TYPE_SEL_REMOVED:
+            _stats.increment("Selector removed messages from driver")
+            self._on_sel_removed_msg_from_driver(msg)
+        elif msg_type == MSG_TYPE_IP_ADDED:
+            _stats.increment("IP added messages from driver")
+            self._on_ip_added_msg_from_driver(msg)
+        elif msg_type == MSG_TYPE_IP_REMOVED:
+            _stats.increment("IP removed messages from driver")
+            self._on_ip_removed_msg_from_driver(msg)
         else:
             raise RuntimeError("Unexpected message %s" % msg)
         self.msgs_processed += 1
@@ -549,6 +563,20 @@ class _FelixEtcdWatcher(gevent.Greenlet):
             if self._config.REPORT_ENDPOINT_STATUS:
                 self._status_reporter.clean_up_endpoint_statuses(async=True)
             self._update_hosts_ipset()
+
+    def _on_sel_added_msg_from_driver(self, msg):
+        self.splitter.on_selector_added(msg[MSG_KEY_SEL_ID])
+
+    def _on_sel_removed_msg_from_driver(self, msg):
+        self.splitter.on_selector_removed(msg[MSG_KEY_SEL_ID])
+
+    def _on_ip_added_msg_from_driver(self, msg):
+        self.splitter.on_selector_ip_added(msg[MSG_KEY_SEL_ID],
+                                           msg[MSG_KEY_IP])
+
+    def _on_ip_removed_msg_from_driver(self, msg):
+        self.splitter.on_selector_ip_removed(msg[MSG_KEY_SEL_ID],
+                                             msg[MSG_KEY_IP])
 
     def _start_driver(self):
         """

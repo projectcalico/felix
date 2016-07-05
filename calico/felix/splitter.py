@@ -55,6 +55,10 @@ class UpdateSplitter(object):
         self.selector_mgrs = self._managers_with("on_policy_selector_update")
         self.tier_data_mgrs = self._managers_with("on_tier_data_update")
         self.prof_labels_mgrs = self._managers_with("on_prof_labels_set")
+        self.sel_added_upd_mgrs = self._managers_with("on_selector_added")
+        self.sel_removed_upd_mgrs = self._managers_with("on_selector_removed")
+        self.sel_ip_added_mgrs = self._managers_with("on_selector_ip_added")
+        self.sel_ip_rem_mgrs = self._managers_with("on_selector_ip_removed")
 
     def _managers_with(self, method_name):
         return [m for m in self.managers if hasattr(m, method_name)]
@@ -165,6 +169,27 @@ class UpdateSplitter(object):
         _log.info("IPAM pool %s updated", pool_id)
         for mgr in self.ipam_upd_mgrs:
             mgr.on_ipam_pool_updated(pool_id, pool, async=True)
+
+    def on_selector_added(self, selector_id):
+        _log.info("Selector added %s", selector_id)
+        for mgr in self.sel_added_upd_mgrs:
+            mgr.on_selector_added(selector_id, async=True)
+
+    def on_selector_removed(self, selector_id):
+        _log.info("Selector removed %s", selector_id)
+        for mgr in self.sel_removed_upd_mgrs:
+            mgr.on_selector_removed(selector_id, async=True)
+
+    def on_selector_ip_added(self, selector_id, ip):
+        _log.debug("Selector IP added %s, %s", selector_id, ip)
+        for mgr in self.sel_ip_added_mgrs:
+            mgr.on_selector_ip_added(selector_id, ip, async=True)
+
+    def on_selector_ip_removed(self, selector_id, ip):
+        _log.debug("Selector IP removed %s, %s", selector_id, ip)
+        for mgr in self.sel_ip_rem_mgrs:
+            mgr.on_selector_ip_removed(selector_id, ip, async=True)
+
 
 
 class CleanupManager(Actor):

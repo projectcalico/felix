@@ -291,6 +291,22 @@ class IpsetManager(ReferenceManager):
         assert isinstance(endpoint_id, WloadEndpointId)
         self._on_endpoint_or_host_ep_update(endpoint_id, endpoint)
 
+    @actor_message()
+    def on_selector_added(self, selector_id):
+        _log.info("Selector %s now active.", selector_id)
+
+    @actor_message()
+    def on_selector_removed(self, selector_id):
+        _log.info("Selector %s no longer active.", selector_id)
+
+    @actor_message()
+    def on_selector_ip_added(self, selector_id, ip):
+        _log.info("Selector %s now contains %s", selector_id, ip)
+
+    @actor_message()
+    def on_selector_ip_removed(self, selector_id, ip):
+        _log.info("Selector %s no longer contains %s", selector_id, ip)
+
     def _on_endpoint_or_host_ep_update(self, combined_id, data):
         """
         Update tag/selector memberships and indices with the new
