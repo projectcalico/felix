@@ -184,6 +184,19 @@ class TestConfig(unittest.TestCase):
                                          "Cannot read cert file"):
                 config = Config("calico/felix/test/data/felix_unreadable_cert.cfg")
 
+    def test_https_without_ca(self):
+        """
+        Test that validation fails if HTTPS is specified without a CA cert.
+        """
+        with mock.patch("os.path.isfile", autospec=True) as m_isfile, \
+                mock.patch("os.access", autospec=True) as m_access:
+
+            m_isfile.return_value = True
+            m_access.return_value = True
+            with self.assertRaisesRegexp(ConfigException,
+                                         "no certificate authority"):
+                config = Config("calico/felix/test/data/felix_https_no_ca.cfg")
+
     def test_unreadable_etcd_ca(self):
         """
         Test that we throw an exception when the etcd CA cert is unreadable
