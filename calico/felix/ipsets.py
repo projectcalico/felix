@@ -141,7 +141,7 @@ class IpsetManager(ReferenceManager):
         assert self._datamodel_in_sync
         active_ipset = self.objects_by_id[tag_id]
         if isinstance(tag_id, SelectorID):
-            members = frozenset(self._pre_calc_ipsets_by_id[tag_id])
+            members = frozenset(self._pre_calc_ipsets_by_id.get(tag_id, set()))
         else:
             members = self.tag_membership_index.members(tag_id)
         active_ipset.replace_members(members, async=True)
@@ -163,6 +163,8 @@ class IpsetManager(ReferenceManager):
         ips_removed.update(self._pre_calc_removed_ips_by_id)
         for sel_id, removed_ips in self._pre_calc_removed_ips_by_id.iteritems():
             self._pre_calc_ipsets_by_id[sel_id].difference_update(removed_ips)
+            if not self._pre_calc_ipsets_by_id[sel_id]:
+                del self._pre_calc_ipsets_by_id[sel_id]
         self._pre_calc_removed_ips_by_id.clear()
 
         num_updates = 0
@@ -317,15 +319,15 @@ class IpsetManager(ReferenceManager):
 
     @actor_message()
     def on_selector_added(self, selector_id):
-        _log.info("Selector %s now active.", selector_id)
+        _log.debug("Selector %s now active.", selector_id)
 
     @actor_message()
     def on_selector_removed(self, selector_id):
-        _log.info("Selector %s no longer active.", selector_id)
+        _log.debug("Selector %s no longer active.", selector_id)
 
     @actor_message()
     def on_selector_ip_added(self, selector_id, ip):
-        _log.info("Selector %s now contains %s", selector_id, ip)
+        _log.debug("Selector %s now contains %s", selector_id, ip)
         if self.ip_type == IPV6:
             return  # FIXME Add IPv6 support
         ip = ip.split("/")[0]
