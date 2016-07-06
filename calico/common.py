@@ -35,7 +35,7 @@ from netaddr.strategy import eui48
 from calico.felix.futils import IPV4, IP_TYPE_TO_VERSION
 
 from calico.datamodel_v1 import TieredPolicyId, LABEL_CHARS
-from calico.felix.selectors import parse_selector, BadSelector
+from calico.felix.selectors import parse_selector, BadSelector, SelectorID
 
 _log = logging.getLogger(__name__)
 
@@ -753,12 +753,8 @@ def _validate_rule_match_criteria(rule, issues, neg_pfx):
         if sel_str is None:
             # sel_type wasn't present.
             continue
-        try:
-            sel = parse_selector(sel_str)
-        except BadSelector:
-            issues.append("Invalid %s: %r" % (sel_type, sel_str))
-        else:
-            rule[sel_type] = sel
+        # FIXME: No longer validating selectors
+        rule[sel_type] = SelectorID(sel_str)
 
     if "log_prefix" in rule:
         log_pfx = rule["log_prefix"]

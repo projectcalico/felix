@@ -941,7 +941,12 @@ class FelixIptablesGenerator(FelixPlugin):
                 # Selector, likewise.
                 sel_key = neg_pfx + dirn + "_selector"
                 if sel_key in rule and rule[sel_key] is not None:
-                    ipset_name = selector_to_ipset[rule[sel_key]]
+                    try:
+                        ipset_name = selector_to_ipset[rule[sel_key]]
+                    except KeyError:
+                        _log.exception("Missing selector in %s",
+                                       selector_to_ipset)
+                        raise
                     append("--match set",
                            neg_pfx, "--match-set", ipset_name, dirn)
 

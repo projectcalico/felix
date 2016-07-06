@@ -58,6 +58,7 @@ from calico.felix.futils import (
     logging_exceptions, iso_utc_timestamp, IPV4,
     IPV6, StatCounter
 )
+from calico.felix.selectors import SelectorID
 from calico.monotonic import monotonic_time
 
 _log = logging.getLogger(__name__)
@@ -565,17 +566,17 @@ class _FelixEtcdWatcher(gevent.Greenlet):
             self._update_hosts_ipset()
 
     def _on_sel_added_msg_from_driver(self, msg):
-        self.splitter.on_selector_added(msg[MSG_KEY_SEL_ID])
+        self.splitter.on_selector_added(SelectorID(msg[MSG_KEY_SEL_ID]))
 
     def _on_sel_removed_msg_from_driver(self, msg):
-        self.splitter.on_selector_removed(msg[MSG_KEY_SEL_ID])
+        self.splitter.on_selector_removed(SelectorID(msg[MSG_KEY_SEL_ID]))
 
     def _on_ip_added_msg_from_driver(self, msg):
-        self.splitter.on_selector_ip_added(msg[MSG_KEY_SEL_ID],
+        self.splitter.on_selector_ip_added(SelectorID(msg[MSG_KEY_SEL_ID]),
                                            msg[MSG_KEY_IP])
 
     def _on_ip_removed_msg_from_driver(self, msg):
-        self.splitter.on_selector_ip_removed(msg[MSG_KEY_SEL_ID],
+        self.splitter.on_selector_ip_removed(SelectorID(msg[MSG_KEY_SEL_ID]),
                                              msg[MSG_KEY_IP])
 
     def _start_driver(self):

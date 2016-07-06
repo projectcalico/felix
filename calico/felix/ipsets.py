@@ -31,7 +31,7 @@ from calico.felix.futils import IPV4, IPV6, FailedSystemCall
 from calico.felix.actor import actor_message, Actor
 from calico.felix.labels import LabelValueIndex, LabelInheritanceIndex
 from calico.felix.refcount import ReferenceManager, RefCountedActor
-from calico.felix.selectors import SelectorExpression
+from calico.felix.selectors import SelectorExpression, SelectorID
 
 _log = logging.getLogger(__name__)
 
@@ -88,13 +88,23 @@ class IpsetManager(ReferenceManager):
         self._started_label_matches = set()
         self._stopped_label_matches = set()
 
+        self._pre_calc_ipsets_by_id = defaultdict(set)
+        self._pre_calc_added_ips_by_id = defaultdict(set)
+        self._pre_calc_removed_ips_by_id = defaultdict(set)
+
         # One-way flag set when we know the datamodel is in sync.  We can't
         # rewrite any ipsets before we're in sync or we risk omitting some
         # values.
         self._datamodel_in_sync = False
 
     def _create(self, tag_id_or_sel):
-        if isinstance(tag_id_or_sel, SelectorExpression):
+        if isinstance(tag_id_or_sel, SelectorID):
+            _log.info("Creating ipset for pre-calculated selector %s",
+                       tag_id_or_sel)
+            sel_id = tag_id_or_sel
+            ipset_name = futils.uniquely_shorten(sel_id.sel_id,
+                                                 MAX_NAME_LENGTH)
+        elif isinstance(tag_id_or_sel, SelectorExpression):
             _log.debug("Creating ipset for expression %s", tag_id_or_sel)
             sel = tag_id_or_sel
             self._label_index.on_expression_update(sel, sel)
@@ -130,7 +140,10 @@ class IpsetManager(ReferenceManager):
         assert self._is_starting_or_live(tag_id)
         assert self._datamodel_in_sync
         active_ipset = self.objects_by_id[tag_id]
-        members = self.tag_membership_index.members(tag_id)
+        if isinstance(tag_id, SelectorID):
+            members = frozenset(self._pre_calc_ipsets_by_id[tag_id])
+        else:
+            members = self.tag_membership_index.members(tag_id)
         active_ipset.replace_members(members, async=True)
 
     def _update_dirty_active_ipsets(self):
@@ -141,6 +154,17 @@ class IpsetManager(ReferenceManager):
         """
         tag_index = self.tag_membership_index
         ips_added, ips_removed = tag_index.get_and_reset_changes_by_tag()
+
+        # Add in the pre-calculated IPs from the etcd driver.
+        ips_added.update(self._pre_calc_added_ips_by_id)
+        for sel_id, added_ips in self._pre_calc_added_ips_by_id.iteritems():
+            self._pre_calc_ipsets_by_id[sel_id].update(added_ips)
+        self._pre_calc_added_ips_by_id.clear()
+        ips_removed.update(self._pre_calc_removed_ips_by_id)
+        for sel_id, removed_ips in self._pre_calc_removed_ips_by_id.iteritems():
+            self._pre_calc_ipsets_by_id[sel_id].difference_update(removed_ips)
+        self._pre_calc_removed_ips_by_id.clear()
+
         num_updates = 0
         for tag_id, removed_ips in ips_removed.iteritems():
             if self._is_starting_or_live(tag_id):
@@ -302,10 +326,20 @@ class IpsetManager(ReferenceManager):
     @actor_message()
     def on_selector_ip_added(self, selector_id, ip):
         _log.info("Selector %s now contains %s", selector_id, ip)
+        if self.ip_type == IPV6:
+            return  # FIXME Add IPv6 support
+        ip = ip.split("/")[0]
+        self._pre_calc_added_ips_by_id[selector_id].add(ip)
+        self._pre_calc_removed_ips_by_id[selector_id].discard(ip)
 
     @actor_message()
     def on_selector_ip_removed(self, selector_id, ip):
         _log.info("Selector %s no longer contains %s", selector_id, ip)
+        if self.ip_type == IPV6:
+            return  # FIXME Add IPv6 support
+        ip = ip.split("/")[0]
+        self._pre_calc_added_ips_by_id[selector_id].discard(ip)
+        self._pre_calc_removed_ips_by_id[selector_id].add(ip)
 
     def _on_endpoint_or_host_ep_update(self, combined_id, data):
         """
@@ -744,7 +778,7 @@ class IpsetActor(Actor):
         :param set[str]|list[str] members: The IP address strings.  This
                method takes a copy of the contents.
         """
-        _log.info("Replacing members of ipset %s", self.name)
+        _log.info("Replacing members of ipset %s", self)
         self.members = set(members)
         self._force_reprogram = True  # Force a full rewrite of the set.
         self.changes = SetDelta(self.members)  # Any changes now obsolete.
