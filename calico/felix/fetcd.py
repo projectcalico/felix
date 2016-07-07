@@ -462,7 +462,7 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         self.begin_polling.wait()
         # Unpack the message.
         key = msg[MSG_KEY_KEY]
-        value = msg[MSG_KEY_VALUE]
+        value = msg.get(MSG_KEY_VALUE)
         _log.debug("Update from driver: %s -> %s", key, value)
         # Output some very coarse stats.
         self.read_count += 1
