@@ -31,19 +31,33 @@ from calico.felix.futils import IPV4, IPV6, FailedSystemCall
 from calico.felix.actor import actor_message, Actor
 from calico.felix.labels import LabelValueIndex, LabelInheritanceIndex
 from calico.felix.refcount import ReferenceManager, RefCountedActor
-from calico.felix.selectors import SelectorExpression, SelectorID
+from calico.felix.selectors import SelectorExpression, IpsetID
 
 _log = logging.getLogger(__name__)
 
 FELIX_PFX = "felix-"
-IPSET_PREFIX = {IPV4: FELIX_PFX+"v4-", IPV6: FELIX_PFX+"v6-"}
-IPSET_TMP_PREFIX = {IPV4: FELIX_PFX+"tmp-v4-", IPV6: FELIX_PFX+"tmp-v6-"}
+
+# Historic prefixes that any previous version of felix has used, for cleanup
+# purposes.
+OLD_PREFIXES = {
+    "felix-v4-",
+    "felix-v6-",
+    "felix-tmp-v4-",
+    "felix-tmp-v6-",
+}
+
+IPSET_PREFIX = {IPV4: FELIX_PFX+"4-", IPV6: FELIX_PFX+"6-"}
+IPSET_TMP_PREFIX = {IPV4: FELIX_PFX+"4t", IPV6: FELIX_PFX+"6t"}
+
+ALL_FELIX_PREFIXES = set(IPSET_PREFIX.values() +
+                         IPSET_TMP_PREFIX.values()) | OLD_PREFIXES
+
 DEFAULT_IPSET_SIZE = 2**20
 DUMMY_PROFILE = "dummy"
 
 # Number of chars we have left over in the ipset name after we take out the
 # "felix-tmp-v4" prefix.
-MAX_NAME_LENGTH = 16
+MAX_NAME_LENGTH = 31 - len(IPSET_TMP_PREFIX[IPV4])
 
 
 class IpsetManager(ReferenceManager):
@@ -98,12 +112,11 @@ class IpsetManager(ReferenceManager):
         self._datamodel_in_sync = False
 
     def _create(self, tag_id_or_sel):
-        if isinstance(tag_id_or_sel, SelectorID):
+        if isinstance(tag_id_or_sel, IpsetID):
             _log.info("Creating ipset for pre-calculated selector %s",
                        tag_id_or_sel)
             sel_id = tag_id_or_sel
-            ipset_name = futils.uniquely_shorten(sel_id.sel_id,
-                                                 MAX_NAME_LENGTH)
+            ipset_name = sel_id.sel_id[:MAX_NAME_LENGTH]
         elif isinstance(tag_id_or_sel, SelectorExpression):
             _log.debug("Creating ipset for expression %s", tag_id_or_sel)
             sel = tag_id_or_sel
@@ -140,7 +153,7 @@ class IpsetManager(ReferenceManager):
         assert self._is_starting_or_live(tag_id)
         assert self._datamodel_in_sync
         active_ipset = self.objects_by_id[tag_id]
-        if isinstance(tag_id, SelectorID):
+        if isinstance(tag_id, IpsetID):
             members = frozenset(self._pre_calc_ipsets_by_id.get(tag_id, set()))
         else:
             members = self.tag_membership_index.members(tag_id)
@@ -210,11 +223,14 @@ class IpsetManager(ReferenceManager):
         """
         _log.info("Cleaning up left-over ipsets.")
         all_ipsets = list_ipset_names()
-        # only clean up our own rubbish.
-        pfx = IPSET_PREFIX[self.ip_type]
-        tmppfx = IPSET_TMP_PREFIX[self.ip_type]
-        felix_ipsets = set([n for n in all_ipsets if (n.startswith(pfx) or
-                                                      n.startswith(tmppfx))])
+
+        # Filter deletion candidates to only ipsets that we could have created.
+        felix_ipsets = set()
+        for ipset in all_ipsets:
+            for prefix in ALL_FELIX_PREFIXES:
+                if ipset.startswith(prefix):
+                    felix_ipsets.add(ipset)
+
         whitelist = set()
         live_ipsets = self.objects_by_id.itervalues()
         # stopping_objects_by_id is a dict of sets of RefCountedIpsetActor

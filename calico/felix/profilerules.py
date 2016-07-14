@@ -23,7 +23,7 @@ import logging
 from calico.felix.actor import actor_message
 from calico.felix.futils import FailedSystemCall
 from calico.felix.refcount import ReferenceManager, RefCountedActor, RefHelper
-from calico.felix.selectors import SelectorExpression, SelectorID
+from calico.felix.selectors import SelectorExpression, IpsetID
 
 _log = logging.getLogger(__name__)
 
@@ -265,13 +265,9 @@ class ProfileRules(RefCountedActor):
         _log.info("%s Programming iptables with our chains.", self)
         assert self._pending_profile is not None, \
             "_update_chains called with no _pending_profile"
-        tag_to_ip_set_name = {}
-        sel_to_ip_set_name = {}
+        tag_or_sel_to_ip_set_name = {}
         for tag_or_sel, ipset in self._ipset_refs.iteritems():
-            if isinstance(tag_or_sel, (SelectorExpression, SelectorID)):
-                sel_to_ip_set_name[tag_or_sel] = ipset.ipset_name
-            else:
-                tag_to_ip_set_name[tag_or_sel] = ipset.ipset_name
+            tag_or_sel_to_ip_set_name[tag_or_sel] = ipset.ipset_name
 
         _log.info("Updating chains for profile %s", self.id)
         _log.debug("Profile %s: %s", self.id, self._profile)
@@ -280,8 +276,8 @@ class ProfileRules(RefCountedActor):
             self.id,
             self._pending_profile,
             self.ip_version,
-            tag_to_ipset=tag_to_ip_set_name,
-            selector_to_ipset=sel_to_ip_set_name,
+            tag_to_ipset=tag_or_sel_to_ip_set_name,
+            selector_to_ipset=tag_or_sel_to_ip_set_name,
             comment_tag=self.id)
 
         _log.debug("Queueing programming for rules %s: %s", self.id,

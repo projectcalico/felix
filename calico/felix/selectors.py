@@ -62,13 +62,13 @@ from calico.datamodel_v1 import LABEL_CHARS
 _log = logging.getLogger(__name__)
 
 
-class SelectorID(object):
-    """ID for a pre-calculated selector, calculated in the golang etcd-driver."""
+class IpsetID(object):
+    """ID for a pre-calculated selector/tag, calculated in the golang etcd-driver."""
     def __init__(self, sel_id):
         self.sel_id = sel_id
 
     def __eq__(self, other):
-        return isinstance(other, SelectorID) and other.sel_id == self.sel_id
+        return isinstance(other, IpsetID) and other.sel_id == self.sel_id
 
     def __ne__(self, other):
         return not self.__eq__(other)
