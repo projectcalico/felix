@@ -256,96 +256,96 @@ class IpsetManager(ReferenceManager):
                 _log.info("Whitelist: %s", whitelist)
                 _log.info("ipsets to delete: %s", ipsets_to_delete)
 
+    # @actor_message()
+    # def on_tags_update(self, profile_id, tags):
+    #     """
+    #     Called when the tag list of the given profile has changed or been
+    #     deleted.
+    #
+    #     Updates the indices and notifies any live RefCountedIpsetActor
+    #     objects of any changes that affect them.
+    #
+    #     :param str profile_id: Profile ID affected.
+    #     :param list[str]|NoneType tags: List of tags for the given profile or
+    #         None if deleted.
+    #     """
+    #     _log.info("Tags for profile %s updated", profile_id)
+    #
+    #     # General approach is to default to the empty list if the new/old
+    #     # tag list is missing; then add/delete falls out: all the tags will
+    #     # end up in added_tags/removed_tags.
+    #     old_tags = set(self.tags_by_prof_id.get(profile_id, []))
+    #     new_tags = set(tags or [])
+    #     # Find the endpoints that use these tags and work out what tags have
+    #     # been added/removed.
+    #     endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id, set())
+    #     added_tags = new_tags - old_tags
+    #     removed_tags = old_tags - new_tags
+    #     _log.debug("Endpoint IDs with this profile: %s", endpoint_ids)
+    #     _log.debug("Profile %s added tags: %s", profile_id, added_tags)
+    #     _log.debug("Profile %s removed tags: %s", profile_id, removed_tags)
+    #
+    #     for endpoint_id in endpoint_ids:
+    #         endpoint = self.endpoint_data_by_ep_id.get(endpoint_id,
+    #                                                    EMPTY_ENDPOINT_DATA)
+    #         ip_addrs = endpoint.ip_addresses
+    #         for tag_id in removed_tags:
+    #             for ip in ip_addrs:
+    #                 self._remove_mapping(tag_id, profile_id, endpoint_id, ip)
+    #         for tag_id in added_tags:
+    #             for ip in ip_addrs:
+    #                 self._add_mapping(tag_id, profile_id, endpoint_id, ip)
+    #
+    #     if tags is None:
+    #         _log.info("Tags for profile %s deleted", profile_id)
+    #         self.tags_by_prof_id.pop(profile_id, None)
+    #     else:
+    #         self.tags_by_prof_id[profile_id] = tags
+
+    # @actor_message()
+    # def on_prof_labels_set(self, profile_id, labels):
+    #     _log.debug("Profile labels updated for %s: %s", profile_id, labels)
+    #     self._label_inherit_idx.on_parent_labels_update(profile_id, labels)
+    #     # Flush the updates.
+    #     self._process_stopped_label_matches()
+    #     self._process_started_label_matches()
+    #
+    # @actor_message()
+    # def on_host_ep_update(self, combined_id, endpoint):
+    #     """
+    #     Update tag/selector memberships and indices with the new interface
+    #     data dict.
+    #
+    #     :param HostEndpointId combined_id: ID of the host endpoint.
+    #     :param dict|NoneType endpoint: Either a dict containing interface
+    #         information or None to indicate deletion.
+    #     """
+    #     # For our purposes, host endpoints are indexed as endpoints.
+    #     assert isinstance(combined_id, HostEndpointId)
+    #     self._on_endpoint_or_host_ep_update(combined_id, endpoint)
+    #
+    # @actor_message()
+    # def on_endpoint_update(self, endpoint_id, endpoint):
+    #     """
+    #     Update tag/selector memberships and indices with the new endpoint dict.
+    #
+    #     :param WloadEndpointId endpoint_id: ID of the endpoint.
+    #     :param dict|NoneType endpoint: Either a dict containing endpoint
+    #         information or None to indicate deletion.
+    #     """
+    #     assert isinstance(endpoint_id, WloadEndpointId)
+    #     self._on_endpoint_or_host_ep_update(endpoint_id, endpoint)
+
     @actor_message()
-    def on_tags_update(self, profile_id, tags):
-        """
-        Called when the tag list of the given profile has changed or been
-        deleted.
-
-        Updates the indices and notifies any live RefCountedIpsetActor
-        objects of any changes that affect them.
-
-        :param str profile_id: Profile ID affected.
-        :param list[str]|NoneType tags: List of tags for the given profile or
-            None if deleted.
-        """
-        _log.info("Tags for profile %s updated", profile_id)
-
-        # General approach is to default to the empty list if the new/old
-        # tag list is missing; then add/delete falls out: all the tags will
-        # end up in added_tags/removed_tags.
-        old_tags = set(self.tags_by_prof_id.get(profile_id, []))
-        new_tags = set(tags or [])
-        # Find the endpoints that use these tags and work out what tags have
-        # been added/removed.
-        endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id, set())
-        added_tags = new_tags - old_tags
-        removed_tags = old_tags - new_tags
-        _log.debug("Endpoint IDs with this profile: %s", endpoint_ids)
-        _log.debug("Profile %s added tags: %s", profile_id, added_tags)
-        _log.debug("Profile %s removed tags: %s", profile_id, removed_tags)
-
-        for endpoint_id in endpoint_ids:
-            endpoint = self.endpoint_data_by_ep_id.get(endpoint_id,
-                                                       EMPTY_ENDPOINT_DATA)
-            ip_addrs = endpoint.ip_addresses
-            for tag_id in removed_tags:
-                for ip in ip_addrs:
-                    self._remove_mapping(tag_id, profile_id, endpoint_id, ip)
-            for tag_id in added_tags:
-                for ip in ip_addrs:
-                    self._add_mapping(tag_id, profile_id, endpoint_id, ip)
-
-        if tags is None:
-            _log.info("Tags for profile %s deleted", profile_id)
-            self.tags_by_prof_id.pop(profile_id, None)
-        else:
-            self.tags_by_prof_id[profile_id] = tags
-
-    @actor_message()
-    def on_prof_labels_set(self, profile_id, labels):
-        _log.debug("Profile labels updated for %s: %s", profile_id, labels)
-        self._label_inherit_idx.on_parent_labels_update(profile_id, labels)
-        # Flush the updates.
-        self._process_stopped_label_matches()
-        self._process_started_label_matches()
-
-    @actor_message()
-    def on_host_ep_update(self, combined_id, endpoint):
-        """
-        Update tag/selector memberships and indices with the new interface
-        data dict.
-
-        :param HostEndpointId combined_id: ID of the host endpoint.
-        :param dict|NoneType endpoint: Either a dict containing interface
-            information or None to indicate deletion.
-        """
-        # For our purposes, host endpoints are indexed as endpoints.
-        assert isinstance(combined_id, HostEndpointId)
-        self._on_endpoint_or_host_ep_update(combined_id, endpoint)
-
-    @actor_message()
-    def on_endpoint_update(self, endpoint_id, endpoint):
-        """
-        Update tag/selector memberships and indices with the new endpoint dict.
-
-        :param WloadEndpointId endpoint_id: ID of the endpoint.
-        :param dict|NoneType endpoint: Either a dict containing endpoint
-            information or None to indicate deletion.
-        """
-        assert isinstance(endpoint_id, WloadEndpointId)
-        self._on_endpoint_or_host_ep_update(endpoint_id, endpoint)
-
-    @actor_message()
-    def on_selector_added(self, selector_id):
+    def on_ipset_added(self, selector_id):
         _log.debug("Selector %s now active.", selector_id)
 
     @actor_message()
-    def on_selector_removed(self, selector_id):
+    def on_ipset_removed(self, selector_id):
         _log.debug("Selector %s no longer active.", selector_id)
 
     @actor_message()
-    def on_selector_ip_added(self, selector_id, ip):
+    def on_ipset_ip_added(self, selector_id, ip):
         _log.debug("Selector %s now contains %s", selector_id, ip)
         if self.ip_type == IPV6:
             return  # FIXME Add IPv6 support
@@ -354,8 +354,8 @@ class IpsetManager(ReferenceManager):
         self._pre_calc_removed_ips_by_id[selector_id].discard(ip)
 
     @actor_message()
-    def on_selector_ip_removed(self, selector_id, ip):
-        _log.info("Selector %s no longer contains %s", selector_id, ip)
+    def on_ipset_ip_removed(self, selector_id, ip):
+        _log.debug("Selector %s no longer contains %s", selector_id, ip)
         if self.ip_type == IPV6:
             return  # FIXME Add IPv6 support
         ip = ip.split("/")[0]

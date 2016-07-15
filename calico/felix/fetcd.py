@@ -566,18 +566,18 @@ class _FelixEtcdWatcher(gevent.Greenlet):
             self._update_hosts_ipset()
 
     def _on_sel_added_msg_from_driver(self, msg):
-        self.splitter.on_selector_added(IpsetID(msg[MSG_KEY_IPSET_ID]))
+        self.splitter.on_ipset_added(IpsetID(msg[MSG_KEY_IPSET_ID]))
 
     def _on_sel_removed_msg_from_driver(self, msg):
-        self.splitter.on_selector_removed(IpsetID(msg[MSG_KEY_IPSET_ID]))
+        self.splitter.on_ipset_removed(IpsetID(msg[MSG_KEY_IPSET_ID]))
 
     def _on_ip_added_msg_from_driver(self, msg):
-        self.splitter.on_selector_ip_added(IpsetID(msg[MSG_KEY_IPSET_ID]),
-                                           msg[MSG_KEY_IP])
+        self.splitter.on_ipset_ip_added(IpsetID(msg[MSG_KEY_IPSET_ID]),
+                                        msg[MSG_KEY_IP])
 
     def _on_ip_removed_msg_from_driver(self, msg):
-        self.splitter.on_selector_ip_removed(IpsetID(msg[MSG_KEY_IPSET_ID]),
-                                             msg[MSG_KEY_IP])
+        self.splitter.on_ipset_ip_removed(IpsetID(msg[MSG_KEY_IPSET_ID]),
+                                          msg[MSG_KEY_IP])
 
     def _start_driver(self):
         """
