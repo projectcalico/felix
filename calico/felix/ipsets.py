@@ -40,17 +40,17 @@ FELIX_PFX = "felix-"
 # Historic prefixes that any previous version of felix has used, for cleanup
 # purposes.
 OLD_PREFIXES = {
-    "felix-v4-",
-    "felix-v6-",
-    "felix-tmp-v4-",
-    "felix-tmp-v6-",
+    IPV4: {"felix-v4-", "felix-tmp-v4-"},
+    IPV6: {"felix-v4-", "felix-tmp-v6-"},
 }
 
 IPSET_PREFIX = {IPV4: FELIX_PFX+"4-", IPV6: FELIX_PFX+"6-"}
 IPSET_TMP_PREFIX = {IPV4: FELIX_PFX+"4t", IPV6: FELIX_PFX+"6t"}
 
-ALL_FELIX_PREFIXES = set(IPSET_PREFIX.values() +
-                         IPSET_TMP_PREFIX.values()) | OLD_PREFIXES
+ALL_FELIX_PREFIXES = {
+    IPV4: {IPSET_PREFIX[IPV4], IPSET_TMP_PREFIX[IPV4]} | OLD_PREFIXES[IPV4],
+    IPV6: {IPSET_PREFIX[IPV6], IPSET_TMP_PREFIX[IPV6]} | OLD_PREFIXES[IPV6],
+}
 
 DEFAULT_IPSET_SIZE = 2**20
 DUMMY_PROFILE = "dummy"
@@ -227,7 +227,7 @@ class IpsetManager(ReferenceManager):
         # Filter deletion candidates to only ipsets that we could have created.
         felix_ipsets = set()
         for ipset in all_ipsets:
-            for prefix in ALL_FELIX_PREFIXES:
+            for prefix in ALL_FELIX_PREFIXES[self.ip_type]:
                 if ipset.startswith(prefix):
                     felix_ipsets.add(ipset)
 
@@ -252,6 +252,9 @@ class IpsetManager(ReferenceManager):
             except FailedSystemCall:
                 _log.exception("Failed to clean up dead ipset %s, will "
                                "retry on next cleanup.", ipset_name)
+                _log.info("All ipsets: %s", all_ipsets)
+                _log.info("Whitelist: %s", whitelist)
+                _log.info("ipsets to delete: %s", ipsets_to_delete)
 
     @actor_message()
     def on_tags_update(self, profile_id, tags):
