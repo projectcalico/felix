@@ -333,8 +333,12 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         self._driver_process = None
         # Stats.
         self.read_count = 0
+        self.ip_add_count = 0
+        self.ip_remove_count = 0
         self.msgs_processed = 0
         self.last_rate_log_time = monotonic_time()
+        self.last_ip_add_log_time = monotonic_time()
+        self.last_ip_remove_log_time = monotonic_time()
         # Register for events when values change.
         self._register_paths()
 
@@ -572,10 +576,26 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         self.splitter.on_ipset_removed(IpsetID(msg[MSG_KEY_IPSET_ID]))
 
     def _on_ip_added_msg_from_driver(self, msg):
+        # Output some very coarse stats.
+        self.ip_add_count += 1
+        if self.ip_add_count % 1000 == 0:
+            now = monotonic_time()
+            delta = now - self.last_ip_add_log_time
+            _log.info("Processed %s IP adds from driver "
+                      "%.1f/s", self.ip_add_count, 1000.0 / delta)
+            self.last_ip_add_log_time = now
         self.splitter.on_ipset_ip_added(IpsetID(msg[MSG_KEY_IPSET_ID]),
                                         msg[MSG_KEY_IP])
 
     def _on_ip_removed_msg_from_driver(self, msg):
+        # Output some very coarse stats.
+        self.ip_remove_count += 1
+        if self.ip_remove_count % 1000 == 0:
+            now = monotonic_time()
+            delta = now - self.last_ip_remove_log_time
+            _log.info("Processed %s IP removes from driver "
+                      "%.1f/s", self.ip_remove_count, 1000.0 / delta)
+            self.last_ip_remove_log_time = now
         self.splitter.on_ipset_ip_removed(IpsetID(msg[MSG_KEY_IPSET_ID]),
                                           msg[MSG_KEY_IP])
 
@@ -613,7 +633,7 @@ class _FelixEtcdWatcher(gevent.Greenlet):
         else:
             # Not running under pyinstaller, execute the etcd driver directly.
             cmd = [sys.executable, "-m", "calico.etcddriver"]
-        cmd =["/home/gulfstream/go-work/src/github.com/projectcalico/calico-go/bin/etcd-driver"]
+        cmd =["/home/gulfstream/go-work/src/github.com/tigera/libcalico-go/bin/etcd-driver"]
         # etcd driver takes the felix socket name as argument.
         cmd += [sck_filename]
         _log.info("etcd-driver command line: %s", cmd)
