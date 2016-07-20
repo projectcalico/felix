@@ -32,7 +32,7 @@ from calico.datamodel_v1 import (
     ENDPOINT_STATUS_UP, ENDPOINT_STATUS_DOWN, ENDPOINT_STATUS_ERROR,
     WloadEndpointId, ResolvedHostEndpointId)
 from calico.felix import devices, futils
-from calico.felix.actor import actor_message
+from calico.felix.actor import actor_message, TimedGreenlet
 from calico.felix.futils import FailedSystemCall
 from calico.felix.futils import IPV4, IP_TYPE_TO_VERSION
 from calico.felix.labels import LabelValueIndex, LabelInheritanceIndex
@@ -101,7 +101,7 @@ class EndpointManager(ReferenceManager):
         self.endpoints_with_dirty_policy = set()
 
         self._data_model_in_sync = False
-        self._iface_poll_greenlet = gevent.Greenlet(self._interface_poll_loop)
+        self._iface_poll_greenlet = TimedGreenlet(self._interface_poll_loop)
         self._iface_poll_greenlet.link_exception(self._on_worker_died)
 
     def _on_actor_started(self):

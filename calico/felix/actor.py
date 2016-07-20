@@ -129,6 +129,28 @@ actor_storage = gevent.local.local()
 _stats = StatCounter("Actor framework counters")
 
 
+_time_buckets = collections.defaultdict(lambda: 0)
+
+
+class TimedGreenlet(gevent.Greenlet):
+    def __init__(self, fn, actor, time_bucket=None):
+        super(TimedGreenlet, self).__init__(fn)
+        self.actor = actor
+        self._switch_in_time = None
+        self.total_time = 0
+        self.time_bucket = time_bucket
+
+    def switch(self, *args):
+        self._switch_in_time = monotonic_time()
+        super(TimedGreenlet, self).switch(*args)
+
+    def switch_out(self):
+        switch_out_time = monotonic_time()
+        delta = (switch_out_time - self._switch_in_time)
+        self.total_time += delta
+        _time_buckets[self.time_bucket] += delta
+
+
 class Actor(object):
     """
     Class that contains a queue and a greenlet serving that queue.
@@ -144,7 +166,7 @@ class Actor(object):
     latency when we're under load).
     """
 
-    def __init__(self, qualifier=None):
+    def __init__(self, qualifier=None, time_bucket=None):
         self._event_queue = collections.deque()
 
         # Set to True when the main loop is actively processing the input
@@ -157,7 +179,11 @@ class Actor(object):
         self._gevent_hub = gevent.get_hub()
         self._gevent_loop = self._gevent_hub.loop
 
-        self.greenlet = gevent.Greenlet(self._loop)
+        self.greenlet = TimedGreenlet(
+            self._loop,
+            actor=self,
+            time_bucket=time_bucket or self.__class__.__name__
+        )
         self._op_count = 0
         self._current_msg = None
         self.started = False
@@ -459,11 +485,12 @@ class Actor(object):
             self._op_count = 0
 
     def __str__(self):
-        return self.__class__.__name__ + "<%s,queue_len=%s,live=%s,msg=%s>" % (
+        return self.__class__.__name__ + "<%s,queue_len=%s,live=%s,msg=%s,time=%s>" % (
             self.qualifier,
             len(self._event_queue),
             bool(self.greenlet),
-            self._current_msg
+            self._current_msg,
+            self.greenlet.total_time,
         )
 
 
@@ -639,6 +666,8 @@ def dump_actor_diags(log):
     log.info("Current ref index: %s", _ref_idx)
     log.info("Number of tracked messages outstanding: %s",
              len(_tracked_refs_by_idx))
+    for k, v in _time_buckets.items():
+        log.info("Time spent in % 28s: \t%.3f", k, v)
 futils.register_diags("Actor framework", dump_actor_diags)
 
 
