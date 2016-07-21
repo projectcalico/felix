@@ -68,10 +68,10 @@ MSG_KEY_VALUE = "v"
 # Selector/IP added/removed message Driver -> Felix.
 MSG_TYPE_IPSET_ADDED = "ipset_added"
 MSG_TYPE_IPSET_REMOVED = "ipset_removed"
-MSG_TYPE_IP_ADDED = "ip_added"
-MSG_TYPE_IP_REMOVED = "ip_removed"
+MSG_TYPE_IP_UPDATES = "ip_updates"
+MSG_KEY_ADDED_IPS = "added_ips"
+MSG_KEY_REMOVED_IPS = "removed_ips"
 MSG_KEY_IPSET_ID = "ipset_id"
-MSG_KEY_IP = "ip"
 
 
 FLUSH_THRESHOLD = 200

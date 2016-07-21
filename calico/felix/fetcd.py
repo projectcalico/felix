@@ -47,8 +47,7 @@ from calico.etcddriver.protocol import (
     MSG_TYPE_UPDATE, MSG_KEY_KEY, MSG_KEY_VALUE, MessageWriter,
     MSG_TYPE_STATUS, MSG_KEY_STATUS, MSG_KEY_KEY_FILE, MSG_KEY_CERT_FILE,
     MSG_KEY_CA_FILE, SocketClosed, MSG_KEY_PROM_PORT, MSG_TYPE_IPSET_ADDED,
-    MSG_TYPE_IPSET_REMOVED, MSG_TYPE_IP_ADDED, MSG_TYPE_IP_REMOVED,
-    MSG_KEY_IPSET_ID, MSG_KEY_IP)
+    MSG_TYPE_IPSET_REMOVED, MSG_TYPE_IP_UPDATES, MSG_KEY_IPSET_ID)
 from calico.etcdutils import (
     EtcdClientOwner, delete_empty_parents, PathDispatcher, EtcdEvent,
     safe_decode_json, intern_list
@@ -333,11 +332,11 @@ class _FelixEtcdWatcher(TimedGreenlet):
         self._driver_process = None
         # Stats.
         self.read_count = 0
-        self.ip_add_count = 0
+        self.ip_upd_count = 0
         self.ip_remove_count = 0
         self.msgs_processed = 0
         self.last_rate_log_time = monotonic_time()
-        self.last_ip_add_log_time = monotonic_time()
+        self.last_ip_upd_log_time = monotonic_time()
         self.last_ip_remove_log_time = monotonic_time()
         # Register for events when values change.
         self._register_paths()
@@ -434,12 +433,9 @@ class _FelixEtcdWatcher(TimedGreenlet):
         elif msg_type == MSG_TYPE_IPSET_REMOVED:
             _stats.increment("Selector removed messages from driver")
             self._on_sel_removed_msg_from_driver(msg)
-        elif msg_type == MSG_TYPE_IP_ADDED:
-            _stats.increment("IP added messages from driver")
-            self._on_ip_added_msg_from_driver(msg)
-        elif msg_type == MSG_TYPE_IP_REMOVED:
-            _stats.increment("IP removed messages from driver")
-            self._on_ip_removed_msg_from_driver(msg)
+        elif msg_type == MSG_TYPE_IP_UPDATES:
+            _stats.increment("IP update messages from driver")
+            self._on_ip_updates_msg_from_driver(msg)
         else:
             raise RuntimeError("Unexpected message %s" % msg)
         self.msgs_processed += 1
@@ -575,29 +571,17 @@ class _FelixEtcdWatcher(TimedGreenlet):
     def _on_sel_removed_msg_from_driver(self, msg):
         self.splitter.on_ipset_removed(IpsetID(msg[MSG_KEY_IPSET_ID]))
 
-    def _on_ip_added_msg_from_driver(self, msg):
+    def _on_ip_updates_msg_from_driver(self, msg):
         # Output some very coarse stats.
-        self.ip_add_count += 1
-        if self.ip_add_count % 1000 == 0:
+        self.ip_upd_count += 1
+        if self.ip_upd_count % 1000 == 0:
             now = monotonic_time()
-            delta = now - self.last_ip_add_log_time
-            _log.info("Processed %s IP adds from driver "
-                      "%.1f/s", self.ip_add_count, 1000.0 / delta)
-            self.last_ip_add_log_time = now
-        self.splitter.on_ipset_ip_added(IpsetID(msg[MSG_KEY_IPSET_ID]),
-                                        msg[MSG_KEY_IP])
-
-    def _on_ip_removed_msg_from_driver(self, msg):
-        # Output some very coarse stats.
-        self.ip_remove_count += 1
-        if self.ip_remove_count % 1000 == 0:
-            now = monotonic_time()
-            delta = now - self.last_ip_remove_log_time
-            _log.info("Processed %s IP removes from driver "
-                      "%.1f/s", self.ip_remove_count, 1000.0 / delta)
-            self.last_ip_remove_log_time = now
-        self.splitter.on_ipset_ip_removed(IpsetID(msg[MSG_KEY_IPSET_ID]),
-                                          msg[MSG_KEY_IP])
+            delta = now - self.last_ip_upd_log_time
+            _log.info("Processed %s IP updates from driver "
+                      "%.1f/s", self.ip_upd_count, 1000.0 / delta)
+            self.last_ip_upd_log_time = now
+        # FIXME Should unpack the msg.
+        self.splitter.on_ipset_updates(msg)
 
     def _start_driver(self):
         """

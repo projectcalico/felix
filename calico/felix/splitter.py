@@ -57,8 +57,7 @@ class UpdateSplitter(object):
         self.prof_labels_mgrs = self._managers_with("on_prof_labels_set")
         self.ipset_added_upd_mgrs = self._managers_with("on_ipset_added")
         self.ipset_removed_upd_mgrs = self._managers_with("on_ipset_removed")
-        self.ip_added_mgrs = self._managers_with("on_ipset_ip_added")
-        self.ip_rem_mgrs = self._managers_with("on_ipset_ip_removed")
+        self.ipset_upd_mgrs = self._managers_with("on_ipset_updates")
 
     def _managers_with(self, method_name):
         return [m for m in self.managers if hasattr(m, method_name)]
@@ -180,16 +179,10 @@ class UpdateSplitter(object):
         for mgr in self.ipset_removed_upd_mgrs:
             mgr.on_ipset_removed(selector_id, async=True)
 
-    def on_ipset_ip_added(self, selector_id, ip):
-        _log.debug("Selector IP added %s, %s", selector_id, ip)
-        for mgr in self.ip_added_mgrs:
-            mgr.on_ipset_ip_added(selector_id, ip, async=True)
-
-    def on_ipset_ip_removed(self, selector_id, ip):
-        _log.debug("Selector IP removed %s, %s", selector_id, ip)
-        for mgr in self.ip_rem_mgrs:
-            mgr.on_ipset_ip_removed(selector_id, ip, async=True)
-
+    def on_ipset_updates(self, updates):
+        _log.debug("IP set updates: %s", updates)
+        for mgr in self.ipset_upd_mgrs:
+            mgr.on_ipset_updates(updates, async=True)
 
 
 class CleanupManager(Actor):

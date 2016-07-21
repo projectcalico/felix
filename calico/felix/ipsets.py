@@ -345,22 +345,21 @@ class IpsetManager(ReferenceManager):
         _log.debug("Selector %s no longer active.", selector_id)
 
     @actor_message()
-    def on_ipset_ip_added(self, selector_id, ip):
-        _log.debug("Selector %s now contains %s", selector_id, ip)
+    def on_ipset_updates(self, updates):
         if self.ip_type == IPV6:
             return  # FIXME Add IPv6 support
-        ip = ip.split("/")[0]
-        self._pre_calc_added_ips_by_id[selector_id].add(ip)
-        self._pre_calc_removed_ips_by_id[selector_id].discard(ip)
-
-    @actor_message()
-    def on_ipset_ip_removed(self, selector_id, ip):
-        _log.debug("Selector %s no longer contains %s", selector_id, ip)
-        if self.ip_type == IPV6:
-            return  # FIXME Add IPv6 support
-        ip = ip.split("/")[0]
-        self._pre_calc_added_ips_by_id[selector_id].discard(ip)
-        self._pre_calc_removed_ips_by_id[selector_id].add(ip)
+        for ipset, added_ips in updates["added_ips"].iteritems():
+            ipset = IpsetID(ipset)
+            for ip in added_ips:
+                ip = ip.split("/")[0]
+                self._pre_calc_added_ips_by_id[ipset].add(ip)
+                self._pre_calc_removed_ips_by_id[ipset].discard(ip)
+        for ipset, removed_ips in updates["removed_ips"].iteritems():
+            ipset = IpsetID(ipset)
+            for ip in removed_ips:
+                ip = ip.split("/")[0]
+                self._pre_calc_added_ips_by_id[ipset].discard(ip)
+                self._pre_calc_removed_ips_by_id[ipset].add(ip)
 
     def _on_endpoint_or_host_ep_update(self, combined_id, data):
         """
