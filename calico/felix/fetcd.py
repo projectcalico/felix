@@ -53,7 +53,7 @@ from calico.etcdutils import (
     EtcdClientOwner, delete_empty_parents, PathDispatcher, EtcdEvent,
     safe_decode_json, intern_list
 )
-from calico.felix.actor import Actor, actor_message
+from calico.felix.actor import Actor, actor_message, TimedGreenlet
 from calico.felix.futils import (
     logging_exceptions, iso_utc_timestamp, IPV4,
     IPV6, StatCounter
@@ -136,12 +136,12 @@ class EtcdAPI(EtcdClientOwner, Actor):
         self._watcher.link(self._on_worker_died)
 
         # Create a greenlet to trigger periodic resyncs.
-        self._resync_greenlet = gevent.Greenlet(self._periodically_resync)
+        self._resync_greenlet = TimedGreenlet(self._periodically_resync)
         self._resync_greenlet.link_exception(self._on_worker_died)
 
         # Create a greenlet to report felix's liveness into etcd.
         self.done_first_status_report = False
-        self._status_reporting_greenlet = gevent.Greenlet(
+        self._status_reporting_greenlet = TimedGreenlet(
             self._periodically_report_status
         )
         self._status_reporting_greenlet.link_exception(self._on_worker_died)
@@ -284,7 +284,7 @@ class EtcdAPI(EtcdClientOwner, Actor):
         sys.exit(1)
 
 
-class _FelixEtcdWatcher(gevent.Greenlet):
+class _FelixEtcdWatcher(TimedGreenlet):
     """
     Greenlet that communicates with the etcd driver over a socket.
 

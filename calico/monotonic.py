@@ -31,8 +31,9 @@ __all__ = ["monotonic_time"]
 import ctypes
 import os
 
-
-CLOCK_MONOTONIC_RAW = 4 # see <linux/time.h>
+# see <linux/time.h>
+CLOCK_PROCESS_CPUTIME_ID = 2
+CLOCK_MONOTONIC_RAW = 4
 
 
 class Timespec(ctypes.Structure):
@@ -54,7 +55,18 @@ def monotonic_time():
         a process.
     """
     t = Timespec()
-    if clock_gettime(CLOCK_MONOTONIC_RAW , ctypes.pointer(t)) != 0:
+    if clock_gettime(CLOCK_MONOTONIC_RAW, ctypes.pointer(t)) != 0:
+        errno_ = ctypes.get_errno()
+        raise OSError(errno_, os.strerror(errno_))
+    return t.tv_sec + t.tv_nsec * 1e-9
+
+
+def cpu_time():
+    """
+    :returns: CPU time in seconds
+    """
+    t = Timespec()
+    if clock_gettime(CLOCK_PROCESS_CPUTIME_ID, ctypes.pointer(t)) != 0:
         errno_ = ctypes.get_errno()
         raise OSError(errno_, os.strerror(errno_))
     return t.tv_sec + t.tv_nsec * 1e-9

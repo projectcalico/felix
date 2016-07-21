@@ -99,7 +99,7 @@ inconsistent state.
 """
 import collections
 import functools
-from calico.monotonic import monotonic_time
+from calico.monotonic import monotonic_time, cpu_time
 import gevent
 import gevent.local
 import logging
@@ -130,24 +130,46 @@ _stats = StatCounter("Actor framework counters")
 
 
 _time_buckets = collections.defaultdict(lambda: 0)
+_time_bucket_counts = collections.defaultdict(lambda: 0)
+_last_switch_out_time = cpu_time()
 
 
 class TimedGreenlet(gevent.Greenlet):
-    def __init__(self, fn, actor, time_bucket=None):
-        super(TimedGreenlet, self).__init__(fn)
-        self.actor = actor
+    def __init__(self, run=None, *args, **kwargs):
+        time_bucket = kwargs.pop("time_bucket", None)
+        if time_bucket is None:
+            if run is not None:
+                try:
+                    # Bare func.
+                    time_bucket = run.func_name
+                except AttributeError:
+                    try:
+                        # Method.
+                        time_bucket = run.im_func.func_name
+                    except AttributeError:
+                        pass
+            else:
+                time_bucket = self.__class__.__name__
+
+        super(TimedGreenlet, self).__init__(run, *args, **kwargs)
         self._switch_in_time = None
         self.total_time = 0
         self.time_bucket = time_bucket
 
     def switch(self, *args):
-        self._switch_in_time = monotonic_time()
+        self._switch_in_time = cpu_time()
+        hub_time = self._switch_in_time - _last_switch_out_time
+        _time_bucket_counts["**Hub**"] += 1
+        _time_buckets["**Hub**"] += hub_time
         super(TimedGreenlet, self).switch(*args)
 
     def switch_out(self):
-        switch_out_time = monotonic_time()
+        switch_out_time = cpu_time()
+        global _last_switch_out_time
+        _last_switch_out_time = switch_out_time
         delta = (switch_out_time - self._switch_in_time)
         self.total_time += delta
+        _time_bucket_counts[self.time_bucket] += 1
         _time_buckets[self.time_bucket] += delta
 
 
@@ -181,7 +203,6 @@ class Actor(object):
 
         self.greenlet = TimedGreenlet(
             self._loop,
-            actor=self,
             time_bucket=time_bucket or self.__class__.__name__
         )
         self._op_count = 0
@@ -485,7 +506,7 @@ class Actor(object):
             self._op_count = 0
 
     def __str__(self):
-        return self.__class__.__name__ + "<%s,queue_len=%s,live=%s,msg=%s,time=%s>" % (
+        return self.__class__.__name__ + "<%s,queue_len=%s,live=%s,msg=%s,time=%.3fs>" % (
             self.qualifier,
             len(self._event_queue),
             bool(self.greenlet),
@@ -666,8 +687,11 @@ def dump_actor_diags(log):
     log.info("Current ref index: %s", _ref_idx)
     log.info("Number of tracked messages outstanding: %s",
              len(_tracked_refs_by_idx))
-    for k, v in _time_buckets.items():
-        log.info("Time spent in % 28s: \t%.3f", k, v)
+    for bucket, time in _time_buckets.items():
+        count = _time_bucket_counts[bucket]
+        per_instance = time / count
+        log.info("Time spent in % 28s: \t%.3fs %.3fms (%s)",
+                 bucket, time, per_instance*1000, count)
 futils.register_diags("Actor framework", dump_actor_diags)
 
 
