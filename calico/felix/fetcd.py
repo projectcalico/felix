@@ -617,7 +617,7 @@ class _FelixEtcdWatcher(TimedGreenlet):
         else:
             # Not running under pyinstaller, execute the etcd driver directly.
             cmd = [sys.executable, "-m", "calico.etcddriver"]
-        cmd =["/home/gulfstream/go-work/src/github.com/tigera/libcalico-go/bin/etcd-driver"]
+        cmd =["/home/gulfstream/go-work/src/github.com/tigera/libcalico-go/bin/felix-backend"]
         # etcd driver takes the felix socket name as argument.
         cmd += [sck_filename]
         _log.info("etcd-driver command line: %s", cmd)

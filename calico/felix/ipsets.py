@@ -863,6 +863,7 @@ class IpsetActor(Actor):
             _log.debug("Replacing content of ipset %s with %s", self,
                        self.members)
             self._ipset.replace_members(self.members)
+            _log.info("Completed force-rewrite of ipset %s", self)
             self._force_reprogram = False
         _log.debug("Finished syncing %s to kernel", self.name)
 
