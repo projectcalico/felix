@@ -346,18 +346,20 @@ class IpsetManager(ReferenceManager):
 
     @actor_message()
     def on_ipset_updates(self, updates):
-        if self.ip_type == IPV6:
-            return  # FIXME Add IPv6 support
         for ipset, added_ips in updates["added_ips"].iteritems():
             ipset = IpsetID(ipset)
             for ip in added_ips:
-                ip = ip.split("/")[0]
+                if (":" in ip) != (self.ip_type == IPV6):
+                    # Skip IPs of incorrect type.
+                    continue
                 self._pre_calc_added_ips_by_id[ipset].add(ip)
                 self._pre_calc_removed_ips_by_id[ipset].discard(ip)
         for ipset, removed_ips in updates["removed_ips"].iteritems():
             ipset = IpsetID(ipset)
             for ip in removed_ips:
-                ip = ip.split("/")[0]
+                if (":" in ip) != (self.ip_type == IPV6):
+                    # Skip IPs of incorrect type.
+                    continue
                 self._pre_calc_added_ips_by_id[ipset].discard(ip)
                 self._pre_calc_removed_ips_by_id[ipset].add(ip)
 
@@ -798,7 +800,8 @@ class IpsetActor(Actor):
         :param set[str]|list[str] members: The IP address strings.  This
                method takes a copy of the contents.
         """
-        _log.info("Replacing members of ipset %s", self)
+        _log.info("Replacing members of ipset %s with %s IPs", self,
+                  len(members))
         self.members = set(members)
         self._force_reprogram = True  # Force a full rewrite of the set.
         self.changes = SetDelta(self.members)  # Any changes now obsolete.
