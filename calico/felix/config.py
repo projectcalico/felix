@@ -43,6 +43,7 @@ from calico.felix.futils import find_set_bits
 log = logging.getLogger(__name__)
 
 FELIX_IPT_GENERATOR_PLUGIN_NAME = "calico.felix.iptables_generator"
+DEVICES_PLUGIN_NAME = 'calico.felix.devices'
 
 # Convert log level names into python log levels.
 LOGLEVELS = {"none":      None,
@@ -321,6 +322,15 @@ class Config(object):
                            "Which IptablesGenerator Plugin to use.",
                            "default")
 
+        # The following setting determines which flavour of device plugin is
+        # loaded.  Note: this plugin support is currently highly
+        # experimental and may change significantly, or be removed completely,
+        # in future releases. This config attribute is therefore not yet
+        # publicly documented.
+        self.add_parameter("DevicesPlugin",
+                           "Which devices plugin to use.",
+                           "default")
+
         # Read the environment variables, then the configuration file.
         self._read_env_vars()
         self._finish_update(final=False)
@@ -331,6 +341,12 @@ class Config(object):
         self.plugins["iptables_generator"] = _load_plugin(
             FELIX_IPT_GENERATOR_PLUGIN_NAME,
             self.IPTABLES_GENERATOR_PLUGIN
+        )()
+
+        # Load the iptables generator plugin.
+        self.plugins["devices"] = _load_plugin(
+            DEVICES_PLUGIN_NAME,
+            self.DEVICES_PLUGIN
         )()
 
         # Give plugins the opportunity to register any plugin specific
@@ -406,6 +422,8 @@ class Config(object):
         self.MAX_IPSET_SIZE = self.parameters["MaxIpsetSize"].value
         self.IPTABLES_GENERATOR_PLUGIN = \
             self.parameters["IptablesGeneratorPlugin"].value
+        self.DEVICES_PLUGIN = \
+            self.parameters["DevicesPlugin"].value
         self.IPTABLES_MARK_MASK =\
             self.parameters["IptablesMarkMask"].value
         self.PROM_METRICS_ENABLED = \

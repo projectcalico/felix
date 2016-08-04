@@ -123,7 +123,6 @@ import logging
 
 import time
 
-from calico.felix import devices
 from calico.felix import futils
 from calico.felix.futils import FailedSystemCall
 from calico.felix.ipsets import HOSTS_IPSET_V4
@@ -379,6 +378,7 @@ def _configure_ipip_device(config):
     """Creates and enables the IPIP tunnel device.
     :raises FailedSystemCall on failure.
     """
+    devices = config.plugins["devices"]
     if not devices.interface_exists(IP_IN_IP_DEV_NAME):
         # Make sure the IP-in-IP device exists; since we use the global
         # device, this command actually creates it as a side-effect of

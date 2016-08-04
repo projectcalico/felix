@@ -31,7 +31,7 @@ if sys.version_info < (2, 7):
 else:
     import unittest
 
-import calico.felix.devices as devices
+import calico.felix.devices as devices_module
 import calico.felix.futils as futils
 import calico.felix.test.stub_utils as stub_utils
 
@@ -41,6 +41,9 @@ log = logging.getLogger(__name__)
 # Canned mock calls representing clean entry to/exit from a context manager.
 M_ENTER = mock.call().__enter__()
 M_CLEAN_EXIT = mock.call().__exit__(None, None, None)
+
+
+devices = devices_module.LinuxKernelDevices()
 
 
 class TestDevices(unittest.TestCase):
@@ -55,11 +58,11 @@ class TestDevices(unittest.TestCase):
                 autospec=True)
     @mock.patch("calico.felix.devices._read_proc_sys",
                 autospec=True, return_value="1")
-    def test_configure_global_kernel_config(self,
+    def test_do_global_configuration(self,
                                             m_read_proc_sys,
                                             m_write_proc_sys,
                                             m_exists):
-        devices.configure_global_kernel_config()
+        devices.do_global_configuration()
         m_write_proc_sys.assert_called_once_with(
             "/proc/sys/net/ipv4/conf/default/rp_filter", "1"
         )
@@ -69,23 +72,23 @@ class TestDevices(unittest.TestCase):
                 autospec=True)
     @mock.patch("calico.felix.devices._read_proc_sys",
                 autospec=True, return_value="1")
-    def test_configure_global_kernel_config_no_sysfs(self,
+    def test_do_global_configuration_no_sysfs(self,
                                                      m_read_proc_sys,
                                                      m_write_proc_sys,
                                                      m_exists):
-        self.assertRaises(devices.BadKernelConfig,
-                          devices.configure_global_kernel_config)
+        self.assertRaises(devices_module.BadKernelConfig,
+                          devices.do_global_configuration)
 
-    def test_configure_global_kernel_config_bad_rp_filter(self):
+    def test_do_global_configuration_bad_rp_filter(self):
         with mock.patch("calico.felix.devices._read_proc_sys",
                         autospec=True, return_value="2") as m_read_proc_sys:
-            self.assertRaises(devices.BadKernelConfig,
-                              devices.configure_global_kernel_config)
+            self.assertRaises(devices_module.BadKernelConfig,
+                              devices.do_global_configuration)
 
     def test_read_proc_sys(self):
         m_open = mock.mock_open(read_data="1\n")
         with mock.patch('__builtin__.open', m_open, create=True):
-            result = devices._read_proc_sys("/proc/sys/foo/bar")
+            result = devices_module._read_proc_sys("/proc/sys/foo/bar")
         calls = [mock.call('/proc/sys/foo/bar', 'rb'),
                  M_ENTER, mock.call().read(), M_CLEAN_EXIT]
         m_open.assert_has_calls(calls)
@@ -109,21 +112,21 @@ class TestDevices(unittest.TestCase):
         type = futils.IPV4
         ip = "1.2.3.4"
         with mock.patch('calico.felix.futils.check_call', return_value=retcode):
-            devices.add_route(type, ip, tap, mac)
+            devices._add_route(type, ip, tap, mac)
             futils.check_call.assert_any_call(['arp', '-s', ip, mac, '-i', tap])
             futils.check_call.assert_called_with(["ip", "route", "replace", ip, "dev", tap])
 
         with mock.patch("calico.felix.futils.check_call") as m_check_call:
-            devices.add_route(type, ip, tap, None)
+            devices._add_route(type, ip, tap, None)
 
         type = futils.IPV6
         ip = "2001::"
         with mock.patch('calico.felix.futils.check_call', return_value=retcode):
-            devices.add_route(type, ip, tap, mac)
+            devices._add_route(type, ip, tap, mac)
             futils.check_call.assert_called_with(["ip", "-6", "route", "replace", ip, "dev", tap])
 
         with mock.patch("calico.felix.futils.check_call") as m_check_call:
-            devices.add_route(type, ip, tap, None)
+            devices._add_route(type, ip, tap, None)
 
     def test_del_route(self):
         tap = "tap" + str(uuid.uuid4())[:11]
@@ -132,14 +135,14 @@ class TestDevices(unittest.TestCase):
         type = futils.IPV4
         ip = "1.2.3.4"
         with mock.patch('calico.felix.futils.check_call', return_value=retcode):
-            devices.del_route(type, ip, tap)
+            devices._del_route(type, ip, tap)
             futils.check_call.assert_any_call(['arp', '-d', ip, '-i', tap])
             futils.check_call.assert_called_with(["ip", "route", "del", ip, "dev", tap])
 
         type = futils.IPV6
         ip = "2001::"
         with mock.patch('calico.felix.futils.check_call', return_value=retcode):
-            devices.del_route(type, ip, tap)
+            devices._del_route(type, ip, tap)
             futils.check_call.assert_called_once_with(["ip", "-6", "route", "del", ip, "dev", tap])
 
     def test_set_routes_mac_not_set(self):
@@ -172,7 +175,7 @@ class TestDevices(unittest.TestCase):
 
         with mock.patch('calico.felix.futils.check_call',
                         return_value=futils.CommandOutput("", "")):
-            with mock.patch('calico.felix.devices.list_interface_route_ips',
+            with mock.patch('calico.felix.devices.LinuxKernelDevices.list_interface_route_ips',
                             return_value=set()):
                 devices.set_routes(type, ips, interface, mac)
                 self.assertEqual(futils.check_call.call_count, len(calls))
@@ -186,7 +189,7 @@ class TestDevices(unittest.TestCase):
         mac = stub_utils.get_mac()
         with mock.patch('calico.felix.futils.check_call',
                         return_value=retcode):
-            with mock.patch('calico.felix.devices.list_interface_route_ips',
+            with mock.patch('calico.felix.devices.LinuxKernelDevices.list_interface_route_ips',
                             return_value=ips):
                 devices.set_routes(type, ips, interface, mac)
                 self.assertEqual(futils.check_call.call_count, 0)
@@ -206,7 +209,7 @@ class TestDevices(unittest.TestCase):
                             interface])]
 
         with mock.patch('calico.felix.futils.check_call', return_value=retcode):
-            with mock.patch('calico.felix.devices.list_interface_route_ips',
+            with mock.patch('calico.felix.devices.LinuxKernelDevices.list_interface_route_ips',
                             return_value=current_ips):
                 devices.set_routes(ip_type, ips, interface, mac)
                 self.assertEqual(futils.check_call.call_count, len(calls))
@@ -225,7 +228,7 @@ class TestDevices(unittest.TestCase):
                  mock.call(['arp', '-d', "3.4.5.6", '-i', interface]),
                  mock.call(["ip", "route", "del", "3.4.5.6", "dev", interface])]
         with mock.patch('calico.felix.futils.check_call', return_value=retcode):
-            with mock.patch('calico.felix.devices.list_interface_route_ips',
+            with mock.patch('calico.felix.devices.LinuxKernelDevices.list_interface_route_ips',
                             return_value=current_ips):
                 devices.set_routes(type, ips, interface, mac, reset_arp=True)
                 self.assertEqual(futils.check_call.call_count, len(calls))
@@ -246,7 +249,7 @@ class TestDevices(unittest.TestCase):
                             interface])]
 
         with mock.patch('calico.felix.futils.check_call', return_value=retcode):
-            with mock.patch('calico.felix.devices.list_interface_route_ips',
+            with mock.patch('calico.felix.devices.LinuxKernelDevices.list_interface_route_ips',
                             return_value=current_ips):
                 devices.set_routes(type, ips, interface, mac, reset_arp=True)
                 self.assertEqual(futils.check_call.call_count, len(calls))
@@ -377,7 +380,7 @@ class TestDevices(unittest.TestCase):
     def test_set_interface_ips(self):
         with mock.patch('calico.felix.futils.check_call',
                         autospec=True) as m_check_call:
-            with mock.patch("calico.felix.devices.list_interface_ips",
+            with mock.patch("calico.felix.devices.LinuxKernelDevices.list_interface_ips",
                             autospec=True) as m_list_ips:
                 m_list_ips.return_value = set([IPAddress("10.0.0.1"),
                                                IPAddress("10.0.0.2")])

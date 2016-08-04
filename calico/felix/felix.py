@@ -35,7 +35,6 @@ import gevent
 from prometheus_client import MetricsHandler
 
 from calico import common
-from calico.felix import devices
 from calico.felix import futils
 from calico.felix.fiptables import IptablesUpdater
 from calico.felix.dispatch import (HostEndpointDispatchChains,
@@ -46,7 +45,6 @@ from calico.felix.frules import (install_global_rules, load_nf_conntrack,
 from calico.felix.splitter import UpdateSplitter, CleanupManager
 from calico.felix.config import Config
 from calico.felix.futils import IPV4, IPV6
-from calico.felix.devices import InterfaceWatcher
 from calico.felix.endpoint import EndpointManager
 from calico.felix.ipsets import IpsetManager, IpsetActor, HOSTS_IPSET_V4
 from calico.felix.masq import MasqueradeManager
@@ -76,7 +74,8 @@ def _main_greenlet(config):
 
         # Ensure the Kernel's global options are correctly configured for
         # Calico.
-        devices.configure_global_kernel_config()
+        devices = config.plugins["devices"]
+        devices.do_global_configuration()
 
         # Check the commands we require are present.
         futils.check_command_deps()
@@ -189,7 +188,7 @@ def _main_greenlet(config):
         cleanup_mgr = CleanupManager(config, cleanup_updaters, cleanup_ip_mgrs)
         managers.append(cleanup_mgr)
         update_splitter = UpdateSplitter(managers)
-        iface_watcher = InterfaceWatcher(update_splitter)
+        iface_watcher = devices.interface_watcher(update_splitter)
         actors_to_start += [
             cleanup_mgr,
             iface_watcher,

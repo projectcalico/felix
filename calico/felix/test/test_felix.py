@@ -53,7 +53,7 @@ class TestBasic(BaseTestCase):
     @mock.patch("calico.felix.felix.load_nf_conntrack", autospec=True)
     @mock.patch("os.path.exists", autospec=True, return_value=True)
     @mock.patch("calico.felix.devices.list_interface_ips", autospec=True)
-    @mock.patch("calico.felix.devices.configure_global_kernel_config",
+    @mock.patch("calico.felix.devices.LinuxKernelDevices.do_global_configuration",
                 autospec=True)
     @mock.patch("calico.felix.devices.interface_up",
                 return_value=False, autospec=True)
@@ -78,7 +78,7 @@ class TestBasic(BaseTestCase):
                            m_ipset_4,
                            m_check_output, m_check_call, m_popen,
                            m_iface_exists, m_iface_up,
-                           m_configure_global_kernel_config,
+                           m_do_global_configuration,
                            m_list_interface_ips, m_path_exists, m_conntrack,
                            m_http_server):
         m_popen.return_value.communicate.return_value = "", ""
@@ -111,7 +111,7 @@ class TestBasic(BaseTestCase):
         m_load.assert_called_once_with(async=False)
         m_iface_exists.assert_called_once_with("tunl0")
         m_iface_up.assert_called_once_with("tunl0")
-        m_configure_global_kernel_config.assert_called_once_with()
+        m_do_global_configuration.assert_called_once_with()
         m_conntrack.assert_called_once_with()
         m_http_server.assert_called_once_with(("0.0.0.0", 9091),
                                               felix.MetricsHandler)
@@ -120,7 +120,7 @@ class TestBasic(BaseTestCase):
     @mock.patch("calico.felix.felix.install_global_rules", autospec=True)
     @mock.patch("os.path.exists", autospec=True, return_value=False)
     @mock.patch("calico.felix.devices.list_interface_ips", autospec=True)
-    @mock.patch("calico.felix.devices.configure_global_kernel_config",
+    @mock.patch("calico.felix.devices.LinuxKernelDevices.do_global_configuration",
                 autospec=True)
     @mock.patch("calico.felix.futils.Popen", autospec=True)
     @mock.patch("calico.felix.futils.check_call", autospec=True)
@@ -140,7 +140,7 @@ class TestBasic(BaseTestCase):
                                    m_start, m_load,
                                    m_ipset_4,
                                    m_check_output, m_check_call, m_popen,
-                                   m_configure_global_kernel_config,
+                                   m_do_global_configuration,
                                    m_list_interface_ips, m_path_exists,
                                    m_install_globals, m_conntrack):
         m_popen.return_value.communicate.return_value = "", ""
@@ -170,7 +170,7 @@ class TestBasic(BaseTestCase):
             self.assertRaises(TestException,
                               felix._main_greenlet, config)
         m_load.assert_called_once_with(async=False)
-        m_configure_global_kernel_config.assert_called_once_with()
+        m_do_global_configuration.assert_called_once_with()
         m_install_globals.assert_called_once_with(mock.ANY, mock.ANY, mock.ANY,
                                                   ip_version=4)
         m_conntrack.assert_called_once_with()

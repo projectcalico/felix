@@ -82,6 +82,9 @@ setuptools.setup(
             'default = '
             'calico.felix.plugins.fiptgenerator:FelixIptablesGenerator',
         ],
+        'calico.felix.devices': [
+            'default = calico.felix.devices:LinuxKernelDevices',
+        ],
     },
     scripts=['utils/calico-diags'],
     install_requires=collect_requirements()

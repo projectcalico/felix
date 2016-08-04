@@ -23,7 +23,7 @@ import logging
 from mock import Mock, patch, call
 from netaddr import IPAddress
 
-from calico.felix import frules
+from calico.felix import frules, devices
 from calico.felix.fiptables import IptablesUpdater
 from calico.felix.futils import FailedSystemCall, IPV4
 from calico.felix.test.base import BaseTestCase, load_config
@@ -42,9 +42,9 @@ EXPECTED_TOP_LEVEL_DEPS = {
 class TestRules(BaseTestCase):
 
     @patch("calico.felix.futils.check_call", autospec=True)
-    @patch("calico.felix.frules.devices", autospec=True)
     @patch("calico.felix.frules.HOSTS_IPSET_V4", autospec=True)
-    def test_install_global_rules(self, m_ipset, m_devices, m_check_call):
+    def test_install_global_rules(self, m_ipset, m_check_call):
+        m_devices = Mock(spec=devices.DevicesPlugin)
         m_devices.interface_exists.return_value = False
         m_devices.interface_up.return_value = False
         m_set_ips = m_devices.set_interface_ips
@@ -60,6 +60,7 @@ class TestRules(BaseTestCase):
             "FELIX_DEFAULTENDPOINTTOHOSTACTION": "RETURN"
         }
         config = load_config("felix_missing.cfg", env_dict=env_dict)
+        config.plugins["devices"] = m_devices
         config.IP_IN_IP_ADDR = IPAddress("10.0.0.1")
 
         m_v4_upd = Mock(spec=IptablesUpdater)
@@ -211,9 +212,9 @@ class TestRules(BaseTestCase):
         )
 
     @patch("calico.felix.futils.check_call", autospec=True)
-    @patch("calico.felix.frules.devices", autospec=True)
     @patch("calico.felix.frules.HOSTS_IPSET_V4", autospec=True)
-    def test_install_global_ipip_disabled(self, m_ipset, m_devices, m_check_call):
+    def test_install_global_ipip_disabled(self, m_ipset, m_check_call):
+        m_devices = Mock(spec=devices.DevicesPlugin)
         m_devices.interface_exists.return_value = False
         m_devices.interface_up.return_value = False
         m_set_ips = m_devices.set_interface_ips
@@ -229,6 +230,7 @@ class TestRules(BaseTestCase):
             "FELIX_DEFAULTENDPOINTTOHOSTACTION": "RETURN"
         }
         config = load_config("felix_missing.cfg", env_dict=env_dict)
+        config.plugins["devices"] = m_devices
 
         m_v4_upd = Mock(spec=IptablesUpdater)
         m_v6_upd = Mock(spec=IptablesUpdater)
@@ -344,9 +346,9 @@ class TestRules(BaseTestCase):
         )
 
     @patch("calico.felix.futils.check_call", autospec=True)
-    @patch("calico.felix.frules.devices", autospec=True)
     @patch("calico.felix.frules.HOSTS_IPSET_V4", autospec=True)
-    def test_install_global_no_ipv6(self, m_ipset, m_devices, m_check_call):
+    def test_install_global_no_ipv6(self, m_ipset, m_check_call):
+        m_devices = Mock(spec=devices.DevicesPlugin)
         m_devices.interface_exists.return_value = False
         m_devices.interface_up.return_value = False
         m_set_ips = m_devices.set_interface_ips
@@ -362,6 +364,7 @@ class TestRules(BaseTestCase):
             "FELIX_DEFAULTENDPOINTTOHOSTACTION": "RETURN"
         }
         config = load_config("felix_missing.cfg", env_dict=env_dict)
+        config.plugins["devices"] = m_devices
 
         m_v4_upd = Mock(spec=IptablesUpdater)
         m_v4_nat_upd = Mock(spec=IptablesUpdater)

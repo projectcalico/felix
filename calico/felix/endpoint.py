@@ -31,7 +31,7 @@ from calico.common import nat_key
 from calico.datamodel_v1 import (
     ENDPOINT_STATUS_UP, ENDPOINT_STATUS_DOWN, ENDPOINT_STATUS_ERROR,
     WloadEndpointId, ResolvedHostEndpointId)
-from calico.felix import devices, futils
+from calico.felix import futils
 from calico.felix.actor import actor_message
 from calico.felix.futils import FailedSystemCall
 from calico.felix.futils import IPV4, IP_TYPE_TO_VERSION
@@ -55,6 +55,7 @@ class EndpointManager(ReferenceManager):
 
         # Configuration and version to use
         self.config = config
+        self.devices = config.plugins["devices"]
         self.ip_type = ip_type
         self.ip_version = futils.IP_TYPE_TO_VERSION[ip_type]
 
@@ -385,7 +386,7 @@ class EndpointManager(ReferenceManager):
         # We only care about host interfaces, not workload ones.
         exclude_prefix = self.config.IFACE_PREFIX
         # Get the IPs for each interface.
-        ips_by_iface = devices.list_ips_by_iface(self.ip_type)
+        ips_by_iface = self.devices.list_ips_by_iface(self.ip_type)
         for iface, ips in ips_by_iface.items():
             if iface.startswith(exclude_prefix):
                 # Ignore non-host interfaces.
@@ -571,6 +572,7 @@ class LocalEndpoint(RefCountedActor):
         assert isinstance(rules_manager, RulesManager)
 
         self.config = config
+        self.devices = config.plugins["devices"]
         self.iptables_generator = config.plugins["iptables_generator"]
 
         self.combined_id = combined_id
@@ -865,8 +867,8 @@ class LocalEndpoint(RefCountedActor):
                     _log.debug("Learned interface name, checking if device "
                                "is up.")
                     self._device_is_up = (
-                        devices.interface_exists(self._iface_name) and
-                        devices.interface_up(self._iface_name)
+                        self.devices.interface_exists(self._iface_name) and
+                        self.devices.interface_up(self._iface_name)
                     )
 
             # Check if the profile ID or IP addresses have changed, requiring
@@ -997,7 +999,7 @@ class LocalEndpoint(RefCountedActor):
     def _clean_up_conntrack_entries(self):
         """Removes conntrack entries for all the IPs in self._removed_ips."""
         _log.debug("Cleaning up conntrack for old IPs: %s", self._removed_ips)
-        devices.remove_conntrack_flows(
+        self.devices.remove_conntrack_flows(
             self._removed_ips,
             IP_TYPE_TO_VERSION[self.ip_type]
         )
@@ -1028,11 +1030,11 @@ class WorkloadEndpoint(LocalEndpoint):
             return
         try:
             if self.ip_type == IPV4:
-                devices.configure_interface_ipv4(self._iface_name)
+                self.devices.configure_interface_ipv4(self._iface_name)
                 reset_arp = self._mac_changed
             else:
                 ipv6_gw = self.endpoint.get("ipv6_gateway", None)
-                devices.configure_interface_ipv6(self._iface_name, ipv6_gw)
+                self.devices.configure_interface_ipv6(self._iface_name, ipv6_gw)
                 reset_arp = False
 
             ips = set()
@@ -1040,16 +1042,16 @@ class WorkloadEndpoint(LocalEndpoint):
                 ips.add(futils.net_to_ip(ip))
             for nat_map in self.endpoint.get(nat_key(self.ip_type), []):
                 ips.add(nat_map['ext_ip'])
-            devices.set_routes(self.ip_type, ips,
-                               self._iface_name,
-                               self.endpoint.get("mac"),
-                               reset_arp=reset_arp)
+            self.devices.set_routes(self.ip_type, ips,
+                                    self._iface_name,
+                                    self.endpoint.get("mac"),
+                                    reset_arp=reset_arp)
 
         except (IOError, FailedSystemCall) as e:
-            if not devices.interface_exists(self._iface_name):
+            if not self.devices.interface_exists(self._iface_name):
                 _log.info("Interface %s for %s does not exist yet",
                           self._iface_name, self.combined_id)
-            elif not devices.interface_up(self._iface_name):
+            elif not self.devices.interface_up(self._iface_name):
                 _log.info("Interface %s for %s is not up yet",
                           self._iface_name, self.combined_id)
             else:
@@ -1072,9 +1074,9 @@ class WorkloadEndpoint(LocalEndpoint):
         Removes routes from the interface.
         """
         try:
-            devices.set_routes(self.ip_type, set(), self._iface_name, None)
+            self.devices.set_routes(self.ip_type, set(), self._iface_name, None)
         except (IOError, FailedSystemCall):
-            if not devices.interface_exists(self._iface_name):
+            if not self.devices.interface_exists(self._iface_name):
                 # Deleted under our feet - so the rules are gone.
                 _log.info("Interface %s for %s already deleted",
                           self._iface_name, self.combined_id)
@@ -1085,6 +1087,11 @@ class WorkloadEndpoint(LocalEndpoint):
         else:
             _log.info("Interface %s deconfigured", self._iface_name)
             super(WorkloadEndpoint, self)._deconfigure_interface()
+        finally:
+            if self.ip_type == IPV4:
+                self.devices.deconfigure_interface_ipv4(self._iface_name)
+            else:
+                self.devices.deconfigure_interface_ipv6(self._iface_name)
 
     def _endpoint_updates(self):
         updates, deps = self.iptables_generator.endpoint_updates(
