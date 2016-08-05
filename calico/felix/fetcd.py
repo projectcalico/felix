@@ -49,8 +49,7 @@ from calico.etcddriver.protocol import (
     MSG_KEY_CA_FILE, SocketClosed, MSG_KEY_PROM_PORT, MSG_TYPE_IPSET_ADDED,
     MSG_TYPE_IPSET_REMOVED, MSG_TYPE_IP_UPDATES, MSG_KEY_IPSET_ID)
 from calico.etcdutils import (
-    EtcdClientOwner, delete_empty_parents, PathDispatcher, EtcdEvent,
-    safe_decode_json, intern_list
+    EtcdClientOwner, delete_empty_parents, PathDispatcher, EtcdEvent, intern_list
 )
 from calico.felix.actor import Actor, actor_message, TimedGreenlet
 from calico.felix.futils import (
@@ -1153,3 +1152,6 @@ def parse_ipam_pool(pool_id, raw_json):
         return None
     else:
         return pool
+
+def safe_decode_json(raw, log_tag=None):
+    return raw
