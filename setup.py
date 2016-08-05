@@ -84,6 +84,7 @@ setuptools.setup(
         ],
         'calico.felix.devices': [
             'default = calico.felix.devices:LinuxKernelDevices',
+            'vpp = calico.felix.vppdevices:VppDevices',
         ],
     },
     scripts=['utils/calico-diags'],
