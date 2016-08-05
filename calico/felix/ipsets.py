@@ -169,6 +169,7 @@ class IpsetManager(ReferenceManager):
         ips_added, ips_removed = tag_index.get_and_reset_changes_by_tag()
 
         # Add in the pre-calculated IPs from the etcd driver.
+        _log.debug("Incorporating pre-calculated ipsets")
         ips_added.update(self._pre_calc_added_ips_by_id)
         for sel_id, added_ips in self._pre_calc_added_ips_by_id.iteritems():
             self._pre_calc_ipsets_by_id[sel_id].update(added_ips)
@@ -346,12 +347,16 @@ class IpsetManager(ReferenceManager):
 
     @actor_message()
     def on_ipset_updates(self, updates):
+        skipped = 0
+        processed = 0
         for ipset, added_ips in updates["added_ips"].iteritems():
             ipset = IpsetID(ipset)
             for ip in added_ips:
                 if (":" in ip) != (self.ip_type == IPV6):
                     # Skip IPs of incorrect type.
+                    skipped += 1
                     continue
+                processed += 1
                 self._pre_calc_added_ips_by_id[ipset].add(ip)
                 self._pre_calc_removed_ips_by_id[ipset].discard(ip)
         for ipset, removed_ips in updates["removed_ips"].iteritems():
@@ -359,9 +364,12 @@ class IpsetManager(ReferenceManager):
             for ip in removed_ips:
                 if (":" in ip) != (self.ip_type == IPV6):
                     # Skip IPs of incorrect type.
+                    skipped += 1
                     continue
+                processed += 1
                 self._pre_calc_added_ips_by_id[ipset].discard(ip)
                 self._pre_calc_removed_ips_by_id[ipset].add(ip)
+        _log.debug("Processed %s IP updates, %s skipped", processed, skipped)
 
     def _on_endpoint_or_host_ep_update(self, combined_id, data):
         """

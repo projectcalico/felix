@@ -30,7 +30,7 @@ from calico.calcollections import MultiDict
 from calico.common import nat_key
 from calico.datamodel_v1 import (
     ENDPOINT_STATUS_UP, ENDPOINT_STATUS_DOWN, ENDPOINT_STATUS_ERROR,
-    WloadEndpointId, ResolvedHostEndpointId)
+    WloadEndpointId, ResolvedHostEndpointId, TieredPolicyId)
 from calico.felix import devices, futils
 from calico.felix.actor import actor_message, TimedGreenlet
 from calico.felix.futils import FailedSystemCall
@@ -668,10 +668,10 @@ class LocalEndpoint(RefCountedActor):
         """
         _log.debug("New policy IDs for %s: %s", self.combined_id,
                    pols_by_tier)
-        if pols_by_tier != self._pol_ids_by_tier:
-            self._pol_ids_by_tier = pols_by_tier
-            self._iptables_in_sync = False
-            self._profile_ids_dirty = True
+        # if pols_by_tier != self._pol_ids_by_tier:
+        #     self._pol_ids_by_tier = pols_by_tier
+        #     self._iptables_in_sync = False
+        #     self._profile_ids_dirty = True
 
     @actor_message()
     def on_interface_update(self, iface_up):
@@ -909,6 +909,20 @@ class LocalEndpoint(RefCountedActor):
                                all_old_ips, all_new_ips)
                     self._removed_ips |= all_old_ips
                     self._removed_ips -= all_new_ips
+
+            tiers = pending_endpoint.get("tiers", [])
+            tier_dict = OrderedDict()
+            for tier in tiers or []:
+                pols = []
+                for pol in tier["policies"] or []:
+                    pol_id = TieredPolicyId(tier["name"], pol)
+                    pols.append(pol_id)
+                tier_dict[tier["name"]] = pols
+            if self._pol_ids_by_tier.items() != tier_dict.items():
+                self._pol_ids_by_tier = tier_dict
+                self._iptables_in_sync = False
+                self._profile_ids_dirty = True
+
         else:
             # Delete of the endpoint.  Need to resync everything.
             self._profile_ids_dirty = True
@@ -931,6 +945,7 @@ class LocalEndpoint(RefCountedActor):
             profile_ids = set()
         # Note: we don't actually need to wait for the activation to finish
         # due to the dependency management in the iptables layer.
+        _log.debug("New referenced policies/profiles: %s", profile_ids)
         self._rules_ref_helper.replace_all(profile_ids)
         self._profile_ids_dirty = False
 

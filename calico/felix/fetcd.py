@@ -39,15 +39,7 @@ from calico.datamodel_v1 import (
     get_endpoint_id_from_key, dir_for_felix_status, ENDPOINT_STATUS_ERROR,
     ENDPOINT_STATUS_DOWN, ENDPOINT_STATUS_UP,
     POLICY_DIR, TieredPolicyId, HostEndpointId, EndpointId)
-from calico.etcddriver.protocol import (
-    MessageReader, MSG_TYPE_INIT, MSG_TYPE_CONFIG, MSG_TYPE_RESYNC,
-    MSG_KEY_ETCD_URLS, MSG_KEY_HOSTNAME, MSG_KEY_LOG_FILE, MSG_KEY_SEV_FILE,
-    MSG_KEY_SEV_SYSLOG, MSG_KEY_SEV_SCREEN, STATUS_IN_SYNC,
-    MSG_TYPE_CONFIG_LOADED, MSG_KEY_GLOBAL_CONFIG, MSG_KEY_HOST_CONFIG,
-    MSG_TYPE_UPDATE, MSG_KEY_KEY, MSG_KEY_VALUE, MessageWriter,
-    MSG_TYPE_STATUS, MSG_KEY_STATUS, MSG_KEY_KEY_FILE, MSG_KEY_CERT_FILE,
-    MSG_KEY_CA_FILE, SocketClosed, MSG_KEY_PROM_PORT, MSG_TYPE_IPSET_ADDED,
-    MSG_TYPE_IPSET_REMOVED, MSG_TYPE_IP_UPDATES, MSG_KEY_IPSET_ID)
+from calico.etcddriver.protocol import *
 from calico.etcdutils import (
     EtcdClientOwner, delete_empty_parents, PathDispatcher, EtcdEvent, intern_list
 )
@@ -345,27 +337,10 @@ class _FelixEtcdWatcher(TimedGreenlet):
         Program the dispatcher with the paths we care about.
         """
         reg = self.dispatcher.register
-        # Profiles and their contents.
-        reg(TAGS_KEY, on_set=self.on_tags_set, on_del=self.on_tags_delete)
-        reg(RULES_KEY, on_set=self.on_rules_set, on_del=self.on_rules_delete)
-        reg(PROFILE_LABELS_KEY,
-            on_set=self.on_prof_labels_set,
-            on_del=self.on_prof_labels_delete)
-        # Tiered policy
-        reg(TIER_DATA,
-            on_set=self.on_tier_data_set,
-            on_del=self.on_tier_data_delete)
-        reg(TIERED_PROFILE,
-            on_set=self.on_tiered_policy_set,
-            on_del=self.on_tiered_policy_delete)
         # Hosts and endpoints.
         reg(HOST_IP_KEY,
             on_set=self.on_host_ip_set,
             on_del=self.on_host_ip_delete)
-        reg(PER_ENDPOINT_KEY,
-            on_set=self.on_endpoint_set, on_del=self.on_endpoint_delete)
-        reg(HOST_IFACE_KEY,
-            on_set=self.on_host_ep_set, on_del=self.on_host_ep_delete)
         reg(CIDR_V4_KEY,
             on_set=self.on_ipam_v4_pool_set,
             on_del=self.on_ipam_v4_pool_delete)
@@ -415,11 +390,35 @@ class _FelixEtcdWatcher(TimedGreenlet):
                 die_and_restart()
 
     def _dispatch_msg_from_driver(self, msg_type, msg):
-        # Optimization: put update first in the "switch" block because
-        # it's on the critical path.
-        if msg_type == MSG_TYPE_UPDATE:
-            _stats.increment("Update messages from driver")
-            self._on_update_from_driver(msg)
+        _log.debug("Dispatching message of type: %s", msg_type)
+        if msg_type not in {MSG_TYPE_CONFIG_LOADED,
+                            MSG_TYPE_INIT,
+                            MSG_TYPE_STATUS}:
+            if not self.begin_polling.is_set():
+                _log.info("Non-init message, waiting for begin_polling flag")
+            self.begin_polling.wait()
+
+        if msg_type == MSG_TYPE_WL_EP_UPDATE:
+            _stats.increment("Workload endpoint update messages from driver")
+            self.on_wl_endpoint_update(msg[MSG_KEY_HOST],
+                                       msg[MSG_KEY_ORCH],
+                                       msg[MSG_KEY_WORKLOAD],
+                                       msg[MSG_KEY_ENDPOINT],
+                                       msg.get(MSG_KEY_VALUE))
+        elif msg_type == MSG_TYPE_HOST_EP_UPDATE:
+            _stats.increment("Host endpoint update messages from driver")
+            self.on_host_ep_update(msg[MSG_KEY_HOST],
+                                   msg[MSG_KEY_ENDPOINT],
+                                   msg.get(MSG_KEY_VALUE))
+        elif msg_type == MSG_TYPE_POLICY_UPDATE:
+            _stats.increment("Policy update messages from driver")
+            self.on_tiered_policy_update(msg[MSG_KEY_TIER_NAME],
+                                         msg[MSG_KEY_NAME],
+                                         msg.get(MSG_KEY_VALUE))
+        elif msg_type == MSG_TYPE_PROFILE_UPDATE:
+            _stats.increment("Profile update messages from driver")
+            self.on_prof_rules_update(msg[MSG_KEY_NAME],
+                                      msg.get(MSG_KEY_VALUE))
         elif msg_type == MSG_TYPE_CONFIG_LOADED:
             _stats.increment("Config loaded messages from driver")
             self._on_config_loaded_from_driver(msg)
@@ -436,7 +435,8 @@ class _FelixEtcdWatcher(TimedGreenlet):
             _stats.increment("IP update messages from driver")
             self._on_ip_updates_msg_from_driver(msg)
         else:
-            raise RuntimeError("Unexpected message %s" % msg)
+            _log.error("Unexpected message %s %s", msg_type, msg)
+            #raise RuntimeError("Unexpected message %s" % msg)
         self.msgs_processed += 1
         if self.msgs_processed % MAX_EVENTS_BEFORE_YIELD == 0:
             # Yield to ensure that other actors make progress.  (gevent only
@@ -571,6 +571,7 @@ class _FelixEtcdWatcher(TimedGreenlet):
         self.splitter.on_ipset_removed(IpsetID(msg[MSG_KEY_IPSET_ID]))
 
     def _on_ip_updates_msg_from_driver(self, msg):
+        _log.debug("IP updates: %v", msg)
         # Output some very coarse stats.
         self.ip_upd_count += 1
         if self.ip_upd_count % 1000 == 0:
@@ -652,116 +653,48 @@ class _FelixEtcdWatcher(TimedGreenlet):
         )
         return reader, writer
 
-    def on_endpoint_set(self, response, hostname, orchestrator,
-                        workload_id, endpoint_id):
+    def on_wl_endpoint_update(self, hostname, orchestrator,
+                              workload_id, endpoint_id, endpoint):
         """Handler for endpoint updates, passes the update to the splitter."""
         combined_id = WloadEndpointId(hostname, orchestrator, workload_id,
                                       endpoint_id)
         _log.debug("Endpoint %s updated", combined_id)
         _stats.increment("Endpoint created/updated")
-        endpoint = parse_endpoint(self._config, combined_id, response.value)
+        if endpoint is not None:
+            common.validate_endpoint(self._config, combined_id, endpoint)
         self.splitter.on_endpoint_update(combined_id, endpoint)
 
-    def on_endpoint_delete(self, response, hostname, orchestrator,
-                           workload_id, endpoint_id):
-        """Handler for endpoint deleted, passes the update to the splitter."""
-        combined_id = WloadEndpointId(hostname, orchestrator, workload_id,
-                                      endpoint_id)
-        _log.debug("Endpoint %s deleted", combined_id)
-        _stats.increment("Endpoint deleted")
-        self.splitter.on_endpoint_update(combined_id, None)
-
-    def on_host_ep_set(self, response, hostname, endpoint_id):
+    def on_host_ep_update(self, hostname, endpoint_id, endpoint):
         """Handler for create/update of host endpoint."""
         combined_id = HostEndpointId(hostname, endpoint_id)
         _log.debug("Host iface %s updated", combined_id)
         _stats.increment("Host iface created/updated")
-        iface_data = parse_host_ep(self._config, combined_id, response.value)
-        self.splitter.on_host_ep_update(combined_id, iface_data)
+        if endpoint is not None:
+            common.validate_host_endpoint(self._config, combined_id, endpoint)
+        self.splitter.on_host_ep_update(combined_id, endpoint)
 
-    def on_host_ep_delete(self, response, hostname, endpoint_id):
-        """Handler for delete of host endpoint."""
-        combined_id = HostEndpointId(hostname, endpoint_id)
-        _log.debug("Host iface %s deleted", combined_id)
-        _stats.increment("Host iface deleted")
-        self.splitter.on_host_ep_update(combined_id, None)
-
-    def on_rules_set(self, response, profile_id):
+    def on_prof_rules_update(self, profile_id, rules):
         """Handler for rules updates, passes the update to the splitter."""
         _log.debug("Rules for %s set", profile_id)
         _stats.increment("Rules created/updated")
-        rules = parse_profile(profile_id, response.value)
         profile_id = intern(profile_id.encode("utf8"))
         self.splitter.on_rules_update(profile_id, rules)
 
-    def on_rules_delete(self, response, profile_id):
-        """Handler for rules deletes, passes the update to the splitter."""
-        _log.debug("Rules for %s deleted", profile_id)
-        _stats.increment("Rules deleted")
-        self.splitter.on_rules_update(profile_id, None)
-
-    def on_tags_set(self, response, profile_id):
-        """Handler for tags updates, passes the update to the splitter."""
-        _log.debug("Tags for %s set", profile_id)
-        _stats.increment("Tags created/updated")
-        rules = parse_tags(profile_id, response.value)
-        profile_id = intern(profile_id.encode("utf8"))
-        self.splitter.on_tags_update(profile_id, rules)
-
-    def on_tags_delete(self, response, profile_id):
-        """Handler for tags deletes, passes the update to the splitter."""
-        _log.debug("Tags for %s deleted", profile_id)
-        _stats.increment("Tags deleted")
-        self.splitter.on_tags_update(profile_id, None)
-
-    def on_prof_labels_set(self, response, profile_id):
-        """Handler for profile labels, passes update to the splitter."""
-        _log.debug("Labels for profile %s created/updated", profile_id)
-        labels = parse_labels(profile_id, response.value)
-        profile_id = intern(profile_id.encode("utf8"))
-        self.splitter.on_prof_labels_set(profile_id, labels)
-
-    def on_prof_labels_delete(self, response, profile_id):
-        """Handler for profile label deletion
-
-        passed update to the splitter."""
-        _log.debug("Labels for profile %s deleted", profile_id)
-        profile_id = intern(profile_id.encode("utf8"))
-        self.splitter.on_prof_labels_set(profile_id, None)
-
-    def on_tier_data_set(self, response, tier):
-        _log.debug("Tier data set for tier %s", tier)
-        _stats.increment("Tier data created/updated")
-        data = parse_tier_data(tier, response.value)
-        self.splitter.on_tier_data_update(tier, data)
-
-    def on_tier_data_delete(self, response, tier):
-        _log.debug("Tier data deleted for tier %s", tier)
-        _stats.increment("Tier data deleted")
-        self.splitter.on_tier_data_update(tier, None)
-
-    def on_tiered_policy_set(self, response, tier, policy_id):
+    def on_tiered_policy_update(self, tier, policy_id, rules):
         _log.debug("Rules for %s/%s set", tier, policy_id)
         _stats.increment("Tiered rules created/updated")
         policy_id = TieredPolicyId(tier, policy_id)
-        rules = parse_policy(policy_id, response.value)
         if rules is not None:
-            selector = rules.pop("selector")
-            order = rules.pop("order")
+            try:
+                common.validate_policy(policy_id, rules)
+            except ValidationFailed:
+                rules = None
             self.splitter.on_rules_update(policy_id, rules)
-            self.splitter.on_policy_selector_update(policy_id, selector,
-                                                     order)
+            # self.splitter.on_policy_selector_update(policy_id, selector,
+            #                                         order)
         else:
             self.splitter.on_rules_update(policy_id, None)
-            self.splitter.on_policy_selector_update(policy_id, None, None)
-
-    def on_tiered_policy_delete(self, response, tier, policy_id):
-        """Handler for tiered rules deletes, passes update to the splitter."""
-        _log.debug("Rules for %s/%s deleted", tier, policy_id)
-        _stats.increment("tiered rules deleted")
-        policy_id = TieredPolicyId(tier, policy_id)
-        self.splitter.on_rules_update(policy_id, None)
-        self.splitter.on_policy_selector_update(policy_id, None, None)
+            # self.splitter.on_policy_selector_update(policy_id, None, None)
 
     def on_host_ip_set(self, response, hostname):
         if not self._config.IP_IN_IP_ENABLED:

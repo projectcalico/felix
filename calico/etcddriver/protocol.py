@@ -65,6 +65,18 @@ MSG_TYPE_UPDATE = "u"
 MSG_KEY_KEY = "k"
 MSG_KEY_VALUE = "v"
 
+MSG_TYPE_PROFILE_UPDATE = "prof_update"
+MSG_TYPE_POLICY_UPDATE = "pol_update"
+MSG_KEY_TIER_NAME = "tier"
+MSG_KEY_NAME = "name"
+
+MSG_TYPE_WL_EP_UPDATE = "wl_ep_update"
+MSG_TYPE_HOST_EP_UPDATE = "host_ep_update"
+MSG_KEY_HOST = "host"
+MSG_KEY_ORCH = "orch"
+MSG_KEY_WORKLOAD = "wl"
+MSG_KEY_ENDPOINT = "ep"
+
 # Selector/IP added/removed message Driver -> Felix.
 MSG_TYPE_IPSET_ADDED = "ipset_added"
 MSG_TYPE_IPSET_REMOVED = "ipset_removed"
