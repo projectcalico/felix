@@ -141,7 +141,7 @@ class DevicesPlugin(FelixPlugin):
         """
         pass
 
-    def deconfigure_interface_ipv6(self, if_name, proxy_target):
+    def deconfigure_interface_ipv6(self, if_name):
         """
         Deconfigure the interface. Called when it is removed from etcd or
         disabled administratively.
