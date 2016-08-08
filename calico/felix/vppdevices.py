@@ -33,6 +33,7 @@ from calico.felix.actor import Actor, actor_message
 from calico.felix import futils
 from calico.felix.fplugin import FelixPlugin
 from calico.felix.futils import FailedSystemCall
+from calico.felix.devices import DevicesPlugin
 
 # VPP API. Currently a manual dependancy (no pypy module)
 import vpp_papi
