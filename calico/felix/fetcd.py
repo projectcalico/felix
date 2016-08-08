@@ -48,7 +48,6 @@ from calico.felix.futils import (
     logging_exceptions, iso_utc_timestamp, IPV4,
     IPV6, StatCounter
 )
-from calico.felix.selectors import IpsetID
 from calico.monotonic import monotonic_time
 
 _log = logging.getLogger(__name__)
@@ -565,10 +564,10 @@ class _FelixEtcdWatcher(TimedGreenlet):
             self._update_hosts_ipset()
 
     def _on_sel_added_msg_from_driver(self, msg):
-        self.splitter.on_ipset_added(IpsetID(msg[MSG_KEY_IPSET_ID]))
+        self.splitter.on_ipset_added(msg[MSG_KEY_IPSET_ID])
 
     def _on_sel_removed_msg_from_driver(self, msg):
-        self.splitter.on_ipset_removed(IpsetID(msg[MSG_KEY_IPSET_ID]))
+        self.splitter.on_ipset_removed(msg[MSG_KEY_IPSET_ID])
 
     def _on_ip_updates_msg_from_driver(self, msg):
         _log.debug("IP updates: %v", msg)
@@ -685,10 +684,6 @@ class _FelixEtcdWatcher(TimedGreenlet):
         _stats.increment("Tiered rules created/updated")
         policy_id = TieredPolicyId(tier, policy_id)
         if rules is not None:
-            try:
-                common.validate_policy(policy_id, rules)
-            except ValidationFailed:
-                rules = None
             self.splitter.on_rules_update(policy_id, rules)
             # self.splitter.on_policy_selector_update(policy_id, selector,
             #                                         order)

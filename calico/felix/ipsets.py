@@ -24,14 +24,11 @@ from collections import defaultdict
 from itertools import chain
 import logging
 
-from calico.datamodel_v1 import HostEndpointId, WloadEndpointId
 from calico.felix import futils
 from calico.calcollections import SetDelta
 from calico.felix.futils import IPV4, IPV6, FailedSystemCall
 from calico.felix.actor import actor_message, Actor
-from calico.felix.labels import LabelValueIndex, LabelInheritanceIndex
 from calico.felix.refcount import ReferenceManager, RefCountedActor
-from calico.felix.selectors import SelectorExpression, IpsetID
 
 _log = logging.getLogger(__name__)
 
@@ -76,32 +73,6 @@ class IpsetManager(ReferenceManager):
         self.ip_type = ip_type
         self._config = config
 
-        # State.
-        # Tag IDs indexed by profile IDs
-        self.tags_by_prof_id = {}
-        # EndpointData "structs" indexed by WloadEndpointId.
-        self.endpoint_data_by_ep_id = {}
-
-        # Main index.  Tracks which IPs are currently in each tag.
-        self.tag_membership_index = TagMembershipIndex()
-        # Take copies of the key functions; avoids messy long lines.
-        self._add_mapping = self.tag_membership_index.add_mapping
-        self._remove_mapping = self.tag_membership_index.remove_mapping
-
-        # Set of WloadEndpointId objects referenced by profile IDs.
-        self.endpoint_ids_by_profile_id = defaultdict(set)
-
-        # LabelNode index, used to cross-reference endpoint labels against
-        # selectors.
-        self._label_index = LabelValueIndex()
-        self._label_index.on_match_started = self._on_label_match_started
-        self._label_index.on_match_stopped = self._on_label_match_stopped
-        self._label_inherit_idx = LabelInheritanceIndex(self._label_index)
-        # Sets used to defer updates of the label match cache until we're ready
-        # to handle them.
-        self._started_label_matches = set()
-        self._stopped_label_matches = set()
-
         self._pre_calc_ipsets_by_id = defaultdict(set)
         self._pre_calc_added_ips_by_id = defaultdict(set)
         self._pre_calc_removed_ips_by_id = defaultdict(set)
@@ -111,24 +82,10 @@ class IpsetManager(ReferenceManager):
         # values.
         self._datamodel_in_sync = False
 
-    def _create(self, tag_id_or_sel):
-        if isinstance(tag_id_or_sel, IpsetID):
-            _log.info("Creating ipset for pre-calculated selector %s",
-                       tag_id_or_sel)
-            sel_id = tag_id_or_sel
-            ipset_name = sel_id.sel_id[:MAX_NAME_LENGTH]
-        elif isinstance(tag_id_or_sel, SelectorExpression):
-            _log.debug("Creating ipset for expression %s", tag_id_or_sel)
-            sel = tag_id_or_sel
-            self._label_index.on_expression_update(sel, sel)
-            ipset_name = futils.uniquely_shorten(sel.unique_id,
-                                                 MAX_NAME_LENGTH)
-            self._process_stopped_label_matches()
-            self._process_started_label_matches()
-        else:
-            _log.debug("Creating ipset for tag %s", tag_id_or_sel)
-            ipset_name = futils.uniquely_shorten(tag_id_or_sel,
-                                                 MAX_NAME_LENGTH)
+    def _create(self, ipset_id):
+        _log.info("Creating ipset for pre-calculated selector %s",
+                  ipset_id)
+        ipset_name = ipset_id[:MAX_NAME_LENGTH]
         active_ipset = RefCountedIpsetActor(
             ipset_name,
             self.ip_type,
@@ -144,19 +101,16 @@ class IpsetManager(ReferenceManager):
             _log.info("Delaying startup of ipset for %s because datamodel is "
                       "not in sync.", obj_id)
 
-    def _on_object_started(self, tag_id, active_ipset):
-        _log.debug("RefCountedIpsetActor actor for %s started", tag_id)
+    def _on_object_started(self, ipset_id, active_ipset):
+        _log.debug("RefCountedIpsetActor actor for %s started", ipset_id)
         # Fill the ipset in with its members, this will trigger its first
         # programming, after which it will call us back to tell us it is ready.
         # We can't use self._dirty_tags to defer this in case the set becomes
         # unreferenced before _finish_msg_batch() is called.
-        assert self._is_starting_or_live(tag_id)
+        assert self._is_starting_or_live(ipset_id)
         assert self._datamodel_in_sync
-        active_ipset = self.objects_by_id[tag_id]
-        if isinstance(tag_id, IpsetID):
-            members = frozenset(self._pre_calc_ipsets_by_id.get(tag_id, set()))
-        else:
-            members = self.tag_membership_index.members(tag_id)
+        active_ipset = self.objects_by_id[ipset_id]
+        members = frozenset(self._pre_calc_ipsets_by_id.get(ipset_id, set()))
         active_ipset.replace_members(members, async=True)
 
     def _update_dirty_active_ipsets(self):
@@ -165,50 +119,36 @@ class IpsetManager(ReferenceManager):
 
         Clears the index of dirty TagIpsets as a side-effect.
         """
-        tag_index = self.tag_membership_index
-        ips_added, ips_removed = tag_index.get_and_reset_changes_by_tag()
-
         # Add in the pre-calculated IPs from the etcd driver.
         _log.debug("Incorporating pre-calculated ipsets")
-        ips_added.update(self._pre_calc_added_ips_by_id)
         for sel_id, added_ips in self._pre_calc_added_ips_by_id.iteritems():
             self._pre_calc_ipsets_by_id[sel_id].update(added_ips)
-        self._pre_calc_added_ips_by_id.clear()
-        ips_removed.update(self._pre_calc_removed_ips_by_id)
         for sel_id, removed_ips in self._pre_calc_removed_ips_by_id.iteritems():
             self._pre_calc_ipsets_by_id[sel_id].difference_update(removed_ips)
             if not self._pre_calc_ipsets_by_id[sel_id]:
                 del self._pre_calc_ipsets_by_id[sel_id]
-        self._pre_calc_removed_ips_by_id.clear()
 
         num_updates = 0
-        for tag_id, removed_ips in ips_removed.iteritems():
+        for tag_id, removed_ips in self._pre_calc_removed_ips_by_id.iteritems():
             if self._is_starting_or_live(tag_id):
                 assert self._datamodel_in_sync
                 active_ipset = self.objects_by_id[tag_id]
                 active_ipset.remove_members(removed_ips, async=True)
                 num_updates += 1
             self._maybe_yield()
-        for tag_id, added_ips in ips_added.iteritems():
+        for tag_id, added_ips in self._pre_calc_added_ips_by_id.iteritems():
             if self._is_starting_or_live(tag_id):
                 assert self._datamodel_in_sync
                 active_ipset = self.objects_by_id[tag_id]
                 active_ipset.add_members(added_ips, async=True)
                 num_updates += 1
             self._maybe_yield()
+
+        self._pre_calc_removed_ips_by_id.clear()
+        self._pre_calc_added_ips_by_id.clear()
+
         if num_updates > 0:
             _log.info("Sent %s updates to updated tags", num_updates)
-
-    @property
-    def nets_key(self):
-        nets = "ipv4_nets" if self.ip_type == IPV4 else "ipv6_nets"
-        return nets
-
-    @property
-    def expected_ips_key(self):
-        key = ("expected_ipv4_addrs" if self.ip_type == IPV4
-               else "expected_ipv6_addrs")
-        return key
 
     @actor_message()
     def on_datamodel_in_sync(self):
@@ -257,100 +197,19 @@ class IpsetManager(ReferenceManager):
                 _log.info("Whitelist: %s", whitelist)
                 _log.info("ipsets to delete: %s", ipsets_to_delete)
 
-    # @actor_message()
-    # def on_tags_update(self, profile_id, tags):
-    #     """
-    #     Called when the tag list of the given profile has changed or been
-    #     deleted.
-    #
-    #     Updates the indices and notifies any live RefCountedIpsetActor
-    #     objects of any changes that affect them.
-    #
-    #     :param str profile_id: Profile ID affected.
-    #     :param list[str]|NoneType tags: List of tags for the given profile or
-    #         None if deleted.
-    #     """
-    #     _log.info("Tags for profile %s updated", profile_id)
-    #
-    #     # General approach is to default to the empty list if the new/old
-    #     # tag list is missing; then add/delete falls out: all the tags will
-    #     # end up in added_tags/removed_tags.
-    #     old_tags = set(self.tags_by_prof_id.get(profile_id, []))
-    #     new_tags = set(tags or [])
-    #     # Find the endpoints that use these tags and work out what tags have
-    #     # been added/removed.
-    #     endpoint_ids = self.endpoint_ids_by_profile_id.get(profile_id, set())
-    #     added_tags = new_tags - old_tags
-    #     removed_tags = old_tags - new_tags
-    #     _log.debug("Endpoint IDs with this profile: %s", endpoint_ids)
-    #     _log.debug("Profile %s added tags: %s", profile_id, added_tags)
-    #     _log.debug("Profile %s removed tags: %s", profile_id, removed_tags)
-    #
-    #     for endpoint_id in endpoint_ids:
-    #         endpoint = self.endpoint_data_by_ep_id.get(endpoint_id,
-    #                                                    EMPTY_ENDPOINT_DATA)
-    #         ip_addrs = endpoint.ip_addresses
-    #         for tag_id in removed_tags:
-    #             for ip in ip_addrs:
-    #                 self._remove_mapping(tag_id, profile_id, endpoint_id, ip)
-    #         for tag_id in added_tags:
-    #             for ip in ip_addrs:
-    #                 self._add_mapping(tag_id, profile_id, endpoint_id, ip)
-    #
-    #     if tags is None:
-    #         _log.info("Tags for profile %s deleted", profile_id)
-    #         self.tags_by_prof_id.pop(profile_id, None)
-    #     else:
-    #         self.tags_by_prof_id[profile_id] = tags
-
-    # @actor_message()
-    # def on_prof_labels_set(self, profile_id, labels):
-    #     _log.debug("Profile labels updated for %s: %s", profile_id, labels)
-    #     self._label_inherit_idx.on_parent_labels_update(profile_id, labels)
-    #     # Flush the updates.
-    #     self._process_stopped_label_matches()
-    #     self._process_started_label_matches()
-    #
-    # @actor_message()
-    # def on_host_ep_update(self, combined_id, endpoint):
-    #     """
-    #     Update tag/selector memberships and indices with the new interface
-    #     data dict.
-    #
-    #     :param HostEndpointId combined_id: ID of the host endpoint.
-    #     :param dict|NoneType endpoint: Either a dict containing interface
-    #         information or None to indicate deletion.
-    #     """
-    #     # For our purposes, host endpoints are indexed as endpoints.
-    #     assert isinstance(combined_id, HostEndpointId)
-    #     self._on_endpoint_or_host_ep_update(combined_id, endpoint)
-    #
-    # @actor_message()
-    # def on_endpoint_update(self, endpoint_id, endpoint):
-    #     """
-    #     Update tag/selector memberships and indices with the new endpoint dict.
-    #
-    #     :param WloadEndpointId endpoint_id: ID of the endpoint.
-    #     :param dict|NoneType endpoint: Either a dict containing endpoint
-    #         information or None to indicate deletion.
-    #     """
-    #     assert isinstance(endpoint_id, WloadEndpointId)
-    #     self._on_endpoint_or_host_ep_update(endpoint_id, endpoint)
-
     @actor_message()
     def on_ipset_added(self, selector_id):
-        _log.debug("Selector %s now active.", selector_id)
+        _log.debug("IP set %s now active.", selector_id)
 
     @actor_message()
     def on_ipset_removed(self, selector_id):
-        _log.debug("Selector %s no longer active.", selector_id)
+        _log.debug("IP set %s no longer active.", selector_id)
 
     @actor_message()
     def on_ipset_updates(self, updates):
         skipped = 0
         processed = 0
         for ipset, added_ips in updates["added_ips"].iteritems():
-            ipset = IpsetID(ipset)
             for ip in added_ips:
                 if (":" in ip) != (self.ip_type == IPV6):
                     # Skip IPs of incorrect type.
@@ -360,7 +219,6 @@ class IpsetManager(ReferenceManager):
                 self._pre_calc_added_ips_by_id[ipset].add(ip)
                 self._pre_calc_removed_ips_by_id[ipset].discard(ip)
         for ipset, removed_ips in updates["removed_ips"].iteritems():
-            ipset = IpsetID(ipset)
             for ip in removed_ips:
                 if (":" in ip) != (self.ip_type == IPV6):
                     # Skip IPs of incorrect type.
@@ -370,200 +228,6 @@ class IpsetManager(ReferenceManager):
                 self._pre_calc_added_ips_by_id[ipset].discard(ip)
                 self._pre_calc_removed_ips_by_id[ipset].add(ip)
         _log.debug("Processed %s IP updates, %s skipped", processed, skipped)
-
-    def _on_endpoint_or_host_ep_update(self, combined_id, data):
-        """
-        Update tag/selector memberships and indices with the new
-        host ep/endpoint dict.
-
-        We care about the labels, profiles and IP addresses.  For host
-        endpoints, we include the expected_ipvX_addrs in the IP addresses.
-
-        :param HostEndpointId|WloadEndpointId combined_id: ID of the endpoint.
-        :param dict|NoneType data: Either a dict containing endpoint
-            information or None to indicate deletion.
-        """
-        endpoint_data = self._endpoint_data_from_dict(combined_id, data)
-        if data and endpoint_data != EMPTY_ENDPOINT_DATA:
-            # This endpoint makes a contribution to the IP addresses, we need
-            # to index its labels.
-            labels = data.get("labels", {})
-            prof_ids = data.get("profile_ids", [])
-        else:
-            labels = None
-            prof_ids = None
-        # Remove the endpoint from the label index so that we clean up its
-        # old IP addresses.
-        self._label_inherit_idx.on_item_update(combined_id, None, None)
-        self._process_stopped_label_matches()
-        # Now update the main cache of endpoint data.
-        self._on_endpoint_data_update(combined_id, endpoint_data)
-        # And then, if not doing a deletion, add the endpoint back into the
-        # label index.
-        if labels is not None:
-            self._label_inherit_idx.on_item_update(combined_id, labels,
-                                                   prof_ids)
-            self._process_started_label_matches()
-
-    def _on_label_match_started(self, expr_id, item_id):
-        """Callback from the label index to tell us that a match started."""
-        _log.debug("SelectorExpression %s now matches %s", expr_id, item_id)
-        self._started_label_matches.add((expr_id, item_id))
-
-    def _on_label_match_stopped(self, expr_id, item_id):
-        """Callback from the label index to tell us that a match stopped."""
-        _log.debug("SelectorExpression %s no longer matches %s",
-                   expr_id, item_id)
-        self._stopped_label_matches.add((expr_id, item_id))
-
-    def _process_started_label_matches(self):
-        for selector, item_id in self._started_label_matches:
-            ep_data = self.endpoint_data_by_ep_id[item_id]
-            ip_addrs = ep_data.ip_addresses
-            _log.debug("Adding %s to expression %s", ip_addrs, selector)
-            for ip in ip_addrs:
-                self._add_mapping(selector, DUMMY_PROFILE, item_id, ip)
-        self._started_label_matches.clear()
-
-    def _process_stopped_label_matches(self):
-        for selector, item_id in self._stopped_label_matches:
-            ep_data = self.endpoint_data_by_ep_id[item_id]
-            for ip in ep_data.ip_addresses:
-                self._remove_mapping(selector, DUMMY_PROFILE, item_id, ip)
-        self._stopped_label_matches.clear()
-
-    def _endpoint_data_from_dict(self, endpoint_id, endpoint_dict):
-        """
-        Convert the endpoint dict, which may be large, into a struct-like
-        object in order to save occupancy.
-
-        As an optimization, if the endpoint doesn't contain any data relevant
-        to this manager, returns EMPTY_ENDPOINT_DATA.
-
-        :param dict|None endpoint_dict: The data model endpoint dict or None.
-        :return: An EndpointData object containing the data. If the input
-            was None, EMPTY_ENDPOINT_DATA is returned.
-        """
-        if endpoint_dict is not None:
-            profile_ids = endpoint_dict.get("profile_ids", [])
-            nets = endpoint_dict.get(self.nets_key, [])
-            ips = map(futils.net_to_ip, nets)
-            exp_ips = endpoint_dict.get(self.expected_ips_key, [])
-
-            if ips or exp_ips:
-                # Optimization: only return an object if this endpoint makes
-                # some contribution to the IP addresses.
-                return EndpointData(profile_ids, ips + exp_ips)
-            else:
-                _log.debug("Endpoint makes no contribution, "
-                           "treating as missing: %s", endpoint_id)
-        return EMPTY_ENDPOINT_DATA
-
-    def _on_endpoint_data_update(self, endpoint_id, endpoint_data):
-        """
-        Update tag memberships and indices with the new EndpointData
-        object.
-
-        :param EndpointId endpoint_id: ID of the endpoint.
-        :param EndpointData endpoint_data: An EndpointData object
-            EMPTY_ENDPOINT_DATA to indicate deletion (or endpoint being
-            optimized out).
-
-        """
-        # Endpoint updates are the most complex to handle because they may
-        # change the profile IDs (and hence the set of tags) as well as the
-        # ip addresses attached to the interface.  In addition, the endpoint
-        # may or may not have existed before.
-        #
-        # General approach: force all the possibilities through the same
-        # update loops by defaulting values.  For example, if there was no
-        # previous endpoint then we default old_tags to the empty set.  Then,
-        # when we calculate removed_tags, we'll get the empty set and the
-        # removal loop will be skipped.
-        old_endpoint = self.endpoint_data_by_ep_id.pop(endpoint_id,
-                                                       EMPTY_ENDPOINT_DATA)
-        old_prof_ids = old_endpoint.profile_ids
-        old_tags = set()
-        for profile_id in old_prof_ids:
-            for tag in self.tags_by_prof_id.get(profile_id, []):
-                old_tags.add((profile_id, tag))
-
-        if endpoint_data != EMPTY_ENDPOINT_DATA:
-            # EMPTY_ENDPOINT_DATA represents a deletion (or that the endpoint
-            # has been optimized out earlier in the pipeline).  Only store
-            # off real endpoints.
-            _log.debug("Endpoint %s updated", endpoint_id)
-            self.endpoint_data_by_ep_id[endpoint_id] = endpoint_data
-
-        new_prof_ids = endpoint_data.profile_ids
-        new_tags = set()
-        for profile_id in new_prof_ids:
-            for tag in self.tags_by_prof_id.get(profile_id, []):
-                new_tags.add((profile_id, tag))
-
-        if new_prof_ids != old_prof_ids:
-            # Profile ID changed, or an add/delete.  the _xxx_profile_index
-            # methods ignore profile_id == None so we'll do the right thing.
-            _log.debug("Profile IDs changed from %s to %s",
-                       old_prof_ids, new_prof_ids)
-            self._remove_profile_index(old_prof_ids, endpoint_id)
-            self._add_profile_index(new_prof_ids, endpoint_id)
-
-        # Since we've defaulted new/old_tags to set() if needed, we can
-        # use set operations to calculate the tag changes.
-        added_tags = new_tags - old_tags
-        unchanged_tags = new_tags & old_tags
-        removed_tags = old_tags - new_tags
-
-        # These default to set() if there are no IPs.
-        old_ips = old_endpoint.ip_addresses
-        new_ips = endpoint_data.ip_addresses
-
-        # Add *new* IPs to new tags.  On a deletion, added_tags will be empty.
-        # Do this first to avoid marking ipsets as dirty if an endpoint moves
-        # from one profile to another but keeps the same tag.
-        for profile_id, tag in added_tags:
-            for ip in new_ips:
-                self._add_mapping(tag, profile_id, endpoint_id, ip)
-        # Change IPs in unchanged tags.
-        added_ips = new_ips - old_ips
-        removed_ips = old_ips - new_ips
-        for profile_id, tag in unchanged_tags:
-            for ip in removed_ips:
-                self._remove_mapping(tag, profile_id, endpoint_id, ip)
-            for ip in added_ips:
-                self._add_mapping(tag, profile_id, endpoint_id, ip)
-        # Remove *all* *old* IPs from removed tags.  For a deletion, only this
-        # loop will fire.
-        for profile_id, tag in removed_tags:
-            for ip in old_ips:
-                self._remove_mapping(tag, profile_id, endpoint_id, ip)
-
-    def _add_profile_index(self, prof_ids, endpoint_id):
-        """
-        Notes in the index that an endpoint uses the given profiles.
-
-        :param set[str] prof_ids: set of profile IDs that the endpoint is in.
-        :param EndpointId endpoint_id: ID of the endpoint
-        """
-        for prof_id in prof_ids:
-            self.endpoint_ids_by_profile_id[prof_id].add(endpoint_id)
-
-    def _remove_profile_index(self, prof_ids, endpoint_id):
-        """
-        Notes in the index that an endpoint no longer uses any of the
-        given profiles.
-
-        :param set[str] prof_ids: set of profile IDs to remove the endpoint
-            from.
-        :param EndpointId endpoint_id: ID of the endpoint
-        """
-        for prof_id in prof_ids:
-            endpoints = self.endpoint_ids_by_profile_id[prof_id]
-            endpoints.discard(endpoint_id)
-            if not endpoints:
-                _log.debug("No more endpoints use profile %s", prof_id)
-                del self.endpoint_ids_by_profile_id[prof_id]
 
     def _finish_msg_batch(self, batch, results):
         """
@@ -575,188 +239,6 @@ class IpsetManager(ReferenceManager):
         """
         super(IpsetManager, self)._finish_msg_batch(batch, results)
         self._update_dirty_active_ipsets()
-
-
-class TagMembershipIndex(object):
-    """Indexes tag memberships to allow efficient calculation of changes."""
-    def __init__(self):
-        # Main index.  Since an IP address can be assigned to multiple
-        # endpoints, we need to track which endpoints reference an IP.  When
-        # we find the set of endpoints with an IP is empty, we remove the
-        # ip from the tag.
-        # ip_owners_by_tag[tag][ip] = set([(profile_id, combined_id),
-        #                                  (profile_id, combined_id2), ...]) |
-        #                             (profile_id, combined_id)
-        # Here "combined_id" is an WloadEndpointId object.
-        self.ip_owners_by_tag = defaultdict(lambda: defaultdict(lambda: None))
-        # IPs added and removed since the last reset.
-        self.ips_added_by_tag = defaultdict(set)
-        self.ips_removed_by_tag = defaultdict(set)
-
-    def add_mapping(self, tag_id, profile_id, endpoint_id, ip_address):
-        """
-        Adds the given tag->IP->profile->endpoint mapping to the index.
-        Marks the tag as dirty if the update resulted in the IP being
-        newly added.
-
-        :param str tag_id: Tag ID
-        :param str profile_id: Profile ID
-        :param EndpointId endpoint_id: ID of the endpoint
-        :param str ip_address: IP address to add
-        """
-        if not self.ip_owners_by_tag[tag_id][ip_address]:
-            self._on_ip_added(ip_address, tag_id)
-        owners = self.ip_owners_by_tag[tag_id][ip_address]
-        new_mapping = (profile_id, endpoint_id)
-        if not owners:
-            self.ip_owners_by_tag[tag_id][ip_address] = new_mapping
-        elif isinstance(owners, set):
-            owners.add(new_mapping)
-        else:
-            self.ip_owners_by_tag[tag_id][ip_address] = set([
-                owners,
-                new_mapping
-            ])
-
-    def remove_mapping(self, tag_id, profile_id, endpoint_id, ip_address):
-        """
-        Removes the tag->IP->profile->endpoint mapping from index.
-        Marks the tag as dirty if the update resulted in the IP being
-        removed.
-
-        :param str tag_id: Tag ID
-        :param str profile_id: Profile ID
-        :param EndpointId endpoint_id: ID of the endpoint
-        :param str ip_address: IP address to remove
-        """
-        owners = self.ip_owners_by_tag[tag_id][ip_address]
-        removed_mapping = (profile_id, endpoint_id)
-        if owners == removed_mapping:
-            # This was the sole owner of the IP in the tag, remove it.
-            _log.debug("%s was sole owner of IP %s, IP no longer in tag",
-                       removed_mapping, ip_address)
-            del self.ip_owners_by_tag[tag_id][ip_address]
-            if not self.ip_owners_by_tag[tag_id]:
-                _log.debug("Tag %s now empty, removing", tag_id)
-                del self.ip_owners_by_tag[tag_id]
-            self._on_ip_removed(ip_address, tag_id)
-        else:
-            assert isinstance(owners, set), (
-                "Expected owners of IP %s to be %s or a set but got %s" %
-                (ip_address, removed_mapping, owners)
-            )
-            assert len(owners) > 1, ("ip_owners_by_tag entry should never "
-                                     "be a set with <=1 entry")
-            assert removed_mapping in owners, (
-                "Owners set for IP %s should contain %s" %
-                (ip_address, removed_mapping)
-            )
-            _log.debug("Tag %s still contains IP %s", tag_id, ip_address)
-            owners.remove(removed_mapping)
-            if len(owners) == 1:
-                _log.debug("IP %s now only has one owner, replacing set with "
-                           "single tuple", ip_address)
-                self.ip_owners_by_tag[tag_id][ip_address] = owners.pop()
-
-    def _on_ip_added(self, ip_address, tag_id):
-        """
-        Track the addition of an IP address to the given tag.
-
-        Only affects the ips_(added|removed)_by_tag mappings.  An
-        addition following a removal cleans up the removal.
-        """
-        _log.debug("IP %s added to tag %s", ip_address, tag_id)
-        # Track the addition.
-        self.ips_added_by_tag[tag_id].add(ip_address)
-        # The addition invalidates any previous removal; clean that up.
-        removed_ips_for_tag = self.ips_removed_by_tag[tag_id]
-        removed_ips_for_tag.discard(ip_address)
-        if not removed_ips_for_tag:
-            del self.ips_removed_by_tag[tag_id]
-
-    def _on_ip_removed(self, ip_address, tag_id):
-        """
-        Track the removal of an IP address to the given tag.
-
-        Only affects the ips_(added|removed)_by_tag mappings.  A
-        removal following an addition cleans up the addition.
-        """
-        _log.debug("IP %s removed from tag %s", ip_address, tag_id)
-        # Track the removal.
-        self.ips_removed_by_tag[tag_id].add(ip_address)
-        # The addition invalidates any previous addition; clean that up.
-        added_ips_for_tag = self.ips_added_by_tag[tag_id]
-        added_ips_for_tag.discard(ip_address)
-        if not added_ips_for_tag:
-            del self.ips_added_by_tag[tag_id]
-
-    def members(self, tag_id):
-        members = self.ip_owners_by_tag.get(tag_id, {}).keys()
-        return members
-
-    def get_and_reset_changes_by_tag(self):
-        """ Get the deltas accumulated since the last reset.
-        :return: tuple of two dicts.  The first contains the added IPs by tag,
-                 the second contains the removed IPs by tag.
-        """
-        added_and_removed = self.ips_added_by_tag, self.ips_removed_by_tag
-        self.ips_added_by_tag = defaultdict(set)
-        self.ips_removed_by_tag = defaultdict(set)
-        return added_and_removed
-
-
-class EndpointData(object):
-    """
-    Space-efficient read-only 'struct' to hold only the endpoint data
-    that we need.
-    """
-    __slots__ = ["_profile_ids", "_ip_addresses"]
-
-    def __init__(self, profile_ids, ip_addresses):
-        """
-        :param sequence profile_ids: The profile IDs for the endpoint.
-        :param sequence ip_addresses: IP addresses for the endpoint.
-        """
-        # Note: profile IDs are ordered in the data model but the ipsets
-        # code doesn't care about the ordering so it's safe to sort these here
-        # for comparison purposes.
-        self._profile_ids = tuple(sorted(profile_ids))
-        self._ip_addresses = tuple(sorted(ip_addresses))
-
-    @property
-    def profile_ids(self):
-        """:returns set[str]: profile IDs."""
-        # Generate set on demand to keep occupancy down.  250B overhead for a
-        # set vs 64 for a tuple.
-        return set(self._profile_ids)
-
-    @property
-    def ip_addresses(self):
-        """:returns set[str]: IP addresses."""
-        # Generate set on demand to keep occupancy down.  250B overhead for a
-        # set vs 64 for a tuple.
-        return set(self._ip_addresses)
-
-    def __repr__(self):
-        return self.__class__.__name__ + "(%s,%s)" % (self._profile_ids,
-                                                      self._ip_addresses)
-
-    def __eq__(self, other):
-        if other is self:
-            return True
-        if not isinstance(other, EndpointData):
-            return False
-        return (other._profile_ids == self._profile_ids and
-                other._ip_addresses == self._ip_addresses)
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
-    def __hash__(self):
-        return hash(self._profile_ids) + hash(self._ip_addresses)
-
-
-EMPTY_ENDPOINT_DATA = EndpointData([], [])
 
 
 class IpsetActor(Actor):

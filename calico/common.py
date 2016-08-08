@@ -35,7 +35,7 @@ from netaddr.strategy import eui48
 from calico.felix.futils import IPV4, IP_TYPE_TO_VERSION
 
 from calico.datamodel_v1 import TieredPolicyId, LABEL_CHARS
-from calico.felix.selectors import parse_selector, BadSelector, IpsetID
+from calico.felix.selectors import parse_selector, BadSelector
 
 _log = logging.getLogger(__name__)
 
@@ -737,16 +737,6 @@ def _validate_rule_match_criteria(rule, issues, neg_pfx):
         issues.append("Using icmpv6 with IPv4 in rule %s." % rule)
     if ip_version == 6 and protocol == "icmp":
         issues.append("Using icmp with IPv6 in rule %s." % rule)
-
-    # For selectors and tags, we know the etcd-driver has already
-    # pre-calculated the ipset, swap the value for an ID object.
-    for ipset_type in (neg_pfx + 'src_selector', neg_pfx + 'dst_selector',
-                       neg_pfx + 'src_tag', neg_pfx + 'dst_tag'):
-        ipset_id = rule.get(ipset_type)
-        if ipset_id is None:
-            # ipset_type wasn't present.
-            continue
-        rule[ipset_type] = IpsetID(ipset_id)
 
     if "log_prefix" in rule:
         log_pfx = rule["log_prefix"]
