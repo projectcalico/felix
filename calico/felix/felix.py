@@ -21,6 +21,7 @@ felix.felix
 The main logic for Felix.
 """
 # Monkey-patch before we do anything else...
+import sys
 from gevent import monkey
 monkey.patch_all()
 
@@ -241,6 +242,8 @@ def _main_greenlet(config):
             # It doesn't matter too much if we fail to do this.
             _log.warning("Unable to install diag dump handler")
             pass
+        gevent.signal(signal.SIGTERM, functools.partial(shut_down, etcd_api))
+        gevent.signal(signal.SIGINT, functools.partial(shut_down, etcd_api))
 
         # Wait for something to fail.
         _log.info("All top-level actors started, waiting on failures...")
@@ -258,6 +261,18 @@ def _main_greenlet(config):
     except:
         _log.exception("Exception killing main greenlet")
         raise
+
+
+def shut_down(etcd_api):
+    _log.info("Shutting down due to signal")
+    try:
+        with gevent.Timeout(10):
+            etcd_api.kill(async=False)
+    except:
+        _log.exception("Exception during shutdown")
+        raise
+    finally:
+        os._exit(1)
 
 
 def main():
