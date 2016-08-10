@@ -23,6 +23,7 @@ import os
 import random
 import json
 import logging
+import signal
 import socket
 import subprocess
 
@@ -250,6 +251,10 @@ class EtcdAPI(EtcdClientOwner, Actor):
         self._watcher.begin_polling.set()
 
     @actor_message()
+    def kill(self):
+        self._watcher.kill_watcher()
+
+    @actor_message()
     def force_resync(self, reason="unknown"):
         """
         Force a resync with etcd after the current poll completes.
@@ -320,6 +325,8 @@ class _FelixEtcdWatcher(TimedGreenlet):
         self.dispatcher = PathDispatcher()
         # The Popen object for the driver.
         self._driver_process = None
+        # True if we've been shut down.
+        self.killed = False
         # Stats.
         self.read_count = 0
         self.ip_upd_count = 0
@@ -607,32 +614,39 @@ class _FelixEtcdWatcher(TimedGreenlet):
         update_socket = socket.socket(socket.AF_UNIX,
                                       socket.SOCK_STREAM)
         update_socket.bind(sck_filename)
-        update_socket.listen(1)
-        if getattr(sys, "frozen", False):
-            # We're running under pyinstaller, where we share our executable
-            # with the etcd driver.  Re-run this executable with the "driver"
-            # argument to invoke the etcd driver.
-            cmd = [sys.argv[0], "driver"]
-        else:
-            # Not running under pyinstaller, execute the etcd driver directly.
-            cmd = [sys.executable, "-m", "calico.etcddriver"]
-        cmd =["/home/gulfstream/go-work/src/github.com/tigera/libcalico-go/bin/felix-backend"]
-        # etcd driver takes the felix socket name as argument.
-        cmd += [sck_filename]
-        _log.info("etcd-driver command line: %s", cmd)
-        self._driver_process = subprocess.Popen(cmd)
-        _log.info("Started etcd driver with PID %s", self._driver_process.pid)
-        with gevent.Timeout(10):
-            update_conn, _ = update_socket.accept()
-        _log.info("Accepted connection on socket")
-        # No longer need the server socket, remove it.
+        update_conn = None
         try:
-            os.unlink(sck_filename)
-        except OSError:
-            # Unexpected but carry on...
-            _log.exception("Failed to unlink socket")
-        else:
-            _log.info("Unlinked server socket")
+            update_socket.listen(1)
+            if getattr(sys, "frozen", False):
+                # We're running under pyinstaller, where we share our executable
+                # with the etcd driver.  Re-run this executable with the "driver"
+                # argument to invoke the etcd driver.
+                cmd = [sys.argv[0], "driver"]
+            else:
+                # Not running under pyinstaller, execute the etcd driver directly.
+                cmd = [sys.executable, "-m", "calico.etcddriver"]
+            # etcd driver takes the felix socket name as argument.
+            cmd =["/home/gulfstream/go-work/src/github.com/tigera/libcalico-go/bin/felix-backend"]
+            cmd += [sck_filename]
+            _log.info("etcd-driver command line: %s", cmd)
+            if self.killed:
+                _log.critical("Not starting driver: process is shutting down.")
+                raise Exception("Driver shut down.")
+            self._driver_process = subprocess.Popen(cmd)
+            _log.info("Started etcd driver with PID %s",
+                      self._driver_process.pid)
+            with gevent.Timeout(10):
+                update_conn, _ = update_socket.accept()
+            _log.info("Accepted connection on socket")
+        finally:
+            # No longer need the server socket, remove it.
+            try:
+                os.unlink(sck_filename)
+            except OSError:
+                # Unexpected but carry on...
+                _log.exception("Failed to unlink socket")
+            else:
+                _log.info("Unlinked server socket")
 
         # Wrap the socket in reader/writer objects that simplify using the
         # protocol.
@@ -753,6 +767,16 @@ class _FelixEtcdWatcher(TimedGreenlet):
     def on_ipam_v4_pool_delete(self, response, pool_id):
         _stats.increment("IPAM pool deleted")
         self.splitter.on_ipam_pool_updated(pool_id, None)
+
+    def kill_watcher(self):
+        self.killed = True
+        if self._driver_process is not None:
+            try:
+                self._driver_process.send_signal(signal.SIGTERM)
+            except OSError:  # Likely already died.
+                _log.exception("Failed to kill driver process")
+            else:
+                self._driver_process.wait()
 
 
 class EtcdStatusReporter(EtcdClientOwner, Actor):
