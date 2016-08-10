@@ -624,10 +624,16 @@ class Config(object):
                                           "must be a readable path.",
                                           self.parameters["EtcdCertFile"])
 
+            # Check we have a certificate authority file to authenticate the
+            # server against.
+            if not self.ETCD_CA_FILE:
+                raise ConfigException("HTTPS enabled but no certificate "
+                                      "authority certificate specified.",
+                                      self.parameters["EtcdCaFile"])
+
             # If Certificate Authority cert provided, check it's readable
-            if (self.ETCD_CA_FILE and
-                    not (os.path.isfile(self.ETCD_CA_FILE) and
-                         os.access(self.ETCD_CA_FILE, os.R_OK))):
+            if not (os.path.isfile(self.ETCD_CA_FILE) and
+                    os.access(self.ETCD_CA_FILE, os.R_OK)):
                 raise ConfigException("Missing CA certificate or file is "
                                       "unreadable. Value must be readable "
                                       "file path.",
