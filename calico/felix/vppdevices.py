@@ -48,6 +48,44 @@ class VppDevices(DevicesPlugin):
     vpp_resolve_if_index = dict()
     #Usage VppDevices.vpp_resolve_if_index
 
+    #TEMPORARY. Probably a nicer way to do this
+    #Usually, the calling binary (calicoctl/CNI) is responsible for container to host link local configuration.
+    #However, we need our VPP instance to have a link local IP for the container<>VPP Interface.
+    #Here we are taking the MAC used INSIDE THE CONTAINER (Calico gives us this in set_routes) and modifying by a couple of bits (low1 and low2 should be 0xff and 0xffff if you wanted an actual MAC<>v6 conversion).
+    #This means we'll get a slightly different IP than the one assigned to the container, in the same fd80 link local /64. So communication should work :)
+
+    def mac2vpplinklocal(self, mac):
+
+        # Remove the most common delimiters; dots, dashes, etc.
+        mac_value = int(mac.translate(None, ' .:-'), 16)
+
+        # Split out the bytes that slot into the IPv6 address
+        # XOR the most significant byte with 0x02, inverting the
+        # Universal / Local bit
+        high2 = mac_value >> 32 & 0xffff ^ 0x0200
+        high1 = mac_value >> 24 & 0xff
+        low1 = mac_value >> 16 & 0xf0
+        low2 = mac_value & 0xfff0
+
+        return 'fe80::{:04x}:{:02x}ff:fe{:02x}:{:04x}'.format(
+            high2, high1, low1, low2)
+
+    def mac2linklocal(self, mac):
+
+        # Remove the most common delimiters; dots, dashes, etc.
+        mac_value = int(mac.translate(None, ' .:-'), 16)
+
+        # Split out the bytes that slot into the IPv6 address
+        # XOR the most significant byte with 0x02, inverting the
+        # Universal / Local bit
+        high2 = mac_value >> 32 & 0xffff ^ 0x0200
+        high1 = mac_value >> 24 & 0xff
+        low1 = mac_value >> 16 & 0xff
+        low2 = mac_value & 0xffff
+
+        return 'fe80::{:04x}:{:02x}ff:fe{:02x}:{:04x}'.format(
+            high2, high1, low1, low2)
+
     def do_global_configuration(self):
         """
         Configures the global kernel config.  In particular, sets the flags
@@ -83,7 +121,7 @@ class VppDevices(DevicesPlugin):
         if r != 0:
             _log.critical("vppapi: could not connect to vpp")
         dst_address = "169.254.1.1".encode('utf-8', 'ignore')
-        dst_address = socket.inet_aton(dst_address)
+        dst_address = socket.inet_pton(socket.AF_INET, dst_address)
         proxyarp_r = vpp_papi.proxy_arp_add_del(0, True, dst_address, dst_address)
         if type(proxyarp_r) == list:
             _log.critical("vppapi: addition of proxy arp for default gateway failed")
@@ -254,15 +292,15 @@ class VppDevices(DevicesPlugin):
         # Here we add the AF_PACKET interface into VPP.
         # Assuming for now that if we've created it once, do nothing next time. VPPTODO
         vpp_inter = if_name.encode('utf-8', 'ignore')
-        _log.debug("vppapi: Processing Creation of vpp_inter %s of type %s",
+        _log.debug("vppapi: Processing v4 Creation of vpp_inter %s of type %s",
                    vpp_inter, type(vpp_inter))
 
         # If we already have this interface. Do nothing.
         if if_name in VppDevices.vpp_resolve_if_index:
-            _log.debug("vppapi: We already have the calico interace assigned to an if_index: %s",
-                        if_name)
+            _log.debug("vppapi: We already have the calico interace assigned to an if_index: %s name: %s",
+                        VppDevices.vpp_resolve_if_index[if_name], if_name)
             return
-	_log.debug("VPPDICT before addition: %s", VppDevices.vpp_resolve_if_index)
+        _log.debug("VPPDICT before addition: %s", VppDevices.vpp_resolve_if_index)
 
         afp_r = vpp_papi.af_packet_create(vpp_inter,
                                  "00:00:00:00:00:00", True, False)
@@ -277,7 +315,7 @@ class VppDevices(DevicesPlugin):
 
             _log.debug("Associated calico interface %s with vpp if_index %s",
                        if_name, VppDevices.vpp_resolve_if_index[if_name])
-	    _log.debug("VPPDICT After addition of %s: %s",if_name, VppDevices.vpp_resolve_if_index)
+            _log.debug("VPPDICT After addition of %s: %s",if_name, VppDevices.vpp_resolve_if_index)
             # If create success. Set interface flags to up.
             flags_r = vpp_papi.sw_interface_set_flags(sw_if_index,
                                                       admin_up_down,
@@ -291,7 +329,7 @@ class VppDevices(DevicesPlugin):
             _log.debug("vppapi: VPP AFP for %s created", vpp_inter)
 
         else:
-            _log.debug("vppapi: could not create AFP: %s", afp_r)
+            _log.debug("vppapi: v4_configure: could not create AFP: %s", vpp_inter)
 
         # Enable the kernel's RPF check, which ensures that a VM cannot spoof
         # its IP address.
@@ -314,8 +352,44 @@ class VppDevices(DevicesPlugin):
         :raises: FailedSystemCall
         """
         # VPPSTART
-        _log.debug("vppapi: got request for IPv6 ... Ignoring for now. TODO ")
-        # VPPTODO: IPv6 support. Will need hosts state for removal of interface if both V4 and V6 not configured.
+        vpp_inter = if_name.encode('utf-8', 'ignore')
+        _log.debug("vppapi: Processing v6 Creation of vpp_inter %s of type %s",
+                   vpp_inter, type(vpp_inter))
+
+        # If we already have this interface. Do nothing.
+        if if_name in VppDevices.vpp_resolve_if_index:
+            _log.debug("vppapi: We already have the calico interace assigned to an if_index: %s name: %s",
+                        VppDevices.vpp_resolve_if_index[if_name], if_name)
+            return
+        _log.debug("VPPDICT before addition: %s", VppDevices.vpp_resolve_if_index)
+
+        afp_r = vpp_papi.af_packet_create(vpp_inter,
+                                 "00:00:00:00:00:00", True, False)
+        if type(afp_r) != list and afp_r.retval == 0:
+            sw_if_index = afp_r.sw_if_index
+            admin_up_down = 1
+            link_up = 1
+            deleted = 0
+
+            # Store the VPP sw_if_index to calico if_name mapping.
+            VppDevices.vpp_resolve_if_index[if_name] = sw_if_index
+
+            _log.debug("Associated calico interface %s with vpp if_index %s",
+                       if_name, VppDevices.vpp_resolve_if_index[if_name])
+            # If create success. Set interface flags to up.
+            flags_r = vpp_papi.sw_interface_set_flags(sw_if_index,
+                                                      admin_up_down,
+                                                      link_up, deleted)
+
+            if type(flags_r) == list or flags_r.retval != 0:
+                _log.critical("vppapi: Call to set VPP interface flags"
+                              "for %s failed???", vpp_inter)
+                return
+
+            _log.debug("vppapi: VPP AFP for %s created", vpp_inter)
+
+        else:
+            _log.debug("vppapi: v6_configure: could not create AFP: %s Dict State: %s", vpp_inter, VppDevices.vpp_resolve_if_index)
         # VPPEND
         _write_proc_sys("/proc/sys/net/ipv6/conf/%s/proxy_ndp" % if_name, 1)
 
@@ -356,13 +430,13 @@ class VppDevices(DevicesPlugin):
         :raises FailedSystemCall
         """
         if ip_type != futils.IPV4:
-       		_log.debug("vppapi: del_route: got request for IPv6 ... Ignoring for now. ")
-        	# matjohn2 TODO we dont support V6 yet.
-        	return
+               _log.debug("vppapi: del_route: got request for IPv6 ... Ignoring for now. ")
+               # matjohn2 TODO we dont support V6 yet.
+               return
 
         if len(ips) != 1:
-        	_log.debug("vppapi: del_route: got too many IPs: %s", ips)
-        	return
+            _log.debug("vppapi: del_route: got too many IPs: %s", ips)
+            return
 
         # VPP AF_PACKET interface adds and deletes now performed in
         # configure_interface_ipv4 and deconfigure_interface_ipv4 respectivley.
@@ -385,54 +459,120 @@ class VppDevices(DevicesPlugin):
         :param str mac|NoneType: MAC address.
         :param bool reset_arp: Reset arp. Only valid if IPv4.
         """
-        #VPPSTART
-        if ip_type != futils.IPV4:
-            _log.debug("vppapi: got request for IPv6 ... ")
-            # VPPTODO v6
-            return
+        assert ip_type in (futils.IPV4, futils.IPV6), (
+            "Expected an IP type, got %s" % ip_type
+        )
 
+        #VPPSTART
         # Interface already created in configure_interface_ipv4 or configure_interface_ipv6.
-        # ADD IP, ARP and Routes.
+        # Here we add IP(4/6), ARP/NDP and Routes.
         vpp_inter = interface.encode('utf-8', 'ignore')
 
+        #Worry about one IP for now
+        if len(ips) != 1:
+            _log.debug("vppapi: set_routes: didnt get a singular IP: %s", ips)
+            return
+
         #Get our VPP if_index back
-
         if interface not in VppDevices.vpp_resolve_if_index:
-            _log.critical("vppapi: We've lost an interface or the interface doesnt exist in VPP. Interface: %s",
-                        interface)
-	    _log.critical("vppapi: VPPDICT: %s", VppDevices.vpp_resolve_if_index)
+            _log.critical("vppapi: Expected an interface mapping in dict (set_routes). Interface: %s Dict: %s",
+                        interface, VppDevices.vpp_resolve_if_index)
             return
+
         str_if_index = VppDevices.vpp_resolve_if_index[interface]
-
         sw_if_index = int(str_if_index)
-        vpp_vrf_id = 0
-        is_add = True
-        is_ipv6 = False
-        is_static = False
 
-        eui_mac_address = EUI(mac.encode('utf-8', 'ignore'))
-        eui_mac_address.dialect = mac_bare
-        mac_address = str(eui_mac_address)
-        dst_address = ips.pop().encode('utf-8', 'ignore')
-        dst_address = socket.inet_aton(dst_address)
+        if ip_type == futils.IPV6:
+            #IPv6 Configuration
+            _log.debug("vppapi: processing request for IPv6 set_routes. ")
 
-        nb_r = vpp_papi.ip_neighbor_add_del(vpp_vrf_id,
-                                            sw_if_index,
-                                            is_add,
-                                            is_ipv6,
-                                            is_static,
-                                            mac_address.decode('hex'),
-                                            dst_address)
+            # Calico Tells us the MAC address of the container/workload.
+            eui_mac_address = EUI(mac.encode('utf-8', 'ignore'))
+            # Deviate the MAC by a couple of bits to use for the VPP end of the link...
 
-        if type(nb_r) != list and nb_r.retval == 0:
-            _log.debug("vppapi: VPP AFP %s added static arp"
-                     " %s for %s",
-                      vpp_inter, mac_address, dst_address)
-        else:
-            _log.critical("vppapi: VPP AFP add arp failed")
-            return
+            #VPP's LinkLocal IP
+            ll_dst_address_str = self.mac2vpplinklocal(str(eui_mac_address))
+            ll_dst_address = socket.inet_pton(socket.AF_INET6, ll_dst_address_str)
 
-        route_r = vpp_papi.ip_add_del_route(sw_if_index,
+            ##The CONTAINER's Link-Local IP (in string and binary format)
+            ll_container_ip = self.mac2linklocal(str(eui_mac_address))
+            ll_container_ip_binary = dst_address = socket.inet_pton(socket.AF_INET6, ll_container_ip)
+
+            #The CONTAINER's MAC address
+            eui_mac_address.dialect = mac_bare
+            mac_address = str(eui_mac_address)
+
+            #The CONTAINER's /128 route to add (in string format for logging and binary for VPP Calls)
+            dst_address_str = ips.pop().encode('utf-8', 'ignore')
+            dst_address = socket.inet_pton(socket.AF_INET6, dst_address_str)
+
+            #Vars for All VPP API Calls.
+            vpp_vrf_id = 0
+            is_add = True
+            is_ipv6 = True
+            is_static = False
+
+            # Add VPP's Link-Local IPv6 Address
+            _log.debug("vppapi: Configuring VPP link-local address %s for ifindex %s", ll_dst_address_str, sw_if_index)
+
+            ll_addr_r = vpp_papi.sw_interface_ip6_set_link_local_address(
+                                                sw_if_index,
+                                                ll_dst_address, 64)
+
+            if type(ll_addr_r) != list and ll_addr_r.retval == 0:
+                _log.debug("vppapi: Configured VPP link-local v6 address: %s to interface %s",
+                          ll_dst_address_str, vpp_inter)
+            else:
+                _log.critical("vppapi: Failed to configure VPP link-local IP %s",
+                            ll_dst_address_str)
+                #May already be configued. Nasty but for now we'll not return
+                #return
+
+
+            # Setup VPP Neighbor to Containers link-local IP and MAC
+            _log.debug("vppapi: Configuring VPP to Container link-local adjacency. container IP: %s ifindex %s", ll_container_ip, sw_if_index)
+            nb_ll = vpp_papi.ip_neighbor_add_del(vpp_vrf_id,
+                                                 sw_if_index,
+                                                 is_add,
+                                                 is_ipv6,
+                                                 is_static,
+                                                 mac_address.decode('hex'),
+                                                 ll_container_ip_binary)
+
+            if type(nb_ll) != list and nb_ll.retval == 0:
+                 _log.debug("vppapi: Configured VPP to Container link-local adjacency. Container IP: %s MAC: %s IFIndex: %s Interface: %s ",
+                       ll_container_ip ,mac_address, sw_if_index, vpp_inter)
+            else:
+                _log.critical("vppapi: Failed to Configure VPP Container link-local adjacency int: %s mac: %s ip: %s",
+                       vpp_inter, mac_address, ll_container_ip)
+                #May already be configued. Nasty but for now we'll not return
+                #return
+
+
+            # Setup the requested IP route as a neighbor (The real Calico Assigned IP).
+            _log.debug("vppapi: Configuring Requested route %s as a VPP adjacency to interface: %s ifindex: %s",
+                    dst_address_str, vpp_inter, sw_if_index)
+
+            nb_r = vpp_papi.ip_neighbor_add_del(vpp_vrf_id,
+                                                 sw_if_index,
+                                                 is_add,
+                                                 is_ipv6,
+                                                 is_static,
+                                                 mac_address.decode('hex'),
+                                                 dst_address)
+
+            if type(nb_r) != list and nb_r.retval == 0:
+                 _log.debug("vppapi: Configuring Requested route %s Neighbor / Adjacency with Mac: %s Interface: %s IfIndex: %s",
+                      dst_address_str, mac_address, vpp_inter, sw_if_index )
+            else:
+                _log.critical("vppapi: Failed to Configure Requested route %s Neighbor / Adjacency with Mac: %s Interface: %s IfIndex: %s",
+                     dst_address_str, mac_address, vpp_inter, sw_if_index )
+                return
+
+            # Setup the requested IP route in VPP (Finally enables Claico IP to work).
+            _log.debug("vppapi: Configuring Requested route %s/128 via interface: %s ifindex: %s",
+                dst_address_str, vpp_inter, sw_if_index)
+            route_r = vpp_papi.ip_add_del_route(sw_if_index,
                                             vpp_vrf_id,
                                             False, 9, 0,
                                             True, True,
@@ -440,39 +580,90 @@ class VppDevices(DevicesPlugin):
                                             is_ipv6, False,
                                             False, False,
                                             False, 0,
-                                            32, dst_address,
+                                            128, dst_address,
                                             dst_address)
-        if type(route_r) != list and route_r.retval == 0:
-            _log.debug("vppapi: added static route for %s",
-                      dst_address)
-        else:
-            _log.critical("vppapi: Could not add route %s", route_r)
-            return
 
-        proxyarp_r = vpp_papi.proxy_arp_intfc_enable_disable(
-            sw_if_index, True)
-        if type(proxyarp_r) != list and proxyarp_r.retval == 0:
-            _log.debug("vppapi: enabled proxy arp for sw_if_index %s",
-                    sw_if_index)
-        else:
-            _log.critical("vppapi: Could not enable proxy arp for"
-                          " sw_if_index:  %s", route_r)
-            return
+            if type(route_r) != list and route_r.retval == 0:
+                _log.debug("vppapi: Configured route %s/128 via interface: %s ifindex: %s",
+                    dst_address_str, vpp_inter, sw_if_index)
+            else:
+                _log.critical("vppapi: Failed to Configure route %s/128 via interface: %s ifindex: %s",
+                    dst_address_str, vpp_inter, sw_if_index)
+                return
 
-        #VPPEND
-        if reset_arp and ip_type != futils.IPV4:
-            raise ValueError("reset_arp may only be supplied for IPv4")
 
-        current_ips = self.list_interface_route_ips(ip_type, interface)
+        if ip_type == futils.IPV4:
+            #IPv4 Configuration
+            _log.debug("vppapi: processing request for IPv4 set_routes. ")
+            vpp_vrf_id = 0
+            is_add = True
+            is_ipv6 = False
+            is_static = False
 
-        removed_ips = (current_ips - ips)
-        for ip in removed_ips:
-            self._del_route(ip_type, ip, interface)
-        for ip in (ips - current_ips):
-            self._add_route(ip_type, ip, interface, mac)
-        if mac and reset_arp:
-            for ip in (ips & current_ips):
-                futils.check_call(['arp', '-s', ip, mac, '-i', interface])
+            eui_mac_address = EUI(mac.encode('utf-8', 'ignore'))
+            eui_mac_address.dialect = mac_bare
+            mac_address = str(eui_mac_address)
+            dst_address_str = ips.pop().encode('utf-8', 'ignore')
+            dst_address = socket.inet_pton(socket.AF_INET, dst_address_str)
+
+            nb_r = vpp_papi.ip_neighbor_add_del(vpp_vrf_id,
+                                                sw_if_index,
+                                                is_add,
+                                                is_ipv6,
+                                                is_static,
+                                                mac_address.decode('hex'),
+                                                dst_address)
+
+            if type(nb_r) != list and nb_r.retval == 0:
+                _log.debug("vppapi: VPP AFP %s added static arp"
+                         " %s for %s",
+                          vpp_inter, mac_address, dst_address_str)
+            else:
+                _log.critical("vppapi: VPP AFP add arp failed on int %s mac %s addr %s",
+                          vpp_inter, mac_address, dst_address_str)
+                return
+
+            route_r = vpp_papi.ip_add_del_route(sw_if_index,
+                                                vpp_vrf_id,
+                                                False, 9, 0,
+                                                True, True,
+                                                is_add, False,
+                                                is_ipv6, False,
+                                                False, False,
+                                                False, 0,
+                                                32, dst_address,
+                                                dst_address)
+            if type(route_r) != list and route_r.retval == 0:
+                _log.debug("vppapi: added static route for %s",
+                          dst_address_str)
+            else:
+                _log.critical("vppapi: Could not add route %s", dst_address_str)
+                return
+
+            proxyarp_r = vpp_papi.proxy_arp_intfc_enable_disable(
+                sw_if_index, True)
+            if type(proxyarp_r) != list and proxyarp_r.retval == 0:
+                _log.debug("vppapi: enabled proxy arp for sw_if_index %s",
+                        sw_if_index)
+            else:
+                _log.critical("vppapi: Could not enable proxy arp for"
+                              " sw_if_index:  %s", sw_if_index)
+                return
+
+            #VPPEND
+            # if reset_arp and ip_type != futils.IPV4:
+            #     raise ValueError("reset_arp may only be supplied for IPv4")
+            #
+            # current_ips = self.list_interface_route_ips(ip_type, interface)
+            #
+            # removed_ips = (current_ips - ips)
+            # for ip in removed_ips:
+            #     self._del_route(ip_type, ip, interface)
+            # for ip in (ips - current_ips):
+            #     self._add_route(ip_type, ip, interface, mac)
+            # if mac and reset_arp:
+            #     for ip in (ips & current_ips):
+            #         futils.check_call(['arp', '-s', ip, mac, '-i', interface])
 
     def interface_up(self, if_name):
         """
