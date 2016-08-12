@@ -198,35 +198,56 @@ class IpsetManager(ReferenceManager):
                 _log.info("ipsets to delete: %s", ipsets_to_delete)
 
     @actor_message()
-    def on_ipset_added(self, selector_id):
-        _log.debug("IP set %s now active.", selector_id)
+    def on_ipset_update(self, ipset_id, members):
+        _log.debug("IP set %s now active.", ipset_id)
+        filtered_members = self._pre_calc_ipsets_by_id[ipset_id]
+        filtered_members.clear()
+        for ip in members:
+            if (":" in ip) != (self.ip_type == IPV6):
+                # Skip IPs of incorrect type.
+                continue
+            filtered_members.add(ip)
+        if not filtered_members:
+            self._pre_calc_ipsets_by_id.pop(ipset_id)
+        self._pre_calc_added_ips_by_id.pop(ipset_id, None)
+        self._pre_calc_removed_ips_by_id.pop(ipset_id, None)
+
+        if self._is_starting_or_live(ipset_id):
+            ipset = self.objects_by_id[ipset_id]
+            ipset.replace_members(frozenset(filtered_members), async=True)
 
     @actor_message()
-    def on_ipset_removed(self, selector_id):
-        _log.debug("IP set %s no longer active.", selector_id)
+    def on_ipset_removed(self, ipset_id):
+        _log.debug("IP set %s no longer active.", ipset_id)
+
+        self._pre_calc_ipsets_by_id.pop(ipset_id)
+        self._pre_calc_added_ips_by_id.pop(ipset_id, None)
+        self._pre_calc_removed_ips_by_id.pop(ipset_id, None)
+
+        if self._is_starting_or_live(ipset_id):
+            ipset = self.objects_by_id[ipset_id]
+            ipset.replace_members(frozenset(), async=True)
 
     @actor_message()
-    def on_ipset_updates(self, updates):
+    def on_ipset_delta_update(self, ipset_id, added_ips, removed_ips):
         skipped = 0
         processed = 0
-        for ipset, added_ips in updates["added_ips"].iteritems():
-            for ip in added_ips:
-                if (":" in ip) != (self.ip_type == IPV6):
-                    # Skip IPs of incorrect type.
-                    skipped += 1
-                    continue
-                processed += 1
-                self._pre_calc_added_ips_by_id[ipset].add(ip)
-                self._pre_calc_removed_ips_by_id[ipset].discard(ip)
-        for ipset, removed_ips in updates["removed_ips"].iteritems():
-            for ip in removed_ips:
-                if (":" in ip) != (self.ip_type == IPV6):
-                    # Skip IPs of incorrect type.
-                    skipped += 1
-                    continue
-                processed += 1
-                self._pre_calc_added_ips_by_id[ipset].discard(ip)
-                self._pre_calc_removed_ips_by_id[ipset].add(ip)
+        for ip in added_ips:
+            if (":" in ip) != (self.ip_type == IPV6):
+                # Skip IPs of incorrect type.
+                skipped += 1
+                continue
+            processed += 1
+            self._pre_calc_added_ips_by_id[ipset_id].add(ip)
+            self._pre_calc_removed_ips_by_id[ipset_id].discard(ip)
+        for ip in removed_ips:
+            if (":" in ip) != (self.ip_type == IPV6):
+                # Skip IPs of incorrect type.
+                skipped += 1
+                continue
+            processed += 1
+            self._pre_calc_added_ips_by_id[ipset_id].discard(ip)
+            self._pre_calc_removed_ips_by_id[ipset_id].add(ip)
         _log.debug("Processed %s IP updates, %s skipped", processed, skipped)
 
     def _finish_msg_batch(self, batch, results):

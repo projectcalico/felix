@@ -895,7 +895,7 @@ class FelixIptablesGenerator(FelixPlugin):
 
         :param str chain_name: Name of the chain this rule belongs to (used in
                 the --append)
-        :param dict[str,str|list|int] rule: Rule dict.
+        :param dict rule: Rule dict.
         :param ip_version.  Whether these are for the IPv4 or IPv6 iptables.
         :param dict[str] tag_to_ipset: dictionary mapping from tag key to ipset
                name.
@@ -931,22 +931,10 @@ class FelixIptablesGenerator(FelixPlugin):
                     if (":" in ip_or_cidr) == (ip_version == 6):
                         append(neg_pfx, "--%s" % direction, ip_or_cidr)
 
-                # Tag, which maps to an ipset.
-                tag_key = neg_pfx + dirn + "_tag"
-                if tag_key in rule and rule[tag_key] is not None:
-                    ipset_name = tag_to_ipset[rule[tag_key]]
-                    append("--match set",
-                           neg_pfx, "--match-set", ipset_name, dirn)
-
-                # Selector, likewise.
-                sel_key = neg_pfx + dirn + "_selector"
-                if sel_key in rule and rule[sel_key] is not None:
-                    try:
-                        ipset_name = selector_to_ipset[rule[sel_key]]
-                    except KeyError:
-                        _log.exception("Missing selector in %s",
-                                       selector_to_ipset)
-                        raise
+                # Pre-calculated ipsets.
+                ipsets_key = neg_pfx + dirn + "_ipsets"
+                for ipset_id in rule.get(ipsets_key) or []:
+                    ipset_name = tag_to_ipset[ipset_id]
                     append("--match set",
                            neg_pfx, "--match-set", ipset_name, dirn)
 

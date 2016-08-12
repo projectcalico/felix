@@ -44,43 +44,44 @@ MSG_KEY_GLOBAL_CONFIG = "global"
 MSG_KEY_HOST_CONFIG = "host"
 
 # Config message Felix -> Driver.
-MSG_TYPE_CONFIG = "conf"
+MSG_TYPE_CONFIG = "config_resolved"
 MSG_KEY_LOG_FILE = "log_file"
 MSG_KEY_SEV_FILE = "sev_file"
 MSG_KEY_SEV_SCREEN = "sev_screen"
 MSG_KEY_SEV_SYSLOG = "sev_syslog"
 
 # Status message Driver -> Felix.
-MSG_TYPE_STATUS = "stat"
+MSG_TYPE_STATUS = "datastore_status"
 MSG_KEY_STATUS = "status"
 STATUS_WAIT_FOR_READY = "wait-for-ready"
 STATUS_RESYNC = "resync"
 STATUS_IN_SYNC = "in-sync"
 
-# Force resync message Felix->Driver.
-MSG_TYPE_RESYNC = "resync"
 
-# Update message Driver -> Felix.
-MSG_TYPE_UPDATE = "u"
-MSG_KEY_KEY = "k"
-MSG_KEY_VALUE = "v"
-
-MSG_TYPE_PROFILE_UPDATE = "prof_update"
-MSG_TYPE_POLICY_UPDATE = "pol_update"
+MSG_TYPE_PROFILE_UPDATE = "profile_update"
+MSG_TYPE_PROFILE_REMOVED = "profile_remove"
+MSG_TYPE_POLICY_UPDATE = "policy_update"
+MSG_TYPE_POLICY_REMOVED = "policy_remove"
 MSG_KEY_TIER_NAME = "tier"
 MSG_KEY_NAME = "name"
+MSG_KEY_POLICY = "policy"
+MSG_KEY_PROFILE = "profile"
 
 MSG_TYPE_WL_EP_UPDATE = "wl_ep_update"
+MSG_TYPE_WL_EP_REMOVE = "wl_ep_remove"
 MSG_TYPE_HOST_EP_UPDATE = "host_ep_update"
-MSG_KEY_HOST = "host"
-MSG_KEY_ORCH = "orch"
-MSG_KEY_WORKLOAD = "wl"
-MSG_KEY_ENDPOINT = "ep"
+MSG_TYPE_HOST_EP_REMOVE = "host_ep_remove"
+MSG_KEY_ORCH = "orchestrator"
+MSG_KEY_WORKLOAD_ID = "workload_id"
+MSG_KEY_ENDPOINT_ID = "endpoint_id"
+MSG_KEY_ENDPOINT = "endpoint"
 
 # Selector/IP added/removed message Driver -> Felix.
-MSG_TYPE_IPSET_ADDED = "ipset_added"
-MSG_TYPE_IPSET_REMOVED = "ipset_removed"
-MSG_TYPE_IP_UPDATES = "ip_updates"
+MSG_TYPE_IPSET_UPDATE = "ipset_update"
+MSG_TYPE_IPSET_REMOVED = "ipset_remove"
+MSG_TYPE_IPSET_DELTA = "ipset_delta"
+
+MSG_KEY_MEMBERS = "members"
 MSG_KEY_ADDED_IPS = "added_ips"
 MSG_KEY_REMOVED_IPS = "removed_ips"
 MSG_KEY_IPSET_ID = "ipset_id"
@@ -122,10 +123,9 @@ class MessageWriter(object):
         :param dict fields: dict mapping MSG_KEY_* constants to values.
         :param flush: True to force the data to be written immediately.
         """
-        msg = {MSG_KEY_TYPE: msg_type}
-        if fields:
-            msg.update(fields)
-        self._buf.write(msgpack.dumps(msg))
+        _log.debug("Sending message %s: %s", msg_type, fields)
+        self._buf.write(msgpack.dumps(msg_type))
+        self._buf.write(msgpack.dumps(fields))
         if flush:
             self.flush()
         else:
@@ -155,6 +155,7 @@ class MessageWriter(object):
 class MessageReader(object):
     def __init__(self, sck):
         self._sck = sck
+        self._current_msg_type = None
         self._unpacker = msgpack.Unpacker()
 
     def new_messages(self, timeout=1):
@@ -195,6 +196,13 @@ class MessageReader(object):
         # generate some messages.
         self._unpacker.feed(data)
         for msg in self._unpacker:
-            _log.debug("Unpacked message: %s", msg)
-            # coverage.py doesn't fully support yield statements.
-            yield msg[MSG_KEY_TYPE], msg  # pragma: nocover
+            if self._current_msg_type is None:
+                self._current_msg_type = msg
+                _log.debug("Read message type: %r", self._current_msg_type)
+                assert self._current_msg_type is not None
+                assert isinstance(msg, basestring), (
+                    "Unexpected message type: %r" % self._current_msg_type
+                )
+                continue
+            yield self._current_msg_type, msg
+            self._current_msg_type = None

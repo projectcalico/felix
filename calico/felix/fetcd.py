@@ -382,10 +382,10 @@ class _FelixEtcdWatcher(TimedGreenlet):
                 _log.critical("The driver process closed its socket, Felix "
                               "must exit.")
                 die_and_restart()
-            if self.resync_requested:
-                _log.info("Resync requested, sending resync request to driver")
-                self.resync_requested = False
-                self._msg_writer.send_message(MSG_TYPE_RESYNC)
+            # if self.resync_requested:
+            #     _log.info("Resync requested, sending resync request to driver")
+            #     self.resync_requested = False
+            #     self._msg_writer.send_message(MSG_TYPE_RESYNC)
             # Check that the driver hasn't died.  The recv() call should
             # raise an exception when the buffer runs dry but this usually
             # gets hit first.
@@ -404,44 +404,64 @@ class _FelixEtcdWatcher(TimedGreenlet):
                 _log.info("Non-init message, waiting for begin_polling flag")
             self.begin_polling.wait()
 
-        if msg_type == MSG_TYPE_WL_EP_UPDATE:
+        if msg_type == MSG_TYPE_IPSET_DELTA:
+            _stats.increment("IP set delta messages from driver")
+            self._on_ipset_delta_msg_from_driver(msg)
+        elif msg_type == MSG_TYPE_IPSET_REMOVED:
+            _stats.increment("IP set removed messages from driver")
+            self._on_ipset_removed_msg_from_driver(msg)
+        elif msg_type == MSG_TYPE_IPSET_UPDATE:
+            _stats.increment("IP set added messages from driver")
+            self._on_ipset_update_msg_from_driver(msg)
+        elif msg_type == MSG_TYPE_WL_EP_UPDATE:
             _stats.increment("Workload endpoint update messages from driver")
-            self.on_wl_endpoint_update(msg[MSG_KEY_HOST],
+            self.on_wl_endpoint_update(msg[MSG_KEY_HOSTNAME],
                                        msg[MSG_KEY_ORCH],
-                                       msg[MSG_KEY_WORKLOAD],
-                                       msg[MSG_KEY_ENDPOINT],
-                                       msg.get(MSG_KEY_VALUE))
+                                       msg[MSG_KEY_WORKLOAD_ID],
+                                       msg[MSG_KEY_ENDPOINT_ID],
+                                       msg.get(MSG_KEY_ENDPOINT))
+        elif msg_type == MSG_TYPE_WL_EP_REMOVE:
+            _stats.increment("Workload endpoint remove messages from driver")
+            self.on_wl_endpoint_update(msg[MSG_KEY_HOSTNAME],
+                                       msg[MSG_KEY_ORCH],
+                                       msg[MSG_KEY_WORKLOAD_ID],
+                                       msg[MSG_KEY_ENDPOINT_ID],
+                                       None)
         elif msg_type == MSG_TYPE_HOST_EP_UPDATE:
             _stats.increment("Host endpoint update messages from driver")
-            self.on_host_ep_update(msg[MSG_KEY_HOST],
-                                   msg[MSG_KEY_ENDPOINT],
-                                   msg.get(MSG_KEY_VALUE))
+            self.on_host_ep_update(msg[MSG_KEY_HOSTNAME],
+                                   msg[MSG_KEY_ENDPOINT_ID],
+                                   msg.get(MSG_KEY_ENDPOINT))
+        elif msg_type == MSG_TYPE_HOST_EP_REMOVE:
+            _stats.increment("Host endpoint update remove from driver")
+            self.on_host_ep_update(msg[MSG_KEY_HOSTNAME],
+                                   msg[MSG_KEY_ENDPOINT_ID],
+                                   None)
         elif msg_type == MSG_TYPE_POLICY_UPDATE:
             _stats.increment("Policy update messages from driver")
             self.on_tiered_policy_update(msg[MSG_KEY_TIER_NAME],
                                          msg[MSG_KEY_NAME],
-                                         msg.get(MSG_KEY_VALUE))
+                                         msg.get(MSG_KEY_POLICY))
+        elif msg_type == MSG_TYPE_POLICY_REMOVED:
+            _stats.increment("Policy update messages from driver")
+            self.on_tiered_policy_update(msg[MSG_KEY_TIER_NAME],
+                                         msg[MSG_KEY_NAME],
+                                         None)
         elif msg_type == MSG_TYPE_PROFILE_UPDATE:
             _stats.increment("Profile update messages from driver")
             self.on_prof_rules_update(msg[MSG_KEY_NAME],
-                                      msg.get(MSG_KEY_VALUE))
+                                      msg.get(MSG_KEY_POLICY))
+        elif msg_type == MSG_TYPE_PROFILE_REMOVED:
+            _stats.increment("Profile update messages from driver")
+            self.on_prof_rules_update(msg[MSG_KEY_NAME], None)
         elif msg_type == MSG_TYPE_CONFIG_LOADED:
             _stats.increment("Config loaded messages from driver")
             self._on_config_loaded_from_driver(msg)
         elif msg_type == MSG_TYPE_STATUS:
             _stats.increment("Status messages from driver")
             self._on_status_from_driver(msg)
-        elif msg_type == MSG_TYPE_IPSET_ADDED:
-            _stats.increment("Selector added messages from driver")
-            self._on_sel_added_msg_from_driver(msg)
-        elif msg_type == MSG_TYPE_IPSET_REMOVED:
-            _stats.increment("Selector removed messages from driver")
-            self._on_sel_removed_msg_from_driver(msg)
-        elif msg_type == MSG_TYPE_IP_UPDATES:
-            _stats.increment("IP update messages from driver")
-            self._on_ip_updates_msg_from_driver(msg)
         else:
-            _log.error("Unexpected message %s %s", msg_type, msg)
+            _log.error("Unexpected message %r %s", msg_type, msg)
             #raise RuntimeError("Unexpected message %s" % msg)
         self.msgs_processed += 1
         if self.msgs_processed % MAX_EVENTS_BEFORE_YIELD == 0:
@@ -450,37 +470,6 @@ class _FelixEtcdWatcher(TimedGreenlet):
             # non-zero to work around gevent issue where we could be
             # immediately rescheduled.
             gevent.sleep(0.000001)
-
-    def _on_update_from_driver(self, msg):
-        """
-        Called when the driver sends us a key/value pair update.
-
-        After the initial handshake, the stream of events consists
-        entirely of updates unless something happens to change the
-        state of the driver.
-
-        :param dict msg: The message received from the driver.
-        """
-        assert self.configured.is_set(), "Received update before config"
-        # The driver starts polling immediately, make sure we block until
-        # everyone else is ready to receive updates.
-        self.begin_polling.wait()
-        # Unpack the message.
-        key = msg[MSG_KEY_KEY]
-        value = msg.get(MSG_KEY_VALUE)
-        _log.debug("Update from driver: %s -> %s", key, value)
-        # Output some very coarse stats.
-        self.read_count += 1
-        if self.read_count % 1000 == 0:
-            now = monotonic_time()
-            delta = now - self.last_rate_log_time
-            _log.info("Processed %s updates from driver "
-                      "%.1f/s", self.read_count, 1000.0 / delta)
-            self.last_rate_log_time = now
-        # Wrap the update in an EtcdEvent object so we can dispatch it via the
-        # PathDispatcher.
-        n = EtcdEvent("set" if value is not None else "delete", key, value)
-        self.dispatcher.handle_event(n)
 
     def _on_config_loaded_from_driver(self, msg):
         """
@@ -570,14 +559,15 @@ class _FelixEtcdWatcher(TimedGreenlet):
                 self._status_reporter.clean_up_endpoint_statuses(async=True)
             self._update_hosts_ipset()
 
-    def _on_sel_added_msg_from_driver(self, msg):
-        self.splitter.on_ipset_added(msg[MSG_KEY_IPSET_ID])
+    def _on_ipset_update_msg_from_driver(self, msg):
+        self.splitter.on_ipset_update(msg[MSG_KEY_IPSET_ID],
+                                      msg[MSG_KEY_MEMBERS] or [])
 
-    def _on_sel_removed_msg_from_driver(self, msg):
+    def _on_ipset_removed_msg_from_driver(self, msg):
         self.splitter.on_ipset_removed(msg[MSG_KEY_IPSET_ID])
 
-    def _on_ip_updates_msg_from_driver(self, msg):
-        _log.debug("IP updates: %v", msg)
+    def _on_ipset_delta_msg_from_driver(self, msg):
+        _log.debug("IP set delta updates: %v", msg)
         # Output some very coarse stats.
         self.ip_upd_count += 1
         if self.ip_upd_count % 1000 == 0:
@@ -586,8 +576,9 @@ class _FelixEtcdWatcher(TimedGreenlet):
             _log.info("Processed %s IP updates from driver "
                       "%.1f/s", self.ip_upd_count, 1000.0 / delta)
             self.last_ip_upd_log_time = now
-        # FIXME Should unpack the msg.
-        self.splitter.on_ipset_updates(msg)
+        self.splitter.on_ipset_delta_update(msg[MSG_KEY_IPSET_ID],
+                                            msg[MSG_KEY_ADDED_IPS] or [],
+                                            msg[MSG_KEY_REMOVED_IPS] or [])
 
     def _start_driver(self):
         """

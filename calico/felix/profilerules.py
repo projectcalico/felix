@@ -23,6 +23,7 @@ import logging
 from calico.felix.actor import actor_message
 from calico.felix.futils import FailedSystemCall
 from calico.felix.refcount import ReferenceManager, RefCountedActor, RefHelper
+from calico.felix.selectors import SelectorExpression
 
 _log = logging.getLogger(__name__)
 
@@ -114,7 +115,6 @@ class ProfileRules(RefCountedActor):
     def __init__(self, iptables_generator, profile_id, ip_version,
                  iptables_updater, ipset_mgr):
         super(ProfileRules, self).__init__(qualifier=profile_id)
-        _log.info("Creating ProfileRules for %s", profile_id)
         assert profile_id is not None
 
         self.iptables_generator = iptables_generator
@@ -292,11 +292,9 @@ def extract_tags_and_selectors_from_profile(profile):
     for in_or_out in ["inbound_rules", "outbound_rules"]:
         for rule in profile.get(in_or_out, []):
             for neg_pfx in ["", "!"]:
-                for suffix in ["src_tag", "dst_tag",
-                               "src_selector", "dst_selector"]:
+                for suffix in ["src_ipsets", "dst_ipsets"]:
                     key = neg_pfx + suffix
-                    if key in rule:
-                        tags_and_sels.add(rule[key])
+                    tags_and_sels.update(rule.get(key) or [])
     return tags_and_sels
 
 
