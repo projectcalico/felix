@@ -397,7 +397,7 @@ class _FelixEtcdWatcher(TimedGreenlet):
 
     def _dispatch_msg_from_driver(self, msg_type, msg):
         _log.debug("Dispatching message of type: %s", msg_type)
-        if msg_type not in {MSG_TYPE_CONFIG_LOADED,
+        if msg_type not in {MSG_TYPE_CONFIG_UPDATE,
                             MSG_TYPE_INIT,
                             MSG_TYPE_STATUS}:
             if not self.begin_polling.is_set():
@@ -454,9 +454,9 @@ class _FelixEtcdWatcher(TimedGreenlet):
         elif msg_type == MSG_TYPE_PROFILE_REMOVED:
             _stats.increment("Profile update messages from driver")
             self.on_prof_rules_update(msg[MSG_KEY_NAME], None)
-        elif msg_type == MSG_TYPE_CONFIG_LOADED:
+        elif msg_type == MSG_TYPE_CONFIG_UPDATE:
             _stats.increment("Config loaded messages from driver")
-            self._on_config_loaded_from_driver(msg)
+            self._on_config_update_from_driver(msg)
         elif msg_type == MSG_TYPE_STATUS:
             _stats.increment("Status messages from driver")
             self._on_status_from_driver(msg)
@@ -471,7 +471,7 @@ class _FelixEtcdWatcher(TimedGreenlet):
             # immediately rescheduled.
             gevent.sleep(0.000001)
 
-    def _on_config_loaded_from_driver(self, msg):
+    def _on_config_update_from_driver(self, msg):
         """
         Called when we receive a config loaded message from the driver.
 

@@ -609,7 +609,7 @@ class TestEtcdDriverFV(TestCase):
                                            10, 404)
         # Then the driver should send the config to Felix.
         self.assert_msg_to_felix(
-            MSG_TYPE_CONFIG_LOADED,
+            MSG_TYPE_CONFIG_UPDATE,
             {
                 MSG_KEY_GLOBAL_CONFIG: {"InterfacePrefix": "tap"},
                 MSG_KEY_HOST_CONFIG: {},

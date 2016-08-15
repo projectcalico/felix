@@ -27,7 +27,7 @@ from mock import Mock, call, patch, ANY
 
 from calico.datamodel_v1 import WloadEndpointId, TieredPolicyId, HostEndpointId
 from calico.etcddriver.protocol import MessageReader, MessageWriter, \
-    MSG_TYPE_CONFIG_LOADED, MSG_TYPE_STATUS, STATUS_RESYNC, MSG_KEY_STATUS, \
+    MSG_TYPE_CONFIG_UPDATE, MSG_TYPE_STATUS, STATUS_RESYNC, MSG_KEY_STATUS, \
     MSG_TYPE_UPDATE, MSG_KEY_KEY, MSG_KEY_VALUE, MSG_KEY_TYPE, \
     MSG_KEY_HOST_CONFIG, MSG_KEY_GLOBAL_CONFIG, MSG_TYPE_CONFIG, \
     MSG_KEY_LOG_FILE, MSG_KEY_SEV_FILE, MSG_KEY_SEV_SCREEN, MSG_KEY_SEV_SYSLOG, \
@@ -265,7 +265,7 @@ class TestEtcdWatcher(BaseTestCase):
     def test_dispatch_from_driver(self):
         for msg_type, expected_method in [
                 (MSG_TYPE_UPDATE, "_on_update_from_driver"),
-                (MSG_TYPE_CONFIG_LOADED, "_on_config_loaded_from_driver"),
+                (MSG_TYPE_CONFIG_UPDATE, "_on_config_loaded_from_driver"),
                 (MSG_TYPE_STATUS, "_on_status_from_driver"),]:
             with patch.object(self.watcher, expected_method) as m_meth:
                 msg = Mock()
@@ -303,7 +303,7 @@ class TestEtcdWatcher(BaseTestCase):
         self.m_config.PROM_METRICS_ENABLED = True
         global_config = {"InterfacePrefix": "tap"}
         local_config = {"LogSeverityFile": "DEBUG"}
-        self.watcher._on_config_loaded_from_driver({
+        self.watcher._on_config_update_from_driver({
             MSG_KEY_GLOBAL_CONFIG: global_config,
             MSG_KEY_HOST_CONFIG: local_config,
         })
@@ -328,7 +328,7 @@ class TestEtcdWatcher(BaseTestCase):
         # Check a subsequent config change results in Felix dying.
         global_config = {"InterfacePrefix": "not!tap"}
         local_config = {"LogSeverityFile": "not!DEBUG"}
-        self.watcher._on_config_loaded_from_driver({
+        self.watcher._on_config_update_from_driver({
             MSG_KEY_GLOBAL_CONFIG: global_config,
             MSG_KEY_HOST_CONFIG: local_config,
         })

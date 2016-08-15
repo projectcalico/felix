@@ -64,7 +64,7 @@ from calico.etcddriver.protocol import (
     MessageReader, MSG_TYPE_INIT, MSG_TYPE_CONFIG, MSG_TYPE_RESYNC,
     MSG_KEY_ETCD_URLS, MSG_KEY_HOSTNAME, MSG_KEY_LOG_FILE, MSG_KEY_SEV_FILE,
     MSG_KEY_SEV_SYSLOG, MSG_KEY_SEV_SCREEN, STATUS_WAIT_FOR_READY,
-    STATUS_RESYNC, STATUS_IN_SYNC, MSG_TYPE_CONFIG_LOADED,
+    STATUS_RESYNC, STATUS_IN_SYNC, MSG_TYPE_CONFIG_UPDATE,
     MSG_KEY_GLOBAL_CONFIG, MSG_KEY_HOST_CONFIG, MSG_TYPE_UPDATE, MSG_KEY_KEY,
     MSG_KEY_VALUE, MessageWriter, MSG_TYPE_STATUS, MSG_KEY_STATUS,
     MSG_KEY_KEY_FILE, MSG_KEY_CERT_FILE, MSG_KEY_CA_FILE, WriteFailed,
@@ -409,7 +409,7 @@ class EtcdDriver(object):
         host_config_dir = dir_for_per_host_config(self._hostname)
         host_config = self._load_config(host_config_dir)
         self._msg_writer.send_message(
-            MSG_TYPE_CONFIG_LOADED,
+            MSG_TYPE_CONFIG_UPDATE,
             {
                 MSG_KEY_GLOBAL_CONFIG: global_config,
                 MSG_KEY_HOST_CONFIG: host_config,

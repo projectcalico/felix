@@ -39,7 +39,7 @@ MSG_KEY_CA_FILE = "etcd_ca_file"
 MSG_KEY_PROM_PORT = "prom_port"
 
 # Config loaded message Driver -> Felix.
-MSG_TYPE_CONFIG_LOADED = "config_loaded"
+MSG_TYPE_CONFIG_UPDATE = "config_update"
 MSG_KEY_GLOBAL_CONFIG = "global"
 MSG_KEY_HOST_CONFIG = "host"
 
