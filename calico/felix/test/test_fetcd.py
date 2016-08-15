@@ -35,8 +35,8 @@ from calico.etcddriver.protocol import MessageReader, MessageWriter, \
 from calico.felix.config import Config
 from calico.felix.futils import IPV4, IPV6
 from calico.felix.ipsets import IpsetActor
-from calico.felix.fetcd import (_FelixEtcdWatcher, EtcdAPI,
-    die_and_restart, EtcdStatusReporter, combine_statuses)
+from calico.felix.datastore import (DatastoreReader, DatastoreAPI,
+                                    die_and_restart, DatastoreWriter, combine_statuses)
 from calico.felix.splitter import UpdateSplitter
 from calico.felix.test.base import BaseTestCase, JSONString
 
@@ -95,9 +95,9 @@ POLICY_PARSED = {
 }
 POLICY_STR = json.dumps(POLICY)
 
-class TestEtcdAPI(BaseTestCase):
+class TestDatastoreAPI(BaseTestCase):
     def setUp(self):
-        super(TestEtcdAPI, self).setUp()
+        super(TestDatastoreAPI, self).setUp()
         self.m_config = Mock(spec=Config)
         self.m_config.ETCD_ADDRS = [ETCD_ADDRESS]
         self.m_config.ETCD_SCHEME = "http"
@@ -105,10 +105,10 @@ class TestEtcdAPI(BaseTestCase):
         self.m_config.ETCD_CERT_FILE = None
         self.m_config.ETCD_CA_FILE = None
         self.m_hosts_ipset = Mock(spec=IpsetActor)
-        with patch("calico.felix.fetcd._FelixEtcdWatcher",
+        with patch("calico.felix.datastore.DatastoreReader",
                    autospec=True) as m_etcd_watcher:
             with patch("gevent.spawn", autospec=True) as m_spawn:
-                self.api = EtcdAPI(self.m_config, self.m_hosts_ipset)
+                self.api = DatastoreAPI(self.m_config, self.m_hosts_ipset)
         self.m_spawn = m_spawn
         self.m_etcd_watcher = m_etcd_watcher.return_value
         self.m_etcd_watcher.load_config = Mock(spec=Event)
@@ -130,37 +130,6 @@ class TestEtcdAPI(BaseTestCase):
         m_stat_start.assert_called_once_with()
         m_sr_start.assert_called_once_with()
         self.m_etcd_watcher.start.assert_called_once_with()
-
-    @patch("gevent.sleep", autospec=True)
-    def test_periodic_resync_mainline(self, m_sleep):
-        self.m_config.RESYNC_INTERVAL = 10
-        m_configured = Mock(spec=Event)
-        self.m_etcd_watcher.configured = m_configured
-        with patch.object(self.api, "force_resync") as m_force_resync:
-            m_force_resync.side_effect = ExpectedException()
-            self.assertRaises(ExpectedException,
-                              self.api._periodically_resync)
-        m_configured.wait.assert_called_once_with()
-        m_sleep.assert_called_once_with(ANY)
-        sleep_time = m_sleep.call_args[0][0]
-        self.assertTrue(sleep_time >= 10)
-        self.assertTrue(sleep_time <= 12)
-
-    @patch("gevent.sleep", autospec=True)
-    def test_periodic_resync_disabled(self, m_sleep):
-        self.m_config.RESYNC_INTERVAL = 0
-        self.m_etcd_watcher.configured = Mock(spec=Event)
-        with patch.object(self.api, "force_resync") as m_force_resync:
-            m_force_resync.side_effect = Exception()
-            self.api._periodically_resync()
-
-    def test_force_resync(self):
-        self.m_config.REPORT_ENDPOINT_STATUS = True
-        with patch.object(self.api, "status_reporter") as m_status_rep:
-            self.api.force_resync(async=True)
-            self.step_actor(self.api)
-        m_status_rep.resync.assert_called_once_with(async=True)
-        self.assertTrue(self.m_etcd_watcher.resync_requested)
 
     def test_load_config(self):
         result = self.api.load_config(async=True)
@@ -203,9 +172,9 @@ class TestEtcdWatcher(BaseTestCase):
         self.m_config.ETCD_CERT_FILE = None
         self.m_config.ETCD_CA_FILE = None
         self.m_hosts_ipset = Mock(spec=IpsetActor)
-        self.m_api = Mock(spec=EtcdAPI)
-        self.m_status_rep = Mock(spec=EtcdStatusReporter)
-        self.watcher = _FelixEtcdWatcher(self.m_config,
+        self.m_api = Mock(spec=DatastoreAPI)
+        self.m_status_rep = Mock(spec=DatastoreWriter)
+        self.watcher = DatastoreReader(self.m_config,
                                          self.m_api,
                                          self.m_status_rep,
                                          self.m_hosts_ipset)
@@ -228,7 +197,7 @@ class TestEtcdWatcher(BaseTestCase):
                 self.assertRaises(ExpectedException, self.watcher._run)
         self.assertEqual(m_wait.mock_calls, [call()])
 
-    @patch("calico.felix.fetcd.die_and_restart", autospec=True)
+    @patch("calico.felix.datastore.die_and_restart", autospec=True)
     def test_read_loop(self, m_die):
         self.m_reader.new_messages.side_effect = iter([
             iter([]),
@@ -245,7 +214,7 @@ class TestEtcdWatcher(BaseTestCase):
                          [call(MSG_TYPE_STATUS,
                                {MSG_KEY_STATUS: STATUS_RESYNC})])
 
-    @patch("calico.felix.fetcd.die_and_restart", autospec=True)
+    @patch("calico.felix.datastore.die_and_restart", autospec=True)
     def test_read_loop_socket_error(self, m_die):
         self.m_reader.new_messages.side_effect = SocketClosed()
         m_die.side_effect = ExpectedException
@@ -253,7 +222,7 @@ class TestEtcdWatcher(BaseTestCase):
                           self.watcher._loop_reading_from_driver)
         self.assertEqual(m_die.mock_calls, [call()])
 
-    @patch("calico.felix.fetcd.die_and_restart", autospec=True)
+    @patch("calico.felix.datastore.die_and_restart", autospec=True)
     def test_read_loop_resync(self, m_die):
         self.m_reader.new_messages.side_effect = iter([iter([]), iter([])])
         self.m_driver_proc.poll.side_effect = iter([None, 1])
@@ -296,7 +265,7 @@ class TestEtcdWatcher(BaseTestCase):
             })
         m_begin.wait.assert_called_once_with()
 
-    @patch("calico.felix.fetcd.die_and_restart", autospec=True)
+    @patch("calico.felix.datastore.die_and_restart", autospec=True)
     def test_on_config_loaded(self, m_die):
         self.m_config.DRIVERLOGFILE = "/tmp/driver.log"
         self.m_config.PROM_METRICS_DRIVER_PORT = 9092
@@ -383,7 +352,7 @@ class TestEtcdWatcher(BaseTestCase):
         m_exists.assert_called_once_with("/run")
         m_timeout.assert_called_once_with(10)
 
-    @patch("calico.felix.fetcd.sys")
+    @patch("calico.felix.datastore.sys")
     @patch("os.path.exists", autospec=True)
     @patch("subprocess.Popen")
     @patch("socket.socket")
@@ -433,14 +402,14 @@ class TestEtcdWatcher(BaseTestCase):
         self.watcher._update_hosts_ipset()
         self.assertEqual(self.m_hosts_ipset.mock_calls, [])
 
-    @patch("calico.felix.fetcd.die_and_restart", autospec=True)
+    @patch("calico.felix.datastore.die_and_restart", autospec=True)
     def test_config_set(self, m_die):
         self.watcher.last_global_config = {}
         self.dispatch("/calico/v1/config/InterfacePrefix",
                       "set", value="foo")
         self.assertEqual(m_die.mock_calls, [call()])
 
-    @patch("calico.felix.fetcd.die_and_restart", autospec=True)
+    @patch("calico.felix.datastore.die_and_restart", autospec=True)
     def test_host_config_set(self, m_die):
         self.watcher.last_host_config = {}
         self.dispatch("/calico/v1/host/notourhostname/config/InterfacePrefix",
@@ -738,11 +707,11 @@ class TestEtcdReporting(BaseTestCase):
         self.m_config.REPORTING_TTL_SECS = 10
         self.m_hosts_ipset = Mock(spec=IpsetActor)
         with patch("gevent.spawn", autospec=True):
-            with patch("calico.felix.fetcd._FelixEtcdWatcher", autospec=True):
-                with patch("calico.felix.fetcd.monotonic_time",
+            with patch("calico.felix.datastore.DatastoreReader", autospec=True):
+                with patch("calico.felix.datastore.monotonic_time",
                            return_value=100):
-                    self.api = EtcdAPI(self.m_config, self.m_hosts_ipset)
-        self.api._watcher.configured = Mock()
+                    self.api = DatastoreAPI(self.m_config, self.m_hosts_ipset)
+        self.api._reader.configured = Mock()
 
     @patch("gevent.sleep", autospec=True)
     def test_reporting_loop_mainline(self, m_sleep):
@@ -772,7 +741,7 @@ class TestEtcdReporting(BaseTestCase):
             self.api._periodically_report_status()
 
     @patch("calico.felix.futils.datetime", autospec=True)
-    @patch("calico.felix.fetcd.monotonic_time", return_value=200)
+    @patch("calico.felix.datastore.monotonic_time", return_value=200)
     def test_update_felix_status(self, m_monotime, m_datetime):
         m_datetime.utcnow.return_value = datetime(2015, 9, 10, 2, 1, 53, 1234)
         with patch.object(self.api.client, "set") as m_set:
@@ -800,9 +769,9 @@ class TestEtcdReporting(BaseTestCase):
         ])
 
 
-class TestEtcdStatusReporter(BaseTestCase):
+class TestStatusReporter(BaseTestCase):
     def setUp(self):
-        super(TestEtcdStatusReporter, self).setUp()
+        super(TestStatusReporter, self).setUp()
         self.m_config = Mock(spec=Config)
         self.m_config.ETCD_ADDRS = [ETCD_ADDRESS]
         self.m_config.ETCD_SCHEME = "http"
@@ -813,7 +782,7 @@ class TestEtcdStatusReporter(BaseTestCase):
         self.m_config.REPORT_ENDPOINT_STATUS = True
         self.m_config.ENDPOINT_REPORT_DELAY = 1
         self.m_client = Mock()
-        self.rep = EtcdStatusReporter(self.m_config)
+        self.rep = DatastoreWriter(self.m_config)
         self.rep.client = self.m_client
 
     def test_on_endpoint_status_mainline(self):
@@ -891,14 +860,14 @@ class TestEtcdStatusReporter(BaseTestCase):
         # Cache should be cleaned up.
         self.assertEqual(self.rep._endpoint_status[IPV4], {})
         # Nothing queued.
-        self.assertEqual(self.rep._newer_dirty_endpoints, set())
+        self.assertEqual(self.rep._dirty_endpoints, set())
         self.assertEqual(self.rep._older_dirty_endpoints, set())
 
     def test_mark_endpoint_dirty_already_dirty(self):
         endpoint_id = WloadEndpointId("a", "b", "c", "d")
         self.rep._older_dirty_endpoints.add(endpoint_id)
         self.rep._mark_endpoint_dirty(endpoint_id)
-        self.assertFalse(endpoint_id in self.rep._newer_dirty_endpoints)
+        self.assertFalse(endpoint_id in self.rep._dirty_endpoints)
 
     def test_on_endpoint_status_failure(self):
         # Send in an endpoint status update.
@@ -917,7 +886,7 @@ class TestEtcdStatusReporter(BaseTestCase):
                   JSONString({"status": "up"}))]
         )
         # But endpoint should be re-queued in the newer set.
-        self.assertEqual(self.rep._newer_dirty_endpoints, set([endpoint_id]))
+        self.assertEqual(self.rep._dirty_endpoints, set([endpoint_id]))
         self.assertEqual(self.rep._older_dirty_endpoints, set())
 
     def test_on_endpoint_status_changed_disabled(self):
@@ -933,7 +902,7 @@ class TestEtcdStatusReporter(BaseTestCase):
         self.assertFalse(m_spawn.called)
         self.assertEqual(self.rep._endpoint_status[IPV4], {})
         # Nothing queued.
-        self.assertEqual(self.rep._newer_dirty_endpoints, set())
+        self.assertEqual(self.rep._dirty_endpoints, set())
         self.assertEqual(self.rep._older_dirty_endpoints, set())
 
     def test_on_endpoint_status_v4_v6(self):
@@ -972,13 +941,13 @@ class TestEtcdStatusReporter(BaseTestCase):
             self.rep._on_timer_pop(async=True)
             self.step_actor(self.rep)
         self.assertEqual(self.rep._older_dirty_endpoints, set())
-        self.assertEqual(self.rep._newer_dirty_endpoints, set())
+        self.assertEqual(self.rep._dirty_endpoints, set())
 
         self.rep.resync(async=True)
         self.step_actor(self.rep)
 
         self.assertEqual(self.rep._older_dirty_endpoints, set())
-        self.assertEqual(self.rep._newer_dirty_endpoints, set([endpoint_id, endpoint_id_2]))
+        self.assertEqual(self.rep._dirty_endpoints, set([endpoint_id, endpoint_id_2]))
 
     def test_combine_statuses(self):
         """

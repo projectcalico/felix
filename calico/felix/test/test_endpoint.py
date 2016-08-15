@@ -32,7 +32,7 @@ from calico.felix.selectors import parse_selector
 
 from calico.felix.endpoint import EndpointManager, WorkloadEndpoint, \
     HostEndpoint
-from calico.felix.fetcd import EtcdStatusReporter
+from calico.felix.datastore import DatastoreWriter
 from calico.felix.fiptables import IptablesUpdater
 from calico.felix.futils import FailedSystemCall
 from calico.felix.profilerules import RulesManager
@@ -68,7 +68,7 @@ class TestEndpointManager(BaseTestCase):
         self.m_host_dispatch = Mock(spec=HostEndpointDispatchChains)
         self.m_rules_mgr = Mock(spec=RulesManager)
         self.m_fip_manager = Mock(spec=FloatingIPManager)
-        self.m_status_reporter = Mock(spec=EtcdStatusReporter)
+        self.m_status_reporter = Mock(spec=DatastoreWriter)
         self.mgr = EndpointManager(self.config, "IPv4", self.m_updater,
                                    self.m_wl_dispatch, self.m_host_dispatch,
                                    self.m_rules_mgr, self.m_fip_manager,
@@ -562,7 +562,7 @@ class TestWorkloadEndpoint(BaseTestCase):
         self.m_rules_mgr = Mock(spec=RulesManager)
         self.m_manager = Mock(spec=EndpointManager)
         self.m_fip_manager = Mock(spec=FloatingIPManager)
-        self.m_status_rep = Mock(spec=EtcdStatusReporter)
+        self.m_status_rep = Mock(spec=DatastoreWriter)
 
     def create_endpoint(self, combined_id, ip_type):
         local_endpoint = endpoint.WorkloadEndpoint(self.config,
@@ -1347,7 +1347,7 @@ class TestHostEndpoint(BaseTestCase):
         self.m_rules_mgr = Mock(spec=RulesManager)
         self.m_manager = Mock(spec=EndpointManager)
         self.m_fip_manager = Mock(spec=FloatingIPManager)
-        self.m_status_rep = Mock(spec=EtcdStatusReporter)
+        self.m_status_rep = Mock(spec=DatastoreWriter)
 
     def create_endpoint(self, resolved_id=None, ip_type=futils.IPV4):
         if resolved_id is None:

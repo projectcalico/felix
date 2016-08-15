@@ -21,7 +21,6 @@ felix.felix
 The main logic for Felix.
 """
 # Monkey-patch before we do anything else...
-import sys
 from gevent import monkey
 monkey.patch_all()
 
@@ -42,8 +41,7 @@ from calico.felix.fiptables import IptablesUpdater
 from calico.felix.dispatch import (HostEndpointDispatchChains,
                                    WorkloadDispatchChains)
 from calico.felix.profilerules import RulesManager
-from calico.felix.frules import (install_global_rules, load_nf_conntrack,
-                                 HOST_DISPATCH_CHAINS)
+from calico.felix.frules import (install_global_rules, load_nf_conntrack)
 from calico.felix.splitter import UpdateSplitter, CleanupManager
 from calico.felix.config import Config
 from calico.felix.futils import IPV4, IPV6
@@ -52,7 +50,7 @@ from calico.felix.endpoint import EndpointManager
 from calico.felix.ipsets import IpsetManager, IpsetActor, HOSTS_IPSET_V4
 from calico.felix.masq import MasqueradeManager
 from calico.felix.fipmanager import FloatingIPManager
-from calico.felix.fetcd import EtcdAPI
+from calico.felix.datastore import DatastoreAPI
 
 _log = logging.getLogger(__name__)
 
@@ -67,12 +65,13 @@ def _main_greenlet(config):
         hosts_ipset_v4 = IpsetActor(HOSTS_IPSET_V4)
 
         monitored_items = []
-        etcd_api = EtcdAPI(config, hosts_ipset_v4)
-        etcd_api.start()
-        monitored_items.append(etcd_api.greenlet)
-        # Ask the EtcdAPI to fill in the global config object before we
+        datastore = DatastoreAPI(config, hosts_ipset_v4)
+        datastore.start()
+        monitored_items.append(datastore.greenlet)
+
+        # Ask the DatastoreAPI to fill in the global config object before we
         # proceed.  We don't yet support config updates.
-        config_loaded = etcd_api.load_config(async=False)
+        config_loaded = datastore.load_config(async=False)
         config_loaded.wait()
 
         # Ensure the Kernel's global options are correctly configured for
@@ -113,7 +112,7 @@ def _main_greenlet(config):
                                         v4_if_dispatch_chains,
                                         v4_rules_manager,
                                         v4_fip_manager,
-                                        etcd_api.status_reporter)
+                                        datastore.write_api)
 
         cleanup_updaters = [v4_filter_updater, v4_nat_updater]
         cleanup_ip_mgrs = [v4_ipset_mgr]
@@ -160,7 +159,7 @@ def _main_greenlet(config):
                                             v6_if_dispatch_chains,
                                             v6_rules_manager,
                                             v6_fip_manager,
-                                            etcd_api.status_reporter)
+                                            datastore.write_api)
             cleanup_updaters.append(v6_filter_updater)
             cleanup_ip_mgrs.append(v6_ipset_mgr)
             managers += [v6_ipset_mgr,
@@ -227,7 +226,7 @@ def _main_greenlet(config):
         _log.info("Starting polling for interface and etcd updates.")
         f = iface_watcher.watch_interfaces(async=True)
         monitored_items.append(f)
-        etcd_api.start_watch(update_splitter, async=True)
+        datastore.start_watch(update_splitter, async=True)
 
         # Register a SIG_USR handler to trigger a diags dump.
         def dump_top_level_actors(log):
@@ -242,8 +241,8 @@ def _main_greenlet(config):
             # It doesn't matter too much if we fail to do this.
             _log.warning("Unable to install diag dump handler")
             pass
-        gevent.signal(signal.SIGTERM, functools.partial(shut_down, etcd_api))
-        gevent.signal(signal.SIGINT, functools.partial(shut_down, etcd_api))
+        gevent.signal(signal.SIGTERM, functools.partial(shut_down, datastore))
+        gevent.signal(signal.SIGINT, functools.partial(shut_down, datastore))
 
         # Wait for something to fail.
         _log.info("All top-level actors started, waiting on failures...")

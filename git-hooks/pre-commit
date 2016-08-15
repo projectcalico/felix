@@ -37,6 +37,9 @@ copyright_check_failed=false
 apache_check_failed=false
 
 for filename in $changed_py_files; do
+  if [ ! -e  "${filename}" ]; then
+    continue
+  fi
   if ! grep -q -E "$copyright_re" "${filename}"; then
     echo "Changed file is missing ${copyright_owner} copyright:" ${filename}
     copyright_check_failed=true
