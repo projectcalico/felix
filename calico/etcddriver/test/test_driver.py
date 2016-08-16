@@ -619,7 +619,7 @@ class TestEtcdDriverFV(TestCase):
         # We respond with the config message to trigger the start of the
         # resync.
         self.msg_reader.send_msg(
-            MSG_TYPE_CONFIG,
+            MSG_TYPE_CONFIG_RESOLVED,
             {
                 MSG_KEY_LOG_FILE: "/tmp/driver.log",
                 MSG_KEY_SEV_FILE: "DEBUG",

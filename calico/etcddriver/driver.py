@@ -61,7 +61,7 @@ import httplib
 from prometheus_client import Counter, Histogram, Gauge, start_http_server
 
 from calico.etcddriver.protocol import (
-    MessageReader, MSG_TYPE_INIT, MSG_TYPE_CONFIG, MSG_TYPE_RESYNC,
+    MessageReader, MSG_TYPE_INIT, MSG_TYPE_CONFIG_RESOLVED, MSG_TYPE_RESYNC,
     MSG_KEY_ETCD_URLS, MSG_KEY_HOSTNAME, MSG_KEY_LOG_FILE, MSG_KEY_SEV_FILE,
     MSG_KEY_SEV_SYSLOG, MSG_KEY_SEV_SCREEN, STATUS_WAIT_FOR_READY,
     STATUS_RESYNC, STATUS_IN_SYNC, MSG_TYPE_CONFIG_UPDATE,
@@ -219,7 +219,7 @@ class EtcdDriver(object):
                     if msg_type == MSG_TYPE_INIT:
                         # Init message, received at start of day.
                         self._handle_init(msg)
-                    elif msg_type == MSG_TYPE_CONFIG:
+                    elif msg_type == MSG_TYPE_CONFIG_RESOLVED:
                         # Config message, expected after we send the raw
                         # config to Felix.
                         self._handle_config(msg)

@@ -44,11 +44,13 @@ MSG_KEY_GLOBAL_CONFIG = "global"
 MSG_KEY_HOST_CONFIG = "host"
 
 # Config message Felix -> Driver.
-MSG_TYPE_CONFIG = "config_resolved"
+MSG_TYPE_CONFIG_RESOLVED = "config_resolved"
 MSG_KEY_LOG_FILE = "log_file"
 MSG_KEY_SEV_FILE = "sev_file"
 MSG_KEY_SEV_SCREEN = "sev_screen"
 MSG_KEY_SEV_SYSLOG = "sev_syslog"
+MSG_KEY_EP_REPORT_DELAY_SECS = "ep_status_report_delay_seconds"
+MSG_KEY_EP_REPORT_RESYNC_SECS = "ep_status_resync_interval_seconds"
 
 # Status message Driver -> Felix.
 MSG_TYPE_STATUS = "datastore_status"
@@ -102,6 +104,8 @@ __all__ = [
     'MSG_KEY_CERT_FILE',
     'MSG_KEY_ENDPOINT',
     'MSG_KEY_ENDPOINT_ID',
+    'MSG_KEY_EP_REPORT_DELAY_SECS',
+    'MSG_KEY_EP_REPORT_RESYNC_SECS',
     'MSG_KEY_ETCD_URLS',
     'MSG_KEY_GLOBAL_CONFIG',
     'MSG_KEY_HOSTNAME',
@@ -125,7 +129,7 @@ __all__ = [
     'MSG_KEY_TYPE',
     'MSG_KEY_UPTIME',
     'MSG_KEY_WORKLOAD_ID',
-    'MSG_TYPE_CONFIG',
+    'MSG_TYPE_CONFIG_RESOLVED',
     'MSG_TYPE_CONFIG_UPDATE',
     'MSG_TYPE_FELIX_STATUS',
     'MSG_TYPE_HOST_ENDPOINT_STATUS',

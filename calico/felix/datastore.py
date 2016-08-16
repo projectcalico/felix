@@ -635,7 +635,7 @@ class DatastoreWriter(Actor):
         self.config_resolved = True
         driver_log_file = self._config.DRIVERLOGFILE
         self._writer.send_message(
-            MSG_TYPE_CONFIG,
+            MSG_TYPE_CONFIG_RESOLVED,
             {
                 MSG_KEY_LOG_FILE: driver_log_file,
                 MSG_KEY_SEV_FILE: self._config.LOGLEVFILE,
@@ -643,7 +643,13 @@ class DatastoreWriter(Actor):
                 MSG_KEY_SEV_SYSLOG: self._config.LOGLEVSYS,
                 MSG_KEY_PROM_PORT:
                     self._config.PROM_METRICS_DRIVER_PORT if
-                    self._config.PROM_METRICS_ENABLED else None
+                    self._config.PROM_METRICS_ENABLED else None,
+                MSG_KEY_EP_REPORT_DELAY_SECS:
+                    self._config.ENDPOINT_REPORT_DELAY if
+                    self._config.REPORT_ENDPOINT_STATUS else 0,
+                MSG_KEY_EP_REPORT_RESYNC_SECS:
+                    self._config.ENDPOINT_REPORT_DELAY * 180 if
+                    self._config.REPORT_ENDPOINT_STATUS else 0,
             }
         )
 

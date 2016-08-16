@@ -29,7 +29,7 @@ from calico.datamodel_v1 import WloadEndpointId, TieredPolicyId, HostEndpointId
 from calico.etcddriver.protocol import MessageReader, MessageWriter, \
     MSG_TYPE_CONFIG_UPDATE, MSG_TYPE_STATUS, STATUS_RESYNC, MSG_KEY_STATUS, \
     MSG_TYPE_UPDATE, MSG_KEY_KEY, MSG_KEY_VALUE, MSG_KEY_TYPE, \
-    MSG_KEY_HOST_CONFIG, MSG_KEY_GLOBAL_CONFIG, MSG_TYPE_CONFIG, \
+    MSG_KEY_HOST_CONFIG, MSG_KEY_GLOBAL_CONFIG, MSG_TYPE_CONFIG_RESOLVED, \
     MSG_KEY_LOG_FILE, MSG_KEY_SEV_FILE, MSG_KEY_SEV_SCREEN, MSG_KEY_SEV_SYSLOG, \
     STATUS_IN_SYNC, SocketClosed, MSG_KEY_PROM_PORT
 from calico.felix.config import Config
@@ -283,7 +283,7 @@ class TestEtcdWatcher(BaseTestCase):
         )
         self.assertEqual(
             self.m_writer.send_message.mock_calls,
-            [call(MSG_TYPE_CONFIG,
+            [call(MSG_TYPE_CONFIG_RESOLVED,
                   {
                       MSG_KEY_LOG_FILE: "/tmp/driver.log",
                       MSG_KEY_SEV_FILE: self.m_config.LOGLEVFILE,
