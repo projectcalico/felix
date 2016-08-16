@@ -704,16 +704,22 @@ class DatastoreWriter(Actor):
             status = combine_statuses(status_v4, status_v6)
             self._write_endpoint_status(ep_id, status)
 
+        self._dirty_endpoints.clear()
+
     def _write_endpoint_status(self, ep_id, status):
         _stats.increment("Per-port status report writes")
         if isinstance(ep_id, WloadEndpointId):
             if status is not None:
-                self._writer.send_message(MSG_TYPE_WL_ENDPOINT_STATUS,
-                                          {MSG_KEY_HOSTNAME: ep_id.host,
-                                           MSG_KEY_ORCH: ep_id.orchestrator,
-                                           MSG_KEY_WORKLOAD_ID: ep_id.workload,
-                                           MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
-                                           MSG_KEY_STATUS: status})
+                self._writer.send_message(
+                    MSG_TYPE_WL_ENDPOINT_STATUS,
+                    {
+                        MSG_KEY_HOSTNAME: ep_id.host,
+                        MSG_KEY_ORCH: ep_id.orchestrator,
+                        MSG_KEY_WORKLOAD_ID: ep_id.workload,
+                        MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
+                        MSG_KEY_STATUS: status["status"]
+                    }
+                )
             else:
                 self._writer.send_message(
                     MSG_TYPE_WL_ENDPOINT_STATUS_REMOVE,
@@ -726,10 +732,14 @@ class DatastoreWriter(Actor):
                 )
         else:
             if status is not None:
-                self._writer.send_message(MSG_TYPE_HOST_ENDPOINT_STATUS,
-                                          {MSG_KEY_HOSTNAME: ep_id.host,
-                                           MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
-                                           MSG_KEY_STATUS: status})
+                self._writer.send_message(
+                    MSG_TYPE_HOST_ENDPOINT_STATUS,
+                    {
+                        MSG_KEY_HOSTNAME: ep_id.host,
+                        MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
+                        MSG_KEY_STATUS: status["status"]
+                    }
+                )
             else:
                 self._writer.send_message(
                     MSG_TYPE_HOST_ENDPOINT_STATUS_REMOVE,

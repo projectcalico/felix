@@ -191,8 +191,11 @@ class MessageWriter(object):
         :param flush: True to force the data to be written immediately.
         """
         _log.debug("Sending message %s: %s", msg_type, fields)
-        self._buf.write(msgpack.dumps(msg_type))
-        self._buf.write(msgpack.dumps(fields))
+        msg_type_data = msgpack.dumps(msg_type)
+        field_data = msgpack.dumps(fields)
+        _log.debug("Raw wire data: %v, %v", msg_type_data, field_data)
+        self._buf.write(msg_type_data)
+        self._buf.write(field_data)
         if flush:
             self.flush()
         else:
