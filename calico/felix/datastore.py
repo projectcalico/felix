@@ -33,10 +33,9 @@ from calico.felix import felixbackend_pb2
 from gevent.event import Event
 
 from calico.datamodel_v1 import (
-    VERSION_DIR, CONFIG_DIR, dir_for_per_host_config, PROFILE_DIR, HOST_DIR,
     WloadEndpointId, ENDPOINT_STATUS_ERROR,
     ENDPOINT_STATUS_DOWN, ENDPOINT_STATUS_UP,
-    POLICY_DIR, TieredPolicyId, HostEndpointId, EndpointId)
+    TieredPolicyId, HostEndpointId, EndpointId)
 from calico.etcddriver.protocol import *
 from calico.felix.actor import Actor, actor_message, TimedGreenlet
 from calico.felix.futils import (
@@ -44,38 +43,12 @@ from calico.felix.futils import (
     IPV6, StatCounter
 )
 from calico.monotonic import monotonic_time
-from google.protobuf import descriptor
 from google.protobuf.descriptor import FieldDescriptor
 
 _log = logging.getLogger(__name__)
 
 
 RETRY_DELAY = 5
-
-# Etcd paths that we care about for use with the PathDispatcher class.
-# We use angle-brackets to name parameters that we want to capture.
-PER_PROFILE_DIR = PROFILE_DIR + "/<profile_id>"
-TAGS_KEY = PER_PROFILE_DIR + "/tags"
-RULES_KEY = PER_PROFILE_DIR + "/rules"
-PROFILE_LABELS_KEY = PER_PROFILE_DIR + "/labels"
-PER_HOST_DIR = HOST_DIR + "/<hostname>"
-HOST_IP_KEY = PER_HOST_DIR + "/bird_ip"
-WORKLOAD_DIR = PER_HOST_DIR + "/workload"
-HOST_IFACE_DIR = PER_HOST_DIR + "/endpoint"
-HOST_IFACE_KEY = PER_HOST_DIR + "/endpoint/<endpoint_id>"
-PER_ORCH_DIR = WORKLOAD_DIR + "/<orchestrator>"
-PER_WORKLOAD_DIR = PER_ORCH_DIR + "/<workload_id>"
-ENDPOINT_DIR = PER_WORKLOAD_DIR + "/endpoint"
-PER_ENDPOINT_KEY = ENDPOINT_DIR + "/<endpoint_id>"
-CONFIG_PARAM_KEY = CONFIG_DIR + "/<config_param>"
-PER_HOST_CONFIG_PARAM_KEY = PER_HOST_DIR + "/config/<config_param>"
-TIER_DATA = POLICY_DIR + "/tier/<tier>/metadata"
-TIERED_PROFILE = POLICY_DIR + "/tier/<tier>/policy/<policy_id>"
-
-IPAM_DIR = VERSION_DIR + "/ipam"
-IPAM_V4_DIR = IPAM_DIR + "/v4"
-POOL_V4_DIR = IPAM_V4_DIR + "/pool"
-CIDR_V4_KEY = POOL_V4_DIR + "/<pool_id>"
 
 # Max number of events from driver process before we yield to another greenlet.
 MAX_EVENTS_BEFORE_YIELD = 200
@@ -266,7 +239,6 @@ class DatastoreReader(TimedGreenlet):
         # changes.
         self.last_global_config = None
         self.last_host_config = None
-        self.my_config_dir = dir_for_per_host_config(self._config.HOSTNAME)
         # Events triggered by the DatastoreAPI Actor to tell us to load the
         # config and start polling.  These are one-way flags.
         self.load_config = Event()
@@ -489,7 +461,7 @@ class DatastoreReader(TimedGreenlet):
             "profile_ids": msg.endpoint.profile_ids,
             "ipv4_nets": msg.endpoint.ipv4_nets,
             "ipv6_nets": msg.endpoint.ipv6_nets,
-            "tiers": convert_tiers(msg.endpoint.tiers),
+            "tiers": convert_pb_tiers(msg.endpoint.tiers),
         }
         self.splitter.on_endpoint_update(combined_id, endpoint)
 
@@ -518,7 +490,7 @@ class DatastoreReader(TimedGreenlet):
             "profile_ids": msg.endpoint.profile_ids,
             "expected_ipv4_addrs": msg.endpoint.expected_ipv4_addrs,
             "expected_ipv6_addrs": msg.endpoint.expected_ipv6_addrs,
-            "tiers": convert_tiers(msg.endpoint.tiers),
+            "tiers": convert_pb_tiers(msg.endpoint.tiers),
         }
         self.splitter.on_host_ep_update(combined_id, endpoint)
 
@@ -538,8 +510,8 @@ class DatastoreReader(TimedGreenlet):
         _stats.increment("Rules created/updated")
         profile_id = intern(profile_id.encode("utf8"))
         rules = {
-            "inbound_rules": convert_rules(msg.profile.inbound_rules),
-            "outbound_rules": convert_rules(msg.profile.outbound_rules),
+            "inbound_rules": convert_pb_rules(msg.profile.inbound_rules),
+            "outbound_rules": convert_pb_rules(msg.profile.outbound_rules),
         }
         self.splitter.on_rules_update(profile_id, rules)
 
@@ -556,8 +528,8 @@ class DatastoreReader(TimedGreenlet):
         _stats.increment("Tiered rules created/updated")
         policy_id = TieredPolicyId(msg.id.tier, msg.id.name)
         rules = {
-            "inbound_rules": convert_rules(msg.policy.inbound_rules),
-            "outbound_rules": convert_rules(msg.policy.outbound_rules),
+            "inbound_rules": convert_pb_rules(msg.policy.inbound_rules),
+            "outbound_rules": convert_pb_rules(msg.policy.outbound_rules),
         }
         self.splitter.on_rules_update(policy_id, rules)
 
@@ -673,7 +645,6 @@ class DatastoreWriter(Actor):
         self.config_resolved = True
         driver_log_file = self._config.DRIVERLOGFILE
 
-
         envelope = felixbackend_pb2.FromDataplane()
         payload = envelope.config_resolved
 
@@ -781,41 +752,6 @@ class DatastoreWriter(Actor):
         sys.exit(1)
 
 
-def convert_tiers(tiers):
-    dict_tiers = []
-    for pb_tier in tiers:
-        d_tier = {"name": pb_tier.name, "policies": pb_tier.policies}
-        dict_tiers.append(d_tier)
-    return dict_tiers
-
-
-def convert_rules(pb_rules):
-    dict_rules = []
-    for pb_rule in pb_rules:
-        _log.debug("Converting protobuf rule: %r type: %s", pb_rule, pb_rule.__class__)
-        d_rule = {}
-        for fd, value in pb_rule.ListFields():
-            if fd.type == FieldDescriptor.TYPE_STRING and value == "":
-                continue
-            if fd.type in (FieldDescriptor.TYPE_INT32, FieldDescriptor.TYPE_INT64) and value == 0:
-                continue
-            _log.debug("Field %s = %s", fd.name, value)
-            negated = fd.name.startswith("not_")
-            stem = fd.name if not negated else fd.name[4:]
-            dict_name = "!" + stem if negated else stem
-
-            if stem.endswith("_ports"):
-                value = convert_ports(value)
-            elif stem.endswith("protocol"):
-                value = convert_protocol(value)
-            elif stem.endswith("ip_set_ids"):
-                value = list(value)
-            d_rule[dict_name] = value
-
-        dict_rules.append(d_rule)
-    return dict_rules
-
-
 def combine_statuses(status_a, status_b):
     """
     Combines a pair of status reports for the same interface.
@@ -837,7 +773,44 @@ def combine_statuses(status_a, status_b):
         return {"status": ENDPOINT_STATUS_UP}
 
 
-def convert_ports(pb_ports):
+def convert_pb_tiers(tiers):
+    dict_tiers = []
+    for pb_tier in tiers:
+        d_tier = {"name": pb_tier.name, "policies": pb_tier.policies}
+        dict_tiers.append(d_tier)
+    return dict_tiers
+
+
+def convert_pb_rules(pb_rules):
+    dict_rules = []
+    for pb_rule in pb_rules:
+        _log.debug("Converting protobuf rule: %r type: %s",
+                   pb_rule, pb_rule.__class__)
+        d_rule = {}
+        for fd, value in pb_rule.ListFields():
+            if fd.type == FieldDescriptor.TYPE_STRING and value == "":
+                continue
+            if fd.type in (FieldDescriptor.TYPE_INT32,
+                           FieldDescriptor.TYPE_INT64) and value == 0:
+                continue
+            _log.debug("Field %s = %s", fd.name, value)
+            negated = fd.name.startswith("not_")
+            stem = fd.name if not negated else fd.name[4:]
+            dict_name = "!" + stem if negated else stem
+
+            if stem.endswith("_ports"):
+                value = convert_pb_ports(value)
+            elif stem.endswith("protocol"):
+                value = convert_pb_protocol(value)
+            elif stem.endswith("ip_set_ids"):
+                value = list(value)
+            d_rule[dict_name] = value
+
+        dict_rules.append(d_rule)
+    return dict_rules
+
+
+def convert_pb_ports(pb_ports):
     _log.debug("Converting ports: %s", pb_ports)
     return map(convert_port, pb_ports)
 
@@ -849,11 +822,12 @@ def convert_port(pb_port):
         return "%s:%s" % (pb_port.first, pb_port.last)
 
 
-def convert_protocol(pb_proto):
+def convert_pb_protocol(pb_proto):
     if pb_proto.HasField("number"):
         return pb_proto.number
     else:
         return pb_proto.name
+
 
 def die_and_restart():
     # Sleep so that we can't die more than 5 times in 10s even if someone is
