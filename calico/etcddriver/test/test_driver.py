@@ -675,7 +675,7 @@ class TestEtcdDriverFV(TestCase):
     def assert_status_message(self, status):
         _log.info("Expecting %s status from driver...", status)
         self.assert_msg_to_felix(
-            MSG_TYPE_STATUS,
+            MSG_TYPE_IN_SYNC,
             {MSG_KEY_STATUS: status}
         )
         self.assert_flush_to_felix()

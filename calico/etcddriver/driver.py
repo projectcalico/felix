@@ -66,7 +66,7 @@ from calico.etcddriver.protocol import (
     MSG_KEY_SEV_SYSLOG, MSG_KEY_SEV_SCREEN, STATUS_WAIT_FOR_READY,
     STATUS_RESYNC, STATUS_IN_SYNC, MSG_TYPE_CONFIG_UPDATE,
     MSG_KEY_GLOBAL_CONFIG, MSG_KEY_HOST_CONFIG, MSG_TYPE_UPDATE, MSG_KEY_KEY,
-    MSG_KEY_VALUE, MessageWriter, MSG_TYPE_STATUS, MSG_KEY_STATUS,
+    MSG_KEY_VALUE, MessageWriter, MSG_TYPE_IN_SYNC, MSG_KEY_STATUS,
     MSG_KEY_KEY_FILE, MSG_KEY_CERT_FILE, MSG_KEY_CA_FILE, WriteFailed,
     SocketClosed, MSG_KEY_PROM_PORT)
 from calico.etcdutils import ACTION_MAPPING
@@ -766,7 +766,7 @@ class EtcdDriver(object):
         _log.info("Sending status to Felix: %s", status)
         RESYNC_STATE.set(STATUS_TO_GUAGE_VALUE.get(status, 0))
         self._msg_writer.send_message(
-            MSG_TYPE_STATUS,
+            MSG_TYPE_IN_SYNC,
             {
                 MSG_KEY_STATUS: status,
             }

@@ -932,7 +932,7 @@ class FelixIptablesGenerator(FelixPlugin):
                         append(neg_pfx, "--%s" % direction, ip_or_cidr)
 
                 # Pre-calculated ipsets.
-                ipsets_key = neg_pfx + dirn + "_ipsets"
+                ipsets_key = neg_pfx + dirn + "_ip_set_ids"
                 for ipset_id in rule.get(ipsets_key) or []:
                     ipset_name = tag_to_ipset[ipset_id]
                     append("--match set",

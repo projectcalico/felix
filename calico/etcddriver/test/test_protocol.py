@@ -26,7 +26,7 @@ import errno
 from mock import Mock, call, patch
 import msgpack
 from calico.etcddriver.protocol import (
-    MessageWriter, STATUS_RESYNC, MSG_KEY_STATUS, MSG_TYPE_STATUS,
+    MessageWriter, STATUS_RESYNC, MSG_KEY_STATUS, MSG_TYPE_IN_SYNC,
     MSG_KEY_TYPE, STATUS_IN_SYNC, MessageReader,
     SocketClosed, WriteFailed)
 
@@ -56,12 +56,12 @@ class TestMessageWriter(TestCase):
         self.unpacker = msgpack.Unpacker()
 
     def test_send_message(self):
-        self.writer.send_message(MSG_TYPE_STATUS,
+        self.writer.send_message(MSG_TYPE_IN_SYNC,
                                  {
                                      MSG_KEY_STATUS: STATUS_RESYNC
                                  })
         self.assert_message_sent({
-            MSG_KEY_TYPE: MSG_TYPE_STATUS,
+            MSG_KEY_TYPE: MSG_TYPE_IN_SYNC,
             MSG_KEY_STATUS: STATUS_RESYNC
         })
         self.assert_no_more_messages()
@@ -69,27 +69,27 @@ class TestMessageWriter(TestCase):
     def test_send_message_error(self):
         self.sck.exception = socket.error()
         self.assertRaises(WriteFailed, self.writer.send_message,
-                          MSG_TYPE_STATUS,
+                          MSG_TYPE_IN_SYNC,
                           {
                               MSG_KEY_STATUS: STATUS_RESYNC
                           })
 
     def test_send_message_buffered(self):
         # First message gets buffered.
-        self.writer.send_message(MSG_TYPE_STATUS,
+        self.writer.send_message(MSG_TYPE_IN_SYNC,
                                  flush=False)
         self.assert_no_more_messages()
 
         # Second message triggers a flush of both messages, in order.
-        self.writer.send_message(MSG_TYPE_STATUS,
+        self.writer.send_message(MSG_TYPE_IN_SYNC,
                                  {
                                      MSG_KEY_STATUS: STATUS_IN_SYNC
                                  })
         self.assert_message_sent({
-            MSG_KEY_TYPE: MSG_TYPE_STATUS
+            MSG_KEY_TYPE: MSG_TYPE_IN_SYNC
         })
         self.assert_message_sent({
-            MSG_KEY_TYPE: MSG_TYPE_STATUS,
+            MSG_KEY_TYPE: MSG_TYPE_IN_SYNC,
             MSG_KEY_STATUS: STATUS_IN_SYNC
         })
         self.assert_no_more_messages()
@@ -97,7 +97,7 @@ class TestMessageWriter(TestCase):
     def test_eventual_flush(self):
         # First 200 messages should be buffered.
         for _ in xrange(200):
-            self.writer.send_message(MSG_TYPE_STATUS,
+            self.writer.send_message(MSG_TYPE_IN_SYNC,
                                      {
                                          MSG_KEY_STATUS: STATUS_RESYNC
                                      },
@@ -105,14 +105,14 @@ class TestMessageWriter(TestCase):
         self.assert_no_more_messages()
 
         # 201st message triggers them all to be sent.
-        self.writer.send_message(MSG_TYPE_STATUS,
+        self.writer.send_message(MSG_TYPE_IN_SYNC,
                                  {
                                      MSG_KEY_STATUS: STATUS_RESYNC
                                  },
                                  flush=False)
         for _ in xrange(201):
             self.assert_message_sent({
-                MSG_KEY_TYPE: MSG_TYPE_STATUS,
+                MSG_KEY_TYPE: MSG_TYPE_IN_SYNC,
                 MSG_KEY_STATUS: STATUS_RESYNC
             })
         self.assert_no_more_messages()
@@ -150,13 +150,13 @@ class TestMessageReader(TestCase):
             ([self.sck], [], []),
             ([self.sck], [], []),
         ])
-        exp_msg = {MSG_KEY_TYPE: MSG_TYPE_STATUS,
+        exp_msg = {MSG_KEY_TYPE: MSG_TYPE_IN_SYNC,
                    MSG_KEY_STATUS: STATUS_RESYNC}
         self.sck.recv.return_value = msgpack.dumps(exp_msg)
         for _ in xrange(2):
             msg_gen = self.reader.new_messages(timeout=1)
             msg_type, msg = next(msg_gen)
-            self.assertEqual(msg_type, MSG_TYPE_STATUS)
+            self.assertEqual(msg_type, MSG_TYPE_IN_SYNC)
             self.assertEqual(msg, exp_msg)
         self.assertEqual(
             self.sck.recv.mock_calls,
@@ -172,7 +172,7 @@ class TestMessageReader(TestCase):
             ([self.sck], [], []),
             ([self.sck], [], []),
         ])
-        exp_msg = {MSG_KEY_TYPE: MSG_TYPE_STATUS}
+        exp_msg = {MSG_KEY_TYPE: MSG_TYPE_IN_SYNC}
         msg_bytes = msgpack.dumps(exp_msg)
         self.sck.recv.side_effect = iter([
             msg_bytes[:len(msg_bytes)/2],
@@ -181,7 +181,7 @@ class TestMessageReader(TestCase):
         self.assertRaises(StopIteration, next,
                           self.reader.new_messages(timeout=None))
         self.assertEqual(next(self.reader.new_messages(timeout=None)),
-                         (MSG_TYPE_STATUS, exp_msg))
+                         (MSG_TYPE_IN_SYNC, exp_msg))
 
     @patch("select.select", autospec=True)
     def test_retryable_error(self, m_select):
@@ -196,7 +196,7 @@ class TestMessageReader(TestCase):
             err = socket.error()
             err.errno = no
             errors.append(err)
-        exp_msg = {MSG_KEY_TYPE: MSG_TYPE_STATUS,
+        exp_msg = {MSG_KEY_TYPE: MSG_TYPE_IN_SYNC,
                    MSG_KEY_STATUS: STATUS_RESYNC}
         self.sck.recv.side_effect = iter(errors + [msgpack.dumps(exp_msg)])
         for _ in errors:
@@ -204,7 +204,7 @@ class TestMessageReader(TestCase):
             self.assertRaises(StopIteration, next, msg_gen)
         msg_gen = self.reader.new_messages(timeout=1)
         msg_type, msg = next(msg_gen)
-        self.assertEqual(msg_type, MSG_TYPE_STATUS)
+        self.assertEqual(msg_type, MSG_TYPE_IN_SYNC)
         self.assertEqual(msg, exp_msg)
 
     @patch("select.select", autospec=True)

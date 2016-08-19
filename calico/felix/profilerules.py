@@ -292,7 +292,7 @@ def extract_tags_and_selectors_from_profile(profile):
     for in_or_out in ["inbound_rules", "outbound_rules"]:
         for rule in profile.get(in_or_out, []):
             for neg_pfx in ["", "!"]:
-                for suffix in ["src_ipsets", "dst_ipsets"]:
+                for suffix in ["src_ip_set_ids", "dst_ip_set_ids"]:
                     key = neg_pfx + suffix
                     tags_and_sels.update(rule.get(key) or [])
     return tags_and_sels

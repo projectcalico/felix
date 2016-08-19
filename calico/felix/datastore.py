@@ -30,7 +30,6 @@ import gevent
 import sys
 from gevent.event import Event
 
-from calico import common
 from calico.datamodel_v1 import (
     VERSION_DIR, CONFIG_DIR, dir_for_per_host_config, PROFILE_DIR, HOST_DIR,
     WloadEndpointId, ENDPOINT_STATUS_ERROR,
@@ -43,6 +42,8 @@ from calico.felix.futils import (
     IPV6, StatCounter
 )
 from calico.monotonic import monotonic_time
+from google.protobuf import descriptor
+from google.protobuf.descriptor import FieldDescriptor
 
 _log = logging.getLogger(__name__)
 
@@ -305,8 +306,8 @@ class DatastoreReader(TimedGreenlet):
             try:
                 # Note: self._msg_reader.new_messages() returns iterator so
                 # whole for loop must be inside the try.
-                for msg_type, msg in self._msg_reader.new_messages(timeout=1):
-                    self._dispatch_msg_from_driver(msg_type, msg)
+                for msg_type, msg, seq_no in self._msg_reader.new_messages(timeout=1):
+                    self._dispatch_msg_from_driver(msg_type, msg, seq_no)
             except SocketClosed:
                 _log.critical("The driver process closed its socket, Felix "
                               "must exit.")
@@ -317,11 +318,11 @@ class DatastoreReader(TimedGreenlet):
                               "exit.", driver_rc)
                 die_and_restart()
 
-    def _dispatch_msg_from_driver(self, msg_type, msg):
-        _log.debug("Dispatching message of type: %s", msg_type)
+    def _dispatch_msg_from_driver(self, msg_type, msg, seq_no):
+        _log.debug("Dispatching message (%s) of type: %s", seq_no, msg_type)
         if msg_type not in {MSG_TYPE_CONFIG_UPDATE,
                             MSG_TYPE_INIT,
-                            MSG_TYPE_STATUS}:
+                            MSG_TYPE_IN_SYNC}:
             if not self.begin_polling.is_set():
                 _log.info("Non-init message, waiting for begin_polling flag")
             self.begin_polling.wait()
@@ -337,54 +338,37 @@ class DatastoreReader(TimedGreenlet):
             self._on_ipset_update_msg_from_driver(msg)
         elif msg_type == MSG_TYPE_WL_EP_UPDATE:
             _stats.increment("Workload endpoint update messages from driver")
-            self.on_wl_endpoint_update(msg[MSG_KEY_HOSTNAME],
-                                       msg[MSG_KEY_ORCH],
-                                       msg[MSG_KEY_WORKLOAD_ID],
-                                       msg[MSG_KEY_ENDPOINT_ID],
-                                       msg.get(MSG_KEY_ENDPOINT))
+            self.on_wl_endpoint_update(msg)
         elif msg_type == MSG_TYPE_WL_EP_REMOVE:
             _stats.increment("Workload endpoint remove messages from driver")
-            self.on_wl_endpoint_update(msg[MSG_KEY_HOSTNAME],
-                                       msg[MSG_KEY_ORCH],
-                                       msg[MSG_KEY_WORKLOAD_ID],
-                                       msg[MSG_KEY_ENDPOINT_ID],
-                                       None)
+            self.on_wl_endpoint_remove(msg)
         elif msg_type == MSG_TYPE_HOST_EP_UPDATE:
             _stats.increment("Host endpoint update messages from driver")
-            self.on_host_ep_update(msg[MSG_KEY_HOSTNAME],
-                                   msg[MSG_KEY_ENDPOINT_ID],
-                                   msg.get(MSG_KEY_ENDPOINT))
+            self.on_host_ep_update(msg)
         elif msg_type == MSG_TYPE_HOST_EP_REMOVE:
             _stats.increment("Host endpoint update remove from driver")
-            self.on_host_ep_update(msg[MSG_KEY_HOSTNAME],
-                                   msg[MSG_KEY_ENDPOINT_ID],
-                                   None)
+            self.on_host_ep_remove(msg)
         elif msg_type == MSG_TYPE_POLICY_UPDATE:
             _stats.increment("Policy update messages from driver")
-            self.on_tiered_policy_update(msg[MSG_KEY_TIER_NAME],
-                                         msg[MSG_KEY_NAME],
-                                         msg.get(MSG_KEY_POLICY))
+            self.on_tiered_policy_update(msg)
         elif msg_type == MSG_TYPE_POLICY_REMOVED:
             _stats.increment("Policy update messages from driver")
-            self.on_tiered_policy_update(msg[MSG_KEY_TIER_NAME],
-                                         msg[MSG_KEY_NAME],
-                                         None)
+            self.on_tiered_policy_update(msg)
         elif msg_type == MSG_TYPE_PROFILE_UPDATE:
             _stats.increment("Profile update messages from driver")
-            self.on_prof_rules_update(msg[MSG_KEY_NAME],
-                                      msg.get(MSG_KEY_POLICY))
+            self.on_prof_rules_update(msg)
         elif msg_type == MSG_TYPE_PROFILE_REMOVED:
             _stats.increment("Profile update messages from driver")
-            self.on_prof_rules_update(msg[MSG_KEY_NAME], None)
+            self.on_prof_rules_remove(msg)
         elif msg_type == MSG_TYPE_CONFIG_UPDATE:
             _stats.increment("Config loaded messages from driver")
             self._on_config_update_from_driver(msg)
-        elif msg_type == MSG_TYPE_STATUS:
+        elif msg_type == MSG_TYPE_IN_SYNC:
             _stats.increment("Status messages from driver")
-            self._on_status_from_driver(msg)
+            self._on_in_sync_from_driver(msg)
         else:
             _log.error("Unexpected message %r %s", msg_type, msg)
-            #raise RuntimeError("Unexpected message %s" % msg)
+            raise RuntimeError("Unexpected message %s" % msg)
         self.msgs_processed += 1
         if self.msgs_processed % MAX_EVENTS_BEFORE_YIELD == 0:
             # Yield to ensure that other actors make progress.  (gevent only
@@ -406,8 +390,8 @@ class DatastoreReader(TimedGreenlet):
         If the config has changed since a previous call, triggers Felix
         to die.
         """
-        global_config = msg[MSG_KEY_GLOBAL_CONFIG]
-        host_config = msg[MSG_KEY_HOST_CONFIG]
+        global_config = dict(msg.global_config)
+        host_config = dict(msg.per_host_config)
         _log.info("Config loaded by driver:\n"
                   "Global: %s\nPer-host: %s",
                   global_config,
@@ -438,7 +422,7 @@ class DatastoreReader(TimedGreenlet):
             self.configured.set()
             self._datastore_writer.on_config_resolved(async=True)
 
-    def _on_status_from_driver(self, msg):
+    def _on_in_sync_from_driver(self, msg):
         """
         Called when we receive a status update from the driver.
 
@@ -456,25 +440,23 @@ class DatastoreReader(TimedGreenlet):
 
         If the status is in-sync, triggers the relevant processing.
         """
-        status = msg[MSG_KEY_STATUS]
-        _log.info("etcd driver status changed to %s", status)
-        if status == STATUS_IN_SYNC and not self._been_in_sync:
-            # We're now in sync, tell the Actors that need to do start-of-day
-            # cleanup.
-            self.begin_polling.wait()  # Make sure splitter is set.
-            self._been_in_sync = True
-            self.splitter.on_datamodel_in_sync()
-            self._update_hosts_ipset()
+        _log.info("Datastore now in sync")
+        # We're now in sync, tell the Actors that need to do start-of-day
+        # cleanup.
+        self.begin_polling.wait()  # Make sure splitter is set.
+        self._been_in_sync = True
+        self.splitter.on_datamodel_in_sync()
+        self._update_hosts_ipset()
 
     def _on_ipset_update_msg_from_driver(self, msg):
-        self.splitter.on_ipset_update(msg[MSG_KEY_IPSET_ID],
-                                      msg[MSG_KEY_MEMBERS] or [])
+        self.splitter.on_ipset_update(msg.id,
+                                      msg.members or [])
 
     def _on_ipset_removed_msg_from_driver(self, msg):
-        self.splitter.on_ipset_removed(msg[MSG_KEY_IPSET_ID])
+        self.splitter.on_ipset_removed(msg.id)
 
     def _on_ipset_delta_msg_from_driver(self, msg):
-        _log.debug("IP set delta updates: %v", msg)
+        _log.debug("IP set delta updates: %s", msg)
         # Output some very coarse stats.
         self.ip_upd_count += 1
         if self.ip_upd_count % 1000 == 0:
@@ -483,48 +465,105 @@ class DatastoreReader(TimedGreenlet):
             _log.info("Processed %s IP updates from driver "
                       "%.1f/s", self.ip_upd_count, 1000.0 / delta)
             self.last_ip_upd_log_time = now
-        self.splitter.on_ipset_delta_update(msg[MSG_KEY_IPSET_ID],
-                                            msg[MSG_KEY_ADDED_IPS] or [],
-                                            msg[MSG_KEY_REMOVED_IPS] or [])
+        self.splitter.on_ipset_delta_update(msg.id,
+                                            msg.added_members or [],
+                                            msg.removed_members or [])
 
-    def on_wl_endpoint_update(self, hostname, orchestrator,
-                              workload_id, endpoint_id, endpoint):
-        """Handler for endpoint updates, passes the update to the splitter."""
+    def on_wl_endpoint_update(self, msg):
+        """Handler for endpoint updates, passes the update to the splitter.
+        :param msg felixbackend_pb2.WorkloadEndpointUpdate"""
+        hostname = self._config.HOSTNAME
+        orchestrator = msg.id.orchestrator_id
+        workload_id = msg.id.workload_id
+        endpoint_id = msg.id.endpoint_id
         combined_id = WloadEndpointId(hostname, orchestrator, workload_id,
                                       endpoint_id)
         _log.debug("Endpoint %s updated", combined_id)
         _stats.increment("Endpoint created/updated")
-        if endpoint is not None:
-            common.validate_endpoint(self._config, combined_id, endpoint)
+        endpoint = {
+            "state": msg.endpoint.state,
+            "name": msg.endpoint.name,
+            "mac": msg.endpoint.mac or None,
+            "profile_ids": msg.endpoint.profile_ids,
+            "ipv4_nets": msg.endpoint.ipv4_nets,
+            "ipv6_nets": msg.endpoint.ipv6_nets,
+            "tiers": convert_tiers(msg.endpoint.tiers),
+        }
         self.splitter.on_endpoint_update(combined_id, endpoint)
 
-    def on_host_ep_update(self, hostname, endpoint_id, endpoint):
+    def on_wl_endpoint_remove(self, msg):
+        """Handler for endpoint updates, passes the update to the splitter.
+        :param msg felixbackend_pb2.WorkloadEndpointUpdate"""
+        hostname = self._config.HOSTNAME
+        orchestrator = msg.id.orchestrator_id
+        workload_id = msg.id.workload_id
+        endpoint_id = msg.id.endpoint_id
+        combined_id = WloadEndpointId(hostname, orchestrator, workload_id,
+                                      endpoint_id)
+        _log.debug("Endpoint %s removed", combined_id)
+        _stats.increment("Endpoint removed")
+        self.splitter.on_endpoint_update(combined_id, None)
+
+    def on_host_ep_update(self, msg):
         """Handler for create/update of host endpoint."""
+        hostname = self._config.HOSTNAME
+        endpoint_id = msg.id.endpoint_id
         combined_id = HostEndpointId(hostname, endpoint_id)
         _log.debug("Host iface %s updated", combined_id)
         _stats.increment("Host iface created/updated")
-        if endpoint is not None:
-            common.validate_host_endpoint(self._config, combined_id, endpoint)
+        endpoint = {
+            "name": msg.endpoint.name or None,
+            "profile_ids": msg.endpoint.profile_ids,
+            "expected_ipv4_addrs": msg.endpoint.expected_ipv4_addrs,
+            "expected_ipv6_addrs": msg.endpoint.expected_ipv6_addrs,
+            "tiers": convert_tiers(msg.endpoint.tiers),
+        }
         self.splitter.on_host_ep_update(combined_id, endpoint)
 
-    def on_prof_rules_update(self, profile_id, rules):
+    def on_host_ep_remove(self, msg):
+        """Handler for create/update of host endpoint."""
+        hostname = self._config.HOSTNAME
+        endpoint_id = msg.id.endpoint_id
+        combined_id = HostEndpointId(hostname, endpoint_id)
+        _log.debug("Host iface %s removed", combined_id)
+        _stats.increment("Host iface removed")
+        self.splitter.on_host_ep_update(combined_id, None)
+
+    def on_prof_rules_update(self, msg):
         """Handler for rules updates, passes the update to the splitter."""
+        profile_id = msg.id.name
         _log.debug("Rules for %s set", profile_id)
         _stats.increment("Rules created/updated")
         profile_id = intern(profile_id.encode("utf8"))
+        rules = {
+            "inbound_rules": convert_rules(msg.profile.inbound_rules),
+            "outbound_rules": convert_rules(msg.profile.outbound_rules),
+        }
         self.splitter.on_rules_update(profile_id, rules)
 
-    def on_tiered_policy_update(self, tier, policy_id, rules):
-        _log.debug("Rules for %s/%s set", tier, policy_id)
+    def on_prof_rules_remove(self, msg):
+        """Handler for rules updates, passes the update to the splitter."""
+        profile_id = msg.id.name
+        _log.debug("Rules for %s set", profile_id)
+        _stats.increment("Rules created/updated")
+        profile_id = intern(profile_id.encode("utf8"))
+        self.splitter.on_rules_update(profile_id, None)
+
+    def on_tiered_policy_update(self, msg):
+        _log.debug("Rules for %s/%s set", msg.id.tier, msg.id.name)
         _stats.increment("Tiered rules created/updated")
-        policy_id = TieredPolicyId(tier, policy_id)
-        if rules is not None:
-            self.splitter.on_rules_update(policy_id, rules)
-            # self.splitter.on_policy_selector_update(policy_id, selector,
-            #                                         order)
-        else:
-            self.splitter.on_rules_update(policy_id, None)
-            # self.splitter.on_policy_selector_update(policy_id, None, None)
+        policy_id = TieredPolicyId(msg.id.tier, msg.id.name)
+        rules = {
+            "inbound_rules": convert_rules(msg.policy.inbound_rules),
+            "outbound_rules": convert_rules(msg.policy.outbound_rules),
+        }
+        self.splitter.on_rules_update(policy_id, rules)
+
+    def on_tiered_policy_remove(self, msg):
+        _log.debug("Rules for %s/%s set", msg.id.tier, msg.id.name)
+        _stats.increment("Tiered rules created/updated")
+        policy_id = TieredPolicyId(msg.id.tier, msg.id.name)
+        self.splitter.on_rules_update(policy_id, None)
 
     # def on_host_ip_set(self, response, hostname):
     #     if not self._config.IP_IN_IP_ENABLED:
@@ -714,46 +753,46 @@ class DatastoreWriter(Actor):
 
     def _write_endpoint_status(self, ep_id, status):
         _stats.increment("Per-port status report writes")
-        if isinstance(ep_id, WloadEndpointId):
-            if status is not None:
-                self._writer.send_message(
-                    MSG_TYPE_WL_ENDPOINT_STATUS,
-                    {
-                        MSG_KEY_HOSTNAME: ep_id.host,
-                        MSG_KEY_ORCH: ep_id.orchestrator,
-                        MSG_KEY_WORKLOAD_ID: ep_id.workload,
-                        MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
-                        MSG_KEY_STATUS: status["status"]
-                    }
-                )
-            else:
-                self._writer.send_message(
-                    MSG_TYPE_WL_ENDPOINT_STATUS_REMOVE,
-                    {
-                        MSG_KEY_HOSTNAME: ep_id.host,
-                        MSG_KEY_ORCH: ep_id.orchestrator,
-                        MSG_KEY_WORKLOAD_ID: ep_id.workload,
-                        MSG_KEY_ENDPOINT_ID: ep_id.endpoint
-                    }
-                )
-        else:
-            if status is not None:
-                self._writer.send_message(
-                    MSG_TYPE_HOST_ENDPOINT_STATUS,
-                    {
-                        MSG_KEY_HOSTNAME: ep_id.host,
-                        MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
-                        MSG_KEY_STATUS: status["status"]
-                    }
-                )
-            else:
-                self._writer.send_message(
-                    MSG_TYPE_HOST_ENDPOINT_STATUS_REMOVE,
-                    {
-                        MSG_KEY_HOSTNAME: ep_id.host,
-                        MSG_KEY_ENDPOINT_ID: ep_id.endpoint
-                    }
-                )
+        # if isinstance(ep_id, WloadEndpointId):
+        #     if status is not None:
+        #         self._writer.send_message(
+        #             MSG_TYPE_WL_ENDPOINT_STATUS,
+        #             {
+        #                 MSG_KEY_HOSTNAME: ep_id.host,
+        #                 MSG_KEY_ORCH: ep_id.orchestrator,
+        #                 MSG_KEY_WORKLOAD_ID: ep_id.workload,
+        #                 MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
+        #                 MSG_KEY_STATUS: status["status"]
+        #             }
+        #         )
+        #     else:
+        #         self._writer.send_message(
+        #             MSG_TYPE_WL_ENDPOINT_STATUS_REMOVE,
+        #             {
+        #                 MSG_KEY_HOSTNAME: ep_id.host,
+        #                 MSG_KEY_ORCH: ep_id.orchestrator,
+        #                 MSG_KEY_WORKLOAD_ID: ep_id.workload,
+        #                 MSG_KEY_ENDPOINT_ID: ep_id.endpoint
+        #             }
+        #         )
+        # else:
+        #     if status is not None:
+        #         self._writer.send_message(
+        #             MSG_TYPE_HOST_ENDPOINT_STATUS,
+        #             {
+        #                 MSG_KEY_HOSTNAME: ep_id.host,
+        #                 MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
+        #                 MSG_KEY_STATUS: status["status"]
+        #             }
+        #         )
+        #     else:
+        #         self._writer.send_message(
+        #             MSG_TYPE_HOST_ENDPOINT_STATUS_REMOVE,
+        #             {
+        #                 MSG_KEY_HOSTNAME: ep_id.host,
+        #                 MSG_KEY_ENDPOINT_ID: ep_id.endpoint
+        #             }
+        #         )
 
     def _on_worker_died(self, watch_greenlet):
         """
@@ -763,6 +802,41 @@ class DatastoreWriter(Actor):
         _log.critical("Worker greenlet died: %s; exiting.",
                       watch_greenlet)
         sys.exit(1)
+
+
+def convert_tiers(tiers):
+    dict_tiers = []
+    for pb_tier in tiers:
+        d_tier = {"name": pb_tier.name, "policies": pb_tier.policies}
+        dict_tiers.append(d_tier)
+    return dict_tiers
+
+
+def convert_rules(pb_rules):
+    dict_rules = []
+    for pb_rule in pb_rules:
+        _log.debug("Converting protobuf rule: %r type: %s", pb_rule, pb_rule.__class__)
+        d_rule = {}
+        for fd, value in pb_rule.ListFields():
+            if fd.type == FieldDescriptor.TYPE_STRING and value == "":
+                continue
+            if fd.type in (FieldDescriptor.TYPE_INT32, FieldDescriptor.TYPE_INT64) and value == 0:
+                continue
+            _log.debug("Field %s = %s", fd.name, value)
+            negated = fd.name.startswith("not_")
+            stem = fd.name if not negated else fd.name[4:]
+            dict_name = "!" + stem if negated else stem
+
+            if stem.endswith("_ports"):
+                value = convert_ports(value)
+            elif stem.endswith("protocol"):
+                value = convert_protocol(value)
+            elif stem.endswith("ip_set_ids"):
+                value = list(value)
+            d_rule[dict_name] = value
+
+        dict_rules.append(d_rule)
+    return dict_rules
 
 
 def combine_statuses(status_a, status_b):
@@ -785,6 +859,24 @@ def combine_statuses(status_a, status_b):
     else:
         return {"status": ENDPOINT_STATUS_UP}
 
+
+def convert_ports(pb_ports):
+    _log.debug("Converting ports: %s", pb_ports)
+    return map(convert_port, pb_ports)
+
+
+def convert_port(pb_port):
+    if pb_port.first == pb_port.last:
+        return pb_port.first
+    else:
+        return "%s:%s" % (pb_port.first, pb_port.last)
+
+
+def convert_protocol(pb_proto):
+    if pb_proto.HasField("number"):
+        return pb_proto.number
+    else:
+        return pb_proto.name
 
 def die_and_restart():
     # Sleep so that we can't die more than 5 times in 10s even if someone is

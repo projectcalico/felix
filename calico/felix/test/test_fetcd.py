@@ -27,7 +27,7 @@ from mock import Mock, call, patch, ANY
 
 from calico.datamodel_v1 import WloadEndpointId, TieredPolicyId, HostEndpointId
 from calico.etcddriver.protocol import MessageReader, MessageWriter, \
-    MSG_TYPE_CONFIG_UPDATE, MSG_TYPE_STATUS, STATUS_RESYNC, MSG_KEY_STATUS, \
+    MSG_TYPE_CONFIG_UPDATE, MSG_TYPE_IN_SYNC, STATUS_RESYNC, MSG_KEY_STATUS, \
     MSG_TYPE_UPDATE, MSG_KEY_KEY, MSG_KEY_VALUE, MSG_KEY_TYPE, \
     MSG_KEY_HOST_CONFIG, MSG_KEY_GLOBAL_CONFIG, MSG_TYPE_CONFIG_RESOLVED, \
     MSG_KEY_LOG_FILE, MSG_KEY_SEV_FILE, MSG_KEY_SEV_SCREEN, MSG_KEY_SEV_SYSLOG, \
@@ -201,7 +201,7 @@ class TestEtcdWatcher(BaseTestCase):
     def test_read_loop(self, m_die):
         self.m_reader.new_messages.side_effect = iter([
             iter([]),
-            iter([(MSG_TYPE_STATUS, {MSG_KEY_STATUS: STATUS_RESYNC})])
+            iter([(MSG_TYPE_IN_SYNC, {MSG_KEY_STATUS: STATUS_RESYNC})])
         ])
         self.m_driver_proc.poll.side_effect = iter([
             None, 1
@@ -211,7 +211,7 @@ class TestEtcdWatcher(BaseTestCase):
             self.assertRaises(ExpectedException,
                               self.watcher._loop_reading_from_driver)
         self.assertEqual(m_disp.mock_calls,
-                         [call(MSG_TYPE_STATUS,
+                         [call(MSG_TYPE_IN_SYNC,
                                {MSG_KEY_STATUS: STATUS_RESYNC})])
 
     @patch("calico.felix.datastore.die_and_restart", autospec=True)
@@ -235,7 +235,7 @@ class TestEtcdWatcher(BaseTestCase):
         for msg_type, expected_method in [
                 (MSG_TYPE_UPDATE, "_on_update_from_driver"),
                 (MSG_TYPE_CONFIG_UPDATE, "_on_config_loaded_from_driver"),
-                (MSG_TYPE_STATUS, "_on_status_from_driver"),]:
+                (MSG_TYPE_IN_SYNC, "_on_status_from_driver"),]:
             with patch.object(self.watcher, expected_method) as m_meth:
                 msg = Mock()
                 self.watcher._dispatch_msg_from_driver(msg_type, msg)
@@ -304,17 +304,17 @@ class TestEtcdWatcher(BaseTestCase):
         self.assertEqual(m_die.mock_calls, [call()])
 
     def test_on_status_from_driver(self):
-        self.watcher._on_status_from_driver({
+        self.watcher._on_in_sync_from_driver({
             MSG_KEY_STATUS: STATUS_RESYNC
         })
         self.assertFalse(self.watcher._been_in_sync)
 
         with patch.object(self.watcher, "begin_polling") as m_begin:
             # Two calls but second should be ignored...
-            self.watcher._on_status_from_driver({
+            self.watcher._on_in_sync_from_driver({
                 MSG_KEY_STATUS: STATUS_IN_SYNC
             })
-            self.watcher._on_status_from_driver({
+            self.watcher._on_in_sync_from_driver({
                 MSG_KEY_STATUS: STATUS_IN_SYNC
             })
         m_begin.wait.assert_called_once_with()

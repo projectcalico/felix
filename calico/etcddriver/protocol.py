@@ -21,9 +21,13 @@ Protocol constants for Felix <-> Driver protocol.
 import logging
 import socket
 import errno
+import struct
 from io import BytesIO
 import msgpack
 import select
+
+from calico.felix import felixbackend_pb2
+from google.protobuf.internal.containers import ScalarMap
 
 _log = logging.getLogger(__name__)
 
@@ -35,13 +39,13 @@ MSG_KEY_ETCD_URLS = "etcd_urls"
 MSG_KEY_HOSTNAME = "hostname"
 MSG_KEY_KEY_FILE = "etcd_key_file"
 MSG_KEY_CERT_FILE = "etcd_cert_file"
-MSG_KEY_CA_FILE = "etcd_ca_file"
+MSG_KEY_CA_FILE = "etcd_ca_cert_file"
 MSG_KEY_PROM_PORT = "prom_port"
 
 # Config loaded message Driver -> Felix.
 MSG_TYPE_CONFIG_UPDATE = "config_update"
 MSG_KEY_GLOBAL_CONFIG = "global"
-MSG_KEY_HOST_CONFIG = "host"
+MSG_KEY_HOST_CONFIG = "per_host"
 
 # Config message Felix -> Driver.
 MSG_TYPE_CONFIG_RESOLVED = "config_resolved"
@@ -49,30 +53,26 @@ MSG_KEY_LOG_FILE = "log_file"
 MSG_KEY_SEV_FILE = "sev_file"
 MSG_KEY_SEV_SCREEN = "sev_screen"
 MSG_KEY_SEV_SYSLOG = "sev_syslog"
-MSG_KEY_EP_REPORT_DELAY_SECS = "ep_status_report_delay_seconds"
-MSG_KEY_EP_REPORT_RESYNC_SECS = "ep_status_resync_interval_seconds"
+MSG_KEY_EP_REPORT_DELAY_SECS = "endpoint_status_reporting_delay"
+MSG_KEY_EP_REPORT_RESYNC_SECS = "endpoint_status_resync_interval"
 
 # Status message Driver -> Felix.
-MSG_TYPE_STATUS = "datastore_status"
-MSG_KEY_STATUS = "status"
-STATUS_WAIT_FOR_READY = "wait-for-ready"
-STATUS_RESYNC = "resync"
-STATUS_IN_SYNC = "in-sync"
+MSG_TYPE_IN_SYNC = "in_sync"
 
 
-MSG_TYPE_PROFILE_UPDATE = "profile_update"
-MSG_TYPE_PROFILE_REMOVED = "profile_remove"
-MSG_TYPE_POLICY_UPDATE = "policy_update"
-MSG_TYPE_POLICY_REMOVED = "policy_remove"
+MSG_TYPE_PROFILE_UPDATE = "active_profile_update"
+MSG_TYPE_PROFILE_REMOVED = "active_profile_remove"
+MSG_TYPE_POLICY_UPDATE = "active_policy_update"
+MSG_TYPE_POLICY_REMOVED = "active_policy_remove"
 MSG_KEY_TIER_NAME = "tier"
 MSG_KEY_NAME = "name"
 MSG_KEY_POLICY = "policy"
 MSG_KEY_PROFILE = "profile"
 
-MSG_TYPE_WL_EP_UPDATE = "wl_ep_update"
-MSG_TYPE_WL_EP_REMOVE = "wl_ep_remove"
-MSG_TYPE_HOST_EP_UPDATE = "host_ep_update"
-MSG_TYPE_HOST_EP_REMOVE = "host_ep_remove"
+MSG_TYPE_WL_EP_UPDATE = "workload_endpoint_update"
+MSG_TYPE_WL_EP_REMOVE = "workload_endpoint_remove"
+MSG_TYPE_HOST_EP_UPDATE = "host_endpoint_update"
+MSG_TYPE_HOST_EP_REMOVE = "host_endpoint_remove"
 MSG_KEY_ORCH = "orchestrator"
 MSG_KEY_WORKLOAD_ID = "workload_id"
 MSG_KEY_ENDPOINT_ID = "endpoint_id"
@@ -81,22 +81,22 @@ MSG_KEY_ENDPOINT = "endpoint"
 # Selector/IP added/removed message Driver -> Felix.
 MSG_TYPE_IPSET_UPDATE = "ipset_update"
 MSG_TYPE_IPSET_REMOVED = "ipset_remove"
-MSG_TYPE_IPSET_DELTA = "ipset_delta"
+MSG_TYPE_IPSET_DELTA = "ipset_delta_update"
 
 MSG_KEY_MEMBERS = "members"
-MSG_KEY_ADDED_IPS = "added_ips"
-MSG_KEY_REMOVED_IPS = "removed_ips"
-MSG_KEY_IPSET_ID = "ipset_id"
+MSG_KEY_ADDED_IPS = "added_members"
+MSG_KEY_REMOVED_IPS = "removed_members"
+MSG_KEY_IPSET_ID = "id"
 
 # Status reports
-MSG_TYPE_FELIX_STATUS = "felix_status"
-MSG_KEY_TIME = "time"
+MSG_TYPE_FELIX_STATUS = "felix_status_update"
+MSG_KEY_TIME = "iso_timestamp"
 MSG_KEY_UPTIME = "uptime"
 
-MSG_TYPE_WL_ENDPOINT_STATUS = "wl_ep_status"
-MSG_TYPE_WL_ENDPOINT_STATUS_REMOVE = "wl_ep_status_remove"
-MSG_TYPE_HOST_ENDPOINT_STATUS = "host_ep_status"
-MSG_TYPE_HOST_ENDPOINT_STATUS_REMOVE = "host_ep_status_remove"
+MSG_TYPE_WL_ENDPOINT_STATUS = "workload_endpoint_status_update"
+MSG_TYPE_WL_ENDPOINT_STATUS_REMOVE = "workload_endpoint_status_remove"
+MSG_TYPE_HOST_ENDPOINT_STATUS = "host_endpoint_status_update"
+MSG_TYPE_HOST_ENDPOINT_STATUS_REMOVE = "host_endpoint_status_remove"
 
 __all__ = [
     'MSG_KEY_ADDED_IPS',
@@ -123,7 +123,6 @@ __all__ = [
     'MSG_KEY_SEV_FILE',
     'MSG_KEY_SEV_SCREEN',
     'MSG_KEY_SEV_SYSLOG',
-    'MSG_KEY_STATUS',
     'MSG_KEY_TIER_NAME',
     'MSG_KEY_TIME',
     'MSG_KEY_TYPE',
@@ -144,16 +143,13 @@ __all__ = [
     'MSG_TYPE_POLICY_UPDATE',
     'MSG_TYPE_PROFILE_REMOVED',
     'MSG_TYPE_PROFILE_UPDATE',
-    'MSG_TYPE_STATUS',
+    'MSG_TYPE_IN_SYNC',
     'MSG_TYPE_WL_ENDPOINT_STATUS',
     'MSG_TYPE_WL_ENDPOINT_STATUS_REMOVE',
     'MSG_TYPE_WL_EP_REMOVE',
     'MSG_TYPE_WL_EP_UPDATE',
     'MessageReader',
     'MessageWriter',
-    'STATUS_IN_SYNC',
-    'STATUS_RESYNC',
-    'STATUS_WAIT_FOR_READY',
     'SocketClosed',
     'WriteFailed',
 ]
@@ -195,11 +191,25 @@ class MessageWriter(object):
         :param flush: True to force the data to be written immediately.
         """
         _log.debug("Sending message %s: %s", msg_type, fields)
-        msg_type_data = msgpack.dumps(msg_type)
-        field_data = msgpack.dumps(fields)
-        _log.debug("Raw wire data: %v, %v", msg_type_data, field_data)
-        self._buf.write(msg_type_data)
-        self._buf.write(field_data)
+        envelope = felixbackend_pb2.FromDataplane()
+        payload = getattr(envelope, msg_type)
+
+        for k, v in fields.iteritems():
+            if v is None:
+                continue
+            if isinstance(v, (list, tuple)):
+                field = getattr(payload, k)
+                for item in v:
+                    field.append(item)
+            else:
+                setattr(payload, k, v)
+
+        data = envelope.SerializeToString()
+        length = len(data)
+        serialized_length = struct.pack("<Q", length)
+
+        self._buf.write(serialized_length)
+        self._buf.write(data)
         if flush:
             self.flush()
         else:
@@ -231,6 +241,7 @@ class MessageReader(object):
         self._sck = sck
         self._current_msg_type = None
         self._unpacker = msgpack.Unpacker()
+        self._buf = ""
 
     def new_messages(self, timeout=1):
         """
@@ -246,12 +257,38 @@ class MessageReader(object):
         :raises SocketClosed if the socket is closed.
         :raises socket.error if an unexpected socket error occurs.
         """
-        if timeout is not None:
+        if timeout is not None and not self._buf:
             read_ready, _, _ = select.select([self._sck], [], [], timeout)
             if not read_ready:
                 return
+
+        while len(self._buf) < 8:
+            _log.debug("Reading length header...")
+            self._read()
+
+        (length,) = struct.unpack_from("<Q", self._buf, 0)
+        _log.debug("Read message length: %s", length)
+
+        while len(self._buf) < 8 + length:
+            _log.debug("Reading data. Have: %s, need: %s", len(self._buf),
+                       8+length)
+            self._read()
+
+        protobuf = self._buf[8:8 + length]
+        self._buf = self._buf[8 + length:]
+
+        envelope = felixbackend_pb2.ToDataplane()
+        envelope.ParseFromString(protobuf)
+        _log.debug("Received message: envelope = %s", envelope)
+        message_type = envelope.WhichOneof("payload")
+        payload = getattr(envelope, message_type)
+        _log.debug("Payload: %s", payload)
+        yield message_type, payload, envelope.sequence_number
+
+    def _read(self):
         try:
             data = self._sck.recv(16384)
+            _log.debug("Read %s bytes", len(data))
         except socket.error as e:
             if e.errno in (errno.EAGAIN,
                            errno.EWOULDBLOCK,
@@ -266,17 +303,4 @@ class MessageReader(object):
             # which shouldn't happen.
             _log.error("Socket closed by other end.")
             raise SocketClosed()
-        # Feed the data into the Unpacker, if it has enough data it will then
-        # generate some messages.
-        self._unpacker.feed(data)
-        for msg in self._unpacker:
-            if self._current_msg_type is None:
-                self._current_msg_type = msg
-                _log.debug("Read message type: %r", self._current_msg_type)
-                assert self._current_msg_type is not None
-                assert isinstance(msg, basestring), (
-                    "Unexpected message type: %r" % self._current_msg_type
-                )
-                continue
-            yield self._current_msg_type, msg
-            self._current_msg_type = None
+        self._buf += data

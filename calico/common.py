@@ -71,10 +71,10 @@ KERNEL_PORT_PROTOCOLS = set([
 NEGATABLE_MATCH_KEYS = [
     "protocol",
     "src_net",
-    "src_ipsets",
+    "src_ip_set_ids",
     "src_ports",
     "dst_net",
-    "dst_ipsets",
+    "dst_ip_set_ids",
     "dst_ports",
     "icmp_type",
     "icmp_code",

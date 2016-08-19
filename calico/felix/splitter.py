@@ -77,6 +77,7 @@ class UpdateSplitter(object):
             or None if the rules have been deleted.
         """
         _log.info("Profile update: %s", profile_id)
+        _log.debug("Profile update %s = %s", profile_id, rules)
         for mgr in self.rules_upd_mgrs:
             mgr.on_rules_update(profile_id, rules, async=True)
 
@@ -143,6 +144,7 @@ class UpdateSplitter(object):
         :param dict endpoint: Endpoint data dict
         """
         _log.debug("Endpoint update for %s.", endpoint_id)
+        _log.debug("Endpoint update %s = %s", endpoint_id, endpoint)
         for mgr in self.ep_upd_mgrs:
             mgr.on_endpoint_update(endpoint_id, endpoint, async=True)
 
@@ -154,6 +156,7 @@ class UpdateSplitter(object):
         :param dict|NoneType iface_data: JSON data or None for a deletion.
         """
         _log.info("Host interface %s updated", combined_id)
+        _log.debug("Host endpoint update %s = %s", combined_id, iface_data)
         for mgr in self.host_ep_upd_mgrs:
             mgr.on_host_ep_update(combined_id, iface_data, async=True)
 
@@ -170,14 +173,15 @@ class UpdateSplitter(object):
             mgr.on_ipam_pool_updated(pool_id, pool, async=True)
 
     def on_ipset_update(self, ipset_id, members):
-        _log.info("Selector added %s", ipset_id)
+        _log.info("IP set update %s", ipset_id)
+        _log.debug("IP set update %s = %s", ipset_id, members)
         for mgr in self.ipset_added_upd_mgrs:
             mgr.on_ipset_update(ipset_id, members, async=True)
 
-    def on_ipset_removed(self, selector_id):
-        _log.info("Selector removed %s", selector_id)
+    def on_ipset_removed(self, ipset_id):
+        _log.info("IP set removed %s", ipset_id)
         for mgr in self.ipset_removed_upd_mgrs:
-            mgr.on_ipset_removed(selector_id, async=True)
+            mgr.on_ipset_removed(ipset_id, async=True)
 
     def on_ipset_delta_update(self, ipset_id, added_ips, removed_ips):
         _log.debug("IP set updates for %s: added: %s, removed: %s",
