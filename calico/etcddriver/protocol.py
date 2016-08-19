@@ -178,7 +178,7 @@ class MessageWriter(object):
         self._buf = BytesIO()
         self._updates_pending = 0
 
-    def send_message(self, msg_type, fields=None, flush=True):
+    def send_message(self, msg, flush=True):
         """
         Send a message of the given type with the given fields.
         Optionally, flush the data to the socket.
@@ -190,21 +190,8 @@ class MessageWriter(object):
         :param dict fields: dict mapping MSG_KEY_* constants to values.
         :param flush: True to force the data to be written immediately.
         """
-        _log.debug("Sending message %s: %s", msg_type, fields)
-        envelope = felixbackend_pb2.FromDataplane()
-        payload = getattr(envelope, msg_type)
-
-        for k, v in fields.iteritems():
-            if v is None:
-                continue
-            if isinstance(v, (list, tuple)):
-                field = getattr(payload, k)
-                for item in v:
-                    field.append(item)
-            else:
-                setattr(payload, k, v)
-
-        data = envelope.SerializeToString()
+        _log.debug("Sending message: %s", msg)
+        data = msg.SerializeToString()
         length = len(data)
         serialized_length = struct.pack("<Q", length)
 

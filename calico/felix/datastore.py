@@ -28,6 +28,8 @@ import subprocess
 
 import gevent
 import sys
+
+from calico.felix import felixbackend_pb2
 from gevent.event import Event
 
 from calico.datamodel_v1 import (
@@ -565,29 +567,22 @@ class DatastoreReader(TimedGreenlet):
         policy_id = TieredPolicyId(msg.id.tier, msg.id.name)
         self.splitter.on_rules_update(policy_id, None)
 
-    # def on_host_ip_set(self, response, hostname):
-    #     if not self._config.IP_IN_IP_ENABLED:
-    #         _log.debug("Ignoring update to %s because IP-in-IP is disabled",
-    #                    response.key)
-    #         return
-    #     _stats.increment("Host IP created/updated")
-    #     ip = parse_host_ip(hostname, response.value)
-    #     if ip:
-    #         self.ipv4_by_hostname[hostname] = ip
-    #     else:
-    #         _log.warning("Invalid IP for hostname %s: %s, treating as "
-    #                      "deletion", hostname, response.value)
-    #         self.ipv4_by_hostname.pop(hostname, None)
-    #     self._update_hosts_ipset()
-    #
-    # def on_host_ip_delete(self, response, hostname):
-    #     if not self._config.IP_IN_IP_ENABLED:
-    #         _log.debug("Ignoring update to %s because IP-in-IP is disabled",
-    #                    response.key)
-    #         return
-    #     _stats.increment("Host IP deleted")
-    #     if self.ipv4_by_hostname.pop(hostname, None):
-    #         self._update_hosts_ipset()
+    def on_host_ip_set(self, msg):
+        if not self._config.IP_IN_IP_ENABLED:
+            _log.debug("Ignoring update to host IP because IP-in-IP disabled")
+            return
+        _stats.increment("Host IP created/updated")
+        self.ipv4_by_hostname[msg.hostname] = msg.ip
+        self._update_hosts_ipset()
+
+    def on_host_ip_remove(self, msg):
+        if not self._config.IP_IN_IP_ENABLED:
+            _log.debug("Ignoring update to host IP because IP-in-IP is "
+                       "disabled")
+            return
+        _stats.increment("Host IP removed")
+        if self.ipv4_by_hostname.pop(msg.hostname, None):
+            self._update_hosts_ipset()
 
     def _update_hosts_ipset(self):
         if not self._been_in_sync:
@@ -598,14 +593,17 @@ class DatastoreReader(TimedGreenlet):
             async=True
         )
 
-    # def on_ipam_v4_pool_set(self, response, pool_id):
-    #     _stats.increment("IPAM pool created/updated")
-    #     pool = parse_ipam_pool(pool_id, response.value)
-    #     self.splitter.on_ipam_pool_updated(pool_id, pool)
-    #
-    # def on_ipam_v4_pool_delete(self, response, pool_id):
-    #     _stats.increment("IPAM pool deleted")
-    #     self.splitter.on_ipam_pool_updated(pool_id, None)
+    def on_ipam_v4_pool_update(self, msg):
+        _stats.increment("IPAM pool created/updated")
+        pool = {
+            "cidr": msg.pool.cidr,
+            "masquerade": msg.pool.masquerade,
+        }
+        self.splitter.on_ipam_pool_updated(msg.id, pool)
+
+    def on_ipam_v4_pool_remove(self, msg):
+        _stats.increment("IPAM pool deleted")
+        self.splitter.on_ipam_pool_updated(msg.id, None)
 
     def kill_watcher(self):
         self.killed = True
@@ -656,41 +654,40 @@ class DatastoreWriter(Actor):
 
     def send_init(self):
         # Give the driver its config.
-        self._writer.send_message(
-            MSG_TYPE_INIT,
-            {
-                MSG_KEY_ETCD_URLS: [self._config.ETCD_SCHEME + "://" +
-                                    addr for addr in self._config.ETCD_ADDRS],
-                MSG_KEY_HOSTNAME: self._config.HOSTNAME,
-                MSG_KEY_KEY_FILE: self._config.ETCD_KEY_FILE,
-                MSG_KEY_CERT_FILE: self._config.ETCD_CERT_FILE,
-                MSG_KEY_CA_FILE: self._config.ETCD_CA_FILE,
-            }
-        )
+        envelope = felixbackend_pb2.FromDataplane()
+        payload = envelope.init
+        for addr in self._config.ETCD_ADDRS:
+            payload.etcd_urls.append(self._config.ETCD_SCHEME + "://" + addr)
+        payload.hostname = self._config.HOSTNAME
+        if self._config.ETCD_KEY_FILE:
+            payload.etcd_key_file = self._config.ETCD_KEY_FILE
+        if self._config.ETCD_CERT_FILE:
+            payload.etcd_cert_file = self._config.ETCD_CERT_FILE
+        if self._config.ETCD_CA_FILE:
+            payload.etcd_ca_cert_file = self._config.ETCD_CA_FILE
+        self._writer.send_message(envelope)
 
     @actor_message()
     def on_config_resolved(self):
         # Config now fully resolved, inform the driver.
         self.config_resolved = True
         driver_log_file = self._config.DRIVERLOGFILE
-        self._writer.send_message(
-            MSG_TYPE_CONFIG_RESOLVED,
-            {
-                MSG_KEY_LOG_FILE: driver_log_file,
-                MSG_KEY_SEV_FILE: self._config.LOGLEVFILE,
-                MSG_KEY_SEV_SCREEN: self._config.LOGLEVSCR,
-                MSG_KEY_SEV_SYSLOG: self._config.LOGLEVSYS,
-                MSG_KEY_PROM_PORT:
-                    self._config.PROM_METRICS_DRIVER_PORT if
-                    self._config.PROM_METRICS_ENABLED else None,
-                MSG_KEY_EP_REPORT_DELAY_SECS:
-                    self._config.ENDPOINT_REPORT_DELAY if
-                    self._config.REPORT_ENDPOINT_STATUS else 0,
-                MSG_KEY_EP_REPORT_RESYNC_SECS:
-                    self._config.ENDPOINT_REPORT_DELAY * 180 if
-                    self._config.REPORT_ENDPOINT_STATUS else 0,
-            }
+
+
+        envelope = felixbackend_pb2.FromDataplane()
+        payload = envelope.config_resolved
+
+        payload.log_file = driver_log_file
+        payload.endpoint_status_reporting_delay = (
+            self._config.ENDPOINT_REPORT_DELAY if
+                self._config.REPORT_ENDPOINT_STATUS else 0
         )
+        payload.endpoint_status_resync_interval = (
+            self._config.ENDPOINT_REPORT_DELAY * 180 if
+                self._config.REPORT_ENDPOINT_STATUS else 0
+        )
+        # TODO: Remaining parameters.
+        self._writer.send_message(envelope)
 
         if self._config.REPORTING_INTERVAL_SECS > 0:
             self._status_reporting_greenlet = TimedGreenlet(
@@ -717,13 +714,11 @@ class DatastoreWriter(Actor):
         """Sends Felix's status to the backend driver."""
         time_formatted = iso_utc_timestamp()
         uptime = monotonic_time() - self._start_time
-        self._writer.send_message(
-            MSG_TYPE_FELIX_STATUS,
-            {
-                MSG_KEY_TIME: time_formatted,
-                MSG_KEY_UPTIME: uptime,
-            }
-        )
+        envelope = felixbackend_pb2.FromDataplane()
+        payload = envelope.felix_status_update
+        payload.iso_timestamp = time_formatted
+        payload.uptime = uptime
+        self._writer.send_message(envelope)
 
     def _mark_endpoint_dirty(self, endpoint_id):
         assert isinstance(endpoint_id, EndpointId)
@@ -753,46 +748,28 @@ class DatastoreWriter(Actor):
 
     def _write_endpoint_status(self, ep_id, status):
         _stats.increment("Per-port status report writes")
-        # if isinstance(ep_id, WloadEndpointId):
-        #     if status is not None:
-        #         self._writer.send_message(
-        #             MSG_TYPE_WL_ENDPOINT_STATUS,
-        #             {
-        #                 MSG_KEY_HOSTNAME: ep_id.host,
-        #                 MSG_KEY_ORCH: ep_id.orchestrator,
-        #                 MSG_KEY_WORKLOAD_ID: ep_id.workload,
-        #                 MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
-        #                 MSG_KEY_STATUS: status["status"]
-        #             }
-        #         )
-        #     else:
-        #         self._writer.send_message(
-        #             MSG_TYPE_WL_ENDPOINT_STATUS_REMOVE,
-        #             {
-        #                 MSG_KEY_HOSTNAME: ep_id.host,
-        #                 MSG_KEY_ORCH: ep_id.orchestrator,
-        #                 MSG_KEY_WORKLOAD_ID: ep_id.workload,
-        #                 MSG_KEY_ENDPOINT_ID: ep_id.endpoint
-        #             }
-        #         )
-        # else:
-        #     if status is not None:
-        #         self._writer.send_message(
-        #             MSG_TYPE_HOST_ENDPOINT_STATUS,
-        #             {
-        #                 MSG_KEY_HOSTNAME: ep_id.host,
-        #                 MSG_KEY_ENDPOINT_ID: ep_id.endpoint,
-        #                 MSG_KEY_STATUS: status["status"]
-        #             }
-        #         )
-        #     else:
-        #         self._writer.send_message(
-        #             MSG_TYPE_HOST_ENDPOINT_STATUS_REMOVE,
-        #             {
-        #                 MSG_KEY_HOSTNAME: ep_id.host,
-        #                 MSG_KEY_ENDPOINT_ID: ep_id.endpoint
-        #             }
-        #         )
+        envelope = felixbackend_pb2.FromDataplane()
+        if isinstance(ep_id, WloadEndpointId):
+            if status is not None:
+                payload = envelope.workload_endpoint_status_update
+                payload.id.orchestrator_id = ep_id.orchestrator
+                payload.id.workload_id = ep_id.workload
+                payload.id.endpoint_id = ep_id.endpoint
+                payload.status.status = status["status"]
+            else:
+                payload = envelope.workload_endpoint_status_remove
+                payload.id.orchestrator_id = ep_id.orchestrator
+                payload.id.workload_id = ep_id.workload
+                payload.id.endpoint_id = ep_id.endpoint
+        else:
+            if status is not None:
+                payload = envelope.host_endpoint_status_update
+                payload.id.endpoint_id = ep_id.endpoint
+                payload.status.status = status["status"]
+            else:
+                payload = envelope.host_endpoint_status_remove
+                payload.id.endpoint_id = ep_id.endpoint
+        self._writer.send_message(envelope)
 
     def _on_worker_died(self, watch_greenlet):
         """
