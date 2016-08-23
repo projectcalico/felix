@@ -63,17 +63,16 @@ class DatastoreAPI(Actor):
     Our API to the datastore via the backend driver process.
     """
 
-    def __init__(self, config, hosts_ipset):
-        super(DatastoreAPI, self).__init__(config.ETCD_ADDRS)
+    def __init__(self, config, pipe_from_parent, pipe_to_parent, hosts_ipset):
+        super(DatastoreAPI, self).__init__()
         self._config = config
+        self.pipe_from_parent = pipe_from_parent
+        self.pipe_to_parent = pipe_to_parent
         self.hosts_ipset = hosts_ipset
 
         # Timestamp storing when the DatastoreAPI started. This info is needed
         # in order to report uptime to etcd.
         self._start_time = monotonic_time()
-
-        # the Popen object for the driver subprocess.
-        self._driver_process = None
 
         # The main etcd-watching greenlet.
         self._reader = None
@@ -83,7 +82,7 @@ class DatastoreAPI(Actor):
 
     def _on_actor_started(self):
         _log.info("%s starting worker threads", self)
-        reader, writer = self._start_driver_process()
+        reader, writer = self._connect_to_driver()
 
         self.write_api = DatastoreWriter(self._config, writer)
         self.write_api.start()  # Sends the init message to the back-end.
@@ -93,68 +92,15 @@ class DatastoreAPI(Actor):
             reader,
             self.write_api,
             self.hosts_ipset,
-            self._driver_process,
         )
         self._reader.link(self._on_worker_died)
         self._reader.start()
 
-    def _start_driver_process(self):
-        """
-        Starts the driver subprocess, connects to it over the socket
-        and sends it the init message.
-
-        Stores the Popen object in self._driver_process for future
-        access.
-
-        :return: the connected socket to the driver.
-        """
-        _log.info("Creating server socket.")
-        if os.path.exists("/run"):
-            # Linux FHS version 3.0+ location for runtime sockets etc.
-            sck_filename = "/run/felix-driver.sck"
-        else:
-            # Older Linux versions use /var/run.
-            sck_filename = "/var/run/felix-driver.sck"
-        try:
-            os.unlink(sck_filename)
-        except OSError:
-            _log.debug("Failed to delete driver socket, assuming it "
-                       "didn't exist.")
-        update_socket = socket.socket(socket.AF_UNIX,
-                                      socket.SOCK_STREAM)
-        update_socket.bind(sck_filename)
-        update_conn = None
-        try:
-            update_socket.listen(1)
-            cmd = self.driver_cmd(sck_filename)
-            _log.info("etcd-driver command line: %s", cmd)
-            if self.killed:
-                _log.critical("Not starting driver: process is shutting down.")
-                raise Exception("Driver shut down.")
-            self._driver_process = subprocess.Popen(cmd)
-            _log.info("Started etcd driver with PID %s",
-                      self._driver_process.pid)
-            with gevent.Timeout(10):
-                update_conn, _ = update_socket.accept()
-            _log.info("Accepted connection on socket")
-        except gevent.Timeout:
-            _log.exception("Backend failed to connect within timeout, "
-                           "giving up.")
-            raise
-        finally:
-            # No longer need the server socket, remove it.
-            try:
-                os.unlink(sck_filename)
-            except OSError:
-                # Unexpected but carry on...
-                _log.exception("Failed to unlink socket. Ignoring.")
-            else:
-                _log.info("Unlinked server socket")
-
-        # Wrap the socket in reader/writer objects that simplify using the
+    def _connect_to_driver(self):
+        # Wrap the pipes in reader/writer objects that simplify using the
         # protocol.
-        reader = MessageReader(update_conn)
-        writer = MessageWriter(update_conn)
+        reader = MessageReader(self.pipe_from_parent)
+        writer = MessageWriter(self.pipe_to_parent)
         return reader, writer
 
     def driver_cmd(self, sck_filename):
@@ -226,8 +172,7 @@ class DatastoreReader(TimedGreenlet):
     connection of its own.
     """
 
-    def __init__(self, config, msg_reader, datastore_writer, hosts_ipset,
-                 driver_proc):
+    def __init__(self, config, msg_reader, datastore_writer, hosts_ipset):
         super(DatastoreReader, self).__init__()
         self._config = config
         self.hosts_ipset = hosts_ipset
@@ -253,8 +198,6 @@ class DatastoreReader(TimedGreenlet):
         # another thread.  Automatically reset to False after the resync is
         # triggered.
         self.resync_requested = False
-        # The Popen object for the driver.
-        self._driver_process = driver_proc
         # True if we've been shut down.
         self.killed = False
         # Stats.
@@ -285,11 +228,6 @@ class DatastoreReader(TimedGreenlet):
             except SocketClosed:
                 _log.critical("The driver process closed its socket, Felix "
                               "must exit.")
-                die_and_restart()
-            driver_rc = self._driver_process.poll()
-            if driver_rc is not None:
-                _log.critical("Driver process died with RC = %s.  Felix must "
-                              "exit.", driver_rc)
                 die_and_restart()
 
     def _dispatch_msg_from_driver(self, msg_type, msg, seq_no):
@@ -364,12 +302,9 @@ class DatastoreReader(TimedGreenlet):
         If the config has changed since a previous call, triggers Felix
         to die.
         """
-        global_config = dict(msg.global_config)
-        host_config = dict(msg.per_host_config)
-        _log.info("Config loaded by driver:\n"
-                  "Global: %s\nPer-host: %s",
-                  global_config,
-                  host_config)
+        global_config = dict(msg.config)
+        host_config = dict(msg.config)
+        _log.info("Config loaded by driver: %s", msg.config)
         if self.configured.is_set():
             # We've already been configured.  We don't yet support
             # dynamic config update so instead we check if the config
@@ -391,10 +326,11 @@ class DatastoreReader(TimedGreenlet):
             # destructive.
             self.last_host_config = host_config.copy()
             self.last_global_config = global_config.copy()
-            self._config.report_etcd_config(host_config,
-                                            global_config)
+            self._config.update_from(msg.config)
+            _log.info("Config loaded: %s", self._config.__dict__)
             self.configured.set()
-            self._datastore_writer.on_config_resolved(async=True)
+
+        _log.info("Config loaded by driver: %s", msg.config)
 
     def _on_in_sync_from_driver(self, msg):
         """
@@ -483,8 +419,8 @@ class DatastoreReader(TimedGreenlet):
         hostname = self._config.HOSTNAME
         endpoint_id = msg.id.endpoint_id
         combined_id = HostEndpointId(hostname, endpoint_id)
-        _log.debug("Host iface %s updated", combined_id)
-        _stats.increment("Host iface created/updated")
+        _log.debug("Host endpoint %s updated", combined_id)
+        _stats.increment("Host endpoint created/updated")
         endpoint = {
             "name": msg.endpoint.name or None,
             "profile_ids": msg.endpoint.profile_ids,
@@ -499,8 +435,8 @@ class DatastoreReader(TimedGreenlet):
         hostname = self._config.HOSTNAME
         endpoint_id = msg.id.endpoint_id
         combined_id = HostEndpointId(hostname, endpoint_id)
-        _log.debug("Host iface %s removed", combined_id)
-        _stats.increment("Host iface removed")
+        _log.debug("Host endpoint %s removed", combined_id)
+        _stats.increment("Host endpoint removed")
         self.splitter.on_host_ep_update(combined_id, None)
 
     def on_prof_rules_update(self, msg):
@@ -579,13 +515,6 @@ class DatastoreReader(TimedGreenlet):
 
     def kill_watcher(self):
         self.killed = True
-        if self._driver_process is not None:
-            try:
-                self._driver_process.send_signal(signal.SIGTERM)
-            except OSError:  # Likely already died.
-                _log.exception("Failed to kill driver process")
-            else:
-                self._driver_process.wait()
 
 
 class DatastoreWriter(Actor):
@@ -605,9 +534,6 @@ class DatastoreWriter(Actor):
         self._reporting_allowed = True
         self._status_reporting_greenlet = None
 
-    def _on_actor_started(self):
-        self.send_init()
-
     @logging_exceptions
     def _periodically_report_status(self):
         """
@@ -624,41 +550,10 @@ class DatastoreWriter(Actor):
             sleep_time = interval + jitter
             gevent.sleep(sleep_time)
 
-    def send_init(self):
-        # Give the driver its config.
-        envelope = felixbackend_pb2.FromDataplane()
-        payload = envelope.init
-        for addr in self._config.ETCD_ADDRS:
-            payload.etcd_urls.append(self._config.ETCD_SCHEME + "://" + addr)
-        payload.hostname = self._config.HOSTNAME
-        if self._config.ETCD_KEY_FILE:
-            payload.etcd_key_file = self._config.ETCD_KEY_FILE
-        if self._config.ETCD_CERT_FILE:
-            payload.etcd_cert_file = self._config.ETCD_CERT_FILE
-        if self._config.ETCD_CA_FILE:
-            payload.etcd_ca_cert_file = self._config.ETCD_CA_FILE
-        self._writer.send_message(envelope)
-
     @actor_message()
     def on_config_resolved(self):
         # Config now fully resolved, inform the driver.
         self.config_resolved = True
-        driver_log_file = self._config.DRIVERLOGFILE
-
-        envelope = felixbackend_pb2.FromDataplane()
-        payload = envelope.config_resolved
-
-        payload.log_file = driver_log_file
-        payload.endpoint_status_reporting_delay = (
-            self._config.ENDPOINT_REPORT_DELAY if
-                self._config.REPORT_ENDPOINT_STATUS else 0
-        )
-        payload.endpoint_status_resync_interval = (
-            self._config.ENDPOINT_REPORT_DELAY * 180 if
-                self._config.REPORT_ENDPOINT_STATUS else 0
-        )
-        # TODO: Remaining parameters.
-        self._writer.send_message(envelope)
 
         if self._config.REPORTING_INTERVAL_SECS > 0:
             self._status_reporting_greenlet = TimedGreenlet(
@@ -686,7 +581,7 @@ class DatastoreWriter(Actor):
         time_formatted = iso_utc_timestamp()
         uptime = monotonic_time() - self._start_time
         envelope = felixbackend_pb2.FromDataplane()
-        payload = envelope.felix_status_update
+        payload = envelope.process_status_update
         payload.iso_timestamp = time_formatted
         payload.uptime = uptime
         self._writer.send_message(envelope)

@@ -554,7 +554,7 @@ class TestConfig(unittest.TestCase):
             "MaxIpsetSize": "0",
         }
         with mock.patch('calico.common.complete_logging'):
-            config.report_etcd_config({}, cfg_dict)
+            config.update_from({}, cfg_dict)
 
         self.assertEqual(config.MAX_IPSET_SIZE, 2**20)
 

@@ -27,11 +27,11 @@ monkey.patch_all()
 from BaseHTTPServer import HTTPServer
 import functools
 import logging
-import optparse
 import os
 import signal
 
 import gevent
+from gevent.fileobject import FileObject
 from prometheus_client import MetricsHandler
 
 from calico import common
@@ -55,7 +55,7 @@ from calico.felix.datastore import DatastoreAPI
 _log = logging.getLogger(__name__)
 
 
-def _main_greenlet(config):
+def _main_greenlet():
     """
     The root of our tree of greenlets.  Responsible for restarting
     its children if desired.
@@ -65,7 +65,18 @@ def _main_greenlet(config):
         hosts_ipset_v4 = IpsetActor(HOSTS_IPSET_V4)
 
         monitored_items = []
-        datastore = DatastoreAPI(config, hosts_ipset_v4)
+
+        # The parent process sends us communication pipes as FD 3 and 4. Open
+        # those as files.  Wrap the resulting files in a FileObject to make
+        # them cooperate with gevent.
+        pipe_from_parent = FileObject(os.fdopen(3, 'r', -1))
+        pipe_to_parent = FileObject(os.fdopen(4, 'w', -1))
+
+        config = Config()
+        datastore = DatastoreAPI(config,
+                                 pipe_from_parent,
+                                 pipe_to_parent,
+                                 hosts_ipset_v4)
         datastore.start()
         monitored_items.append(datastore.greenlet)
 
@@ -277,38 +288,8 @@ def shut_down(etcd_api):
 def main():
     # Initialise the logging with default parameters.
     common.default_logging(gevent_in_use=True)
-
-    # Create configuration, reading defaults from file if it exists.
-    parser = optparse.OptionParser()
-    parser.add_option('-c', '--config-file', dest='config_file',
-                      help="configuration file to use",
-                      default="/etc/calico/felix.cfg")
-    options, args = parser.parse_args()
-
     try:
-        config = Config(options.config_file)
-    except Exception:
-        # Config loading error, and not just invalid parameters (from optparse)
-        # as they generate a SystemExit. Attempt to open a log file, ignoring
-        # any errors it gets, before we raise the exception.
-        try:
-            common.complete_logging("/var/log/calico/felix.log",
-                                    logging.DEBUG,
-                                    logging.DEBUG,
-                                    logging.DEBUG,
-                                    gevent_in_use=True)
-        except Exception:
-            pass
-
-        # Log the exception with logging in whatever state we managed to get it
-        # to, then reraise it, taking Felix down.
-        _log.exception("Exception loading configuration")
-        raise
-
-    _log.info("Felix initializing")
-
-    try:
-        gevent.spawn(_main_greenlet, config).join()  # Should never return
+        gevent.spawn(_main_greenlet).join()  # Should never return
     except Exception:
         # Make absolutely sure that we exit by asking the OS to terminate our
         # process.  We don't want to let a stray background thread keep us

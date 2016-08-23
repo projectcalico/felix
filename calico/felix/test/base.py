@@ -94,6 +94,6 @@ def load_config(filename, path="calico/felix/test/data/", env_dict=None,
             config = Config(path + filename)
 
     with mock.patch('calico.common.complete_logging'):
-        config.report_etcd_config(host_dict, global_dict)
+        config.update_from(host_dict, global_dict)
 
     return config

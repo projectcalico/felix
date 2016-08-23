@@ -55,14 +55,6 @@ LOGLEVELS = {"none":      None,
              "crit":      logging.CRITICAL,
              "critical":  logging.CRITICAL}
 
-# Sources of a configuration parameter. The order is highest-priority first.
-DEFAULT = "Default"
-ENV = "Environment variable"
-FILE = "Configuration file"
-GLOBAL_ETCD = "Global etcd configuration"
-LOCAL_ETCD = "Host specific etcd configuration"
-DEFAULT_SOURCES = [ENV, FILE, GLOBAL_ETCD, LOCAL_ETCD]
-
 
 class ConfigException(Exception):
     def __init__(self, message, parameter):
@@ -87,8 +79,7 @@ class ConfigParameter(object):
     - The current value
     - Where the value was read from
     """
-    def __init__(self, name, description, default,
-                 sources=DEFAULT_SOURCES, value_is_int=False,
+    def __init__(self, name, description, default, value_is_int=False,
                  value_is_bool=False, value_is_int_list=False):
         """
         Create a configuration parameter.
@@ -99,78 +90,66 @@ class ConfigParameter(object):
         """
         self.description = description
         self.name = name
-        self.sources = sources
         self.value = default
-        self.active_source = None
         self.value_is_int = value_is_int
         self.value_is_bool = value_is_bool
         self.value_is_int_list = value_is_int_list
 
-    def set(self, value, source):
+    def set(self, value):
         """
         Set a value of a parameter - unless already set.
         :param value: value
         :param source: source; for example "Configuration file /etc/felix.cfg"
         """
-        if self.active_source is None:
-            log.debug("Read value %r for %s (%s) from %r",
-                      value,
-                      self.name,
-                      self.description,
-                      source)
+        log.debug("Read value %r for %s (%s)",
+                  value,
+                  self.name,
+                  self.description)
 
-            self.active_source = source
-
-            if self.value_is_int:
-                # Set value before the call to int, so the ConfigException has
-                # the right value if / when it goes wrong.
-                self.value = value
-                try:
-                    # The int(..., 0) form barfs on non-strings so we need to
-                    # check if we've already got a number in-hand.
-                    if isinstance(value, Number):
-                        self.value = int(value)
-                    else:
-                        self.value = int(value, 0)
-                except (ValueError, TypeError):
-                    raise ConfigException("Field was not integer",
-                                          self)
-            elif self.value_is_bool:
-                lower_val = str(value).lower()
-                log.debug("Parsing %r as a Boolean.", lower_val)
-                if lower_val in ("true", "1", "yes", "y", "t"):
-                    self.value = True
-                elif lower_val in ("false", "0", "no", "n", "f"):
-                    self.value = False
+        if self.value_is_int:
+            # Set value before the call to int, so the ConfigException has
+            # the right value if / when it goes wrong.
+            self.value = value
+            try:
+                # The int(..., 0) form barfs on non-strings so we need to
+                # check if we've already got a number in-hand.
+                if isinstance(value, Number):
+                    self.value = int(value)
                 else:
-                    raise ConfigException("Field was not a valid Boolean",
-                                          self)
-            elif self.value_is_int_list:
-                splits = str(value).split(",")
-                ints = []
-                for s in splits:
-                    s = s.strip()
-                    if not s:
-                        continue
-                    if re.match("^\d+$", s):
-                        ints.append(int(s))
-                    else:
-                        raise ConfigException("Invalid list of ints", self)
-                self.value = ints
+                    self.value = int(value, 0)
+            except (ValueError, TypeError):
+                raise ConfigException("Field was not integer",
+                                      self)
+        elif self.value_is_bool:
+            lower_val = str(value).lower()
+            log.debug("Parsing %r as a Boolean.", lower_val)
+            if lower_val in ("true", "1", "yes", "y", "t"):
+                self.value = True
+            elif lower_val in ("false", "0", "no", "n", "f"):
+                self.value = False
             else:
-                # Calling str in principle can throw an exception, but it's
-                # hard to see how in practice, so don't catch and wrap.
-                self.value = str(value)
+                raise ConfigException("Field was not a valid Boolean",
+                                      self)
+        elif self.value_is_int_list:
+            splits = str(value).split(",")
+            ints = []
+            for s in splits:
+                s = s.strip()
+                if not s:
+                    continue
+                if re.match("^\d+$", s):
+                    ints.append(int(s))
+                else:
+                    raise ConfigException("Invalid list of ints", self)
+            self.value = ints
         else:
-            log.warning("Ignore %r value for %s (%s) - already set from %r",
-                        source,
-                        self.name,
-                        self.description,
-                        self.active_source)
+            # Calling str in principle can throw an exception, but it's
+            # hard to see how in practice, so don't catch and wrap.
+            self.value = str(value)
 
 
 class Config(object):
-    def __init__(self, config_path):
+    def __init__(self):
         """
         Create a config. This reads data from the following sources.
         - Environment variables
@@ -190,24 +169,23 @@ class Config(object):
         self.plugins = {}
 
         self.add_parameter("EtcdAddr", "Address and port for etcd",
-                           "localhost:4001", sources=[ENV, FILE])
+                           "localhost:4001")
         self.add_parameter("FelixHostname", "Felix compute host hostname",
-                           socket.gethostname(), sources=[ENV, FILE])
+                           socket.gethostname())
         self.add_parameter("EtcdScheme", "Protocol type for http or https",
-                           "http", sources=[ENV, FILE])
+                           "http")
         self.add_parameter("EtcdKeyFile", "Path to etcd key file",
-                           "none", sources=[ENV, FILE])
+                           "none")
         self.add_parameter("EtcdCertFile", "Path to etcd certificate file",
-                           "none", sources=[ENV, FILE])
+                           "none")
         self.add_parameter("EtcdCaFile", "Path to etcd CA certificate file",
-                           "/etc/ssl/certs/ca-certificates.crt",
-                           sources=[ENV, FILE])
+                           "/etc/ssl/certs/ca-certificates.crt")
         self.add_parameter("EtcdEndpoints", "Comma separated list of etcd "
                            "endpoints, of the form scheme://address:port.  "
                            "For example "
                            "\"https://1.2.3.4:2379,https://1.2.3.5:2379\".  "
                            "This option overrides EtcdScheme and EtcdAddr.",
-                           "", sources=[ENV, FILE])
+                           "")
 
         self.add_parameter("StartupCleanupDelay",
                            "Delay before cleanup starts",
@@ -320,25 +298,6 @@ class Config(object):
         self.add_parameter("IptablesGeneratorPlugin",
                            "Which IptablesGenerator Plugin to use.",
                            "default")
-
-        # Read the environment variables, then the configuration file.
-        self._read_env_vars()
-        self._finish_update(final=False)
-        self._read_cfg_file(config_path)
-        self._finish_update(final=False)
-
-        # Load the iptables generator plugin.
-        self.plugins["iptables_generator"] = _load_plugin(
-            FELIX_IPT_GENERATOR_PLUGIN_NAME,
-            self.IPTABLES_GENERATOR_PLUGIN
-        )()
-
-        # Give plugins the opportunity to register any plugin specific
-        # config attributes.   We've already loaded environment variables and
-        # the configuration file at this point, so plugin specific attributes
-        # will only be settable via etcd.
-        for plugin in self.plugins.itervalues():
-            plugin.register_config(self)
 
     def add_parameter(self, name, description, default, **kwargs):
         """
@@ -460,78 +419,46 @@ class Config(object):
         if final:
             # Log configuration - the whole lot of it.
             for name, parameter in self.parameters.iteritems():
-                log.info("Parameter %s (%s) has value %r read from %s",
+                log.info("Parameter %s (%s) has value %r",
                          name,
                          parameter.description,
-                         parameter.value,
-                         parameter.active_source)
+                         parameter.value)
 
-    def _read_env_vars(self):
-        """
-        Read all of the variables from the environment.
-        """
-        for name, parameter in self.parameters.iteritems():
-            # All currently defined config parameters have ENV as a valid
-            # source.
-            assert(ENV in parameter.sources)
-            # ENV is the first source, so we can assert that using defaults.
-            assert(parameter.active_source is None)
-
-            env_var = ("FELIX_%s" % name).upper()
-            if env_var in os.environ:
-                parameter.set(os.environ[env_var],
-                              "Environment variable %s" % env_var)
-
-    def _read_cfg_file(self, config_file):
-        log.info("Reading config from %s", config_file)
-
-        if not os.path.exists(config_file):
-            log.info("Config file %s not present", config_file)
-            return
-
-        parser = ConfigParser.ConfigParser()
-        parser.read(config_file)
-
-        # The parser has an odd behaviour where a section called [DEFAULT] is
-        # treated as a special case. If the user happens to use that name and
-        # they happen not to put any other sections in the file then no config
-        # is applied.  Explicitly grab the defaults now.
-        cfg_dict = parser.defaults()
-        # Build up the cfg dictionary from the file.
-        for section in parser.sections():
-            log.debug("Examining section %s", section)
-            cfg_dict.update(dict(parser.items(section)))
-
-        source = "Configuration file %s" % config_file
-
-        for name, parameter in self.parameters.iteritems():
-            # Config parameters are lower-cased by ConfigParser
-            name = name.lower()
-            if FILE in parameter.sources and name in cfg_dict:
-                # This can validly be read from file.
-                log.debug("Read %s = %s from file", name, cfg_dict[name])
-                parameter.set(cfg_dict.pop(name), source)
-        self._warn_unused_cfg(cfg_dict, source)
-
-    def report_etcd_config(self, host_dict, global_dict):
+    def update_from(self, config_dict):
         """
         Report configuration parameters read from etcd to the config
         component. This must be called only once, after configuration is
         initially read and before the config structure is used (except for
         ETCD_ADDRS and HOSTNAME).
 
-        :param host_dict: Dictionary of etcd parameters
-        :param global_dict: Dictionary of global parameters
+        :param config_dict: Dictionary of etcd parameters
         :raises ConfigException
         """
         log.debug("Configuration reported from etcd")
-        for source, cfg_dict in ((LOCAL_ETCD, host_dict),
-                                 (GLOBAL_ETCD, global_dict)):
-            for name, parameter in self.parameters.iteritems():
-                if source in parameter.sources and name in cfg_dict:
-                    parameter.set(cfg_dict.pop(name), source)
 
-            self._warn_unused_cfg(cfg_dict, source)
+        for name, parameter in self.parameters.iteritems():
+            if name in config_dict:
+                parameter.set(config_dict[name])
+
+        self._finish_update(final=False)
+
+        # Load the iptables generator plugin.
+        self.plugins["iptables_generator"] = _load_plugin(
+            FELIX_IPT_GENERATOR_PLUGIN_NAME,
+            self.IPTABLES_GENERATOR_PLUGIN
+        )()
+
+        # Give plugins the opportunity to register any plugin specific
+        # config attributes.   We've already loaded environment variables and
+        # the configuration file at this point, so plugin specific attributes
+        # will only be settable via etcd.
+        for plugin in self.plugins.itervalues():
+            plugin.register_config(self)
+
+        # Re-load the config in case the plugin registered a handler.
+        for name, parameter in self.parameters.iteritems():
+            if name in config_dict:
+                parameter.set(config_dict[name])
 
         self._finish_update(final=True)
 

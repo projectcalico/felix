@@ -19,15 +19,13 @@ calico.etcddriver.protocol
 Protocol constants for Felix <-> Driver protocol.
 """
 import logging
-import socket
 import errno
+import os
 import struct
 from io import BytesIO
-import msgpack
 import select
 
 from calico.felix import felixbackend_pb2
-from google.protobuf.internal.containers import ScalarMap
 
 _log = logging.getLogger(__name__)
 
@@ -174,7 +172,7 @@ class MessageWriter(object):
     Supports buffering a number of messages for subsequent flush().
     """
     def __init__(self, sck):
-        self._sck = sck
+        self._pipe = sck
         self._buf = BytesIO()
         self._updates_pending = 0
 
@@ -215,19 +213,19 @@ class MessageWriter(object):
         buf_contents = self._buf.getvalue()
         if buf_contents:
             try:
-                self._sck.sendall(buf_contents)
-            except socket.error as e:
-                _log.exception("Failed to write to socket")
+                self._pipe.write(buf_contents)
+                self._pipe.flush()
+            except OSError as e:
+                _log.exception("Failed to write to pipe")
                 raise WriteFailed(e)
             self._buf = BytesIO()
         self._updates_pending = 0
 
 
 class MessageReader(object):
-    def __init__(self, sck):
-        self._sck = sck
+    def __init__(self, pipe):
+        self._pipe = pipe
         self._current_msg_type = None
-        self._unpacker = msgpack.Unpacker()
         self._buf = ""
 
     def new_messages(self, timeout=1):
@@ -236,7 +234,7 @@ class MessageReader(object):
         message body (as a dict).
 
         May generate 0 events in certain conditions even if there are
-        events available.  (If the socket returns EAGAIN, for example.)
+        events available.  (If the read returns EAGAIN, for example.)
 
         :param timeout: Maximum time to block waiting on the socket before
                giving up.  No exception is raised upon timeout but 0 events
@@ -245,48 +243,47 @@ class MessageReader(object):
         :raises socket.error if an unexpected socket error occurs.
         """
         if timeout is not None and not self._buf:
-            read_ready, _, _ = select.select([self._sck], [], [], timeout)
+            read_ready, _, _ = select.select([self._pipe], [], [], timeout)
             if not read_ready:
                 return
 
         while len(self._buf) < 8:
             _log.debug("Reading length header...")
-            self._read()
+            self._read(8 - len(self._buf))
 
-        (length,) = struct.unpack_from("<Q", self._buf, 0)
+        (length,) = struct.unpack("<Q", self._buf)
         _log.debug("Read message length: %s", length)
 
-        while len(self._buf) < 8 + length:
+        self._buf = ""
+        while len(self._buf) < length:
             _log.debug("Reading data. Have: %s, need: %s", len(self._buf),
-                       8+length)
-            self._read()
-
-        protobuf = self._buf[8:8 + length]
-        self._buf = self._buf[8 + length:]
+                       length)
+            self._read(length - len(self._buf))
 
         envelope = felixbackend_pb2.ToDataplane()
-        envelope.ParseFromString(protobuf)
+        envelope.ParseFromString(self._buf)
+        self._buf = ""
         _log.debug("Received message: envelope = %s", envelope)
         message_type = envelope.WhichOneof("payload")
         payload = getattr(envelope, message_type)
         _log.debug("Payload: %s", payload)
         yield message_type, payload, envelope.sequence_number
 
-    def _read(self):
+    def _read(self, num_bytes):
         try:
-            data = self._sck.recv(16384)
+            data = self._pipe.read(num_bytes)
             _log.debug("Read %s bytes", len(data))
-        except socket.error as e:
+        except OSError as e:
             if e.errno in (errno.EAGAIN,
                            errno.EWOULDBLOCK,
                            errno.EINTR):
                 _log.debug("Retryable error on read.")
                 return
             else:
-                _log.error("Failed to read from socket: %r", e)
+                _log.error("Failed to read from pipe: %r", e)
                 raise
         if not data:
-            # No data indicates an orderly shutdown of the socket,
+            # No data indicates an orderly shutdown of the pipe,
             # which shouldn't happen.
             _log.error("Socket closed by other end.")
             raise SocketClosed()

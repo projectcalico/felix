@@ -20,7 +20,7 @@ DESCRIPTOR = _descriptor.FileDescriptor(
   name='felixbackend.proto',
   package='felix',
   syntax='proto3',
-  serialized_pb=_b('\n\x12\x66\x65lixbackend.proto\x12\x05\x66\x65lix\"\xfc\x05\n\x0bToDataplane\x12\x17\n\x0fsequence_number\x18\x0e \x01(\x04\x12 \n\x07in_sync\x18\x01 \x01(\x0b\x32\r.felix.InSyncH\x00\x12*\n\x0cipset_update\x18\x02 \x01(\x0b\x32\x12.felix.IPSetUpdateH\x00\x12\x35\n\x12ipset_delta_update\x18\x03 \x01(\x0b\x32\x17.felix.IPSetDeltaUpdateH\x00\x12*\n\x0cipset_remove\x18\x04 \x01(\x0b\x32\x12.felix.IPSetRemoveH\x00\x12;\n\x15\x61\x63tive_profile_update\x18\x05 \x01(\x0b\x32\x1a.felix.ActiveProfileUpdateH\x00\x12;\n\x15\x61\x63tive_profile_remove\x18\x06 \x01(\x0b\x32\x1a.felix.ActiveProfileRemoveH\x00\x12\x39\n\x14\x61\x63tive_policy_update\x18\x07 \x01(\x0b\x32\x19.felix.ActivePolicyUpdateH\x00\x12\x39\n\x14\x61\x63tive_policy_remove\x18\x08 \x01(\x0b\x32\x19.felix.ActivePolicyRemoveH\x00\x12\x39\n\x14host_endpoint_update\x18\t \x01(\x0b\x32\x19.felix.HostEndpointUpdateH\x00\x12\x39\n\x14host_endpoint_remove\x18\n \x01(\x0b\x32\x19.felix.HostEndpointRemoveH\x00\x12\x41\n\x18workload_endpoint_update\x18\x0b \x01(\x0b\x32\x1d.felix.WorkloadEndpointUpdateH\x00\x12\x41\n\x18workload_endpoint_remove\x18\x0c \x01(\x0b\x32\x1d.felix.WorkloadEndpointRemoveH\x00\x12,\n\rconfig_update\x18\r \x01(\x0b\x32\x13.felix.ConfigUpdateH\x00\x42\t\n\x07payload\"\xeb\x03\n\rFromDataplane\x12\x17\n\x0fsequence_number\x18\x08 \x01(\x04\x12\x1b\n\x04init\x18\x01 \x01(\x0b\x32\x0b.felix.InitH\x00\x12\x30\n\x0f\x63onfig_resolved\x18\x02 \x01(\x0b\x32\x15.felix.ConfigResolvedH\x00\x12\x37\n\x13\x66\x65lix_status_update\x18\x03 \x01(\x0b\x32\x18.felix.FelixStatusUpdateH\x00\x12\x46\n\x1bhost_endpoint_status_update\x18\x04 \x01(\x0b\x32\x1f.felix.HostEndpointStatusUpdateH\x00\x12\x46\n\x1bhost_endpoint_status_remove\x18\x05 \x01(\x0b\x32\x1f.felix.HostEndpointStatusRemoveH\x00\x12N\n\x1fworkload_endpoint_status_update\x18\x06 \x01(\x0b\x32#.felix.WorkloadEndpointStatusUpdateH\x00\x12N\n\x1fworkload_endpoint_status_remove\x18\x07 \x01(\x0b\x32#.felix.WorkloadEndpointStatusRemoveH\x00\x42\t\n\x07payload\"u\n\x04Init\x12\x11\n\tetcd_urls\x18\x01 \x03(\t\x12\x15\n\retcd_key_file\x18\x02 \x01(\t\x12\x16\n\x0e\x65tcd_cert_file\x18\x03 \x01(\t\x12\x19\n\x11\x65tcd_ca_cert_file\x18\x04 \x01(\t\x12\x10\n\x08hostname\x18\x05 \x01(\t\"\xae\x01\n\x0e\x43onfigResolved\x12\x10\n\x08log_file\x18\x01 \x01(\t\x12\'\n\x1f\x65ndpoint_status_reporting_delay\x18\x02 \x01(\x01\x12\'\n\x1f\x65ndpoint_status_resync_interval\x18\x03 \x01(\x01\x12\x10\n\x08sev_file\x18\x04 \x01(\x05\x12\x12\n\nsev_screen\x18\x05 \x01(\x05\x12\x12\n\nsev_syslog\x18\x06 \x01(\x05\"\xf8\x01\n\x0c\x43onfigUpdate\x12<\n\rglobal_config\x18\x01 \x03(\x0b\x32%.felix.ConfigUpdate.GlobalConfigEntry\x12?\n\x0fper_host_config\x18\x02 \x03(\x0b\x32&.felix.ConfigUpdate.PerHostConfigEntry\x1a\x33\n\x11GlobalConfigEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x1a\x34\n\x12PerHostConfigEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x08\n\x06InSync\"*\n\x0bIPSetUpdate\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0f\n\x07members\x18\x02 \x03(\t\"N\n\x10IPSetDeltaUpdate\x12\n\n\x02id\x18\x01 \x01(\t\x12\x15\n\radded_members\x18\x02 \x03(\t\x12\x17\n\x0fremoved_members\x18\x03 \x03(\t\"\x19\n\x0bIPSetRemove\x12\n\n\x02id\x18\x01 \x01(\t\"T\n\x13\x41\x63tiveProfileUpdate\x12\x1c\n\x02id\x18\x01 \x01(\x0b\x32\x10.felix.ProfileID\x12\x1f\n\x07profile\x18\x02 \x01(\x0b\x32\x0e.felix.Profile\"3\n\x13\x41\x63tiveProfileRemove\x12\x1c\n\x02id\x18\x01 \x01(\x0b\x32\x10.felix.ProfileID\"\x19\n\tProfileID\x12\x0c\n\x04name\x18\x01 \x01(\t\"R\n\x07Profile\x12\"\n\rinbound_rules\x18\x01 \x03(\x0b\x32\x0b.felix.Rule\x12#\n\x0eoutbound_rules\x18\x02 \x03(\x0b\x32\x0b.felix.Rule\"P\n\x12\x41\x63tivePolicyUpdate\x12\x1b\n\x02id\x18\x01 \x01(\x0b\x32\x0f.felix.PolicyID\x12\x1d\n\x06policy\x18\x02 \x01(\x0b\x32\r.felix.Policy\"1\n\x12\x41\x63tivePolicyRemove\x12\x1b\n\x02id\x18\x01 \x01(\x0b\x32\x0f.felix.PolicyID\"&\n\x08PolicyID\x12\x0c\n\x04tier\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\"Q\n\x06Policy\x12\"\n\rinbound_rules\x18\x01 \x03(\x0b\x32\x0b.felix.Rule\x12#\n\x0eoutbound_rules\x18\x02 \x03(\x0b\x32\x0b.felix.Rule\"\xbf\x04\n\x04Rule\x12\x0e\n\x06\x61\x63tion\x18\x01 \x01(\t\x12$\n\nip_version\x18\x02 \x01(\x0e\x32\x10.felix.IPVersion\x12!\n\x08protocol\x18\x03 \x01(\x0b\x32\x0f.felix.Protocol\x12\x0f\n\x07src_net\x18\x04 \x01(\t\x12#\n\tsrc_ports\x18\x05 \x03(\x0b\x32\x10.felix.PortRange\x12\x0f\n\x07\x64st_net\x18\x06 \x01(\t\x12#\n\tdst_ports\x18\x07 \x03(\x0b\x32\x10.felix.PortRange\x12\x11\n\ticmp_type\x18\x08 \x01(\x05\x12\x11\n\ticmp_code\x18\t \x01(\x05\x12\x16\n\x0esrc_ip_set_ids\x18\n \x03(\t\x12\x16\n\x0e\x64st_ip_set_ids\x18\x0b \x03(\t\x12%\n\x0cnot_protocol\x18\x66 \x01(\x0b\x32\x0f.felix.Protocol\x12\x13\n\x0bnot_src_net\x18g \x01(\t\x12\'\n\rnot_src_ports\x18h \x03(\x0b\x32\x10.felix.PortRange\x12\x13\n\x0bnot_dst_net\x18i \x01(\t\x12\'\n\rnot_dst_ports\x18j \x03(\x0b\x32\x10.felix.PortRange\x12\x15\n\rnot_icmp_type\x18k \x01(\x05\x12\x15\n\rnot_icmp_code\x18l \x01(\x05\x12\x1a\n\x12not_src_ip_set_ids\x18m \x03(\t\x12\x1a\n\x12not_dst_ip_set_ids\x18n \x03(\t\x12\x13\n\nlog_prefix\x18\xc8\x01 \x01(\t\">\n\x08Protocol\x12\x10\n\x06number\x18\x01 \x01(\x05H\x00\x12\x0e\n\x04name\x18\x02 \x01(\tH\x00\x42\x10\n\x0enumber_or_name\"(\n\tPortRange\x12\r\n\x05\x66irst\x18\x01 \x01(\x05\x12\x0c\n\x04last\x18\x02 \x01(\x05\"g\n\x12WorkloadEndpointID\x12\x17\n\x0forchestrator_id\x18\x02 \x01(\t\x12\x13\n\x0bworkload_id\x18\x03 \x01(\t\x12\x13\n\x0b\x65ndpoint_id\x18\x04 \x01(\tJ\x04\x08\x01\x10\x02R\x08hostname\"j\n\x16WorkloadEndpointUpdate\x12%\n\x02id\x18\x01 \x01(\x0b\x32\x19.felix.WorkloadEndpointID\x12)\n\x08\x65ndpoint\x18\x05 \x01(\x0b\x32\x17.felix.WorkloadEndpoint\"\x97\x01\n\x10WorkloadEndpoint\x12\r\n\x05state\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0b\n\x03mac\x18\x03 \x01(\t\x12\x13\n\x0bprofile_ids\x18\x04 \x03(\t\x12\x11\n\tipv4_nets\x18\x05 \x03(\t\x12\x11\n\tipv6_nets\x18\x06 \x03(\t\x12\x1e\n\x05tiers\x18\x07 \x03(\x0b\x32\x0f.felix.TierInfo\"?\n\x16WorkloadEndpointRemove\x12%\n\x02id\x18\x01 \x01(\x0b\x32\x19.felix.WorkloadEndpointID\"5\n\x0eHostEndpointID\x12\x13\n\x0b\x65ndpoint_id\x18\x02 \x01(\tJ\x04\x08\x01\x10\x02R\x08hostname\"^\n\x12HostEndpointUpdate\x12!\n\x02id\x18\x01 \x01(\x0b\x32\x15.felix.HostEndpointID\x12%\n\x08\x65ndpoint\x18\x03 \x01(\x0b\x32\x13.felix.HostEndpoint\"\x8b\x01\n\x0cHostEndpoint\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x13\n\x0bprofile_ids\x18\x02 \x03(\t\x12\x1e\n\x05tiers\x18\x03 \x03(\x0b\x32\x0f.felix.TierInfo\x12\x1b\n\x13\x65xpected_ipv4_addrs\x18\x04 \x03(\t\x12\x1b\n\x13\x65xpected_ipv6_addrs\x18\x05 \x03(\t\"7\n\x12HostEndpointRemove\x12!\n\x02id\x18\x01 \x01(\x0b\x32\x15.felix.HostEndpointID\"*\n\x08TierInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08policies\x18\x02 \x03(\t\":\n\x11\x46\x65lixStatusUpdate\x12\x15\n\riso_timestamp\x18\x01 \x01(\t\x12\x0e\n\x06uptime\x18\x02 \x01(\x01\"d\n\x18HostEndpointStatusUpdate\x12!\n\x02id\x18\x01 \x01(\x0b\x32\x15.felix.HostEndpointID\x12%\n\x06status\x18\x02 \x01(\x0b\x32\x15.felix.EndpointStatus\" \n\x0e\x45ndpointStatus\x12\x0e\n\x06status\x18\x01 \x01(\t\"=\n\x18HostEndpointStatusRemove\x12!\n\x02id\x18\x01 \x01(\x0b\x32\x15.felix.HostEndpointID\"l\n\x1cWorkloadEndpointStatusUpdate\x12%\n\x02id\x18\x01 \x01(\x0b\x32\x19.felix.WorkloadEndpointID\x12%\n\x06status\x18\x02 \x01(\x0b\x32\x15.felix.EndpointStatus\"E\n\x1cWorkloadEndpointStatusRemove\x12%\n\x02id\x18\x01 \x01(\x0b\x32\x19.felix.WorkloadEndpointID*(\n\tIPVersion\x12\x07\n\x03\x41NY\x10\x00\x12\x08\n\x04IPV4\x10\x04\x12\x08\n\x04IPV6\x10\x06\x32G\n\x0c\x44\x61taplaneApi\x12\x37\n\x07\x43onnect\x12\x14.felix.FromDataplane\x1a\x12.felix.ToDataplane(\x01\x30\x01\x42\x07Z\x05protob\x06proto3')
+  serialized_pb=_b('\n\x12\x66\x65lixbackend.proto\x12\x05\x66\x65lix\"\xc0\x07\n\x0bToDataplane\x12\x17\n\x0fsequence_number\x18\x0f \x01(\x04\x12 \n\x07in_sync\x18\x01 \x01(\x0b\x32\r.felix.InSyncH\x00\x12*\n\x0cipset_update\x18\x02 \x01(\x0b\x32\x12.felix.IPSetUpdateH\x00\x12\x35\n\x12ipset_delta_update\x18\x03 \x01(\x0b\x32\x17.felix.IPSetDeltaUpdateH\x00\x12*\n\x0cipset_remove\x18\x04 \x01(\x0b\x32\x12.felix.IPSetRemoveH\x00\x12;\n\x15\x61\x63tive_profile_update\x18\x05 \x01(\x0b\x32\x1a.felix.ActiveProfileUpdateH\x00\x12;\n\x15\x61\x63tive_profile_remove\x18\x06 \x01(\x0b\x32\x1a.felix.ActiveProfileRemoveH\x00\x12\x39\n\x14\x61\x63tive_policy_update\x18\x07 \x01(\x0b\x32\x19.felix.ActivePolicyUpdateH\x00\x12\x39\n\x14\x61\x63tive_policy_remove\x18\x08 \x01(\x0b\x32\x19.felix.ActivePolicyRemoveH\x00\x12\x39\n\x14host_endpoint_update\x18\t \x01(\x0b\x32\x19.felix.HostEndpointUpdateH\x00\x12\x39\n\x14host_endpoint_remove\x18\n \x01(\x0b\x32\x19.felix.HostEndpointRemoveH\x00\x12\x41\n\x18workload_endpoint_update\x18\x0b \x01(\x0b\x32\x1d.felix.WorkloadEndpointUpdateH\x00\x12\x41\n\x18workload_endpoint_remove\x18\x0c \x01(\x0b\x32\x1d.felix.WorkloadEndpointRemoveH\x00\x12,\n\rconfig_update\x18\r \x01(\x0b\x32\x13.felix.ConfigUpdateH\x00\x12-\n\x0ehost_ip_update\x18\x0e \x01(\x0b\x32\x13.felix.HostIPUpdateH\x00\x12-\n\x0ehost_ip_remove\x18\x12 \x01(\x0b\x32\x13.felix.HostIPRemoveH\x00\x12\x31\n\x10ipam_pool_update\x18\x10 \x01(\x0b\x32\x15.felix.IPAMPoolUpdateH\x00\x12\x31\n\x10ipam_pool_remove\x18\x11 \x01(\x0b\x32\x15.felix.IPAMPoolRemoveH\x00\x42\t\n\x07payload\"\xa0\x03\n\rFromDataplane\x12\x17\n\x0fsequence_number\x18\x08 \x01(\x04\x12;\n\x15process_status_update\x18\x03 \x01(\x0b\x32\x1a.felix.ProcessStatusUpdateH\x00\x12\x46\n\x1bhost_endpoint_status_update\x18\x04 \x01(\x0b\x32\x1f.felix.HostEndpointStatusUpdateH\x00\x12\x46\n\x1bhost_endpoint_status_remove\x18\x05 \x01(\x0b\x32\x1f.felix.HostEndpointStatusRemoveH\x00\x12N\n\x1fworkload_endpoint_status_update\x18\x06 \x01(\x0b\x32#.felix.WorkloadEndpointStatusUpdateH\x00\x12N\n\x1fworkload_endpoint_status_remove\x18\x07 \x01(\x0b\x32#.felix.WorkloadEndpointStatusRemoveH\x00\x42\t\n\x07payload\"n\n\x0c\x43onfigUpdate\x12/\n\x06\x63onfig\x18\x01 \x03(\x0b\x32\x1f.felix.ConfigUpdate.ConfigEntry\x1a-\n\x0b\x43onfigEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"\x08\n\x06InSync\"*\n\x0bIPSetUpdate\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0f\n\x07members\x18\x02 \x03(\t\"N\n\x10IPSetDeltaUpdate\x12\n\n\x02id\x18\x01 \x01(\t\x12\x15\n\radded_members\x18\x02 \x03(\t\x12\x17\n\x0fremoved_members\x18\x03 \x03(\t\"\x19\n\x0bIPSetRemove\x12\n\n\x02id\x18\x01 \x01(\t\"T\n\x13\x41\x63tiveProfileUpdate\x12\x1c\n\x02id\x18\x01 \x01(\x0b\x32\x10.felix.ProfileID\x12\x1f\n\x07profile\x18\x02 \x01(\x0b\x32\x0e.felix.Profile\"3\n\x13\x41\x63tiveProfileRemove\x12\x1c\n\x02id\x18\x01 \x01(\x0b\x32\x10.felix.ProfileID\"\x19\n\tProfileID\x12\x0c\n\x04name\x18\x01 \x01(\t\"R\n\x07Profile\x12\"\n\rinbound_rules\x18\x01 \x03(\x0b\x32\x0b.felix.Rule\x12#\n\x0eoutbound_rules\x18\x02 \x03(\x0b\x32\x0b.felix.Rule\"P\n\x12\x41\x63tivePolicyUpdate\x12\x1b\n\x02id\x18\x01 \x01(\x0b\x32\x0f.felix.PolicyID\x12\x1d\n\x06policy\x18\x02 \x01(\x0b\x32\r.felix.Policy\"1\n\x12\x41\x63tivePolicyRemove\x12\x1b\n\x02id\x18\x01 \x01(\x0b\x32\x0f.felix.PolicyID\"&\n\x08PolicyID\x12\x0c\n\x04tier\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\"Q\n\x06Policy\x12\"\n\rinbound_rules\x18\x01 \x03(\x0b\x32\x0b.felix.Rule\x12#\n\x0eoutbound_rules\x18\x02 \x03(\x0b\x32\x0b.felix.Rule\"\xbf\x04\n\x04Rule\x12\x0e\n\x06\x61\x63tion\x18\x01 \x01(\t\x12$\n\nip_version\x18\x02 \x01(\x0e\x32\x10.felix.IPVersion\x12!\n\x08protocol\x18\x03 \x01(\x0b\x32\x0f.felix.Protocol\x12\x0f\n\x07src_net\x18\x04 \x01(\t\x12#\n\tsrc_ports\x18\x05 \x03(\x0b\x32\x10.felix.PortRange\x12\x0f\n\x07\x64st_net\x18\x06 \x01(\t\x12#\n\tdst_ports\x18\x07 \x03(\x0b\x32\x10.felix.PortRange\x12\x11\n\ticmp_type\x18\x08 \x01(\x05\x12\x11\n\ticmp_code\x18\t \x01(\x05\x12\x16\n\x0esrc_ip_set_ids\x18\n \x03(\t\x12\x16\n\x0e\x64st_ip_set_ids\x18\x0b \x03(\t\x12%\n\x0cnot_protocol\x18\x66 \x01(\x0b\x32\x0f.felix.Protocol\x12\x13\n\x0bnot_src_net\x18g \x01(\t\x12\'\n\rnot_src_ports\x18h \x03(\x0b\x32\x10.felix.PortRange\x12\x13\n\x0bnot_dst_net\x18i \x01(\t\x12\'\n\rnot_dst_ports\x18j \x03(\x0b\x32\x10.felix.PortRange\x12\x15\n\rnot_icmp_type\x18k \x01(\x05\x12\x15\n\rnot_icmp_code\x18l \x01(\x05\x12\x1a\n\x12not_src_ip_set_ids\x18m \x03(\t\x12\x1a\n\x12not_dst_ip_set_ids\x18n \x03(\t\x12\x13\n\nlog_prefix\x18\xc8\x01 \x01(\t\">\n\x08Protocol\x12\x10\n\x06number\x18\x01 \x01(\x05H\x00\x12\x0e\n\x04name\x18\x02 \x01(\tH\x00\x42\x10\n\x0enumber_or_name\"(\n\tPortRange\x12\r\n\x05\x66irst\x18\x01 \x01(\x05\x12\x0c\n\x04last\x18\x02 \x01(\x05\"g\n\x12WorkloadEndpointID\x12\x17\n\x0forchestrator_id\x18\x02 \x01(\t\x12\x13\n\x0bworkload_id\x18\x03 \x01(\t\x12\x13\n\x0b\x65ndpoint_id\x18\x04 \x01(\tJ\x04\x08\x01\x10\x02R\x08hostname\"j\n\x16WorkloadEndpointUpdate\x12%\n\x02id\x18\x01 \x01(\x0b\x32\x19.felix.WorkloadEndpointID\x12)\n\x08\x65ndpoint\x18\x05 \x01(\x0b\x32\x17.felix.WorkloadEndpoint\"\x97\x01\n\x10WorkloadEndpoint\x12\r\n\x05state\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0b\n\x03mac\x18\x03 \x01(\t\x12\x13\n\x0bprofile_ids\x18\x04 \x03(\t\x12\x11\n\tipv4_nets\x18\x05 \x03(\t\x12\x11\n\tipv6_nets\x18\x06 \x03(\t\x12\x1e\n\x05tiers\x18\x07 \x03(\x0b\x32\x0f.felix.TierInfo\"?\n\x16WorkloadEndpointRemove\x12%\n\x02id\x18\x01 \x01(\x0b\x32\x19.felix.WorkloadEndpointID\"5\n\x0eHostEndpointID\x12\x13\n\x0b\x65ndpoint_id\x18\x02 \x01(\tJ\x04\x08\x01\x10\x02R\x08hostname\"^\n\x12HostEndpointUpdate\x12!\n\x02id\x18\x01 \x01(\x0b\x32\x15.felix.HostEndpointID\x12%\n\x08\x65ndpoint\x18\x03 \x01(\x0b\x32\x13.felix.HostEndpoint\"\x8b\x01\n\x0cHostEndpoint\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x13\n\x0bprofile_ids\x18\x02 \x03(\t\x12\x1e\n\x05tiers\x18\x03 \x03(\x0b\x32\x0f.felix.TierInfo\x12\x1b\n\x13\x65xpected_ipv4_addrs\x18\x04 \x03(\t\x12\x1b\n\x13\x65xpected_ipv6_addrs\x18\x05 \x03(\t\"7\n\x12HostEndpointRemove\x12!\n\x02id\x18\x01 \x01(\x0b\x32\x15.felix.HostEndpointID\"*\n\x08TierInfo\x12\x0c\n\x04name\x18\x01 \x01(\t\x12\x10\n\x08policies\x18\x02 \x03(\t\"<\n\x13ProcessStatusUpdate\x12\x15\n\riso_timestamp\x18\x01 \x01(\t\x12\x0e\n\x06uptime\x18\x02 \x01(\x01\"d\n\x18HostEndpointStatusUpdate\x12!\n\x02id\x18\x01 \x01(\x0b\x32\x15.felix.HostEndpointID\x12%\n\x06status\x18\x02 \x01(\x0b\x32\x15.felix.EndpointStatus\" \n\x0e\x45ndpointStatus\x12\x0e\n\x06status\x18\x01 \x01(\t\"=\n\x18HostEndpointStatusRemove\x12!\n\x02id\x18\x01 \x01(\x0b\x32\x15.felix.HostEndpointID\"l\n\x1cWorkloadEndpointStatusUpdate\x12%\n\x02id\x18\x01 \x01(\x0b\x32\x19.felix.WorkloadEndpointID\x12%\n\x06status\x18\x02 \x01(\x0b\x32\x15.felix.EndpointStatus\"E\n\x1cWorkloadEndpointStatusRemove\x12%\n\x02id\x18\x01 \x01(\x0b\x32\x19.felix.WorkloadEndpointID\"3\n\x0cHostIPUpdate\x12\x10\n\x08hostname\x18\x01 \x01(\t\x12\x11\n\tipv4_addr\x18\x02 \x01(\t\"3\n\x0cHostIPRemove\x12\x10\n\x08hostname\x18\x01 \x01(\t\x12\x11\n\tipv4_addr\x18\x02 \x01(\t\";\n\x0eIPAMPoolUpdate\x12\n\n\x02id\x18\x01 \x01(\t\x12\x1d\n\x04pool\x18\x02 \x01(\x0b\x32\x0f.felix.IPAMPool\"\x1c\n\x0eIPAMPoolRemove\x12\n\n\x02id\x18\x01 \x01(\t\",\n\x08IPAMPool\x12\x0c\n\x04\x63idr\x18\x01 \x01(\t\x12\x12\n\nmasquerade\x18\x02 \x01(\x08*(\n\tIPVersion\x12\x07\n\x03\x41NY\x10\x00\x12\x08\n\x04IPV4\x10\x04\x12\x08\n\x04IPV6\x10\x06\x32G\n\x0c\x44\x61taplaneApi\x12\x37\n\x07\x43onnect\x12\x14.felix.FromDataplane\x1a\x12.felix.ToDataplane(\x01\x30\x01\x42\x07Z\x05protob\x06proto3')
 )
 _sym_db.RegisterFileDescriptor(DESCRIPTOR)
 
@@ -45,8 +45,8 @@ _IPVERSION = _descriptor.EnumDescriptor(
   ],
   containing_type=None,
   options=None,
-  serialized_start=4454,
-  serialized_end=4494,
+  serialized_start=4385,
+  serialized_end=4425,
 )
 _sym_db.RegisterEnumDescriptor(_IPVERSION)
 
@@ -66,7 +66,7 @@ _TODATAPLANE = _descriptor.Descriptor(
   fields=[
     _descriptor.FieldDescriptor(
       name='sequence_number', full_name='felix.ToDataplane.sequence_number', index=0,
-      number=14, type=4, cpp_type=4, label=1,
+      number=15, type=4, cpp_type=4, label=1,
       has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -162,6 +162,34 @@ _TODATAPLANE = _descriptor.Descriptor(
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
+    _descriptor.FieldDescriptor(
+      name='host_ip_update', full_name='felix.ToDataplane.host_ip_update', index=14,
+      number=14, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='host_ip_remove', full_name='felix.ToDataplane.host_ip_remove', index=15,
+      number=18, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='ipam_pool_update', full_name='felix.ToDataplane.ipam_pool_update', index=16,
+      number=16, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='ipam_pool_remove', full_name='felix.ToDataplane.ipam_pool_remove', index=17,
+      number=17, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
   ],
   extensions=[
   ],
@@ -178,7 +206,7 @@ _TODATAPLANE = _descriptor.Descriptor(
       index=0, containing_type=None, fields=[]),
   ],
   serialized_start=30,
-  serialized_end=794,
+  serialized_end=990,
 )
 
 
@@ -197,49 +225,35 @@ _FROMDATAPLANE = _descriptor.Descriptor(
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='init', full_name='felix.FromDataplane.init', index=1,
-      number=1, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='config_resolved', full_name='felix.FromDataplane.config_resolved', index=2,
-      number=2, type=11, cpp_type=10, label=1,
-      has_default_value=False, default_value=None,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='felix_status_update', full_name='felix.FromDataplane.felix_status_update', index=3,
+      name='process_status_update', full_name='felix.FromDataplane.process_status_update', index=1,
       number=3, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='host_endpoint_status_update', full_name='felix.FromDataplane.host_endpoint_status_update', index=4,
+      name='host_endpoint_status_update', full_name='felix.FromDataplane.host_endpoint_status_update', index=2,
       number=4, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='host_endpoint_status_remove', full_name='felix.FromDataplane.host_endpoint_status_remove', index=5,
+      name='host_endpoint_status_remove', full_name='felix.FromDataplane.host_endpoint_status_remove', index=3,
       number=5, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='workload_endpoint_status_update', full_name='felix.FromDataplane.workload_endpoint_status_update', index=6,
+      name='workload_endpoint_status_update', full_name='felix.FromDataplane.workload_endpoint_status_update', index=4,
       number=6, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='workload_endpoint_status_remove', full_name='felix.FromDataplane.workload_endpoint_status_remove', index=7,
+      name='workload_endpoint_status_remove', full_name='felix.FromDataplane.workload_endpoint_status_remove', index=5,
       number=7, type=11, cpp_type=10, label=1,
       has_default_value=False, default_value=None,
       message_type=None, enum_type=None, containing_type=None,
@@ -260,152 +274,27 @@ _FROMDATAPLANE = _descriptor.Descriptor(
       name='payload', full_name='felix.FromDataplane.payload',
       index=0, containing_type=None, fields=[]),
   ],
-  serialized_start=797,
-  serialized_end=1288,
+  serialized_start=993,
+  serialized_end=1409,
 )
 
 
-_INIT = _descriptor.Descriptor(
-  name='Init',
-  full_name='felix.Init',
+_CONFIGUPDATE_CONFIGENTRY = _descriptor.Descriptor(
+  name='ConfigEntry',
+  full_name='felix.ConfigUpdate.ConfigEntry',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   fields=[
     _descriptor.FieldDescriptor(
-      name='etcd_urls', full_name='felix.Init.etcd_urls', index=0,
-      number=1, type=9, cpp_type=9, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='etcd_key_file', full_name='felix.Init.etcd_key_file', index=1,
-      number=2, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=_b("").decode('utf-8'),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='etcd_cert_file', full_name='felix.Init.etcd_cert_file', index=2,
-      number=3, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=_b("").decode('utf-8'),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='etcd_ca_cert_file', full_name='felix.Init.etcd_ca_cert_file', index=3,
-      number=4, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=_b("").decode('utf-8'),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='hostname', full_name='felix.Init.hostname', index=4,
-      number=5, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=_b("").decode('utf-8'),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=1290,
-  serialized_end=1407,
-)
-
-
-_CONFIGRESOLVED = _descriptor.Descriptor(
-  name='ConfigResolved',
-  full_name='felix.ConfigResolved',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='log_file', full_name='felix.ConfigResolved.log_file', index=0,
+      name='key', full_name='felix.ConfigUpdate.ConfigEntry.key', index=0,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=_b("").decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='endpoint_status_reporting_delay', full_name='felix.ConfigResolved.endpoint_status_reporting_delay', index=1,
-      number=2, type=1, cpp_type=5, label=1,
-      has_default_value=False, default_value=float(0),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='endpoint_status_resync_interval', full_name='felix.ConfigResolved.endpoint_status_resync_interval', index=2,
-      number=3, type=1, cpp_type=5, label=1,
-      has_default_value=False, default_value=float(0),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='sev_file', full_name='felix.ConfigResolved.sev_file', index=3,
-      number=4, type=5, cpp_type=1, label=1,
-      has_default_value=False, default_value=0,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='sev_screen', full_name='felix.ConfigResolved.sev_screen', index=4,
-      number=5, type=5, cpp_type=1, label=1,
-      has_default_value=False, default_value=0,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='sev_syslog', full_name='felix.ConfigResolved.sev_syslog', index=5,
-      number=6, type=5, cpp_type=1, label=1,
-      has_default_value=False, default_value=0,
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  options=None,
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=1410,
-  serialized_end=1584,
-)
-
-
-_CONFIGUPDATE_GLOBALCONFIGENTRY = _descriptor.Descriptor(
-  name='GlobalConfigEntry',
-  full_name='felix.ConfigUpdate.GlobalConfigEntry',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='key', full_name='felix.ConfigUpdate.GlobalConfigEntry.key', index=0,
-      number=1, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=_b("").decode('utf-8'),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='value', full_name='felix.ConfigUpdate.GlobalConfigEntry.value', index=1,
+      name='value', full_name='felix.ConfigUpdate.ConfigEntry.value', index=1,
       number=2, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=_b("").decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
@@ -423,45 +312,8 @@ _CONFIGUPDATE_GLOBALCONFIGENTRY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1730,
-  serialized_end=1781,
-)
-
-_CONFIGUPDATE_PERHOSTCONFIGENTRY = _descriptor.Descriptor(
-  name='PerHostConfigEntry',
-  full_name='felix.ConfigUpdate.PerHostConfigEntry',
-  filename=None,
-  file=DESCRIPTOR,
-  containing_type=None,
-  fields=[
-    _descriptor.FieldDescriptor(
-      name='key', full_name='felix.ConfigUpdate.PerHostConfigEntry.key', index=0,
-      number=1, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=_b("").decode('utf-8'),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='value', full_name='felix.ConfigUpdate.PerHostConfigEntry.value', index=1,
-      number=2, type=9, cpp_type=9, label=1,
-      has_default_value=False, default_value=_b("").decode('utf-8'),
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-  ],
-  extensions=[
-  ],
-  nested_types=[],
-  enum_types=[
-  ],
-  options=_descriptor._ParseOptions(descriptor_pb2.MessageOptions(), _b('8\001')),
-  is_extendable=False,
-  syntax='proto3',
-  extension_ranges=[],
-  oneofs=[
-  ],
-  serialized_start=1783,
-  serialized_end=1835,
+  serialized_start=1476,
+  serialized_end=1521,
 )
 
 _CONFIGUPDATE = _descriptor.Descriptor(
@@ -472,15 +324,8 @@ _CONFIGUPDATE = _descriptor.Descriptor(
   containing_type=None,
   fields=[
     _descriptor.FieldDescriptor(
-      name='global_config', full_name='felix.ConfigUpdate.global_config', index=0,
+      name='config', full_name='felix.ConfigUpdate.config', index=0,
       number=1, type=11, cpp_type=10, label=3,
-      has_default_value=False, default_value=[],
-      message_type=None, enum_type=None, containing_type=None,
-      is_extension=False, extension_scope=None,
-      options=None),
-    _descriptor.FieldDescriptor(
-      name='per_host_config', full_name='felix.ConfigUpdate.per_host_config', index=1,
-      number=2, type=11, cpp_type=10, label=3,
       has_default_value=False, default_value=[],
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
@@ -488,7 +333,7 @@ _CONFIGUPDATE = _descriptor.Descriptor(
   ],
   extensions=[
   ],
-  nested_types=[_CONFIGUPDATE_GLOBALCONFIGENTRY, _CONFIGUPDATE_PERHOSTCONFIGENTRY, ],
+  nested_types=[_CONFIGUPDATE_CONFIGENTRY, ],
   enum_types=[
   ],
   options=None,
@@ -497,8 +342,8 @@ _CONFIGUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1587,
-  serialized_end=1835,
+  serialized_start=1411,
+  serialized_end=1521,
 )
 
 
@@ -521,8 +366,8 @@ _INSYNC = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1837,
-  serialized_end=1845,
+  serialized_start=1523,
+  serialized_end=1531,
 )
 
 
@@ -559,8 +404,8 @@ _IPSETUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1847,
-  serialized_end=1889,
+  serialized_start=1533,
+  serialized_end=1575,
 )
 
 
@@ -604,8 +449,8 @@ _IPSETDELTAUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1891,
-  serialized_end=1969,
+  serialized_start=1577,
+  serialized_end=1655,
 )
 
 
@@ -635,8 +480,8 @@ _IPSETREMOVE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1971,
-  serialized_end=1996,
+  serialized_start=1657,
+  serialized_end=1682,
 )
 
 
@@ -673,8 +518,8 @@ _ACTIVEPROFILEUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=1998,
-  serialized_end=2082,
+  serialized_start=1684,
+  serialized_end=1768,
 )
 
 
@@ -704,8 +549,8 @@ _ACTIVEPROFILEREMOVE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2084,
-  serialized_end=2135,
+  serialized_start=1770,
+  serialized_end=1821,
 )
 
 
@@ -735,8 +580,8 @@ _PROFILEID = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2137,
-  serialized_end=2162,
+  serialized_start=1823,
+  serialized_end=1848,
 )
 
 
@@ -773,8 +618,8 @@ _PROFILE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2164,
-  serialized_end=2246,
+  serialized_start=1850,
+  serialized_end=1932,
 )
 
 
@@ -811,8 +656,8 @@ _ACTIVEPOLICYUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2248,
-  serialized_end=2328,
+  serialized_start=1934,
+  serialized_end=2014,
 )
 
 
@@ -842,8 +687,8 @@ _ACTIVEPOLICYREMOVE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2330,
-  serialized_end=2379,
+  serialized_start=2016,
+  serialized_end=2065,
 )
 
 
@@ -880,8 +725,8 @@ _POLICYID = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2381,
-  serialized_end=2419,
+  serialized_start=2067,
+  serialized_end=2105,
 )
 
 
@@ -918,8 +763,8 @@ _POLICY = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2421,
-  serialized_end=2502,
+  serialized_start=2107,
+  serialized_end=2188,
 )
 
 
@@ -1089,8 +934,8 @@ _RULE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=2505,
-  serialized_end=3080,
+  serialized_start=2191,
+  serialized_end=2766,
 )
 
 
@@ -1130,8 +975,8 @@ _PROTOCOL = _descriptor.Descriptor(
       name='number_or_name', full_name='felix.Protocol.number_or_name',
       index=0, containing_type=None, fields=[]),
   ],
-  serialized_start=3082,
-  serialized_end=3144,
+  serialized_start=2768,
+  serialized_end=2830,
 )
 
 
@@ -1168,8 +1013,8 @@ _PORTRANGE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3146,
-  serialized_end=3186,
+  serialized_start=2832,
+  serialized_end=2872,
 )
 
 
@@ -1213,8 +1058,8 @@ _WORKLOADENDPOINTID = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3188,
-  serialized_end=3291,
+  serialized_start=2874,
+  serialized_end=2977,
 )
 
 
@@ -1251,8 +1096,8 @@ _WORKLOADENDPOINTUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3293,
-  serialized_end=3399,
+  serialized_start=2979,
+  serialized_end=3085,
 )
 
 
@@ -1324,8 +1169,8 @@ _WORKLOADENDPOINT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3402,
-  serialized_end=3553,
+  serialized_start=3088,
+  serialized_end=3239,
 )
 
 
@@ -1355,8 +1200,8 @@ _WORKLOADENDPOINTREMOVE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3555,
-  serialized_end=3618,
+  serialized_start=3241,
+  serialized_end=3304,
 )
 
 
@@ -1386,8 +1231,8 @@ _HOSTENDPOINTID = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3620,
-  serialized_end=3673,
+  serialized_start=3306,
+  serialized_end=3359,
 )
 
 
@@ -1424,8 +1269,8 @@ _HOSTENDPOINTUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3675,
-  serialized_end=3769,
+  serialized_start=3361,
+  serialized_end=3455,
 )
 
 
@@ -1483,8 +1328,8 @@ _HOSTENDPOINT = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3772,
-  serialized_end=3911,
+  serialized_start=3458,
+  serialized_end=3597,
 )
 
 
@@ -1514,8 +1359,8 @@ _HOSTENDPOINTREMOVE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3913,
-  serialized_end=3968,
+  serialized_start=3599,
+  serialized_end=3654,
 )
 
 
@@ -1552,29 +1397,29 @@ _TIERINFO = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=3970,
-  serialized_end=4012,
+  serialized_start=3656,
+  serialized_end=3698,
 )
 
 
-_FELIXSTATUSUPDATE = _descriptor.Descriptor(
-  name='FelixStatusUpdate',
-  full_name='felix.FelixStatusUpdate',
+_PROCESSSTATUSUPDATE = _descriptor.Descriptor(
+  name='ProcessStatusUpdate',
+  full_name='felix.ProcessStatusUpdate',
   filename=None,
   file=DESCRIPTOR,
   containing_type=None,
   fields=[
     _descriptor.FieldDescriptor(
-      name='iso_timestamp', full_name='felix.FelixStatusUpdate.iso_timestamp', index=0,
+      name='iso_timestamp', full_name='felix.ProcessStatusUpdate.iso_timestamp', index=0,
       number=1, type=9, cpp_type=9, label=1,
       has_default_value=False, default_value=_b("").decode('utf-8'),
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
     _descriptor.FieldDescriptor(
-      name='uptime', full_name='felix.FelixStatusUpdate.uptime', index=1,
+      name='uptime', full_name='felix.ProcessStatusUpdate.uptime', index=1,
       number=2, type=1, cpp_type=5, label=1,
-      has_default_value=False, default_value=float(0),
+      has_default_value=False, default_value=0,
       message_type=None, enum_type=None, containing_type=None,
       is_extension=False, extension_scope=None,
       options=None),
@@ -1590,8 +1435,8 @@ _FELIXSTATUSUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4014,
-  serialized_end=4072,
+  serialized_start=3700,
+  serialized_end=3760,
 )
 
 
@@ -1628,8 +1473,8 @@ _HOSTENDPOINTSTATUSUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4074,
-  serialized_end=4174,
+  serialized_start=3762,
+  serialized_end=3862,
 )
 
 
@@ -1659,8 +1504,8 @@ _ENDPOINTSTATUS = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4176,
-  serialized_end=4208,
+  serialized_start=3864,
+  serialized_end=3896,
 )
 
 
@@ -1690,8 +1535,8 @@ _HOSTENDPOINTSTATUSREMOVE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4210,
-  serialized_end=4271,
+  serialized_start=3898,
+  serialized_end=3959,
 )
 
 
@@ -1728,8 +1573,8 @@ _WORKLOADENDPOINTSTATUSUPDATE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4273,
-  serialized_end=4381,
+  serialized_start=3961,
+  serialized_end=4069,
 )
 
 
@@ -1759,8 +1604,191 @@ _WORKLOADENDPOINTSTATUSREMOVE = _descriptor.Descriptor(
   extension_ranges=[],
   oneofs=[
   ],
-  serialized_start=4383,
-  serialized_end=4452,
+  serialized_start=4071,
+  serialized_end=4140,
+)
+
+
+_HOSTIPUPDATE = _descriptor.Descriptor(
+  name='HostIPUpdate',
+  full_name='felix.HostIPUpdate',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='hostname', full_name='felix.HostIPUpdate.hostname', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='ipv4_addr', full_name='felix.HostIPUpdate.ipv4_addr', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=4142,
+  serialized_end=4193,
+)
+
+
+_HOSTIPREMOVE = _descriptor.Descriptor(
+  name='HostIPRemove',
+  full_name='felix.HostIPRemove',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='hostname', full_name='felix.HostIPRemove.hostname', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='ipv4_addr', full_name='felix.HostIPRemove.ipv4_addr', index=1,
+      number=2, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=4195,
+  serialized_end=4246,
+)
+
+
+_IPAMPOOLUPDATE = _descriptor.Descriptor(
+  name='IPAMPoolUpdate',
+  full_name='felix.IPAMPoolUpdate',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='id', full_name='felix.IPAMPoolUpdate.id', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='pool', full_name='felix.IPAMPoolUpdate.pool', index=1,
+      number=2, type=11, cpp_type=10, label=1,
+      has_default_value=False, default_value=None,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=4248,
+  serialized_end=4307,
+)
+
+
+_IPAMPOOLREMOVE = _descriptor.Descriptor(
+  name='IPAMPoolRemove',
+  full_name='felix.IPAMPoolRemove',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='id', full_name='felix.IPAMPoolRemove.id', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=4309,
+  serialized_end=4337,
+)
+
+
+_IPAMPOOL = _descriptor.Descriptor(
+  name='IPAMPool',
+  full_name='felix.IPAMPool',
+  filename=None,
+  file=DESCRIPTOR,
+  containing_type=None,
+  fields=[
+    _descriptor.FieldDescriptor(
+      name='cidr', full_name='felix.IPAMPool.cidr', index=0,
+      number=1, type=9, cpp_type=9, label=1,
+      has_default_value=False, default_value=_b("").decode('utf-8'),
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+    _descriptor.FieldDescriptor(
+      name='masquerade', full_name='felix.IPAMPool.masquerade', index=1,
+      number=2, type=8, cpp_type=7, label=1,
+      has_default_value=False, default_value=False,
+      message_type=None, enum_type=None, containing_type=None,
+      is_extension=False, extension_scope=None,
+      options=None),
+  ],
+  extensions=[
+  ],
+  nested_types=[],
+  enum_types=[
+  ],
+  options=None,
+  is_extendable=False,
+  syntax='proto3',
+  extension_ranges=[],
+  oneofs=[
+  ],
+  serialized_start=4339,
+  serialized_end=4383,
 )
 
 _TODATAPLANE.fields_by_name['in_sync'].message_type = _INSYNC
@@ -1776,6 +1804,10 @@ _TODATAPLANE.fields_by_name['host_endpoint_remove'].message_type = _HOSTENDPOINT
 _TODATAPLANE.fields_by_name['workload_endpoint_update'].message_type = _WORKLOADENDPOINTUPDATE
 _TODATAPLANE.fields_by_name['workload_endpoint_remove'].message_type = _WORKLOADENDPOINTREMOVE
 _TODATAPLANE.fields_by_name['config_update'].message_type = _CONFIGUPDATE
+_TODATAPLANE.fields_by_name['host_ip_update'].message_type = _HOSTIPUPDATE
+_TODATAPLANE.fields_by_name['host_ip_remove'].message_type = _HOSTIPREMOVE
+_TODATAPLANE.fields_by_name['ipam_pool_update'].message_type = _IPAMPOOLUPDATE
+_TODATAPLANE.fields_by_name['ipam_pool_remove'].message_type = _IPAMPOOLREMOVE
 _TODATAPLANE.oneofs_by_name['payload'].fields.append(
   _TODATAPLANE.fields_by_name['in_sync'])
 _TODATAPLANE.fields_by_name['in_sync'].containing_oneof = _TODATAPLANE.oneofs_by_name['payload']
@@ -1815,22 +1847,26 @@ _TODATAPLANE.fields_by_name['workload_endpoint_remove'].containing_oneof = _TODA
 _TODATAPLANE.oneofs_by_name['payload'].fields.append(
   _TODATAPLANE.fields_by_name['config_update'])
 _TODATAPLANE.fields_by_name['config_update'].containing_oneof = _TODATAPLANE.oneofs_by_name['payload']
-_FROMDATAPLANE.fields_by_name['init'].message_type = _INIT
-_FROMDATAPLANE.fields_by_name['config_resolved'].message_type = _CONFIGRESOLVED
-_FROMDATAPLANE.fields_by_name['felix_status_update'].message_type = _FELIXSTATUSUPDATE
+_TODATAPLANE.oneofs_by_name['payload'].fields.append(
+  _TODATAPLANE.fields_by_name['host_ip_update'])
+_TODATAPLANE.fields_by_name['host_ip_update'].containing_oneof = _TODATAPLANE.oneofs_by_name['payload']
+_TODATAPLANE.oneofs_by_name['payload'].fields.append(
+  _TODATAPLANE.fields_by_name['host_ip_remove'])
+_TODATAPLANE.fields_by_name['host_ip_remove'].containing_oneof = _TODATAPLANE.oneofs_by_name['payload']
+_TODATAPLANE.oneofs_by_name['payload'].fields.append(
+  _TODATAPLANE.fields_by_name['ipam_pool_update'])
+_TODATAPLANE.fields_by_name['ipam_pool_update'].containing_oneof = _TODATAPLANE.oneofs_by_name['payload']
+_TODATAPLANE.oneofs_by_name['payload'].fields.append(
+  _TODATAPLANE.fields_by_name['ipam_pool_remove'])
+_TODATAPLANE.fields_by_name['ipam_pool_remove'].containing_oneof = _TODATAPLANE.oneofs_by_name['payload']
+_FROMDATAPLANE.fields_by_name['process_status_update'].message_type = _PROCESSSTATUSUPDATE
 _FROMDATAPLANE.fields_by_name['host_endpoint_status_update'].message_type = _HOSTENDPOINTSTATUSUPDATE
 _FROMDATAPLANE.fields_by_name['host_endpoint_status_remove'].message_type = _HOSTENDPOINTSTATUSREMOVE
 _FROMDATAPLANE.fields_by_name['workload_endpoint_status_update'].message_type = _WORKLOADENDPOINTSTATUSUPDATE
 _FROMDATAPLANE.fields_by_name['workload_endpoint_status_remove'].message_type = _WORKLOADENDPOINTSTATUSREMOVE
 _FROMDATAPLANE.oneofs_by_name['payload'].fields.append(
-  _FROMDATAPLANE.fields_by_name['init'])
-_FROMDATAPLANE.fields_by_name['init'].containing_oneof = _FROMDATAPLANE.oneofs_by_name['payload']
-_FROMDATAPLANE.oneofs_by_name['payload'].fields.append(
-  _FROMDATAPLANE.fields_by_name['config_resolved'])
-_FROMDATAPLANE.fields_by_name['config_resolved'].containing_oneof = _FROMDATAPLANE.oneofs_by_name['payload']
-_FROMDATAPLANE.oneofs_by_name['payload'].fields.append(
-  _FROMDATAPLANE.fields_by_name['felix_status_update'])
-_FROMDATAPLANE.fields_by_name['felix_status_update'].containing_oneof = _FROMDATAPLANE.oneofs_by_name['payload']
+  _FROMDATAPLANE.fields_by_name['process_status_update'])
+_FROMDATAPLANE.fields_by_name['process_status_update'].containing_oneof = _FROMDATAPLANE.oneofs_by_name['payload']
 _FROMDATAPLANE.oneofs_by_name['payload'].fields.append(
   _FROMDATAPLANE.fields_by_name['host_endpoint_status_update'])
 _FROMDATAPLANE.fields_by_name['host_endpoint_status_update'].containing_oneof = _FROMDATAPLANE.oneofs_by_name['payload']
@@ -1843,10 +1879,8 @@ _FROMDATAPLANE.fields_by_name['workload_endpoint_status_update'].containing_oneo
 _FROMDATAPLANE.oneofs_by_name['payload'].fields.append(
   _FROMDATAPLANE.fields_by_name['workload_endpoint_status_remove'])
 _FROMDATAPLANE.fields_by_name['workload_endpoint_status_remove'].containing_oneof = _FROMDATAPLANE.oneofs_by_name['payload']
-_CONFIGUPDATE_GLOBALCONFIGENTRY.containing_type = _CONFIGUPDATE
-_CONFIGUPDATE_PERHOSTCONFIGENTRY.containing_type = _CONFIGUPDATE
-_CONFIGUPDATE.fields_by_name['global_config'].message_type = _CONFIGUPDATE_GLOBALCONFIGENTRY
-_CONFIGUPDATE.fields_by_name['per_host_config'].message_type = _CONFIGUPDATE_PERHOSTCONFIGENTRY
+_CONFIGUPDATE_CONFIGENTRY.containing_type = _CONFIGUPDATE
+_CONFIGUPDATE.fields_by_name['config'].message_type = _CONFIGUPDATE_CONFIGENTRY
 _ACTIVEPROFILEUPDATE.fields_by_name['id'].message_type = _PROFILEID
 _ACTIVEPROFILEUPDATE.fields_by_name['profile'].message_type = _PROFILE
 _ACTIVEPROFILEREMOVE.fields_by_name['id'].message_type = _PROFILEID
@@ -1884,10 +1918,9 @@ _HOSTENDPOINTSTATUSREMOVE.fields_by_name['id'].message_type = _HOSTENDPOINTID
 _WORKLOADENDPOINTSTATUSUPDATE.fields_by_name['id'].message_type = _WORKLOADENDPOINTID
 _WORKLOADENDPOINTSTATUSUPDATE.fields_by_name['status'].message_type = _ENDPOINTSTATUS
 _WORKLOADENDPOINTSTATUSREMOVE.fields_by_name['id'].message_type = _WORKLOADENDPOINTID
+_IPAMPOOLUPDATE.fields_by_name['pool'].message_type = _IPAMPOOL
 DESCRIPTOR.message_types_by_name['ToDataplane'] = _TODATAPLANE
 DESCRIPTOR.message_types_by_name['FromDataplane'] = _FROMDATAPLANE
-DESCRIPTOR.message_types_by_name['Init'] = _INIT
-DESCRIPTOR.message_types_by_name['ConfigResolved'] = _CONFIGRESOLVED
 DESCRIPTOR.message_types_by_name['ConfigUpdate'] = _CONFIGUPDATE
 DESCRIPTOR.message_types_by_name['InSync'] = _INSYNC
 DESCRIPTOR.message_types_by_name['IPSetUpdate'] = _IPSETUPDATE
@@ -1913,12 +1946,17 @@ DESCRIPTOR.message_types_by_name['HostEndpointUpdate'] = _HOSTENDPOINTUPDATE
 DESCRIPTOR.message_types_by_name['HostEndpoint'] = _HOSTENDPOINT
 DESCRIPTOR.message_types_by_name['HostEndpointRemove'] = _HOSTENDPOINTREMOVE
 DESCRIPTOR.message_types_by_name['TierInfo'] = _TIERINFO
-DESCRIPTOR.message_types_by_name['FelixStatusUpdate'] = _FELIXSTATUSUPDATE
+DESCRIPTOR.message_types_by_name['ProcessStatusUpdate'] = _PROCESSSTATUSUPDATE
 DESCRIPTOR.message_types_by_name['HostEndpointStatusUpdate'] = _HOSTENDPOINTSTATUSUPDATE
 DESCRIPTOR.message_types_by_name['EndpointStatus'] = _ENDPOINTSTATUS
 DESCRIPTOR.message_types_by_name['HostEndpointStatusRemove'] = _HOSTENDPOINTSTATUSREMOVE
 DESCRIPTOR.message_types_by_name['WorkloadEndpointStatusUpdate'] = _WORKLOADENDPOINTSTATUSUPDATE
 DESCRIPTOR.message_types_by_name['WorkloadEndpointStatusRemove'] = _WORKLOADENDPOINTSTATUSREMOVE
+DESCRIPTOR.message_types_by_name['HostIPUpdate'] = _HOSTIPUPDATE
+DESCRIPTOR.message_types_by_name['HostIPRemove'] = _HOSTIPREMOVE
+DESCRIPTOR.message_types_by_name['IPAMPoolUpdate'] = _IPAMPOOLUPDATE
+DESCRIPTOR.message_types_by_name['IPAMPoolRemove'] = _IPAMPOOLREMOVE
+DESCRIPTOR.message_types_by_name['IPAMPool'] = _IPAMPOOL
 DESCRIPTOR.enum_types_by_name['IPVersion'] = _IPVERSION
 
 ToDataplane = _reflection.GeneratedProtocolMessageType('ToDataplane', (_message.Message,), dict(
@@ -1935,33 +1973,12 @@ FromDataplane = _reflection.GeneratedProtocolMessageType('FromDataplane', (_mess
   ))
 _sym_db.RegisterMessage(FromDataplane)
 
-Init = _reflection.GeneratedProtocolMessageType('Init', (_message.Message,), dict(
-  DESCRIPTOR = _INIT,
-  __module__ = 'felixbackend_pb2'
-  # @@protoc_insertion_point(class_scope:felix.Init)
-  ))
-_sym_db.RegisterMessage(Init)
-
-ConfigResolved = _reflection.GeneratedProtocolMessageType('ConfigResolved', (_message.Message,), dict(
-  DESCRIPTOR = _CONFIGRESOLVED,
-  __module__ = 'felixbackend_pb2'
-  # @@protoc_insertion_point(class_scope:felix.ConfigResolved)
-  ))
-_sym_db.RegisterMessage(ConfigResolved)
-
 ConfigUpdate = _reflection.GeneratedProtocolMessageType('ConfigUpdate', (_message.Message,), dict(
 
-  GlobalConfigEntry = _reflection.GeneratedProtocolMessageType('GlobalConfigEntry', (_message.Message,), dict(
-    DESCRIPTOR = _CONFIGUPDATE_GLOBALCONFIGENTRY,
+  ConfigEntry = _reflection.GeneratedProtocolMessageType('ConfigEntry', (_message.Message,), dict(
+    DESCRIPTOR = _CONFIGUPDATE_CONFIGENTRY,
     __module__ = 'felixbackend_pb2'
-    # @@protoc_insertion_point(class_scope:felix.ConfigUpdate.GlobalConfigEntry)
-    ))
-  ,
-
-  PerHostConfigEntry = _reflection.GeneratedProtocolMessageType('PerHostConfigEntry', (_message.Message,), dict(
-    DESCRIPTOR = _CONFIGUPDATE_PERHOSTCONFIGENTRY,
-    __module__ = 'felixbackend_pb2'
-    # @@protoc_insertion_point(class_scope:felix.ConfigUpdate.PerHostConfigEntry)
+    # @@protoc_insertion_point(class_scope:felix.ConfigUpdate.ConfigEntry)
     ))
   ,
   DESCRIPTOR = _CONFIGUPDATE,
@@ -1969,8 +1986,7 @@ ConfigUpdate = _reflection.GeneratedProtocolMessageType('ConfigUpdate', (_messag
   # @@protoc_insertion_point(class_scope:felix.ConfigUpdate)
   ))
 _sym_db.RegisterMessage(ConfigUpdate)
-_sym_db.RegisterMessage(ConfigUpdate.GlobalConfigEntry)
-_sym_db.RegisterMessage(ConfigUpdate.PerHostConfigEntry)
+_sym_db.RegisterMessage(ConfigUpdate.ConfigEntry)
 
 InSync = _reflection.GeneratedProtocolMessageType('InSync', (_message.Message,), dict(
   DESCRIPTOR = _INSYNC,
@@ -2140,12 +2156,12 @@ TierInfo = _reflection.GeneratedProtocolMessageType('TierInfo', (_message.Messag
   ))
 _sym_db.RegisterMessage(TierInfo)
 
-FelixStatusUpdate = _reflection.GeneratedProtocolMessageType('FelixStatusUpdate', (_message.Message,), dict(
-  DESCRIPTOR = _FELIXSTATUSUPDATE,
+ProcessStatusUpdate = _reflection.GeneratedProtocolMessageType('ProcessStatusUpdate', (_message.Message,), dict(
+  DESCRIPTOR = _PROCESSSTATUSUPDATE,
   __module__ = 'felixbackend_pb2'
-  # @@protoc_insertion_point(class_scope:felix.FelixStatusUpdate)
+  # @@protoc_insertion_point(class_scope:felix.ProcessStatusUpdate)
   ))
-_sym_db.RegisterMessage(FelixStatusUpdate)
+_sym_db.RegisterMessage(ProcessStatusUpdate)
 
 HostEndpointStatusUpdate = _reflection.GeneratedProtocolMessageType('HostEndpointStatusUpdate', (_message.Message,), dict(
   DESCRIPTOR = _HOSTENDPOINTSTATUSUPDATE,
@@ -2182,126 +2198,44 @@ WorkloadEndpointStatusRemove = _reflection.GeneratedProtocolMessageType('Workloa
   ))
 _sym_db.RegisterMessage(WorkloadEndpointStatusRemove)
 
+HostIPUpdate = _reflection.GeneratedProtocolMessageType('HostIPUpdate', (_message.Message,), dict(
+  DESCRIPTOR = _HOSTIPUPDATE,
+  __module__ = 'felixbackend_pb2'
+  # @@protoc_insertion_point(class_scope:felix.HostIPUpdate)
+  ))
+_sym_db.RegisterMessage(HostIPUpdate)
+
+HostIPRemove = _reflection.GeneratedProtocolMessageType('HostIPRemove', (_message.Message,), dict(
+  DESCRIPTOR = _HOSTIPREMOVE,
+  __module__ = 'felixbackend_pb2'
+  # @@protoc_insertion_point(class_scope:felix.HostIPRemove)
+  ))
+_sym_db.RegisterMessage(HostIPRemove)
+
+IPAMPoolUpdate = _reflection.GeneratedProtocolMessageType('IPAMPoolUpdate', (_message.Message,), dict(
+  DESCRIPTOR = _IPAMPOOLUPDATE,
+  __module__ = 'felixbackend_pb2'
+  # @@protoc_insertion_point(class_scope:felix.IPAMPoolUpdate)
+  ))
+_sym_db.RegisterMessage(IPAMPoolUpdate)
+
+IPAMPoolRemove = _reflection.GeneratedProtocolMessageType('IPAMPoolRemove', (_message.Message,), dict(
+  DESCRIPTOR = _IPAMPOOLREMOVE,
+  __module__ = 'felixbackend_pb2'
+  # @@protoc_insertion_point(class_scope:felix.IPAMPoolRemove)
+  ))
+_sym_db.RegisterMessage(IPAMPoolRemove)
+
+IPAMPool = _reflection.GeneratedProtocolMessageType('IPAMPool', (_message.Message,), dict(
+  DESCRIPTOR = _IPAMPOOL,
+  __module__ = 'felixbackend_pb2'
+  # @@protoc_insertion_point(class_scope:felix.IPAMPool)
+  ))
+_sym_db.RegisterMessage(IPAMPool)
+
 
 DESCRIPTOR.has_options = True
 DESCRIPTOR._options = _descriptor._ParseOptions(descriptor_pb2.FileOptions(), _b('Z\005proto'))
-_CONFIGUPDATE_GLOBALCONFIGENTRY.has_options = True
-_CONFIGUPDATE_GLOBALCONFIGENTRY._options = _descriptor._ParseOptions(descriptor_pb2.MessageOptions(), _b('8\001'))
-_CONFIGUPDATE_PERHOSTCONFIGENTRY.has_options = True
-_CONFIGUPDATE_PERHOSTCONFIGENTRY._options = _descriptor._ParseOptions(descriptor_pb2.MessageOptions(), _b('8\001'))
-import grpc
-from grpc.beta import implementations as beta_implementations
-from grpc.beta import interfaces as beta_interfaces
-from grpc.framework.common import cardinality
-from grpc.framework.interfaces.face import utilities as face_utilities
-
-
-class DataplaneApiStub(object):
-  """Rationale for having explicit Remove messages rather than sending and update
-  with empty payload (which is the convention we used to use in Felix):
-  protobuf and golang use zero values to indicate missing data and that makes
-  it impossible to tell the difference between an empty list of IP set members
-  and a deletion, for example.
-
-  Open question: should we use a packed format for IP addresses?
-
-  """
-
-  def __init__(self, channel):
-    """Constructor.
-
-    Args:
-      channel: A grpc.Channel.
-    """
-    self.Connect = channel.stream_stream(
-        '/felix.DataplaneApi/Connect',
-        request_serializer=FromDataplane.SerializeToString,
-        response_deserializer=ToDataplane.FromString,
-        )
-
-
-class DataplaneApiServicer(object):
-  """Rationale for having explicit Remove messages rather than sending and update
-  with empty payload (which is the convention we used to use in Felix):
-  protobuf and golang use zero values to indicate missing data and that makes
-  it impossible to tell the difference between an empty list of IP set members
-  and a deletion, for example.
-
-  Open question: should we use a packed format for IP addresses?
-
-  """
-
-  def Connect(self, request_iterator, context):
-    context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-    context.set_details('Method not implemented!')
-    raise NotImplementedError('Method not implemented!')
-
-
-def add_DataplaneApiServicer_to_server(servicer, server):
-  rpc_method_handlers = {
-      'Connect': grpc.stream_stream_rpc_method_handler(
-          servicer.Connect,
-          request_deserializer=FromDataplane.FromString,
-          response_serializer=ToDataplane.SerializeToString,
-      ),
-  }
-  generic_handler = grpc.method_handlers_generic_handler(
-      'felix.DataplaneApi', rpc_method_handlers)
-  server.add_generic_rpc_handlers((generic_handler,))
-
-
-class BetaDataplaneApiServicer(object):
-  """Rationale for having explicit Remove messages rather than sending and update
-  with empty payload (which is the convention we used to use in Felix):
-  protobuf and golang use zero values to indicate missing data and that makes
-  it impossible to tell the difference between an empty list of IP set members
-  and a deletion, for example.
-
-  Open question: should we use a packed format for IP addresses?
-
-  """
-  def Connect(self, request_iterator, context):
-    context.code(beta_interfaces.StatusCode.UNIMPLEMENTED)
-
-
-class BetaDataplaneApiStub(object):
-  """Rationale for having explicit Remove messages rather than sending and update
-  with empty payload (which is the convention we used to use in Felix):
-  protobuf and golang use zero values to indicate missing data and that makes
-  it impossible to tell the difference between an empty list of IP set members
-  and a deletion, for example.
-
-  Open question: should we use a packed format for IP addresses?
-
-  """
-  def Connect(self, request_iterator, timeout, metadata=None, with_call=False, protocol_options=None):
-    raise NotImplementedError()
-
-
-def beta_create_DataplaneApi_server(servicer, pool=None, pool_size=None, default_timeout=None, maximum_timeout=None):
-  request_deserializers = {
-    ('felix.DataplaneApi', 'Connect'): FromDataplane.FromString,
-  }
-  response_serializers = {
-    ('felix.DataplaneApi', 'Connect'): ToDataplane.SerializeToString,
-  }
-  method_implementations = {
-    ('felix.DataplaneApi', 'Connect'): face_utilities.stream_stream_inline(servicer.Connect),
-  }
-  server_options = beta_implementations.server_options(request_deserializers=request_deserializers, response_serializers=response_serializers, thread_pool=pool, thread_pool_size=pool_size, default_timeout=default_timeout, maximum_timeout=maximum_timeout)
-  return beta_implementations.server(method_implementations, options=server_options)
-
-
-def beta_create_DataplaneApi_stub(channel, host=None, metadata_transformer=None, pool=None, pool_size=None):
-  request_serializers = {
-    ('felix.DataplaneApi', 'Connect'): FromDataplane.SerializeToString,
-  }
-  response_deserializers = {
-    ('felix.DataplaneApi', 'Connect'): ToDataplane.FromString,
-  }
-  cardinalities = {
-    'Connect': cardinality.Cardinality.STREAM_STREAM,
-  }
-  stub_options = beta_implementations.stub_options(host=host, metadata_transformer=metadata_transformer, request_serializers=request_serializers, response_deserializers=response_deserializers, thread_pool=pool, thread_pool_size=pool_size)
-  return beta_implementations.dynamic_stub(channel, 'felix.DataplaneApi', cardinalities, options=stub_options)
+_CONFIGUPDATE_CONFIGENTRY.has_options = True
+_CONFIGUPDATE_CONFIGENTRY._options = _descriptor._ParseOptions(descriptor_pb2.MessageOptions(), _b('8\001'))
 # @@protoc_insertion_point(module_scope)
