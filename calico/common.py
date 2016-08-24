@@ -35,7 +35,6 @@ from netaddr.strategy import eui48
 from calico.felix.futils import IPV4, IP_TYPE_TO_VERSION
 
 from calico.datamodel_v1 import TieredPolicyId, LABEL_CHARS
-from calico.felix.selectors import parse_selector, BadSelector
 
 _log = logging.getLogger(__name__)
 
@@ -591,15 +590,15 @@ def validate_policy(policy_id, policy):
 
     _validate_rules(policy, issues)
 
-    if "selector" in policy:
-        try:
-            selector = parse_selector(policy["selector"])
-        except BadSelector:
-            issues.append("Failed to parse selector %s" % policy["selector"])
-        else:
-            policy["selector"] = selector
-    else:
-        issues.append("Profile missing required selector field")
+    # if "selector" in policy:
+    #     try:
+    #         selector = parse_selector(policy["selector"])
+    #     except BadSelector:
+    #         issues.append("Failed to parse selector %s" % policy["selector"])
+    #     else:
+    #         policy["selector"] = selector
+    # else:
+    #     issues.append("Profile missing required selector field")
 
     if "order" not in policy or policy["order"] == "default":
         policy["order"] = INFINITY

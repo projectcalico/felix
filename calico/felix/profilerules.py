@@ -23,7 +23,6 @@ import logging
 from calico.felix.actor import actor_message
 from calico.felix.futils import FailedSystemCall
 from calico.felix.refcount import ReferenceManager, RefCountedActor, RefHelper
-from calico.felix.selectors import SelectorExpression
 
 _log = logging.getLogger(__name__)
 

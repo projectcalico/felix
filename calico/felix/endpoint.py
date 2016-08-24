@@ -35,7 +35,6 @@ from calico.felix import devices, futils
 from calico.felix.actor import actor_message, TimedGreenlet
 from calico.felix.futils import FailedSystemCall
 from calico.felix.futils import IPV4, IP_TYPE_TO_VERSION
-from calico.felix.labels import LabelValueIndex, LabelInheritanceIndex
 from calico.felix.refcount import ReferenceManager, RefCountedActor, RefHelper
 from calico.felix.profilerules import RulesManager
 from calico.felix.frules import interface_to_chain_suffix
@@ -84,11 +83,6 @@ class EndpointManager(ReferenceManager):
         # increffed.
         self.local_endpoint_ids = set()
 
-        # Index tracking what policy applies to what endpoints.
-        self.policy_index = LabelValueIndex()
-        self.policy_index.on_match_started = self.on_policy_match_started
-        self.policy_index.on_match_stopped = self.on_policy_match_stopped
-        self._label_inherit_idx = LabelInheritanceIndex(self.policy_index)
         # Tier orders by tier ID.  We use this to look up the order when we're
         # sorting the tiers.
         self.tier_orders = {}
@@ -165,61 +159,6 @@ class EndpointManager(ReferenceManager):
                 self.endpoints_by_id.keys()
             )
             self._update_dirty_policy()
-
-    @actor_message()
-    def on_prof_labels_set(self, profile_id, labels):
-        _log.debug("Profile labels updated for %s: %s", profile_id, labels)
-        # Defer to the label index, which will call us back synchronously
-        # with any match changes.
-        self._label_inherit_idx.on_parent_labels_update(profile_id, labels)
-        # Process any match changes that we've recorded in the callbacks.
-        self._update_dirty_policy()
-
-    @actor_message()
-    def on_policy_selector_update(self, policy_id, selector_or_none,
-                                  order_or_none):
-        _log.debug("Policy %s selector updated to %s (%s)", policy_id,
-                   selector_or_none, order_or_none)
-        # Defer to the label index, which will call us back synchronously
-        # via on_policy_match_started and on_policy_match_stopped.
-        self.policy_index.on_expression_update(policy_id,
-                                               selector_or_none)
-
-        # Before we update the policies, check if the order has changed,
-        # which would mean we need to refresh all endpoints with this policy
-        # too.
-        if order_or_none != self.profile_orders.get(policy_id):
-            if order_or_none is not None:
-                self.profile_orders[policy_id] = order_or_none
-            else:
-                del self.profile_orders[policy_id]
-            self.endpoints_with_dirty_policy.update(
-                self.policy_index.matches_by_expr_id.iter_values(policy_id)
-            )
-
-        # Finally, flush any updates to our waiting endpoints.
-        self._update_dirty_policy()
-
-    def on_policy_match_started(self, expr_id, item_id):
-        """Called by the label index when a new match is started.
-
-        Records the update but processing is deferred to
-        the next call to self._update_dirty_policy().
-        """
-        _log.info("Policy %s now applies to endpoint %s", expr_id, item_id)
-        self.pol_ids_by_ep_id.add(item_id, expr_id)
-        self.endpoints_with_dirty_policy.add(item_id)
-
-    def on_policy_match_stopped(self, expr_id, item_id):
-        """Called by the label index when a match stops.
-
-        Records the update but processing is deferred to
-        the next call to self._update_dirty_policy().
-        """
-        _log.info("Policy %s no longer applies to endpoint %s",
-                  expr_id, item_id)
-        self.pol_ids_by_ep_id.discard(item_id, expr_id)
-        self.endpoints_with_dirty_policy.add(item_id)
 
     def _on_object_started(self, endpoint_id, obj):
         """
@@ -310,7 +249,6 @@ class EndpointManager(ReferenceManager):
             if endpoint_id in self.local_endpoint_ids:
                 self.decref(endpoint_id)
                 self.local_endpoint_ids.remove(endpoint_id)
-                self._label_inherit_idx.on_item_update(endpoint_id, None, None)
                 assert endpoint_id not in self.pol_ids_by_ep_id
         else:
             # Creation or modification
@@ -323,11 +261,6 @@ class EndpointManager(ReferenceManager):
                 _log.debug("Endpoint wasn't known before, increffing it")
                 self.local_endpoint_ids.add(endpoint_id)
                 self.get_and_incref(endpoint_id)
-            self._label_inherit_idx.on_item_update(
-                endpoint_id,
-                endpoint.get("labels", {}),
-                endpoint.get("profile_ids", [])
-            )
 
         self._update_dirty_policy()
 

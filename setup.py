@@ -71,11 +71,11 @@ def collect_requirements():
 
 setuptools.setup(
     name="calico",
-    version="1.4.0",
+    version="1.5.0a1",
     packages=setuptools.find_packages(),
     entry_points={
         'console_scripts': [
-            'calico-felix = calico.felix.felix:main',
+            'calico-iptables-plugin = calico.felix.felix:main',
             'calico-cleanup = calico.felix.cleanup:main',
         ],
         'calico.felix.iptables_generator': [

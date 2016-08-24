@@ -26,8 +26,7 @@ migrations.
 """
 import logging
 import re
-
-from pyparsing import alphanums
+import string
 
 _log = logging.getLogger(__name__)
 
@@ -93,7 +92,7 @@ DHCP_DIR = ROOT_DIR + "/dhcp" + DHCP_VERSION
 SUBNET_DIR= DHCP_DIR + "/subnet"
 
 # Characters valid in a label ID.
-LABEL_CHARS = alphanums + "_.-/"
+LABEL_CHARS = string.ascii_letters + string.digits + "_.-/"
 
 
 def dir_for_host(hostname):
