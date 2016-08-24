@@ -228,7 +228,7 @@ class MessageReader(object):
         self._current_msg_type = None
         self._buf = ""
 
-    def new_messages(self, timeout=1):
+    def new_messages(self):
         """
         Generator: generates 0 or more tuples containing message type and
         message body (as a dict).
@@ -236,17 +236,9 @@ class MessageReader(object):
         May generate 0 events in certain conditions even if there are
         events available.  (If the read returns EAGAIN, for example.)
 
-        :param timeout: Maximum time to block waiting on the socket before
-               giving up.  No exception is raised upon timeout but 0 events
-               are generated.
         :raises SocketClosed if the socket is closed.
         :raises socket.error if an unexpected socket error occurs.
         """
-        if timeout is not None and not self._buf:
-            read_ready, _, _ = select.select([self._pipe], [], [], timeout)
-            if not read_ready:
-                return
-
         while len(self._buf) < 8:
             _log.debug("Reading length header...")
             self._read(8 - len(self._buf))

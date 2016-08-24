@@ -218,7 +218,7 @@ class DatastoreReader(TimedGreenlet):
             try:
                 # Note: self._msg_reader.new_messages() returns iterator so
                 # whole for loop must be inside the try.
-                for msg_type, msg, seq_no in self._msg_reader.new_messages(timeout=1):
+                for msg_type, msg, seq_no in self._msg_reader.new_messages():
                     self._dispatch_msg_from_driver(msg_type, msg, seq_no)
             except SocketClosed:
                 _log.critical("The driver process closed its socket, Felix "
