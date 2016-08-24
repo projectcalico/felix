@@ -19,30 +19,25 @@ felix.datastore
 Our API to etcd.  Contains function to synchronize felix with etcd
 as well as reporting our status into etcd.
 """
+import logging
 import os
 import random
-import logging
-import signal
-import socket
-import subprocess
-
-import gevent
 import sys
 
-from calico.felix import felixbackend_pb2
-from gevent.event import Event
-
+import gevent
 from calico.datamodel_v1 import (
     WloadEndpointId, ENDPOINT_STATUS_ERROR,
     ENDPOINT_STATUS_DOWN, ENDPOINT_STATUS_UP,
     TieredPolicyId, HostEndpointId, EndpointId)
-from calico.etcddriver.protocol import *
+from calico.felix import felixbackend_pb2
 from calico.felix.actor import Actor, actor_message, TimedGreenlet
 from calico.felix.futils import (
     logging_exceptions, iso_utc_timestamp, IPV4,
     IPV6, StatCounter
 )
+from calico.felix.protocol import *
 from calico.monotonic import monotonic_time
+from gevent.event import Event
 from google.protobuf.descriptor import FieldDescriptor
 
 _log = logging.getLogger(__name__)

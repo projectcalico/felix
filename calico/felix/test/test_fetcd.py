@@ -12,33 +12,32 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
+import logging
 import socket
 import subprocess
 from datetime import datetime
-import json
-import logging
 
-from calico.felix.selectors import parse_selector
-from etcd import EtcdResult, EtcdException
 import etcd
-from gevent.event import Event
 import gevent
-from mock import Mock, call, patch, ANY
-
 from calico.datamodel_v1 import WloadEndpointId, TieredPolicyId, HostEndpointId
-from calico.etcddriver.protocol import MessageReader, MessageWriter, \
+from calico.felix.config import Config
+from calico.felix.datastore import (DatastoreReader, DatastoreAPI,
+                                    die_and_restart, DatastoreWriter, combine_statuses)
+from calico.felix.futils import IPV4, IPV6
+from calico.felix.ipsets import IpsetActor
+from calico.felix.protocol import MessageReader, MessageWriter, \
     MSG_TYPE_CONFIG_UPDATE, MSG_TYPE_IN_SYNC, STATUS_RESYNC, MSG_KEY_STATUS, \
     MSG_TYPE_UPDATE, MSG_KEY_KEY, MSG_KEY_VALUE, MSG_KEY_TYPE, \
     MSG_KEY_HOST_CONFIG, MSG_KEY_GLOBAL_CONFIG, MSG_TYPE_CONFIG_RESOLVED, \
     MSG_KEY_LOG_FILE, MSG_KEY_SEV_FILE, MSG_KEY_SEV_SCREEN, MSG_KEY_SEV_SYSLOG, \
     STATUS_IN_SYNC, SocketClosed, MSG_KEY_PROM_PORT
-from calico.felix.config import Config
-from calico.felix.futils import IPV4, IPV6
-from calico.felix.ipsets import IpsetActor
-from calico.felix.datastore import (DatastoreReader, DatastoreAPI,
-                                    die_and_restart, DatastoreWriter, combine_statuses)
+from calico.felix.selectors import parse_selector
 from calico.felix.splitter import UpdateSplitter
 from calico.felix.test.base import BaseTestCase, JSONString
+from etcd import EtcdResult, EtcdException
+from gevent.event import Event
+from mock import Mock, call, patch, ANY
 
 _log = logging.getLogger(__name__)
 

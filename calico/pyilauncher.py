@@ -22,10 +22,7 @@ Main script used as the entry-point to the pyinstaller executable.
 import sys
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "driver":
-        sys.argv[1:] = sys.argv[2:]
-        from calico.etcddriver.__main__ import main
-    elif len(sys.argv) > 1 and sys.argv[1] == "cleanup":
+    if len(sys.argv) > 1 and sys.argv[1] == "cleanup":
         sys.argv[1:] = sys.argv[2:]
         from calico.felix.cleanup import main
     else:
