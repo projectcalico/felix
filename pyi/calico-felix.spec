@@ -21,6 +21,7 @@ from PyInstaller.utils.hooks import copy_metadata
 import re
 import glob
 import sys
+import os
 import os.path
 
 block_cipher = None
@@ -60,7 +61,7 @@ hidden_imports = [
 ]
 
 extra_binaries = [
-
+    (os.getcwd() + '/bin/calico-felix', ''),
 ]
 
 a = Analysis([os.path.join(HOMEPATH,'calico/pyilauncher.py')],
@@ -90,4 +91,4 @@ coll = COLLECT(exe,
                a.datas,
                strip=False,
                upx=True,
-               name='calico-iptables-plugin')
+               name='calico-felix')
