@@ -235,44 +235,56 @@ class DatastoreReader(TimedGreenlet):
             self.begin_polling.wait()
 
         if msg_type == MSG_TYPE_IPSET_DELTA:
-            _stats.increment("IP set delta messages from driver")
+            _stats.increment("IP set delta messages")
             self._on_ipset_delta_msg_from_driver(msg)
         elif msg_type == MSG_TYPE_IPSET_REMOVED:
-            _stats.increment("IP set removed messages from driver")
+            _stats.increment("IP set removed messages")
             self._on_ipset_removed_msg_from_driver(msg)
         elif msg_type == MSG_TYPE_IPSET_UPDATE:
-            _stats.increment("IP set added messages from driver")
+            _stats.increment("IP set added messages")
             self._on_ipset_update_msg_from_driver(msg)
         elif msg_type == MSG_TYPE_WL_EP_UPDATE:
-            _stats.increment("Workload endpoint update messages from driver")
+            _stats.increment("Workload endpoint update messages")
             self.on_wl_endpoint_update(msg)
         elif msg_type == MSG_TYPE_WL_EP_REMOVE:
-            _stats.increment("Workload endpoint remove messages from driver")
+            _stats.increment("Workload endpoint remove messages")
             self.on_wl_endpoint_remove(msg)
         elif msg_type == MSG_TYPE_HOST_EP_UPDATE:
-            _stats.increment("Host endpoint update messages from driver")
+            _stats.increment("Host endpoint update messages")
             self.on_host_ep_update(msg)
         elif msg_type == MSG_TYPE_HOST_EP_REMOVE:
-            _stats.increment("Host endpoint update remove from driver")
+            _stats.increment("Host endpoint update remove")
             self.on_host_ep_remove(msg)
+        elif msg_type == MSG_TYPE_HOST_METADATA_UPDATE:
+            _stats.increment("Host endpoint update messages")
+            self.on_host_meta_update(msg)
+        elif msg_type == MSG_TYPE_HOST_METADATA_REMOVE:
+            _stats.increment("Host endpoint remove messages")
+            self.on_host_meta_remove(msg)
+        elif msg_type == MSG_TYPE_IPAM_POOL_UPDATE:
+            _stats.increment("IPAM pool update messagess")
+            self.on_ipam_pool_update(msg)
+        elif msg_type == MSG_TYPE_IPAM_POOL_REMOVE:
+            _stats.increment("IPAM pool remove messages")
+            self.on_ipam_pool_remove(msg)
         elif msg_type == MSG_TYPE_POLICY_UPDATE:
-            _stats.increment("Policy update messages from driver")
+            _stats.increment("Policy update messages")
             self.on_tiered_policy_update(msg)
         elif msg_type == MSG_TYPE_POLICY_REMOVED:
-            _stats.increment("Policy update messages from driver")
-            self.on_tiered_policy_update(msg)
+            _stats.increment("Policy update messages")
+            self.on_tiered_policy_remove(msg)
         elif msg_type == MSG_TYPE_PROFILE_UPDATE:
-            _stats.increment("Profile update messages from driver")
+            _stats.increment("Profile update messages")
             self.on_prof_rules_update(msg)
         elif msg_type == MSG_TYPE_PROFILE_REMOVED:
-            _stats.increment("Profile update messages from driver")
+            _stats.increment("Profile update messages")
             self.on_prof_rules_remove(msg)
         elif msg_type == MSG_TYPE_CONFIG_UPDATE:
-            _stats.increment("Config loaded messages from driver")
-            self._on_config_update_from_driver(msg)
+            _stats.increment("Config loaded messages")
+            self._on_config_update(msg)
         elif msg_type == MSG_TYPE_IN_SYNC:
-            _stats.increment("Status messages from driver")
-            self._on_in_sync_from_driver(msg)
+            _stats.increment("Status messages")
+            self._on_in_sync(msg)
         else:
             _log.error("Unexpected message %r %s", msg_type, msg)
             raise RuntimeError("Unexpected message %s" % msg)
@@ -284,7 +296,7 @@ class DatastoreReader(TimedGreenlet):
             # immediately rescheduled.
             gevent.sleep(0.000001)
 
-    def _on_config_update_from_driver(self, msg):
+    def _on_config_update(self, msg):
         """
         Called when we receive a config loaded message from the driver.
 
@@ -327,7 +339,7 @@ class DatastoreReader(TimedGreenlet):
 
         _log.info("Config loaded by driver: %s", msg.config)
 
-    def _on_in_sync_from_driver(self, msg):
+    def _on_in_sync(self, msg):
         """
         Called when we receive a status update from the driver.
 
@@ -470,7 +482,7 @@ class DatastoreReader(TimedGreenlet):
         policy_id = TieredPolicyId(msg.id.tier, msg.id.name)
         self.splitter.on_rules_update(policy_id, None)
 
-    def on_host_ip_set(self, msg):
+    def on_host_meta_update(self, msg):
         if not self._config.IP_IN_IP_ENABLED:
             _log.debug("Ignoring update to host IP because IP-in-IP disabled")
             return
@@ -478,7 +490,7 @@ class DatastoreReader(TimedGreenlet):
         self.ipv4_by_hostname[msg.hostname] = msg.ip
         self._update_hosts_ipset()
 
-    def on_host_ip_remove(self, msg):
+    def on_host_meta_remove(self, msg):
         if not self._config.IP_IN_IP_ENABLED:
             _log.debug("Ignoring update to host IP because IP-in-IP is "
                        "disabled")
@@ -496,7 +508,7 @@ class DatastoreReader(TimedGreenlet):
             async=True
         )
 
-    def on_ipam_v4_pool_update(self, msg):
+    def on_ipam_pool_update(self, msg):
         _stats.increment("IPAM pool created/updated")
         pool = {
             "cidr": msg.pool.cidr,
@@ -504,7 +516,7 @@ class DatastoreReader(TimedGreenlet):
         }
         self.splitter.on_ipam_pool_updated(msg.id, pool)
 
-    def on_ipam_v4_pool_remove(self, msg):
+    def on_ipam_pool_remove(self, msg):
         _stats.increment("IPAM pool deleted")
         self.splitter.on_ipam_pool_updated(msg.id, None)
 

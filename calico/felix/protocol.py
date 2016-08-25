@@ -57,7 +57,6 @@ MSG_KEY_EP_REPORT_RESYNC_SECS = "endpoint_status_resync_interval"
 # Status message Driver -> Felix.
 MSG_TYPE_IN_SYNC = "in_sync"
 
-
 MSG_TYPE_PROFILE_UPDATE = "active_profile_update"
 MSG_TYPE_PROFILE_REMOVED = "active_profile_remove"
 MSG_TYPE_POLICY_UPDATE = "active_policy_update"
@@ -85,6 +84,12 @@ MSG_KEY_MEMBERS = "members"
 MSG_KEY_ADDED_IPS = "added_members"
 MSG_KEY_REMOVED_IPS = "removed_members"
 MSG_KEY_IPSET_ID = "id"
+
+MSG_TYPE_HOST_METADATA_UPDATE = "host_metadata_update"
+MSG_TYPE_HOST_METADATA_REMOVE = "host_metadata_remove"
+
+MSG_TYPE_IPAM_POOL_UPDATE = "ipam_pool_update"
+MSG_TYPE_IPAM_POOL_REMOVE = "ipam_pool_remove"
 
 # Status reports
 MSG_TYPE_FELIX_STATUS = "felix_status_update"
@@ -137,6 +142,10 @@ __all__ = [
     'MSG_TYPE_IPSET_DELTA',
     'MSG_TYPE_IPSET_REMOVED',
     'MSG_TYPE_IPSET_UPDATE',
+    'MSG_TYPE_IPAM_POOL_REMOVE',
+    'MSG_TYPE_IPAM_POOL_UPDATE',
+    'MSG_TYPE_HOST_METADATA_UPDATE',
+    'MSG_TYPE_HOST_METADATA_REMOVE',
     'MSG_TYPE_POLICY_REMOVED',
     'MSG_TYPE_POLICY_UPDATE',
     'MSG_TYPE_PROFILE_REMOVED',

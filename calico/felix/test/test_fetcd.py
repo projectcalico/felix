@@ -271,7 +271,7 @@ class TestEtcdWatcher(BaseTestCase):
         self.m_config.PROM_METRICS_ENABLED = True
         global_config = {"InterfacePrefix": "tap"}
         local_config = {"LogSeverityFile": "DEBUG"}
-        self.watcher._on_config_update_from_driver({
+        self.watcher._on_config_update({
             MSG_KEY_GLOBAL_CONFIG: global_config,
             MSG_KEY_HOST_CONFIG: local_config,
         })
@@ -296,24 +296,24 @@ class TestEtcdWatcher(BaseTestCase):
         # Check a subsequent config change results in Felix dying.
         global_config = {"InterfacePrefix": "not!tap"}
         local_config = {"LogSeverityFile": "not!DEBUG"}
-        self.watcher._on_config_update_from_driver({
+        self.watcher._on_config_update({
             MSG_KEY_GLOBAL_CONFIG: global_config,
             MSG_KEY_HOST_CONFIG: local_config,
         })
         self.assertEqual(m_die.mock_calls, [call()])
 
     def test_on_status_from_driver(self):
-        self.watcher._on_in_sync_from_driver({
+        self.watcher._on_in_sync({
             MSG_KEY_STATUS: STATUS_RESYNC
         })
         self.assertFalse(self.watcher._been_in_sync)
 
         with patch.object(self.watcher, "begin_polling") as m_begin:
             # Two calls but second should be ignored...
-            self.watcher._on_in_sync_from_driver({
+            self.watcher._on_in_sync({
                 MSG_KEY_STATUS: STATUS_IN_SYNC
             })
-            self.watcher._on_in_sync_from_driver({
+            self.watcher._on_in_sync({
                 MSG_KEY_STATUS: STATUS_IN_SYNC
             })
         m_begin.wait.assert_called_once_with()
