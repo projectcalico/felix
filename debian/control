@@ -13,7 +13,7 @@ Depends:
  ${python:Depends},
  ${shlibs:Depends},
  python-pyparsing,
- python-etcd (>= 0.4.1+calico.1),
+ python-etcd (>= 0.4.3),
  python-ijson (>= 2.2-1),
  python-datrie (>= 0.7-1),
  python-prometheus-client (>= 0.0.13-1~ubuntu14.04.1~ppa1),

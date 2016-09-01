@@ -1,7 +1,7 @@
 gevent
 greenlet
 netaddr
-python-etcd>=0.4.1
+git+https://github.com/projectcalico/python-etcd.git
 posix-spawn>=0.2.post6
 datrie>=0.7
 ijson>=2.2
