@@ -72,7 +72,7 @@ func (calc *MemberCalculator) OnUpdate(update model.KVPair) (filterOut bool) {
 	}
 	switch update.Key.(type) {
 	case model.WorkloadEndpointKey:
-		ep := update.Value.(model.WorkloadEndpoint)
+		ep := update.Value.(*model.WorkloadEndpoint)
 		ips := make([]ip.Addr, 0, len(ep.IPv4Nets)+len(ep.IPv6Nets))
 		for _, net := range ep.IPv4Nets {
 			ips = append(ips, ip.FromNetIP(net.IP))
