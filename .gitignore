@@ -16,4 +16,7 @@ build
 dist
 site-packages
 .noseids
-
+nosetests.xml
+version.txt
+bin
+calico/felix/felixbackend_pb2.py

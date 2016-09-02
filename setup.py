@@ -79,8 +79,7 @@ setuptools.setup(
             'calico-cleanup = calico.felix.cleanup:main',
         ],
         'calico.felix.iptables_generator': [
-            'default = '
-            'calico.felix.plugins.fiptgenerator:FelixIptablesGenerator',
+            'default = calico.felix.plugins.fiptgenerator:FelixIptablesGenerator',
         ],
     },
     scripts=['utils/calico-diags'],

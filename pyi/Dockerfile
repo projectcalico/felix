@@ -27,4 +27,4 @@ RUN pip install pyinstaller
 # (but it does mean that the build script needs to rebuild the container
 # image each time).
 COPY . /code
-RUN cd /code && pip install .
+RUN cd /code && pip install -v .

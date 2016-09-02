@@ -1,4 +1,5 @@
 vendor
-*.coverprofile
 bin
+*.coverprofile
 *.pb.go
+*_pb2.py
