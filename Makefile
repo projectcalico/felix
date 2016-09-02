@@ -1,14 +1,8 @@
-.PHONY: all test ut update-vendor clean
+all: pyinstaller
 
-default: all
-all: test
-test: ut
-
+.PHONY: update-vendor
 update-vendor:
-	glide up
-
-ut: bin/calicoctl
-	./run-uts
+	cd go && glide up
 
 go/felix/proto/felixbackend.pb.go: go/felix/proto/felixbackend.proto
 	docker run -ti \

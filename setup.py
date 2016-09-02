@@ -72,7 +72,7 @@ def collect_requirements():
 setuptools.setup(
     name="calico",
     version="1.5.0a1",
-    packages=setuptools.find_packages(),
+    packages=setuptools.find_packages(exclude=["go"]),
     entry_points={
         'console_scripts': [
             'calico-iptables-plugin = calico.felix.felix:main',
