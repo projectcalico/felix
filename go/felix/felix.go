@@ -127,7 +127,7 @@ configRetry:
 		glog.Fatalf("Failed to open pipe for dataplane driver: %v", err)
 	}
 
-	cmd := exec.Command("./calico-iptables-plugin")
+	cmd := exec.Command("calico-iptables-plugin")
 	driverOut, err := cmd.StdoutPipe()
 	if err != nil {
 		glog.Fatal("Failed to create pipe for dataplane driver")

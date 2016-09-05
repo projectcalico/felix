@@ -24,3 +24,8 @@ cd /code/
 
 rm -rf build dist
 pyinstaller pyi/calico-felix.spec
+
+cd dist/calico-felix
+find -type f | xargs chmod -x
+chmod +x calico-iptables-plugin
+chmod +x calico-felix

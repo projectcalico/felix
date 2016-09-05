@@ -1,3 +1,9 @@
+calico (1.5.0~~dev) xenial; urgency=low
+
+  * Development release.
+
+ -- Shaun Crampton <shaun@tigera.io>  Mon, 5 Sep 2016 15:24:06 +0100
+
 calico (1.4.0-xenial) xenial; urgency=low
 
   * calico release (from Git commit 4ab7e42).

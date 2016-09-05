@@ -2,8 +2,8 @@ Source: calico
 Section: net
 Priority: optional
 Maintainer: Project Calico Maintainers <maintainers@projectcalico.org>
-Build-Depends: debhelper (>= 8.0.0), dh-systemd, python-all (>= 2.6), python-setuptools
-XS-Python-Version: >= 2.6
+Build-Depends: debhelper (>= 8.0.0), dh-systemd, python-all (>= 2.7), python-setuptools
+XS-Python-Version: >= 2.7
 Standards-Version: 3.9.4
 
 Package: calico-common
@@ -32,17 +32,13 @@ Description: Project Calico virtual networking for cloud data centers.
  This package provides common files.
 
 Package: calico-felix
-Architecture: all
+Architecture: amd64
 Depends:
- calico-common (= ${binary:Version}),
  conntrack,
  ipset,
+ iproute2,
  net-tools,
- python-netaddr,
- python-gevent,
- python-posix-spawn,
  ${misc:Depends},
- ${python:Depends},
  ${shlibs:Depends}
 Description: Project Calico virtual networking for cloud data centers.
  Project Calico is an open source solution for virtual networking in
