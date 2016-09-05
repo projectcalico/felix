@@ -25,11 +25,13 @@ override_dh_install:
 	cd debian/tmp/usr/bin && ln -fs ../../opt/calico-felix/calico-iptables-plugin ./calico-iptables-plugin
 	dh_install
 
+# strip fails on some of our binaries, disable it.
 override_dh_strip:
 	true
 
+# Prevent debhelper from trying to rebuild or register our shared libraries,
+# they're only intended for our pyinstaller bundle.
 override_dh_makeshlibs:
 	true
-
 override_dh_shlibdeps:
 	true
