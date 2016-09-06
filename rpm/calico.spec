@@ -2,8 +2,8 @@
 
 Name:           calico
 Summary:        Project Calico virtual networking for cloud data centers
-Version:        1.4.0
-Release:        1%{?dist}
+Version:        1.5.0
+Release:        0.1%{?dist}
 License:        Apache-2
 URL:            http://projectcalico.org
 Source0:        calico-%{version}.tar.gz
@@ -35,7 +35,7 @@ This package provides common files.
 %package felix
 Group:          Applications/Engineering
 Summary:        Project Calico virtual networking for cloud data centers
-Requires:       calico-common, conntrack-tools, ipset, iptables, net-tools, pyparsing, python-devel, python-netaddr, python-gevent, datrie, ijson, python-urllib3, python-msgpack, prometheus_client
+Requires:       conntrack-tools, ipset, iptables, iptables-utils, net-tools, iproute, which
 
 
 %description felix
