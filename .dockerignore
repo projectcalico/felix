@@ -15,3 +15,5 @@ nosetests.xml
 coverage.xml
 htmlcov
 bin
+build
+dist
