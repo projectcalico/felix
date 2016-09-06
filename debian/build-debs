@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+set -x
+set -e
+
+if [ -z "${DEB_VERSION}" ]; then
+  echo "DEB_VERSION variable should be set"
+  exit 1
+fi
+
+deb_dir=dist/$STREAM
+unpacked_src_dir=${deb_dir}/calico-${DEB_VERSION}
+
+rm -rf ${deb_dir}
+mkdir -p ${unpacked_src_dir}
+cp -r dist/calico-felix ${unpacked_src_dir}/pyi
+cp -r etc \
+      utils \
+      calico \
+      setup.py \
+      *requirements.txt \
+      LICENSE \
+      MANIFEST.in \
+      README.md \
+      ${unpacked_src_dir}
+
+cp -r debian ${unpacked_src_dir}
+
+cd ${unpacked_src_dir}
+debuild -us -uc
+
+set +x
+echo
+echo "Build complete.  Source and binary debs now in ${deb_dir}."

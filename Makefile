@@ -5,24 +5,39 @@ DEB_VERSION:=$(shell grep calico debian/changelog | \
                      cut -d '-' -f 1)
 GO_FILES:=$(shell find go/ -type f -name '*.go')
 PY_FILES:=*.py calico/felix/felixbackend_pb2.py $(shell find calico/ docs/  -type f -name '*.py')
+MY_UID:=$(shell id -u)
+
+.PHONY: trusty-build-image
+trusty-build-image:
+	cd docker-build-images && docker build . -f ubuntu-trusty-build.Dockerfile -t calico-trusty-build
+
+.PHONY: xenial-build-image
+xenial-build-image:
+	cd docker-build-images && docker build . -f ubuntu-xenial-build.Dockerfile -t calico-xenial-build
+
 
 .PHONY: deb
-deb: dist/calico-felix/calico-felix
-	rm -rf dist/deb
-	mkdir -p dist/deb/calico-$(DEB_VERSION)
-	cp -r dist/calico-felix dist/deb/calico-$(DEB_VERSION)/pyi
-	cp -r etc \
-	      utils \
-	      calico \
-	      setup.py \
-	      *requirements.txt \
-	      LICENSE \
-	      MANIFEST.in \
-	      README.md \
-	      dist/deb/calico-$(DEB_VERSION)
-	cd dist/deb && tar -czf calico_$(DEB_VERSION).orig.tar.gz calico-$(DEB_VERSION)
-	cp -r debian dist/deb/calico-$(DEB_VERSION)
-	cd dist/deb/calico-$(DEB_VERSION) && debuild -us -uc
+deb: trusty-deb xenial-deb
+
+.PHONY: trusty-deb
+trusty-deb: dist/trusty/calico-felix_$(DEB_VERSION)_amd64.deb
+
+.PHONY: xenial-deb
+xenial-deb: dist/xenial/calico-felix_$(DEB_VERSION)_amd64.deb
+
+dist/trusty/calico-felix_$(DEB_VERSION)_amd64.deb: dist/calico-felix/calico-felix
+	$(MAKE) trusty-build-image
+	docker run --user $(MY_UID) \
+	           -e DEB_VERSION=$(DEB_VERSION) \
+	           -v $${PWD}:/code \
+	           calico-trusty-build debian/build-debs
+
+dist/xenial/calico-felix_$(DEB_VERSION)_amd64.deb: dist/calico-felix/calico-felix
+	$(MAKE) xenial-build-image
+	docker run --user $(MY_UID) \
+	           -e DEB_VERSION=$(DEB_VERSION) \
+	           -v $${PWD}:/code \
+	           calico-xenial-build debian/build-debs
 
 .PHONY: update-vendor
 update-vendor:
