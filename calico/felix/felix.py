@@ -69,8 +69,8 @@ def _main_greenlet():
         # The parent process sends us communication pipes as FD 3 and 4. Open
         # those as files.  Wrap the resulting files in a FileObject to make
         # them cooperate with gevent.
-        pipe_from_parent = FileObject(os.fdopen(3, 'r', -1))
-        pipe_to_parent = FileObject(os.fdopen(4, 'w', -1))
+        pipe_from_parent = FileObject(os.fdopen(3, 'rb', -1), 'rb')
+        pipe_to_parent = FileObject(os.fdopen(4, 'wb', -1), 'wb')
 
         config = Config()
         datastore = DatastoreAPI(config,

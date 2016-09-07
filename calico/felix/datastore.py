@@ -336,7 +336,7 @@ class DatastoreReader(TimedGreenlet):
             self._config.update_from(msg.config)
             _log.info("Config loaded: %s", self._config.__dict__)
             self.configured.set()
-
+        self._datastore_writer.on_config_resolved(async=True)
         _log.info("Config loaded by driver: %s", msg.config)
 
     def _on_in_sync(self, msg):
