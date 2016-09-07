@@ -27,7 +27,16 @@ cp -r etc \
 cp -r debian ${unpacked_src_dir}
 
 cd ${unpacked_src_dir}
-debuild -us -uc
+
+# By default, debuild will exclude .so files from the source deb, we're
+# deliberately shipping pre-compiled .so files as our "source" in the
+# pyinstaller bundle so we need to customize the excludes list.  This list
+# is cribbed from the default (see dpkg-source --help) with the problematic
+# *.so exclusion removed.
+excludes='-I*/*~ -I,,* -I.[#~]* -I.git -I.gitattributes -I.gitignore -I.gitmodules -I.gitreview'
+
+debuild -i="" $excludes -us -uc -b
+debuild -i="" $excludes -us -uc -S
 
 set +x
 echo
