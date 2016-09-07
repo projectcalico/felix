@@ -1,4 +1,4 @@
-calico (1.5.0~~dev) xenial; urgency=low
+calico (1.5.0~~dev~__STREAM__) __STREAM__; urgency=low
 
   * Development release.
 

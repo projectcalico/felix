@@ -3,6 +3,9 @@ all: pyinstaller
 DEB_VERSION:=$(shell grep calico debian/changelog | \
                      head -n 1 | cut -d '(' -f 2 | cut -d ')' -f 1 | \
                      cut -d '-' -f 1)
+DEB_VERSION_TRUSTY:=$(shell echo $(DEB_VERSION) | sed "s/__STREAM__/trusty/g")
+DEB_VERSION_XENIAL:=$(shell echo $(DEB_VERSION) | sed "s/__STREAM__/xenial/g")
+
 GO_FILES:=$(shell find go/ -type f -name '*.go')
 PY_FILES:=*.py calico/felix/felixbackend_pb2.py $(shell find calico/ docs/  -type f -name '*.py')
 MY_UID:=$(shell id -u)
@@ -44,21 +47,21 @@ centos7-build-image:
 deb: trusty-deb xenial-deb
 
 .PHONY: trusty-deb
-trusty-deb: dist/trusty/calico-felix_$(DEB_VERSION)_amd64.deb
+trusty-deb: dist/trusty/calico-felix_$(DEB_VERSION_TRUSTY)_amd64.deb
 
 .PHONY: xenial-deb
-xenial-deb: dist/xenial/calico-felix_$(DEB_VERSION)_amd64.deb
+xenial-deb: dist/xenial/calico-felix_$(DEB_VERSION_XENIAL)_amd64.deb
 
 DOCKER_RUN:=docker run --rm --user $(MY_UID)  -v $${PWD}:/code
 
-dist/trusty/calico-felix_$(DEB_VERSION)_amd64.deb: dist/calico-felix/calico-felix
+dist/trusty/calico-felix_$(DEB_VERSION_TRUSTY)_amd64.deb: dist/calico-felix/calico-felix debian/*
 	$(MAKE) trusty-build-image
-	$(DOCKER_RUN) -e DEB_VERSION=$(DEB_VERSION) \
+	$(DOCKER_RUN) -e DEB_VERSION=$(DEB_VERSION_TRUSTY) \
 	              calico-trusty-build debian/build-debs
 
-dist/xenial/calico-felix_$(DEB_VERSION)_amd64.deb: dist/calico-felix/calico-felix
+dist/xenial/calico-felix_$(DEB_VERSION_XENIAL)_amd64.deb: dist/calico-felix/calico-felix debian/*
 	$(MAKE) xenial-build-image
-	$(DOCKER_RUN) -e DEB_VERSION=$(DEB_VERSION) \
+	$(DOCKER_RUN) -e DEB_VERSION=$(DEB_VERSION_XENIAL) \
 	              calico-xenial-build debian/build-debs
 
 .PHONY: rpm
