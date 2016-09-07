@@ -139,6 +139,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDi
 	ruleScanner.OnTagInactive = tagIndex.SetTagInactive
 	sourceDispatcher.Register(model.WorkloadEndpointKey{}, tagIndex)
 	sourceDispatcher.Register(model.HostEndpointKey{}, tagIndex)
+	sourceDispatcher.Register(model.ProfileTagsKey{}, tagIndex)
 
 	// The member calculator merges the IPs from different endpoints to
 	// calculate the actual IPs that should be in each IP set.  It deals
