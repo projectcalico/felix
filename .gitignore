@@ -22,3 +22,4 @@ bin
 calico/felix/felixbackend_pb2.py
 docker-build-images/group
 docker-build-images/passwd
+local-utils
