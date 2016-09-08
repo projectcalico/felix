@@ -23,5 +23,5 @@ import (
 
 func TestIpsets(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Ipsets Suite")
+	RunSpecs(t, "Calculation graph Suite")
 }

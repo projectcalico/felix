@@ -50,7 +50,7 @@ func NewAsyncCalcGraph(conf *config.Config, outputEvents chan<- interface{}) *As
 		Dispatcher:   dispatcher,
 		eventBuffer:  eventBuffer,
 	}
-	eventBuffer.callback = g.onEvent
+	eventBuffer.Callback = g.onEvent
 	return g
 }
 

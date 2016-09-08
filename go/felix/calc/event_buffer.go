@@ -31,19 +31,23 @@ import (
 
 type EventHandler func(message interface{})
 
+type configInterface interface {
+	UpdateFrom(map[string]string, config.Source) (changed bool, err error)
+}
+
 type EventBuffer struct {
-	config        *config.Config
-	ipSetsAdded   set.Set
-	ipSetsRemoved set.Set
-	ipsAdded      multidict.StringToIface
-	ipsRemoved    multidict.StringToIface
+	config         configInterface
+	ipSetsAdded    set.Set
+	ipSetsRemoved  set.Set
+	ipsAdded       multidict.StringToIface
+	ipsRemoved     multidict.StringToIface
 
 	pendingUpdates []interface{}
 
-	callback EventHandler
+	Callback       EventHandler
 }
 
-func NewEventBuffer(conf *config.Config) *EventBuffer {
+func NewEventBuffer(conf configInterface) *EventBuffer {
 	buf := &EventBuffer{
 		config:        conf,
 		ipSetsAdded:   set.New(),
@@ -82,7 +86,7 @@ func (buf *EventBuffer) Flush() {
 	buf.ipSetsRemoved.Iter(func(item interface{}) (err error) {
 		setID := item.(string)
 		glog.V(3).Infof("Flushing IP set remove: %v", setID)
-		buf.callback(&proto.IPSetRemove{
+		buf.Callback(&proto.IPSetRemove{
 			Id: setID,
 		})
 		buf.ipsRemoved.DiscardKey(setID)
@@ -99,7 +103,7 @@ func (buf *EventBuffer) Flush() {
 			members = append(members, value.(ip.Addr).String())
 		})
 		buf.ipsAdded.DiscardKey(setID)
-		buf.callback(&proto.IPSetUpdate{
+		buf.Callback(&proto.IPSetUpdate{
 			Id:      setID,
 			Members: members,
 		})
@@ -114,7 +118,7 @@ func (buf *EventBuffer) Flush() {
 
 	glog.V(3).Infof("Flushing %v pending updates", len(buf.pendingUpdates))
 	for _, update := range buf.pendingUpdates {
-		buf.callback(update)
+		buf.Callback(update)
 	}
 	glog.V(3).Infof("Done flushing %v pending updates", len(buf.pendingUpdates))
 	buf.pendingUpdates = make([]interface{}, 0)
@@ -135,7 +139,7 @@ func (buf *EventBuffer) flushAddsOrRemoves(setID string) {
 	})
 	buf.ipsAdded.DiscardKey(setID)
 	buf.ipsRemoved.DiscardKey(setID)
-	buf.callback(&deltaUpdate)
+	buf.Callback(&deltaUpdate)
 }
 
 func (buf *EventBuffer) OnConfigUpdate(globalConfig, hostConfig map[string]string) {
