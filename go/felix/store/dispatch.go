@@ -71,6 +71,9 @@ func (d *Dispatcher) OnUpdate(update model.KVPair) (filterOut bool) {
 	keyType := reflect.TypeOf(update.Key)
 	glog.V(4).Info("Type: ", keyType)
 	listeners := d.typeToHandler[keyType]
+	if reflect.TypeOf(update.Value).Kind() == reflect.Struct {
+		glog.Fatalf("KVPair contained a struct instead of expected pointer: %#v", update)
+	}
 	glog.V(4).Infof("Listeners: %#v", listeners)
 	for _, recv := range listeners {
 		filterOut := recv.OnUpdate(update)

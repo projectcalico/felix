@@ -22,7 +22,11 @@ type Set interface {
 	Discard(interface{})
 	Contains(interface{}) bool
 	Iter(func(item interface{}) error)
+	Copy() Set
 }
+
+type empty struct {}
+var emptyValue = empty{}
 
 var (
 	StopIteration = errors.New("Stop iteration")
@@ -39,7 +43,7 @@ func (set mapSet) Len() int {
 }
 
 func (set mapSet) Add(item interface{}) {
-	set[item] = struct{}{}
+	set[item] = emptyValue
 }
 
 func (set mapSet) Discard(item interface{}) {
@@ -58,4 +62,12 @@ func (set mapSet) Iter(visitor func(item interface{}) error) {
 			break
 		}
 	}
+}
+
+func (sest mapSet) Copy() Set {
+	cpy := New()
+	for item, _ := range sest {
+		cpy.Add(item)
+	}
+	return cpy
 }
