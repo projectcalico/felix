@@ -15,13 +15,14 @@
 package fvtest
 
 import (
-	. "github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/calico/go/datastructures/set"
+	. "github.com/tigera/libcalico-go/lib/backend/model"
 )
 
 // A state represents a particular state of the datastore and the expected
 // result of the calculation graph for that state.
 type State struct {
+	Name string
 	// List of KVPairs that are in the datastore.  Stored as a list rather
 	// than a map to give us a deterministic ordering of injection.
 	DatastoreState []KVPair
@@ -88,4 +89,46 @@ func (s State) withIPSet(name string, members []string) (newState State) {
 		newState.ExpectedIPSets[name] = set
 	}
 	return
+}
+
+func (s State) withName(name string) (newState State) {
+	newState = s.copy()
+	newState.Name = name
+	return newState
+}
+
+func (s State) Keys() set.Set {
+	set := set.New()
+	for _, kv := range s.DatastoreState {
+		set.Add(kv.Key)
+	}
+	return set
+}
+
+func (s State) KVs() set.Set {
+	set := set.New()
+	for _, kv := range s.DatastoreState {
+		set.Add(kv)
+	}
+	return set
+}
+
+func (s State) KVDeltas(prev State) []KVPair {
+	updatedKVs := s.KVs()
+	for _, kv := range prev.DatastoreState {
+		updatedKVs.Discard(kv)
+	}
+	currentKeys := s.Keys()
+	deltas := make([]KVPair, 0)
+	for _, kv := range prev.DatastoreState {
+		if !currentKeys.Contains(kv.Key) {
+			deltas = append(deltas, KVPair{Key: kv.Key})
+		}
+	}
+	for _, kv := range s.DatastoreState {
+		if updatedKVs.Contains(kv) {
+			deltas = append(deltas, kv)
+		}
+	}
+	return deltas
 }

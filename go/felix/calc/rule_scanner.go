@@ -149,16 +149,19 @@ func (calc *RuleScanner) updateRules(key interface{}, inbound, outbound []model.
 
 	// And remove the old, triggering events as we clean up unused
 	// selectors/tags.
-	addedUids.Iter(func(item interface{}) error {
+	removedUids.Iter(func(item interface{}) error {
 		uid := item.(string)
 		calc.rulesIDToUIDs.Discard(key, uid)
+		calc.uidsToRulesIDs.Discard(uid, key)
 		if !calc.uidsToRulesIDs.ContainsKey(uid) {
 			glog.V(3).Infof("Selector/tag became inactive: %v", uid)
 			tagOrSel := calc.tagsOrSelsByUID[uid]
+			delete(calc.tagsOrSelsByUID, uid)
 			if tagOrSel.selector != nil {
-				sel := tagOrSel.selector
-				delete(calc.tagsOrSelsByUID, uid)
 				// This selector just became inactive, trigger event.
+				sel := tagOrSel.selector
+				glog.V(3).Infof("Selector became inactive: %v -> %v",
+					uid, sel)
 				calc.OnSelectorInactive(sel)
 			} else {
 				tag := tagOrSel.tag

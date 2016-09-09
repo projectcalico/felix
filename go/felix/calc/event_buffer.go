@@ -36,15 +36,15 @@ type configInterface interface {
 }
 
 type EventBuffer struct {
-	config         configInterface
-	ipSetsAdded    set.Set
-	ipSetsRemoved  set.Set
-	ipsAdded       multidict.StringToIface
-	ipsRemoved     multidict.StringToIface
+	config        configInterface
+	ipSetsAdded   set.Set
+	ipSetsRemoved set.Set
+	ipsAdded      multidict.StringToIface
+	ipsRemoved    multidict.StringToIface
 
 	pendingUpdates []interface{}
 
-	Callback       EventHandler
+	Callback EventHandler
 }
 
 func NewEventBuffer(conf configInterface) *EventBuffer {
@@ -62,12 +62,16 @@ func (buf *EventBuffer) OnIPSetAdded(setID string) {
 	glog.V(3).Infof("IP set %v now active", setID)
 	buf.ipSetsAdded.Add(setID)
 	buf.ipSetsRemoved.Discard(setID)
+	buf.ipsAdded.DiscardKey(setID)
+	buf.ipsRemoved.DiscardKey(setID)
 }
 
 func (buf *EventBuffer) OnIPSetRemoved(setID string) {
 	glog.V(3).Infof("IP set %v no longer active", setID)
 	buf.ipSetsAdded.Discard(setID)
 	buf.ipSetsRemoved.Add(setID)
+	buf.ipsAdded.DiscardKey(setID)
+	buf.ipsRemoved.DiscardKey(setID)
 }
 
 func (buf *EventBuffer) OnIPAdded(setID string, ip ip.Addr) {
@@ -135,7 +139,7 @@ func (buf *EventBuffer) flushAddsOrRemoves(setID string) {
 	})
 	buf.ipsRemoved.Iter(setID, func(item interface{}) {
 		ip := item.(ip.Addr).String()
-		deltaUpdate.AddedMembers = append(deltaUpdate.AddedMembers, ip)
+		deltaUpdate.RemovedMembers = append(deltaUpdate.RemovedMembers, ip)
 	})
 	buf.ipsAdded.DiscardKey(setID)
 	buf.ipsRemoved.DiscardKey(setID)

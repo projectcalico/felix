@@ -25,7 +25,8 @@ type Set interface {
 	Copy() Set
 }
 
-type empty struct {}
+type empty struct{}
+
 var emptyValue = empty{}
 
 var (
