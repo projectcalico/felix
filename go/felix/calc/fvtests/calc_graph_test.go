@@ -128,13 +128,15 @@ var initialisedStore = empty.withKVUpdates(
 	KVPair{Key: ReadyFlagKey{}, Value: true},
 ).withName("<initialised>")
 
-var mainline = initialisedStore.withKVUpdates(
+var withPolicy = initialisedStore.withKVUpdates(
+	KVPair{Key: TierKey{"tier-1"}, Value: &tier1},
+	KVPair{Key: PolicyKey{Tier: "tier-1", Name: "pol-1"}, Value: &policy1},
+).withName("policy")
+
+var localEpsWithPolicy = withPolicy.withKVUpdates(
 	// Two local endpoints with overlapping IPs.
 	KVPair{Key: localWlEpKey1, Value: &localWlEp1},
 	KVPair{Key: localWlEpKey2, Value: &localWlEp2},
-
-	KVPair{Key: TierKey{"tier-1"}, Value: &tier1},
-	KVPair{Key: PolicyKey{"tier-1", "pol-1"}, Value: &policy1},
 ).withIPSet(allSelectorId, []string{
 	"10.0.0.1", // ep1
 	"fc00:fe11::1",
@@ -147,13 +149,51 @@ var mainline = initialisedStore.withKVUpdates(
 	"fc00:fe11::1",
 	"10.0.0.2",
 	"fc00:fe11::2",
-}).withName("2 local endpoints w/ overlapping IPs")
+}).withActivePolicies(
+	proto.PolicyID{"tier-1", "pol-1"},
+).withName("2 local, overlapping IPs, policy")
 
-// Each entry in baseTests contains a series of states to move through.
+var localEp1WithPolicy = withPolicy.withKVUpdates(
+	KVPair{Key: localWlEpKey1, Value: &localWlEp1},
+).withIPSet(allSelectorId, []string{
+	"10.0.0.1", // ep1
+	"fc00:fe11::1",
+	"10.0.0.2", // ep1 and ep2
+	"fc00:fe11::2",
+}).withIPSet(bEqBSelectorId, []string{
+	"10.0.0.1",
+	"fc00:fe11::1",
+	"10.0.0.2",
+	"fc00:fe11::2",
+}).withActivePolicies(
+	proto.PolicyID{"tier-1", "pol-1"},
+).withName("ep1 local, policy")
+
+var localEp2WithPolicy = withPolicy.withKVUpdates(
+	KVPair{Key: localWlEpKey2, Value: &localWlEp2},
+).withIPSet(allSelectorId, []string{
+	"10.0.0.2", // ep1 and ep2
+	"fc00:fe11::2",
+	"10.0.0.3", // ep2
+	"fc00:fe11::3",
+}).withIPSet(bEqBSelectorId, []string{}).withActivePolicies(
+	proto.PolicyID{"tier-1", "pol-1"},
+).withName("ep2 local, policy")
+
+// Each entry in baseTests contains a series of states to move through.  Apart
+// from running each of these, we'll also expand each of them by passing it
+// through the expansion functions below.  In particular, we'll do each of them
+// in reversed order and reversed KV injection order.
 var baseTests = []StateList{
-	StateList{empty},
-	StateList{mainline},
-	StateList{mainline, initialisedStore, mainline},
+	// Empty should be empty!
+	{},
+	// Add one endpoint then remove it and add another with overlapping IP.
+	{localEp1WithPolicy, localEp2WithPolicy},
+	// Add one endpoint then another with an overlapping IP, then remove
+	// first.
+	{localEp1WithPolicy, localEpsWithPolicy, localEp2WithPolicy},
+	// Add both endpoints, then return to empty, then add them both back.
+	{localEpsWithPolicy, initialisedStore, localEpsWithPolicy},
 }
 
 type StateList []State
@@ -169,14 +209,26 @@ func (l StateList) String() string {
 var testExpanders = []func(baseTest StateList) (desc string, mappedTest StateList){
 	identity,
 	reverseKVOrder,
+	reverseStateOrder,
 }
 
+// identity is a test expander that returns the test unaltered.
 func identity(baseTest StateList) (desc string, mappedTest StateList) {
-	desc = baseTest.String()
-	mappedTest = baseTest
+	return baseTest.String(), baseTest
+}
+
+// reverseStateOrder returns a StateList containing the same states in
+// reverse order.
+func reverseStateOrder(baseTest StateList) (desc string, mappedTest StateList) {
+	for ii := 0; ii < len(baseTest); ii++ {
+		mappedTest = append(mappedTest, baseTest[len(baseTest)-ii-1])
+	}
+	desc = baseTest.String() + " with reversed states"
 	return
 }
 
+// reverseKVOrder returns a StateList containing the states in the same order
+// but with their DataStore key order reversed.
 func reverseKVOrder(baseTests StateList) (desc string, mappedTests StateList) {
 	desc = baseTests.String() + " with reversed KV order"
 	for _, test := range baseTests {
@@ -205,7 +257,9 @@ var _ = Describe("Calculation graph", func() {
 	for _, test := range baseTests {
 		for _, expander := range testExpanders {
 			desc, test := expander(test)
-			It(fmt.Sprintf("should calculate correct IP sets for sequence: %v", desc), func() {
+			// Always worth adding an empty to the end of the test.
+			test = append(test, empty)
+			It(fmt.Sprintf("should calculate correct dataplane state for: %v", desc), func() {
 				lastState := empty
 				for ii, state := range test {
 					By(fmt.Sprintf("(%v) Moving from state %#v to %#v",
@@ -217,7 +271,15 @@ var _ = Describe("Calculation graph", func() {
 					}
 					fmt.Fprintln(GinkgoWriter, "       -- <<FLUSH>>")
 					eventBuf.Flush()
-					Expect(tracker.ipsets).To(Equal(state.ExpectedIPSets))
+					Expect(tracker.ipsets).To(Equal(state.ExpectedIPSets),
+						"IP sets didn't match expected state after moving to state: %v",
+						state.Name)
+					Expect(tracker.activePolicies).To(Equal(state.ExpectedPolicyIDs),
+						"Active policy IDs were incorrect after moving to state: %v",
+						state.Name)
+					Expect(tracker.activeProfiles).To(Equal(state.ExpectedProfileIDs),
+						"Active profile IDs were incorrect after moving to state: %v",
+						state.Name)
 					lastState = state
 				}
 			})
@@ -227,15 +289,15 @@ var _ = Describe("Calculation graph", func() {
 
 type stateTracker struct {
 	ipsets         map[string]set.Set
-	activePolicies map[PolicyKey]*ParsedRules
-	activeProfiles map[ProfileKey]*ParsedRules
+	activePolicies set.Set
+	activeProfiles set.Set
 }
 
 func newStateTracker() *stateTracker {
 	s := &stateTracker{
 		ipsets:         make(map[string]set.Set),
-		activePolicies: make(map[PolicyKey]*ParsedRules),
-		activeProfiles: make(map[ProfileKey]*ParsedRules),
+		activePolicies: set.New(),
+		activeProfiles: set.New(),
 	}
 	return s
 }
@@ -278,6 +340,16 @@ func (s *stateTracker) onEvent(event interface{}) {
 			return
 		}
 		delete(s.ipsets, event.Id)
+	case *proto.ActivePolicyUpdate:
+		// TODO: check rules against expected rules
+		s.activePolicies.Add(*event.Id)
+	case *proto.ActivePolicyRemove:
+		s.activePolicies.Discard(*event.Id)
+	case *proto.ActiveProfileUpdate:
+		// TODO: check rules against expected rules
+		s.activeProfiles.Add(*event.Id)
+	case *proto.ActiveProfileRemove:
+		s.activeProfiles.Discard(*event.Id)
 	}
 }
 

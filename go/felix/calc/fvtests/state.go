@@ -16,6 +16,7 @@ package fvtest
 
 import (
 	"github.com/projectcalico/calico/go/datastructures/set"
+	"github.com/projectcalico/calico/go/felix/proto"
 	. "github.com/tigera/libcalico-go/lib/backend/model"
 )
 
@@ -25,14 +26,18 @@ type State struct {
 	Name string
 	// List of KVPairs that are in the datastore.  Stored as a list rather
 	// than a map to give us a deterministic ordering of injection.
-	DatastoreState []KVPair
-	ExpectedIPSets map[string]set.Set
+	DatastoreState     []KVPair
+	ExpectedIPSets     map[string]set.Set
+	ExpectedPolicyIDs  set.Set
+	ExpectedProfileIDs set.Set
 }
 
 func NewState() State {
 	return State{
-		DatastoreState: []KVPair{},
-		ExpectedIPSets: make(map[string]set.Set),
+		DatastoreState:     []KVPair{},
+		ExpectedIPSets:     make(map[string]set.Set),
+		ExpectedPolicyIDs:  set.New(),
+		ExpectedProfileIDs: set.New(),
 	}
 }
 
@@ -43,6 +48,14 @@ func (s State) copy() State {
 	for k, ips := range s.ExpectedIPSets {
 		cpy.ExpectedIPSets[k] = ips.Copy()
 	}
+	s.ExpectedPolicyIDs.Iter(func(item interface{}) error {
+		cpy.ExpectedPolicyIDs.Add(item)
+		return nil
+	})
+	s.ExpectedProfileIDs.Iter(func(item interface{}) error {
+		cpy.ExpectedProfileIDs.Add(item)
+		return nil
+	})
 	return cpy
 }
 
@@ -94,6 +107,24 @@ func (s State) withIPSet(name string, members []string) (newState State) {
 func (s State) withName(name string) (newState State) {
 	newState = s.copy()
 	newState.Name = name
+	return newState
+}
+
+func (s State) withActivePolicies(ids ...proto.PolicyID) (newState State) {
+	newState = s.copy()
+	newState.ExpectedPolicyIDs = set.New()
+	for _, id := range ids {
+		newState.ExpectedPolicyIDs.Add(id)
+	}
+	return newState
+}
+
+func (s State) withActiveProfiles(ids ...proto.ProfileID) (newState State) {
+	newState = s.copy()
+	newState.ExpectedProfileIDs = set.New()
+	for _, id := range ids {
+		newState.ExpectedProfileIDs.Add(id)
+	}
 	return newState
 }
 
