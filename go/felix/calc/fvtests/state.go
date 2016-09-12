@@ -18,6 +18,7 @@ import (
 	"github.com/projectcalico/calico/go/datastructures/set"
 	"github.com/projectcalico/calico/go/felix/proto"
 	. "github.com/tigera/libcalico-go/lib/backend/model"
+	"fmt"
 )
 
 // A state represents a particular state of the datastore and the expected
@@ -30,6 +31,13 @@ type State struct {
 	ExpectedIPSets     map[string]set.Set
 	ExpectedPolicyIDs  set.Set
 	ExpectedProfileIDs set.Set
+}
+
+func (s State) String() string {
+	if s.Name == "" {
+		return fmt.Sprintf("Unnamed State: %#v", s)
+	}
+	return s.Name
 }
 
 func NewState() State {
@@ -56,6 +64,7 @@ func (s State) copy() State {
 		cpy.ExpectedProfileIDs.Add(item)
 		return nil
 	})
+	cpy.Name = s.Name
 	return cpy
 }
 
@@ -136,18 +145,21 @@ func (s State) Keys() set.Set {
 	return set
 }
 
-func (s State) KVs() set.Set {
-	set := set.New()
+func (s State) KVs() map[Key]interface{} {
+	kvs := make(map[Key]interface{})
 	for _, kv := range s.DatastoreState {
-		set.Add(kv)
+		kvs[kv.Key] = kv.Value
 	}
-	return set
+	return kvs
 }
 
 func (s State) KVDeltas(prev State) []KVPair {
 	updatedKVs := s.KVs()
 	for _, kv := range prev.DatastoreState {
-		updatedKVs.Discard(kv)
+		if updatedKVs[kv.Key] == kv.Value {
+			// Key had same value in both states so we ignore it.
+			delete(updatedKVs, kv.Key)
+		}
 	}
 	currentKeys := s.Keys()
 	deltas := make([]KVPair, 0)
@@ -157,7 +169,7 @@ func (s State) KVDeltas(prev State) []KVPair {
 		}
 	}
 	for _, kv := range s.DatastoreState {
-		if updatedKVs.Contains(kv) {
+		if updatedKVs[kv.Key] != nil {
 			deltas = append(deltas, kv)
 		}
 	}

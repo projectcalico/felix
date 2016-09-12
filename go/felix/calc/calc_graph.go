@@ -112,12 +112,12 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDi
 		},
 	)
 	ruleScanner.OnSelectorActive = func(sel selector.Selector) {
-		glog.Infof("Selector %v now active", sel)
+		glog.V(2).Infof("Selector %v now active", sel)
 		callbacks.OnIPSetAdded(sel.UniqueId())
 		activeSelectorIndex.UpdateSelector(sel.UniqueId(), sel)
 	}
 	ruleScanner.OnSelectorInactive = func(sel selector.Selector) {
-		glog.Infof("Selector %v now inactive", sel)
+		glog.V(2).Infof("Selector %v now inactive", sel)
 		callbacks.OnIPSetRemoved(sel.UniqueId())
 		activeSelectorIndex.DeleteSelector(sel.UniqueId())
 	}
@@ -129,14 +129,23 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDi
 	// endpoints match each tag.
 	tagIndex := tags.NewIndex(
 		func(key tags.EndpointKey, tagID string) {
-			memberCalc.MatchStarted(key, hash.MakeUniqueID("t", tagID))
+			memberCalc.MatchStarted(key, TagIPSetID(tagID))
 		},
 		func(key tags.EndpointKey, tagID string) {
-			memberCalc.MatchStopped(key, hash.MakeUniqueID("t", tagID))
+			memberCalc.MatchStopped(key, TagIPSetID(tagID))
 		},
 	)
-	ruleScanner.OnTagActive = tagIndex.SetTagActive
-	ruleScanner.OnTagInactive = tagIndex.SetTagInactive
+
+	ruleScanner.OnTagActive = func(tag string) {
+		glog.V(2).Infof("Tag %v now active", tag)
+		callbacks.OnIPSetAdded(hash.MakeUniqueID("t", tag))
+		tagIndex.SetTagActive(tag)
+	}
+	ruleScanner.OnTagInactive = func(tag string) {
+		glog.V(2).Infof("Tag %v now inactive", tag)
+		tagIndex.SetTagInactive(tag)
+		callbacks.OnIPSetRemoved(hash.MakeUniqueID("t", tag))
+	}
 	sourceDispatcher.Register(model.WorkloadEndpointKey{}, tagIndex)
 	sourceDispatcher.Register(model.HostEndpointKey{}, tagIndex)
 	sourceDispatcher.Register(model.ProfileTagsKey{}, tagIndex)
@@ -170,6 +179,10 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDi
 	sourceDispatcher.Register(model.HostConfigKey{}, configBatcher)
 
 	return sourceDispatcher
+}
+
+func TagIPSetID(tagID string) string {
+	return hash.MakeUniqueID("t", tagID)
 }
 
 // endpointHostnameFilter provides an UpdateHandler that filters out endpoints

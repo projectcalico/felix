@@ -25,6 +25,7 @@ import (
 	"github.com/projectcalico/calico/go/felix/config"
 	"github.com/projectcalico/calico/go/felix/proto"
 	"github.com/projectcalico/calico/go/felix/store"
+	"github.com/tigera/libcalico-go/lib/backend/api"
 	. "github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/net"
 	"os"
@@ -108,10 +109,26 @@ var policy1 = Policy{
 	Selector: "a == 'a'",
 	InboundRules: []Rule{
 		{SrcSelector: allSelector},
+	},
+	OutboundRules: []Rule{
 		{SrcSelector: bEpBSelector},
 	},
-	OutboundRules: []Rule{},
 }
+
+var profileRules1 = ProfileRules{
+	InboundRules: []Rule{
+		{SrcSelector: allSelector},
+	},
+	OutboundRules: []Rule{
+		{SrcTag: "tag-1"},
+	},
+}
+
+var profileTags1 = []string{"tag-1"}
+var profileLabels1 = map[string]string{
+	"profile": "prof-1",
+}
+var tag1LabelId = TagIPSetID("tag-1")
 
 // Pre-defined datastore states.  Each State object wraps up the complete state
 // of the datastore as well as the expected state of the dataplane.  The state
@@ -131,27 +148,7 @@ var initialisedStore = empty.withKVUpdates(
 var withPolicy = initialisedStore.withKVUpdates(
 	KVPair{Key: TierKey{"tier-1"}, Value: &tier1},
 	KVPair{Key: PolicyKey{Tier: "tier-1", Name: "pol-1"}, Value: &policy1},
-).withName("policy")
-
-var localEpsWithPolicy = withPolicy.withKVUpdates(
-	// Two local endpoints with overlapping IPs.
-	KVPair{Key: localWlEpKey1, Value: &localWlEp1},
-	KVPair{Key: localWlEpKey2, Value: &localWlEp2},
-).withIPSet(allSelectorId, []string{
-	"10.0.0.1", // ep1
-	"fc00:fe11::1",
-	"10.0.0.2", // ep1 and ep2
-	"fc00:fe11::2",
-	"10.0.0.3", // ep2
-	"fc00:fe11::3",
-}).withIPSet(bEqBSelectorId, []string{
-	"10.0.0.1",
-	"fc00:fe11::1",
-	"10.0.0.2",
-	"fc00:fe11::2",
-}).withActivePolicies(
-	proto.PolicyID{"tier-1", "pol-1"},
-).withName("2 local, overlapping IPs, policy")
+).withName("with policy")
 
 var localEp1WithPolicy = withPolicy.withKVUpdates(
 	KVPair{Key: localWlEpKey1, Value: &localWlEp1},
@@ -180,6 +177,52 @@ var localEp2WithPolicy = withPolicy.withKVUpdates(
 	proto.PolicyID{"tier-1", "pol-1"},
 ).withName("ep2 local, policy")
 
+var localEpsWithPolicy = withPolicy.withKVUpdates(
+	// Two local endpoints with overlapping IPs.
+	KVPair{Key: localWlEpKey1, Value: &localWlEp1},
+	KVPair{Key: localWlEpKey2, Value: &localWlEp2},
+).withIPSet(allSelectorId, []string{
+	"10.0.0.1", // ep1
+	"fc00:fe11::1",
+	"10.0.0.2", // ep1 and ep2
+	"fc00:fe11::2",
+	"10.0.0.3", // ep2
+	"fc00:fe11::3",
+}).withIPSet(bEqBSelectorId, []string{
+	"10.0.0.1",
+	"fc00:fe11::1",
+	"10.0.0.2",
+	"fc00:fe11::2",
+}).withActivePolicies(
+	proto.PolicyID{"tier-1", "pol-1"},
+).withName("2 local, overlapping IPs & a policy")
+
+var withProfile = initialisedStore.withKVUpdates(
+	KVPair{Key: ProfileRulesKey{ProfileKey{"prof-1"}}, Value: &profileRules1},
+	KVPair{Key: ProfileTagsKey{ProfileKey{"prof-1"}}, Value: profileTags1},
+	KVPair{Key: ProfileLabelsKey{ProfileKey{"prof-1"}}, Value: profileLabels1},
+).withName("profile")
+
+var localEpsWithProfile = withProfile.withKVUpdates(
+	// Two local endpoints with overlapping IPs.
+	KVPair{Key: localWlEpKey1, Value: &localWlEp1},
+	KVPair{Key: localWlEpKey2, Value: &localWlEp2},
+).withIPSet(allSelectorId, []string{
+	"10.0.0.1", // ep1
+	"fc00:fe11::1",
+	"10.0.0.2", // ep1 and ep2
+	"fc00:fe11::2",
+	"10.0.0.3", // ep2
+	"fc00:fe11::3",
+}).withIPSet(tag1LabelId, []string{
+	"10.0.0.1",
+	"fc00:fe11::1",
+	"10.0.0.2",
+	"fc00:fe11::2",
+}).withActiveProfiles(
+	proto.ProfileID{"prof-1"},
+).withName("2 local, overlapping IPs & a profile")
+
 // Each entry in baseTests contains a series of states to move through.  Apart
 // from running each of these, we'll also expand each of them by passing it
 // through the expansion functions below.  In particular, we'll do each of them
@@ -194,6 +237,8 @@ var baseTests = []StateList{
 	{localEp1WithPolicy, localEpsWithPolicy, localEp2WithPolicy},
 	// Add both endpoints, then return to empty, then add them both back.
 	{localEpsWithPolicy, initialisedStore, localEpsWithPolicy},
+
+	{localEpsWithProfile},
 }
 
 type StateList []State
@@ -201,9 +246,9 @@ type StateList []State
 func (l StateList) String() string {
 	names := make([]string, 0)
 	for _, state := range l {
-		names = append(names, state.Name)
+		names = append(names, state.String())
 	}
-	return strings.Join(names, "; ")
+	return "[" + strings.Join(names, ", ") + "]"
 }
 
 var testExpanders = []func(baseTest StateList) (desc string, mappedTest StateList){
@@ -213,8 +258,8 @@ var testExpanders = []func(baseTest StateList) (desc string, mappedTest StateLis
 }
 
 // identity is a test expander that returns the test unaltered.
-func identity(baseTest StateList) (desc string, mappedTest StateList) {
-	return baseTest.String(), baseTest
+func identity(baseTest StateList) (string, StateList) {
+	return "in normal ordering", baseTest
 }
 
 // reverseStateOrder returns a StateList containing the same states in
@@ -223,14 +268,14 @@ func reverseStateOrder(baseTest StateList) (desc string, mappedTest StateList) {
 	for ii := 0; ii < len(baseTest); ii++ {
 		mappedTest = append(mappedTest, baseTest[len(baseTest)-ii-1])
 	}
-	desc = baseTest.String() + " with reversed states"
+	desc = "with order of states reversed"
 	return
 }
 
 // reverseKVOrder returns a StateList containing the states in the same order
 // but with their DataStore key order reversed.
 func reverseKVOrder(baseTests StateList) (desc string, mappedTests StateList) {
-	desc = baseTests.String() + " with reversed KV order"
+	desc = "with order of KVs reversed within each state"
 	for _, test := range baseTests {
 		mappedTest := test.copy()
 		state := mappedTest.DatastoreState
@@ -244,44 +289,68 @@ func reverseKVOrder(baseTests StateList) (desc string, mappedTests StateList) {
 }
 
 var _ = Describe("Calculation graph", func() {
-	var calcGraph *store.Dispatcher
-	var tracker *stateTracker
-	var eventBuf *EventBuffer
-	BeforeEach(func() {
-		tracker = newStateTracker()
-		eventBuf = NewEventBuffer(tracker)
-		eventBuf.Callback = tracker.onEvent
-		calcGraph = NewCalculationGraph(eventBuf, localHostname)
-	})
-
 	for _, test := range baseTests {
+		test := test
 		for _, expander := range testExpanders {
-			desc, test := expander(test)
+			desc, expandedTest := expander(test)
 			// Always worth adding an empty to the end of the test.
-			test = append(test, empty)
-			It(fmt.Sprintf("should calculate correct dataplane state for: %v", desc), func() {
-				lastState := empty
-				for ii, state := range test {
-					By(fmt.Sprintf("(%v) Moving from state %#v to %#v",
-						ii, lastState.Name, state.Name))
-					kvDeltas := state.KVDeltas(lastState)
-					for _, kv := range kvDeltas {
-						fmt.Fprintf(GinkgoWriter, "       -> Injecting KV: %v\n", kv)
-						calcGraph.OnUpdate(kv)
+			expandedTest = append(expandedTest, empty)
+			Describe(fmt.Sprintf("with input states %v %v", test, desc), func() {
+				var calcGraph *store.Dispatcher
+				var tracker *stateTracker
+				var eventBuf *EventBuffer
+				var lastState State
+				var state State
+
+				BeforeEach(func() {
+					tracker = newStateTracker()
+					eventBuf = NewEventBuffer(tracker)
+					eventBuf.Callback = tracker.onEvent
+					calcGraph = NewCalculationGraph(eventBuf, localHostname)
+					calcGraph.OnDatamodelStatus(api.InSync)
+					lastState = empty
+					state = empty
+				})
+
+				// iterStates iterates through the states in turn,
+				// executing the expectation function after each
+				// state.
+				iterStates := func(expectation func()) func() {
+					return func() {
+						var ii int
+						for ii, state = range expandedTest {
+							By(fmt.Sprintf("(%v) Moving from state %#v to %#v",
+								ii, lastState.Name, state.Name))
+							kvDeltas := state.KVDeltas(lastState)
+							for _, kv := range kvDeltas {
+								fmt.Fprintf(GinkgoWriter, "       -> Injecting KV: %v\n", kv)
+								calcGraph.OnUpdate(kv)
+							}
+							fmt.Fprintln(GinkgoWriter, "       -- <<FLUSH>>")
+							eventBuf.Flush()
+							expectation()
+							lastState = state
+						}
 					}
-					fmt.Fprintln(GinkgoWriter, "       -- <<FLUSH>>")
-					eventBuf.Flush()
+				}
+
+				It("should calculate correct IP sets", iterStates(func() {
 					Expect(tracker.ipsets).To(Equal(state.ExpectedIPSets),
 						"IP sets didn't match expected state after moving to state: %v",
 						state.Name)
+				}))
+				It("should calculate correct active policies", iterStates(func() {
 					Expect(tracker.activePolicies).To(Equal(state.ExpectedPolicyIDs),
 						"Active policy IDs were incorrect after moving to state: %v",
 						state.Name)
+
+				}))
+				It("should calculate correct active profiles", iterStates(func() {
 					Expect(tracker.activeProfiles).To(Equal(state.ExpectedProfileIDs),
 						"Active profile IDs were incorrect after moving to state: %v",
 						state.Name)
-					lastState = state
-				}
+
+				}))
 			})
 		}
 	}

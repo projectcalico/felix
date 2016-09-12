@@ -110,14 +110,18 @@ func (arc *ActiveRulesCalculator) OnUpdate(update model.KVPair) (filterOut bool)
 			rules := update.Value.(*model.ProfileRules)
 			arc.allProfileRules[key.Name] = rules
 			if arc.profileIDToEndpointKeys.ContainsKey(key.Name) {
-				glog.V(4).Info("Profile rules updated while active, telling listener/felix")
+				glog.V(3).Infof("Profile rules updated while active: %v", key.Name)
 				arc.sendProfileUpdate(key.Name)
+			} else {
+				glog.V(3).Infof("Profile rules updated while inactive: %v", key.Name)
 			}
 		} else {
 			delete(arc.allProfileRules, key.Name)
 			if arc.profileIDToEndpointKeys.ContainsKey(key.Name) {
-				glog.V(4).Info("Profile rules deleted while active, telling listener/felix")
+				glog.V(3).Info("Profile rules deleted while active, telling listener/felix")
 				arc.sendProfileUpdate(key.Name)
+			} else {
+				glog.V(3).Infof("Profile rules deleted while inactive: %v", key.Name)
 			}
 		}
 	case model.PolicyKey:
@@ -165,17 +169,18 @@ func (arc *ActiveRulesCalculator) updateEndpointProfileIDs(key endpointKey, prof
 
 	// Update the index of required profile IDs for added profiles,
 	// triggering events for profiles that just became active.
-	for id, _ := range addedIDs {
-		if !arc.profileIDToEndpointKeys.ContainsKey(id) {
+	for id := range addedIDs {
+		wasActive := arc.profileIDToEndpointKeys.ContainsKey(id)
+		arc.profileIDToEndpointKeys.Put(id, key)
+		if !wasActive {
 			// This profile is now active.
 			arc.sendProfileUpdate(id)
 		}
-		arc.profileIDToEndpointKeys.Put(id, key)
 	}
 
 	// Update the index for no-longer required profile IDs, triggering
 	// events for profiles that just became inactive.
-	for id, _ := range removedIDs {
+	for id := range removedIDs {
 		arc.profileIDToEndpointKeys.Discard(id, key)
 		if !arc.profileIDToEndpointKeys.ContainsKey(id) {
 			// No endpoint refers to this ID any more.  Clean it
@@ -212,9 +217,10 @@ func (arc *ActiveRulesCalculator) onMatchStopped(selID, labelId interface{}) {
 }
 
 func (arc *ActiveRulesCalculator) sendProfileUpdate(profileID string) {
-	glog.V(3).Infof("Sending profile update for profile %v", profileID)
-	rules, known := arc.allProfileRules[profileID]
 	active := arc.profileIDToEndpointKeys.ContainsKey(profileID)
+	rules, known := arc.allProfileRules[profileID]
+	glog.V(3).Infof("Sending profile update for profile %v (known: %v, active: %v)",
+		profileID, known, active)
 	key := model.ProfileRulesKey{ProfileKey: model.ProfileKey{Name: profileID}}
 
 	if known && active {
