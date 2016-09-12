@@ -118,8 +118,8 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDi
 	}
 	ruleScanner.OnSelectorInactive = func(sel selector.Selector) {
 		glog.V(2).Infof("Selector %v now inactive", sel)
-		callbacks.OnIPSetRemoved(sel.UniqueId())
 		activeSelectorIndex.DeleteSelector(sel.UniqueId())
+		callbacks.OnIPSetRemoved(sel.UniqueId())
 	}
 	sourceDispatcher.Register(model.ProfileLabelsKey{}, activeSelectorIndex)
 	sourceDispatcher.Register(model.WorkloadEndpointKey{}, activeSelectorIndex)

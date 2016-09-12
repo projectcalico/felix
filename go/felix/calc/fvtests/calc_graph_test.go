@@ -286,7 +286,7 @@ var baseTests = []StateList{
 	// String together some complex updates with profiles and policies
 	// coming and going.
 	{localEpsWithProfile, localEpsWithPolicy, localEpsWithUpdatedProfile,
-	 localEp1WithPolicy, localEpsWithProfile},
+		localEp1WithPolicy, localEpsWithProfile},
 }
 
 type StateList []State
@@ -303,6 +303,7 @@ var testExpanders = []func(baseTest StateList) (desc string, mappedTest StateLis
 	identity,
 	reverseKVOrder,
 	reverseStateOrder,
+	squash,
 }
 
 // identity is a test expander that returns the test unaltered.
@@ -333,6 +334,26 @@ func reverseKVOrder(baseTests StateList) (desc string, mappedTests StateList) {
 		}
 		mappedTests = append(mappedTests, mappedTest)
 	}
+	return
+}
+
+// squash returns a StateList with all the states squashed into one (which may
+// include some deletions in the DatastoreState.
+func squash(baseTests StateList) (desc string, mappedTests StateList) {
+	desc = "all states squashed into one"
+	if len(baseTests) == 0 {
+		return
+	}
+	kvs := make([]KVPair, 0)
+	mappedTest := baseTests[len(baseTests)-1].copy()
+	lastTest := empty
+	for _, test := range baseTests {
+		kvs = append(kvs, test.KVDeltas(lastTest)...)
+		lastTest = test
+	}
+	mappedTest.DatastoreState = kvs
+	mappedTest.Name = fmt.Sprintf("squashed(%v)", baseTests)
+	mappedTests = append(mappedTests, mappedTest)
 	return
 }
 
@@ -440,13 +461,13 @@ func (s *stateTracker) onEvent(event interface{}) {
 
 		for _, ip := range event.AddedMembers {
 			Expect(members.Contains(ip)).To(BeFalse(),
-				fmt.Sprintf("IP Set %v already contained IP %v",
+				fmt.Sprintf("IP Set %v already contained added IP %v",
 					event.Id, ip))
 			members.Add(ip)
 		}
 		for _, ip := range event.RemovedMembers {
 			Expect(members.Contains(ip)).To(BeTrue(),
-				fmt.Sprintf("IP Set %v did not contain IP %v",
+				fmt.Sprintf("IP Set %v did not contain removed IP %v",
 					event.Id, ip))
 			members.Discard(ip)
 		}

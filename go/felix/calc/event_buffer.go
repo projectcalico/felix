@@ -37,6 +37,7 @@ type configInterface interface {
 
 type EventBuffer struct {
 	config        configInterface
+	knownIPSets   set.Set
 	ipSetsAdded   set.Set
 	ipSetsRemoved set.Set
 	ipsAdded      multidict.StringToIface
@@ -54,12 +55,16 @@ func NewEventBuffer(conf configInterface) *EventBuffer {
 		ipSetsRemoved: set.New(),
 		ipsAdded:      multidict.NewStringToIface(),
 		ipsRemoved:    multidict.NewStringToIface(),
+		knownIPSets:   set.New(),
 	}
 	return buf
 }
 
 func (buf *EventBuffer) OnIPSetAdded(setID string) {
 	glog.V(3).Infof("IP set %v now active", setID)
+	if buf.knownIPSets.Contains(setID) && !buf.ipSetsRemoved.Contains(setID) {
+		glog.Fatalf("OnIPSetAdded called for existing IP set")
+	}
 	buf.ipSetsAdded.Add(setID)
 	buf.ipSetsRemoved.Discard(setID)
 	buf.ipsAdded.DiscardKey(setID)
@@ -68,22 +73,39 @@ func (buf *EventBuffer) OnIPSetAdded(setID string) {
 
 func (buf *EventBuffer) OnIPSetRemoved(setID string) {
 	glog.V(3).Infof("IP set %v no longer active", setID)
+	if !buf.knownIPSets.Contains(setID) && !buf.ipSetsAdded.Contains(setID) {
+		glog.Fatalf("IPSetRemoved called for unknown IP set: %v", setID)
+	}
+	if buf.knownIPSets.Contains(setID) {
+		buf.ipSetsRemoved.Add(setID)
+	}
 	buf.ipSetsAdded.Discard(setID)
-	buf.ipSetsRemoved.Add(setID)
 	buf.ipsAdded.DiscardKey(setID)
 	buf.ipsRemoved.DiscardKey(setID)
 }
 
 func (buf *EventBuffer) OnIPAdded(setID string, ip ip.Addr) {
 	glog.V(4).Infof("IP set %v now contains %v", setID, ip)
-	buf.ipsAdded.Put(setID, ip)
-	buf.ipsRemoved.Discard(setID, ip)
+	if !buf.knownIPSets.Contains(setID) && !buf.ipSetsAdded.Contains(setID) {
+		glog.Fatalf("IP added to unknown IP set: %v", setID)
+	}
+	if buf.ipsRemoved.Contains(setID, ip) {
+		buf.ipsRemoved.Discard(setID, ip)
+	} else {
+		buf.ipsAdded.Put(setID, ip)
+	}
 }
 
 func (buf *EventBuffer) OnIPRemoved(setID string, ip ip.Addr) {
 	glog.V(4).Infof("IP set %v no longer contains %v", setID, ip)
-	buf.ipsAdded.Discard(setID, ip)
-	buf.ipsRemoved.Put(setID, ip)
+	if !buf.knownIPSets.Contains(setID) && !buf.ipSetsAdded.Contains(setID) {
+		glog.Fatalf("IP removed from unknown IP set: %v", setID)
+	}
+	if buf.ipsAdded.Contains(setID, ip) {
+		buf.ipsAdded.Discard(setID, ip)
+	} else {
+		buf.ipsRemoved.Put(setID, ip)
+	}
 }
 
 func (buf *EventBuffer) Flush() {
@@ -96,6 +118,7 @@ func (buf *EventBuffer) Flush() {
 		buf.ipsRemoved.DiscardKey(setID)
 		buf.ipsAdded.DiscardKey(setID)
 		buf.ipSetsRemoved.Discard(item)
+		buf.knownIPSets.Discard(item)
 		return
 	})
 	glog.V(3).Infof("Done flushing IP set removes")
@@ -112,6 +135,7 @@ func (buf *EventBuffer) Flush() {
 			Members: members,
 		})
 		buf.ipSetsAdded.Discard(item)
+		buf.knownIPSets.Add(item)
 		return
 	})
 	glog.V(3).Infof("Done flushing IP set adds")

@@ -170,7 +170,7 @@ func (s State) KVDeltas(prev State) []KVPair {
 		}
 	}
 	for _, kv := range s.DatastoreState {
-		if updatedKVs[kv.Key] != nil {
+		if _, ok := updatedKVs[kv.Key]; ok {
 			deltas = append(deltas, kv)
 		}
 	}
