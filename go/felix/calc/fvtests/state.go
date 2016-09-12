@@ -15,10 +15,11 @@
 package fvtest
 
 import (
+	"fmt"
 	"github.com/projectcalico/calico/go/datastructures/set"
 	"github.com/projectcalico/calico/go/felix/proto"
 	. "github.com/tigera/libcalico-go/lib/backend/model"
-	"fmt"
+	"reflect"
 )
 
 // A state represents a particular state of the datastore and the expected
@@ -156,7 +157,7 @@ func (s State) KVs() map[Key]interface{} {
 func (s State) KVDeltas(prev State) []KVPair {
 	updatedKVs := s.KVs()
 	for _, kv := range prev.DatastoreState {
-		if updatedKVs[kv.Key] == kv.Value {
+		if reflect.DeepEqual(updatedKVs[kv.Key], kv.Value) {
 			// Key had same value in both states so we ignore it.
 			delete(updatedKVs, kv.Key)
 		}

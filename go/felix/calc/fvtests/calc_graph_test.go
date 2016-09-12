@@ -124,11 +124,21 @@ var profileRules1 = ProfileRules{
 	},
 }
 
+var profileRules1TagUpdate = ProfileRules{
+	InboundRules: []Rule{
+		{SrcSelector: bEpBSelector},
+	},
+	OutboundRules: []Rule{
+		{SrcTag: "tag-2"},
+	},
+}
+
 var profileTags1 = []string{"tag-1"}
 var profileLabels1 = map[string]string{
 	"profile": "prof-1",
 }
 var tag1LabelId = TagIPSetID("tag-1")
+var tag2LabelId = TagIPSetID("tag-2")
 
 // Pre-defined datastore states.  Each State object wraps up the complete state
 // of the datastore as well as the expected state of the dataplane.  The state
@@ -138,18 +148,22 @@ var tag1LabelId = TagIPSetID("tag-1")
 // datastore updates) and then assert that the dataplane matches the resulting
 // state.
 
+// empty is the base state, with nothing in the datastore or dataplane.
 var empty = NewState().withName("<empty>")
 
+// initialisedStore builds on empty, adding in the ready flag and global config.
 var initialisedStore = empty.withKVUpdates(
 	KVPair{Key: GlobalConfigKey{Name: "InterfacePrefix"}, Value: "cali"},
 	KVPair{Key: ReadyFlagKey{}, Value: true},
 ).withName("<initialised>")
 
+// withPolicy adds a tier and policy containing selectors for all and b=="b"
 var withPolicy = initialisedStore.withKVUpdates(
 	KVPair{Key: TierKey{"tier-1"}, Value: &tier1},
 	KVPair{Key: PolicyKey{Tier: "tier-1", Name: "pol-1"}, Value: &policy1},
 ).withName("with policy")
 
+// localEp1WithPolicy adds a local endpoint to the mix.  It matches all and b=="b".
 var localEp1WithPolicy = withPolicy.withKVUpdates(
 	KVPair{Key: localWlEpKey1, Value: &localWlEp1},
 ).withIPSet(allSelectorId, []string{
@@ -166,6 +180,8 @@ var localEp1WithPolicy = withPolicy.withKVUpdates(
 	proto.PolicyID{"tier-1", "pol-1"},
 ).withName("ep1 local, policy")
 
+// localEp2WithPolicy adds a different endpoint that doesn't match b=="b".
+// This tests an empty IP set.
 var localEp2WithPolicy = withPolicy.withKVUpdates(
 	KVPair{Key: localWlEpKey2, Value: &localWlEp2},
 ).withIPSet(allSelectorId, []string{
@@ -173,10 +189,15 @@ var localEp2WithPolicy = withPolicy.withKVUpdates(
 	"fc00:fe11::2",
 	"10.0.0.3", // ep2
 	"fc00:fe11::3",
-}).withIPSet(bEqBSelectorId, []string{}).withActivePolicies(
+}).withIPSet(
+	bEqBSelectorId, []string{},
+).withActivePolicies(
 	proto.PolicyID{"tier-1", "pol-1"},
 ).withName("ep2 local, policy")
 
+// localEpsWithPolicy contains both of the above endpoints, which have some
+// overlapping IPs.  When we sequence this with the states above, we test
+// overlapping IP addition and removal.
 var localEpsWithPolicy = withPolicy.withKVUpdates(
 	// Two local endpoints with overlapping IPs.
 	KVPair{Key: localWlEpKey1, Value: &localWlEp1},
@@ -197,12 +218,15 @@ var localEpsWithPolicy = withPolicy.withKVUpdates(
 	proto.PolicyID{"tier-1", "pol-1"},
 ).withName("2 local, overlapping IPs & a policy")
 
+// withProfile adds a profile to the initialised state.
 var withProfile = initialisedStore.withKVUpdates(
 	KVPair{Key: ProfileRulesKey{ProfileKey{"prof-1"}}, Value: &profileRules1},
 	KVPair{Key: ProfileTagsKey{ProfileKey{"prof-1"}}, Value: profileTags1},
 	KVPair{Key: ProfileLabelsKey{ProfileKey{"prof-1"}}, Value: profileLabels1},
 ).withName("profile")
 
+// localEpsWithProfile contains a pair of overlapping IP endpoints and a profile
+// that matches them both.
 var localEpsWithProfile = withProfile.withKVUpdates(
 	// Two local endpoints with overlapping IPs.
 	KVPair{Key: localWlEpKey1, Value: &localWlEp1},
@@ -223,6 +247,23 @@ var localEpsWithProfile = withProfile.withKVUpdates(
 	proto.ProfileID{"prof-1"},
 ).withName("2 local, overlapping IPs & a profile")
 
+// localEpsWithUpdatedProfile Follows on from localEpsWithProfile, changing the
+// profile to use a different tag and selector.
+var localEpsWithUpdatedProfile = localEpsWithProfile.withKVUpdates(
+	KVPair{Key: ProfileRulesKey{ProfileKey{"prof-1"}}, Value: &profileRules1TagUpdate},
+).withIPSet(
+	tag1LabelId, nil,
+).withIPSet(
+	allSelectorId, nil,
+).withIPSet(bEqBSelectorId, []string{
+	"10.0.0.1",
+	"fc00:fe11::1",
+	"10.0.0.2",
+	"fc00:fe11::2",
+}).withIPSet(
+	tag2LabelId, []string{},
+).withName("2 local, overlapping IPs & updated profile")
+
 // Each entry in baseTests contains a series of states to move through.  Apart
 // from running each of these, we'll also expand each of them by passing it
 // through the expansion functions below.  In particular, we'll do each of them
@@ -238,7 +279,14 @@ var baseTests = []StateList{
 	// Add both endpoints, then return to empty, then add them both back.
 	{localEpsWithPolicy, initialisedStore, localEpsWithPolicy},
 
-	{localEpsWithProfile},
+	// Add a profile and a couple of endpoints.  Then update the profile to
+	// use different tags and selectors.
+	{localEpsWithProfile, localEpsWithUpdatedProfile},
+
+	// String together some complex updates with profiles and policies
+	// coming and going.
+	{localEpsWithProfile, localEpsWithPolicy, localEpsWithUpdatedProfile,
+	 localEp1WithPolicy, localEpsWithProfile},
 }
 
 type StateList []State
