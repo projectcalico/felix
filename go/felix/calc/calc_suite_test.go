@@ -21,7 +21,7 @@ import (
 	"testing"
 )
 
-func TestIpsets(t *testing.T) {
+func TestCalculationGraph(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Calculation graph Suite")
 }
