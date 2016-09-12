@@ -35,7 +35,7 @@ import (
 
 func init() {
 	// FIXME What to do for logs in tests?
-	flag.CommandLine.Parse(nil)
+	flag.Parse()
 	if os.Getenv("GLOG") != "" {
 		flag.Lookup("logtostderr").Value.Set("true")
 		flag.Lookup("v").Value.Set(os.Getenv("GLOG"))
