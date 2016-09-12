@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package fvtest
+package calc_test
 
 import (
 	. "github.com/projectcalico/calico/go/felix/calc"

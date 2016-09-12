@@ -1,5 +1,5 @@
 // Copyright (c) 2016 Tigera, Inc. All rights reserved.
-
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package fvtest
+package calc_test
 
 import (
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-
-	"testing"
+	"github.com/golang/glog"
+	"github.com/tigera/libcalico-go/lib/selector"
 )
 
-func TestIpsets(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "Calculation graph Suite")
+func selectorId(selStr string) string {
+	sel, err := selector.Parse(selStr)
+	if err != nil {
+		glog.Fatalf("Failed to parse %v: %v", selStr, err)
+	}
+	return sel.UniqueId()
 }
