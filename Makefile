@@ -87,7 +87,10 @@ calico/felix/felixbackend_pb2.py: go/felix/proto/felixbackend.proto
 	              --python_out=/dst/ \
 	              felixbackend.proto
 
-bin/calico-felix: go/felix/proto/felixbackend.pb.go $(GO_FILES)
+go/vendor:
+	$(MAKE) -C go vendor
+
+bin/calico-felix: go/felix/proto/felixbackend.pb.go $(GO_FILES) go/vendor
 	mkdir -p bin
 	go build -o "$@" -ldflags "-B 0x$(GIT_HASH)" "./go/felix/felix.go"
 

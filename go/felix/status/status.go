@@ -15,7 +15,7 @@
 package status
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/set"
 	"github.com/projectcalico/calico/go/felix/proto"
 	"github.com/tigera/libcalico-go/lib/backend/api"
@@ -58,7 +58,7 @@ func (esr *EndpointStatusReporter) Start() {
 }
 
 func (esr *EndpointStatusReporter) loopHandlingEndpointStatusUpdates() {
-	glog.V(1).Infof("Starting endpoint status reporter loop with resync "+
+	log.Infof("Starting endpoint status reporter loop with resync "+
 		"interval %v, report rate limit: 1/%v", esr.resyncInterval,
 		esr.reportingDelay)
 	datamodelInSync := false
@@ -71,15 +71,15 @@ func (esr *EndpointStatusReporter) loopHandlingEndpointStatusUpdates() {
 	for {
 		select {
 		case <-resyncSchedulingTicker.C:
-			glog.V(3).Info("Endpoint status resync tick: scheduling cleanup")
+			log.Debug("Endpoint status resync tick: scheduling cleanup")
 			resyncRequested = true
 		case <-updateRateLimitTicker.C:
 			if !updatesAllowed {
-				glog.V(3).Infof("Update tick: uncorking updates")
+				log.Debugf("Update tick: uncorking updates")
 				updatesAllowed = true
 			}
 		case <-esr.inSync:
-			glog.V(3).Info("Datamodel in sync, enabling status resync")
+			log.Debug("Datamodel in sync, enabling status resync")
 			datamodelInSync = true
 		case msg := <-esr.endpointUpdates:
 			var statID model.Key
@@ -112,7 +112,7 @@ func (esr *EndpointStatusReporter) loopHandlingEndpointStatusUpdates() {
 					EndpointID: msg.Id.EndpointId,
 				}
 			default:
-				glog.Fatalf("Unexpected message: %#v", msg)
+				log.Fatalf("Unexpected message: %#v", msg)
 			}
 			if esr.epStatusIDToStatus[statID] != status {
 				if status != "" {
@@ -126,7 +126,7 @@ func (esr *EndpointStatusReporter) loopHandlingEndpointStatusUpdates() {
 
 		if datamodelInSync && resyncRequested {
 			// TODO: load data from datamodel, mark missing/extra/incorrect keys dirty.
-			glog.V(3).Info("Doing endpoint status resync")
+			log.Debug("Doing endpoint status resync")
 			esr.attemptResync()
 			resyncRequested = false
 		}
@@ -142,7 +142,7 @@ func (esr *EndpointStatusReporter) loopHandlingEndpointStatusUpdates() {
 			err := esr.writeEndpointStatus(statID,
 				esr.epStatusIDToStatus[statID])
 			if err == nil {
-				glog.V(3).Infof(
+				log.Debugf(
 					"Write successful, discarding %v from dirty set",
 					statID)
 				esr.dirtyStatIDs.Discard(statID)
@@ -159,7 +159,7 @@ func (esr *EndpointStatusReporter) attemptResync() {
 	}
 	kvs, err := esr.datastore.List(wlListOpts)
 	if err != nil {
-		glog.Errorf("Failed to load workload endpoint statuses from datastore: %v",
+		log.Errorf("Failed to load workload endpoint statuses from datastore: %v",
 			err)
 		return
 	}
@@ -170,7 +170,7 @@ func (esr *EndpointStatusReporter) attemptResync() {
 		} else {
 			status := kv.Value.(model.WorkloadEndpointStatus).Status
 			if status != esr.epStatusIDToStatus[kv.Key] {
-				glog.V(3).Infof("Found out-of sync endpoint status: %v", kv.Key)
+				log.Debugf("Found out-of sync endpoint status: %v", kv.Key)
 				esr.dirtyStatIDs.Add(kv.Key)
 			}
 		}
@@ -181,7 +181,7 @@ func (esr *EndpointStatusReporter) attemptResync() {
 	}
 	kvs, err = esr.datastore.List(hostListOpts)
 	if err != nil {
-		glog.Errorf("Failed to load workload endpoint statuses from datastore: %v",
+		log.Errorf("Failed to load workload endpoint statuses from datastore: %v",
 			err)
 		return
 	}
@@ -192,7 +192,7 @@ func (esr *EndpointStatusReporter) attemptResync() {
 		} else {
 			status := kv.Value.(model.HostEndpointStatus).Status
 			if status != esr.epStatusIDToStatus[kv.Key] {
-				glog.V(3).Infof("Found out-of sync endpoint status: %v", kv.Key)
+				log.Debugf("Found out-of sync endpoint status: %v", kv.Key)
 				esr.dirtyStatIDs.Add(kv.Key)
 			}
 		}
@@ -202,7 +202,7 @@ func (esr *EndpointStatusReporter) attemptResync() {
 func (esr *EndpointStatusReporter) writeEndpointStatus(epID model.Key, status string) (err error) {
 	kv := model.KVPair{Key: epID}
 	if status != "" {
-		glog.V(3).Infof("Writing endpoint status for %v: %v", epID, status)
+		log.Debugf("Writing endpoint status for %v: %v", epID, status)
 		switch epID.(type) {
 		case model.HostEndpointStatusKey:
 			kv.Value = model.HostEndpointStatus{status}
@@ -211,7 +211,7 @@ func (esr *EndpointStatusReporter) writeEndpointStatus(epID model.Key, status st
 		}
 		_, err = esr.datastore.Apply(&kv)
 	} else {
-		glog.V(3).Infof("Deleting endpoint status for %v", epID)
+		log.Debugf("Deleting endpoint status for %v", epID)
 		err = esr.datastore.Delete(&kv)
 		if _, ok := err.(errors.ErrorResourceDoesNotExist); ok {
 			// Ignore non-existent resource.

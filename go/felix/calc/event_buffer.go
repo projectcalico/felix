@@ -15,7 +15,7 @@
 package calc
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/ip"
 	"github.com/projectcalico/calico/go/datastructures/multidict"
 	"github.com/projectcalico/calico/go/datastructures/set"
@@ -61,9 +61,9 @@ func NewEventBuffer(conf configInterface) *EventBuffer {
 }
 
 func (buf *EventBuffer) OnIPSetAdded(setID string) {
-	glog.V(3).Infof("IP set %v now active", setID)
+	log.Debugf("IP set %v now active", setID)
 	if buf.knownIPSets.Contains(setID) && !buf.ipSetsRemoved.Contains(setID) {
-		glog.Fatalf("OnIPSetAdded called for existing IP set")
+		log.Fatalf("OnIPSetAdded called for existing IP set")
 	}
 	buf.ipSetsAdded.Add(setID)
 	buf.ipSetsRemoved.Discard(setID)
@@ -72,9 +72,9 @@ func (buf *EventBuffer) OnIPSetAdded(setID string) {
 }
 
 func (buf *EventBuffer) OnIPSetRemoved(setID string) {
-	glog.V(3).Infof("IP set %v no longer active", setID)
+	log.Debugf("IP set %v no longer active", setID)
 	if !buf.knownIPSets.Contains(setID) && !buf.ipSetsAdded.Contains(setID) {
-		glog.Fatalf("IPSetRemoved called for unknown IP set: %v", setID)
+		log.Fatalf("IPSetRemoved called for unknown IP set: %v", setID)
 	}
 	if buf.knownIPSets.Contains(setID) {
 		buf.ipSetsRemoved.Add(setID)
@@ -85,9 +85,9 @@ func (buf *EventBuffer) OnIPSetRemoved(setID string) {
 }
 
 func (buf *EventBuffer) OnIPAdded(setID string, ip ip.Addr) {
-	glog.V(4).Infof("IP set %v now contains %v", setID, ip)
+	log.Debugf("IP set %v now contains %v", setID, ip)
 	if !buf.knownIPSets.Contains(setID) && !buf.ipSetsAdded.Contains(setID) {
-		glog.Fatalf("IP added to unknown IP set: %v", setID)
+		log.Fatalf("IP added to unknown IP set: %v", setID)
 	}
 	if buf.ipsRemoved.Contains(setID, ip) {
 		buf.ipsRemoved.Discard(setID, ip)
@@ -97,9 +97,9 @@ func (buf *EventBuffer) OnIPAdded(setID string, ip ip.Addr) {
 }
 
 func (buf *EventBuffer) OnIPRemoved(setID string, ip ip.Addr) {
-	glog.V(4).Infof("IP set %v no longer contains %v", setID, ip)
+	log.Debugf("IP set %v no longer contains %v", setID, ip)
 	if !buf.knownIPSets.Contains(setID) && !buf.ipSetsAdded.Contains(setID) {
-		glog.Fatalf("IP removed from unknown IP set: %v", setID)
+		log.Fatalf("IP removed from unknown IP set: %v", setID)
 	}
 	if buf.ipsAdded.Contains(setID, ip) {
 		buf.ipsAdded.Discard(setID, ip)
@@ -111,7 +111,7 @@ func (buf *EventBuffer) OnIPRemoved(setID string, ip ip.Addr) {
 func (buf *EventBuffer) Flush() {
 	buf.ipSetsRemoved.Iter(func(item interface{}) (err error) {
 		setID := item.(string)
-		glog.V(3).Infof("Flushing IP set remove: %v", setID)
+		log.Debugf("Flushing IP set remove: %v", setID)
 		buf.Callback(&proto.IPSetRemove{
 			Id: setID,
 		})
@@ -121,10 +121,10 @@ func (buf *EventBuffer) Flush() {
 		buf.knownIPSets.Discard(item)
 		return
 	})
-	glog.V(3).Infof("Done flushing IP set removes")
+	log.Debugf("Done flushing IP set removes")
 	buf.ipSetsAdded.Iter(func(item interface{}) (err error) {
 		setID := item.(string)
-		glog.V(3).Infof("Flushing IP set added: %v", setID)
+		log.Debugf("Flushing IP set added: %v", setID)
 		members := make([]string, 0)
 		buf.ipsAdded.Iter(setID, func(value interface{}) {
 			members = append(members, value.(ip.Addr).String())
@@ -138,22 +138,22 @@ func (buf *EventBuffer) Flush() {
 		buf.knownIPSets.Add(item)
 		return
 	})
-	glog.V(3).Infof("Done flushing IP set adds")
+	log.Debugf("Done flushing IP set adds")
 	buf.ipsRemoved.IterKeys(buf.flushAddsOrRemoves)
-	glog.V(3).Infof("Done flushing IP address removes")
+	log.Debugf("Done flushing IP address removes")
 	buf.ipsAdded.IterKeys(buf.flushAddsOrRemoves)
-	glog.V(3).Infof("Done flushing IP address adds")
+	log.Debugf("Done flushing IP address adds")
 
-	glog.V(3).Infof("Flushing %v pending updates", len(buf.pendingUpdates))
+	log.Debugf("Flushing %v pending updates", len(buf.pendingUpdates))
 	for _, update := range buf.pendingUpdates {
 		buf.Callback(update)
 	}
-	glog.V(3).Infof("Done flushing %v pending updates", len(buf.pendingUpdates))
+	log.Debugf("Done flushing %v pending updates", len(buf.pendingUpdates))
 	buf.pendingUpdates = make([]interface{}, 0)
 }
 
 func (buf *EventBuffer) flushAddsOrRemoves(setID string) {
-	glog.V(3).Infof("Flushing IP set deltas: %v", setID)
+	log.Debugf("Flushing IP set deltas: %v", setID)
 	deltaUpdate := proto.IPSetDeltaUpdate{
 		Id: setID,
 	}
@@ -171,20 +171,20 @@ func (buf *EventBuffer) flushAddsOrRemoves(setID string) {
 }
 
 func (buf *EventBuffer) OnConfigUpdate(globalConfig, hostConfig map[string]string) {
-	glog.V(3).Infof("Config update: %v, %v", globalConfig, hostConfig)
+	log.Debugf("Config update: %v, %v", globalConfig, hostConfig)
 	changed, err := buf.config.UpdateFrom(globalConfig, config.DatastoreGlobal)
 	if err != nil {
-		glog.Fatalf("Failed to parse config update: %v", err)
+		log.Fatalf("Failed to parse config update: %v", err)
 	}
 	if changed {
-		glog.Fatalf("Config changed, need to restart.")
+		log.Fatalf("Config changed, need to restart.")
 	}
 	changed, err = buf.config.UpdateFrom(hostConfig, config.DatastorePerHost)
 	if err != nil {
-		glog.Fatalf("Failed to parse config update: %v", err)
+		log.Fatalf("Failed to parse config update: %v", err)
 	}
 	if changed {
-		glog.Fatalf("Config changed, need to restart.")
+		log.Fatalf("Config changed, need to restart.")
 	}
 }
 
@@ -233,7 +233,7 @@ func (buf *EventBuffer) OnProfileInactive(key model.ProfileRulesKey) {
 func (buf *EventBuffer) OnEndpointTierUpdate(endpointKey model.Key,
 	endpoint interface{},
 	filteredTiers []endpoint.TierInfo) {
-	glog.V(3).Infof("Endpoint/tier update: %v", endpointKey)
+	log.Debugf("Endpoint/tier update: %v", endpointKey)
 	tiers := convertBackendTierInfo(filteredTiers)
 	switch key := endpointKey.(type) {
 	case model.WorkloadEndpointKey:

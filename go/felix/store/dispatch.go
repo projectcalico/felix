@@ -15,7 +15,7 @@
 package store
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 	"reflect"
@@ -45,7 +45,7 @@ func (d *Dispatcher) Register(keyExample model.Key, receiver UpdateHandler) {
 	if keyType.Kind() == reflect.Ptr {
 		panic("Register expects a non-pointer")
 	}
-	glog.Infof("Registering listener for type %v: %#v", keyType, receiver)
+	log.Infof("Registering listener for type %v: %#v", keyType, receiver)
 	d.typeToHandler[keyType] = append(d.typeToHandler[keyType], receiver)
 	d.allHandlers[receiver] = true
 }
@@ -67,14 +67,14 @@ func (d *Dispatcher) OnStatusUpdated(status api.SyncStatus) {
 // Dispatcher callbacks.
 
 func (d *Dispatcher) OnUpdate(update model.KVPair) (filterOut bool) {
-	glog.V(3).Infof("Dispatching %v", update)
+	log.Debugf("Dispatching %v", update)
 	keyType := reflect.TypeOf(update.Key)
-	glog.V(4).Info("Type: ", keyType)
+	log.Debug("Type: ", keyType)
 	listeners := d.typeToHandler[keyType]
 	if update.Value != nil && reflect.TypeOf(update.Value).Kind() == reflect.Struct {
-		glog.Fatalf("KVPair contained a struct instead of expected pointer: %#v", update)
+		log.Fatalf("KVPair contained a struct instead of expected pointer: %#v", update)
 	}
-	glog.V(4).Infof("Listeners: %#v", listeners)
+	log.Debugf("Listeners: %#v", listeners)
 	for _, recv := range listeners {
 		filterOut := recv.OnUpdate(update)
 		if filterOut {

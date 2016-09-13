@@ -15,7 +15,7 @@
 package calc
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/felix/config"
 	"github.com/projectcalico/calico/go/felix/proto"
 	"github.com/projectcalico/calico/go/felix/store"
@@ -55,36 +55,36 @@ func NewAsyncCalcGraph(conf *config.Config, outputEvents chan<- interface{}) *As
 }
 
 func (acg *AsyncCalcGraph) OnUpdates(updates []model.KVPair) {
-	glog.V(4).Infof("Got %v updates; queueing", len(updates))
+	log.Debugf("Got %v updates; queueing", len(updates))
 	acg.inputEvents <- updates
 }
 
 func (acg *AsyncCalcGraph) OnStatusUpdated(status api.SyncStatus) {
-	glog.V(4).Infof("Status updated: %v; queueing", status)
+	log.Debugf("Status updated: %v; queueing", status)
 	acg.inputEvents <- status
 }
 
 func (acg *AsyncCalcGraph) loop() {
-	glog.V(1).Info("AsyncCalcGraph running")
+	log.Info("AsyncCalcGraph running")
 	for {
 		select {
 		case update := <-acg.inputEvents:
 			switch update := update.(type) {
 			case []model.KVPair:
 				// Update; send it to the dispatcher.
-				glog.V(4).Info("Pulled []KVPair off channel")
+				log.Debug("Pulled []KVPair off channel")
 				acg.Dispatcher.OnUpdates(update)
 			case api.SyncStatus:
 				// Sync status changed, check if we're now in-sync.
-				glog.V(4).Info("Pulled status update off channel")
+				log.Debug("Pulled status update off channel")
 				acg.Dispatcher.OnStatusUpdated(update)
 				if update == api.InSync && !acg.beenInSync {
-					glog.V(1).Info("First time we've been in sync")
+					log.Info("First time we've been in sync")
 					acg.onEvent(&proto.InSync{})
 					acg.beenInSync = true
 				}
 			default:
-				glog.Fatalf("Unexpected update: %#v", update)
+				log.Fatalf("Unexpected update: %#v", update)
 			}
 			acg.dirty = true
 		case <-acg.flushTicks:
@@ -103,23 +103,23 @@ func (acg *AsyncCalcGraph) maybeFlush() {
 		return
 	}
 	if acg.flushLeakyBucket > 0 {
-		glog.V(4).Infof("Not throttled: flushing event buffer")
+		log.Debugf("Not throttled: flushing event buffer")
 		acg.flushLeakyBucket--
 		acg.eventBuffer.Flush()
 		acg.dirty = false
 	} else {
-		glog.V(4).Infof("Throttled: not flushing event buffer")
+		log.Debugf("Throttled: not flushing event buffer")
 	}
 }
 
 func (acg *AsyncCalcGraph) onEvent(event interface{}) {
-	glog.V(4).Info("Sending output event on channel")
+	log.Debug("Sending output event on channel")
 	acg.outputEvents <- event
-	glog.V(4).Info("Sent output event on channel")
+	log.Debug("Sent output event on channel")
 }
 
 func (acg *AsyncCalcGraph) Start() {
-	glog.V(1).Info("Starting AsyncCalcGraph")
+	log.Info("Starting AsyncCalcGraph")
 	acg.flushTicks = time.Tick(tickInterval)
 	go acg.loop()
 }

@@ -16,10 +16,9 @@ package main
 
 import (
 	"encoding/binary"
-	"flag"
 	"github.com/docopt/docopt-go"
 	pb "github.com/gogo/protobuf/proto"
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/ip"
 	"github.com/projectcalico/calico/go/felix/calc"
 	"github.com/projectcalico/calico/go/felix/config"
@@ -45,24 +44,29 @@ Options:
 `
 
 func main() {
+	// Intitialise logging early so we can trace out config parsing.
+	logLevelScreen := log.FatalLevel
+	if rawLogLevel := os.Getenv("FELIX_LOGSEVERITYSCREEN"); rawLogLevel != "" {
+		parsedLevel, err := log.ParseLevel(rawLogLevel)
+		if err == nil {
+			logLevelScreen = parsedLevel
+		}
+	}
+	log.SetLevel(logLevelScreen)
+	log.Infof("Log level set to %v", logLevelScreen)
+
 	// Parse command-line args.
 	arguments, err := docopt.Parse(usage, nil, true, "calico-felix 1.5", false)
 	if err != nil {
 		println(usage)
-		glog.Fatalf("Failed to parse usage, exiting: %v", err)
+		log.Fatalf("Failed to parse usage, exiting: %v", err)
 	}
 
-	// Intitialise logging early so we can trace out config parsing.
-	flag.CommandLine.Parse(nil)
-	if os.Getenv("GLOG") != "" {
-		flag.Lookup("logtostderr").Value.Set("true")
-		flag.Lookup("v").Value.Set(os.Getenv("GLOG"))
-	}
-	glog.V(1).Infof("Command line arguments: %v", arguments)
+	log.Infof("Command line arguments: %v", arguments)
 
 	// Load the configuration from all the different sources and merge.
 	// Keep retrying on failure.
-	glog.V(1).Infof("Loading configuration...")
+	log.Infof("Loading configuration...")
 	var datastore bapi.Client
 	var configParams *config.Config
 configRetry:
@@ -75,7 +79,7 @@ configRetry:
 		configFile := arguments["--config-file"].(string)
 		fileConfig, err := config.LoadConfigFile(configFile)
 		if err != nil {
-			glog.Errorf("Failed to load configuration file, %s: %s",
+			log.Errorf("Failed to load configuration file, %s: %s",
 				configFile, err)
 			time.Sleep(1 * time.Second)
 			continue configRetry
@@ -84,7 +88,7 @@ configRetry:
 		configParams.UpdateFrom(envConfig, config.EnvironmentVariable)
 		configParams.UpdateFrom(fileConfig, config.ConfigFile)
 		if configParams.Err != nil {
-			glog.Errorf("Failed to parse configuration: %s", configParams.Err)
+			log.Errorf("Failed to parse configuration: %s", configParams.Err)
 			time.Sleep(1 * time.Second)
 			continue configRetry
 		}
@@ -94,7 +98,7 @@ configRetry:
 		datastoreConfig := configParams.DatastoreConfig()
 		datastore, err = backend.NewClient(datastoreConfig)
 		if err != nil {
-			glog.Errorf("Failed to connect to datastore: %v", err)
+			log.Errorf("Failed to connect to datastore: %v", err)
 			time.Sleep(1 * time.Second)
 			continue configRetry
 		}
@@ -104,7 +108,7 @@ configRetry:
 		configParams.UpdateFrom(hostConfig, config.DatastorePerHost)
 		configParams.Validate()
 		if configParams.Err != nil {
-			glog.Fatalf("Failed to parse/validate configuration from datastore: %s",
+			log.Fatalf("Failed to parse/validate configuration from datastore: %s",
 				configParams.Err)
 			time.Sleep(1 * time.Second)
 			continue configRetry
@@ -114,49 +118,49 @@ configRetry:
 
 	// If we get here, we've loaded the configuration and we're ready to
 	// start the dataplane driver.
-	glog.V(1).Infof("Successfully loaded configuration: %+v", configParams)
+	log.Infof("Successfully loaded configuration: %+v", configParams)
 
 	// Create a pair of pipes, one for sending messages to the dataplane
 	// driver, the other for receiving.
 	toDriverR, toDriverW, err := os.Pipe()
 	if err != nil {
-		glog.Fatalf("Failed to open pipe for dataplane driver: %v", err)
+		log.Fatalf("Failed to open pipe for dataplane driver: %v", err)
 	}
 	fromDriverR, fromDriverW, err := os.Pipe()
 	if err != nil {
-		glog.Fatalf("Failed to open pipe for dataplane driver: %v", err)
+		log.Fatalf("Failed to open pipe for dataplane driver: %v", err)
 	}
 
 	cmd := exec.Command("calico-iptables-plugin")
 	driverOut, err := cmd.StdoutPipe()
 	if err != nil {
-		glog.Fatal("Failed to create pipe for dataplane driver")
+		log.Fatal("Failed to create pipe for dataplane driver")
 	}
 	driverErr, err := cmd.StderrPipe()
 	if err != nil {
-		glog.Fatal("Failed to create pipe for dataplane driver")
+		log.Fatal("Failed to create pipe for dataplane driver")
 	}
 	go io.Copy(os.Stdout, driverOut)
 	go io.Copy(os.Stderr, driverErr)
 	cmd.ExtraFiles = []*os.File{toDriverR, fromDriverW}
 	if err := cmd.Start(); err != nil {
-		glog.Fatalf("Failed to start dataplane driver: %v", err)
+		log.Fatalf("Failed to start dataplane driver: %v", err)
 	}
 	go func() {
 		err := cmd.Wait()
-		glog.Fatalf("Dataplane driver died, must restart: %v", err)
+		log.Fatalf("Dataplane driver died, must restart: %v", err)
 	}()
 
 	// Now the sub-process is running, close our copy of the file handles
 	// for the child's end of the pipes.
 	if err := toDriverR.Close(); err != nil {
-		glog.Fatalf("Failed to close parent's copy of pipe")
+		log.Fatalf("Failed to close parent's copy of pipe")
 	}
 	if err := fromDriverW.Close(); err != nil {
-		glog.Fatalf("Failed to close parent's copy of pipe")
+		log.Fatalf("Failed to close parent's copy of pipe")
 	}
 
-	glog.Info("Starting the dataplane driver")
+	log.Info("Starting the dataplane driver")
 	felixConn := NewDataplaneConn(configParams, datastore, toDriverW, fromDriverR)
 	felixConn.Start()
 	felixConn.Join()
@@ -164,10 +168,10 @@ configRetry:
 
 func loadConfigFromDatastore(datastore bapi.Client, hostname string) (globalConfig, hostConfig map[string]string) {
 	for {
-		glog.V(1).Info("Loading global config from datastore")
+		log.Info("Loading global config from datastore")
 		kvs, err := datastore.List(model.GlobalConfigListOptions{})
 		if err != nil {
-			glog.Errorf("Failed to load config from datastore: %v", err)
+			log.Errorf("Failed to load config from datastore: %v", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -178,11 +182,11 @@ func loadConfigFromDatastore(datastore bapi.Client, hostname string) (globalConf
 			globalConfig[key.Name] = value
 		}
 
-		glog.V(1).Infof("Loading per-host config from datastore; hostname=%v", hostname)
+		log.Infof("Loading per-host config from datastore; hostname=%v", hostname)
 		kvs, err = datastore.List(
 			model.HostConfigListOptions{Hostname: hostname})
 		if err != nil {
-			glog.Errorf("Failed to load config from datastore: %v", err)
+			log.Errorf("Failed to load config from datastore: %v", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -192,7 +196,7 @@ func loadConfigFromDatastore(datastore bapi.Client, hostname string) (globalConf
 			value := kv.Value.(string)
 			hostConfig[key.Name] = value
 		}
-		glog.V(1).Info("Loaded config from datastore")
+		log.Info("Loaded config from datastore")
 		break
 	}
 	return globalConfig, hostConfig
@@ -245,25 +249,25 @@ func (fc *DataplaneConn) readMessagesFromDataplane() {
 	defer func() {
 		fc.failed <- true
 	}()
-	glog.Info("Reading from dataplane driver pipe...")
+	log.Info("Reading from dataplane driver pipe...")
 	for {
 		buf := make([]byte, 8)
 		_, err := io.ReadFull(fc.felixReader, buf)
 		if err != nil {
-			glog.Fatalf("Failed to read from front-end socket: %v", err)
+			log.Fatalf("Failed to read from front-end socket: %v", err)
 		}
 		length := binary.LittleEndian.Uint64(buf)
 
 		data := make([]byte, length)
 		_, err = io.ReadFull(fc.felixReader, data)
 		if err != nil {
-			glog.Fatalf("Failed to read from front-end socket: %v", err)
+			log.Fatalf("Failed to read from front-end socket: %v", err)
 		}
 
 		msg := proto.FromDataplane{}
 		pb.Unmarshal(data, &msg)
 
-		glog.V(3).Infof("Message from Felix: %#v", msg.Payload)
+		log.Debugf("Message from Felix: %#v", msg.Payload)
 
 		payload := msg.Payload
 		switch msg := payload.(type) {
@@ -286,14 +290,14 @@ func (fc *DataplaneConn) readMessagesFromDataplane() {
 				fc.endpointUpdates <- msg.HostEndpointStatusRemove
 			}
 		default:
-			glog.Warningf("XXXX Unknown message from felix: %#v", msg)
+			log.Warningf("XXXX Unknown message from felix: %#v", msg)
 		}
-		glog.V(3).Info("Finished handling message from front-end")
+		log.Debug("Finished handling message from front-end")
 	}
 }
 
 func (fc *DataplaneConn) handleProcessStatusUpdate(msg *proto.ProcessStatusUpdate) {
-	glog.V(3).Infof("Status update from dataplane driver: %v", *msg)
+	log.Debugf("Status update from dataplane driver: %v", *msg)
 	statusReport := model.StatusReport{
 		Timestamp:     msg.IsoTimestamp,
 		UptimeSeconds: msg.Uptime,
@@ -307,7 +311,7 @@ func (fc *DataplaneConn) handleProcessStatusUpdate(msg *proto.ProcessStatusUpdat
 	}
 	_, err := fc.datastore.Apply(&kv)
 	if err != nil {
-		glog.Warningf("Failed to write status to datastore: %v", err)
+		log.Warningf("Failed to write status to datastore: %v", err)
 	} else {
 		fc.firstStatusReportSent = true
 	}
@@ -317,7 +321,7 @@ func (fc *DataplaneConn) handleProcessStatusUpdate(msg *proto.ProcessStatusUpdat
 	}
 	_, err = fc.datastore.Apply(&kv)
 	if err != nil {
-		glog.Warningf("Failed to write status to datastore: %v", err)
+		log.Warningf("Failed to write status to datastore: %v", err)
 	}
 }
 
@@ -341,7 +345,7 @@ func (fc *DataplaneConn) sendMessagesToDataplaneDriver() {
 }
 
 func (fc *DataplaneConn) marshalToDataplane(msg interface{}) {
-	glog.V(3).Infof("Writing msg (%v) to felix: %#v\n", fc.nextSeqNumber, msg)
+	log.Debugf("Writing msg (%v) to felix: %#v", fc.nextSeqNumber, msg)
 
 	envelope := &proto.ToDataplane{
 		SequenceNumber: fc.nextSeqNumber,
@@ -375,10 +379,10 @@ func (fc *DataplaneConn) marshalToDataplane(msg interface{}) {
 	case *proto.WorkloadEndpointRemove:
 		envelope.Payload = &proto.ToDataplane_WorkloadEndpointRemove{msg}
 	default:
-		glog.Fatalf("Unknown message type: %#v", msg)
+		log.Fatalf("Unknown message type: %#v", msg)
 	}
 	//
-	//if glog.V(4) {
+	//if log.V(4) {
 	//	// For debugging purposes, dump the message to
 	//	// messagepack; parse it as a map and dump it to JSON.
 	//	bs := make([]byte, 0)
@@ -392,14 +396,14 @@ func (fc *DataplaneConn) marshalToDataplane(msg interface{}) {
 	//	dec.Decode(msgAsMap)
 	//	jsonMsg, err := json.Marshal(msgAsMap)
 	//	if err == nil {
-	//		glog.Infof("Dumped message: %v %v", decodedType, string(jsonMsg))
+	//		log.Infof("Dumped message: %v %v", decodedType, string(jsonMsg))
 	//	} else {
-	//		glog.Infof("Failed to dump map to JSON: (%v) %v", err, msgAsMap)
+	//		log.Infof("Failed to dump map to JSON: (%v) %v", err, msgAsMap)
 	//	}
 	//}
 	data, err := pb.Marshal(envelope)
 	if err != nil {
-		glog.Fatalf("Failed to marshal data to front end: %#v; %v",
+		log.Fatalf("Failed to marshal data to front end: %#v; %v",
 			msg, err)
 	}
 
@@ -408,12 +412,12 @@ func (fc *DataplaneConn) marshalToDataplane(msg interface{}) {
 
 	numBytes, err := fc.felixWriter.Write(lengthBuffer)
 	if err != nil || numBytes != len(lengthBuffer) {
-		glog.Fatalf("Failed to write to front end (only wrote %v bytes): %v",
+		log.Fatalf("Failed to write to front end (only wrote %v bytes): %v",
 			numBytes, err)
 	}
 	numBytes, err = fc.felixWriter.Write(data)
 	if err != nil || numBytes != len(data) {
-		glog.Fatalf("Failed to write to front end (only wrote %v bytes): %v",
+		log.Fatalf("Failed to write to front end (only wrote %v bytes): %v",
 			numBytes, err)
 	}
 }
@@ -438,16 +442,16 @@ func (fc *DataplaneConn) Start() {
 
 	// Create the datastore syncer, which will feed the calculation graph.
 	syncer := fc.datastore.Syncer(asyncCalcGraph)
-	glog.V(3).Infof("Created Syncer: %#v", syncer)
+	log.Debugf("Created Syncer: %#v", syncer)
 
 	// Start the background processing threads.
-	glog.V(2).Infof("Starting the datastore Syncer/processing graph")
+	log.Infof("Starting the datastore Syncer/processing graph")
 	syncer.Start()
 	asyncCalcGraph.Start()
-	glog.V(2).Infof("Started the datastore Syncer/processing graph")
+	log.Infof("Started the datastore Syncer/processing graph")
 
 	if fc.config.EndpointReportingEnabled {
-		glog.V(1).Info("Endpoint status reporting enabled, starting status reporter")
+		log.Info("Endpoint status reporting enabled, starting status reporter")
 		fc.statusReporter = status.NewEndpointStatusReporter(
 			fc.config.FelixHostname,
 			fc.endpointUpdates,
@@ -462,5 +466,5 @@ func (fc *DataplaneConn) Start() {
 
 func (fc *DataplaneConn) Join() {
 	_ = <-fc.failed
-	glog.Fatal("Background thread failed")
+	log.Fatal("Background thread failed")
 }

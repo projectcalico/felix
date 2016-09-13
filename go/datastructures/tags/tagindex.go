@@ -15,7 +15,7 @@
 package tags
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 )
@@ -60,7 +60,7 @@ func (idx *TagIndex) SetTagActive(tag string) {
 	if idx.activeTags[tag] {
 		return
 	}
-	glog.V(2).Infof("Tag active: %v")
+	log.Infof("Tag active: %v")
 	// Generate events for all endpoints.
 	idx.activeTags[tag] = true
 	for key, _ := range idx.matches {
@@ -74,7 +74,7 @@ func (idx *TagIndex) SetTagInactive(tag string) {
 	if !idx.activeTags[tag] {
 		return
 	}
-	glog.V(2).Infof("Tag no longer active: %v")
+	log.Infof("Tag no longer active: %v")
 	delete(idx.activeTags, tag)
 	for key, _ := range idx.matches {
 		if key.tag == tag {
@@ -114,7 +114,7 @@ func (l *TagIndex) OnDatamodelStatus(status api.SyncStatus) {
 }
 
 func (idx *TagIndex) updateProfileTags(profileID string, tags []string) {
-	glog.V(3).Infof("Updating tags for profile %v to %v", profileID, tags)
+	log.Debugf("Updating tags for profile %v to %v", profileID, tags)
 	oldTags := idx.profileIDToTags[profileID]
 	// Calculate the added and removed tags.  Initialise removedTags with
 	// a copy of the old tags, then remove any still-present tags.
@@ -150,7 +150,7 @@ func (idx *TagIndex) updateProfileTags(profileID string, tags []string) {
 }
 
 func (idx *TagIndex) updateEndpoint(key EndpointKey, profileIDs []string) {
-	glog.V(3).Infof("Updating endpoint %v, profile IDs: %v", key, profileIDs)
+	log.Debugf("Updating endpoint %v, profile IDs: %v", key, profileIDs)
 	// Figure out what's changed and update the cache.
 	removedIDs, addedIDs := idx.endpointKeyToProfileIDs.Update(key, profileIDs)
 
@@ -159,7 +159,7 @@ func (idx *TagIndex) updateEndpoint(key EndpointKey, profileIDs []string) {
 	for id, _ := range addedIDs {
 		// Update reverse index, which we use when resolving profile
 		// updates.
-		glog.V(4).Infof("Profile ID added: %v", id)
+		log.Debugf("Profile ID added: %v", id)
 		revIdx, ok := idx.profileIDToEndpointKey[id]
 		if !ok {
 			revIdx = make(map[EndpointKey]bool)
@@ -177,11 +177,11 @@ func (idx *TagIndex) updateEndpoint(key EndpointKey, profileIDs []string) {
 	for id, _ := range removedIDs {
 		// Clean up the reverse index that we use when doing profile
 		// updates.
-		glog.V(4).Infof("Profile ID removed: %v", id)
+		log.Debugf("Profile ID removed: %v", id)
 		revIdx := idx.profileIDToEndpointKey[id]
 		delete(revIdx, key)
 		if len(revIdx) == 0 {
-			glog.V(4).Infof("%v no longer has any endpoints", id)
+			log.Debugf("%v no longer has any endpoints", id)
 			delete(idx.profileIDToEndpointKey, id)
 		}
 
@@ -207,13 +207,13 @@ func (idx *TagIndex) addToIndex(epKey EndpointKey, tag string, profID string) {
 }
 
 func (idx *TagIndex) removeFromIndex(epKey EndpointKey, tag string, profID string) {
-	glog.V(4).Infof("Removing %v, %v, %v from index", epKey, tag, profID)
+	log.Debugf("Removing %v, %v, %v from index", epKey, tag, profID)
 	idxKey := indexKey{tag, epKey}
 	matchingProfIDs := idx.matches[idxKey]
 	delete(matchingProfIDs, profID)
 	if len(matchingProfIDs) == 0 {
 		// There's no-longer a profile keeping this tag alive.
-		glog.V(4).Infof("Endpoint %v no longer matches tag %v", epKey, tag)
+		log.Debugf("Endpoint %v no longer matches tag %v", epKey, tag)
 		delete(idx.matches, idxKey)
 		if idx.activeTags[tag] {
 			idx.onMatchStopped(epKey, tag)

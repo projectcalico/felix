@@ -15,7 +15,7 @@
 package labels
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/tigera/libcalico-go/lib/selector"
 )
 
@@ -54,7 +54,7 @@ func NewIndex(onMatchStarted, onMatchStopped MatchCallback) Index {
 }
 
 func (idx *linearScanIndex) UpdateSelector(id interface{}, sel selector.Selector) {
-	glog.V(2).Infof("Updating selector %v", id)
+	log.Infof("Updating selector %v", id)
 	if sel == nil {
 		panic("Selector should not be nil")
 	}
@@ -63,7 +63,7 @@ func (idx *linearScanIndex) UpdateSelector(id interface{}, sel selector.Selector
 }
 
 func (idx *linearScanIndex) DeleteSelector(id interface{}) {
-	glog.V(2).Infof("Deleting selector %v", id)
+	log.Infof("Deleting selector %v", id)
 	matchSet := idx.labelIdsBySelId[id]
 	matchSlice := make([]interface{}, 0, len(matchSet))
 	for labelId, _ := range matchSet {
@@ -76,13 +76,13 @@ func (idx *linearScanIndex) DeleteSelector(id interface{}) {
 }
 
 func (idx *linearScanIndex) UpdateLabels(id interface{}, labels map[string]string) {
-	glog.V(3).Infof("Updating labels for ID %v", id)
+	log.Debugf("Updating labels for ID %v", id)
 	idx.scanAllSelectors(id, labels)
 	idx.labelsById[id] = labels
 }
 
 func (idx *linearScanIndex) DeleteLabels(id interface{}) {
-	glog.V(3).Infof("Deleting labels for %v", id)
+	log.Debugf("Deleting labels for %v", id)
 	matchSet := idx.selIdsByLabelId[id]
 	matchSlice := make([]interface{}, 0, len(matchSet))
 	for selId, _ := range matchSet {
@@ -95,7 +95,7 @@ func (idx *linearScanIndex) DeleteLabels(id interface{}) {
 }
 
 func (idx *linearScanIndex) scanAllLabels(selId interface{}, sel selector.Selector) {
-	glog.V(4).Infof("Scanning all (%v) labels against selector %v",
+	log.Debugf("Scanning all (%v) labels against selector %v",
 		len(idx.labelsById), selId)
 	for labelId, labels := range idx.labelsById {
 		idx.updateMatches(selId, sel, labelId, labels)
@@ -103,7 +103,7 @@ func (idx *linearScanIndex) scanAllLabels(selId interface{}, sel selector.Select
 }
 
 func (idx *linearScanIndex) scanAllSelectors(labelId interface{}, labels map[string]string) {
-	glog.V(4).Infof("Scanning all (%v) selectors against labels %v",
+	log.Debugf("Scanning all (%v) selectors against labels %v",
 		len(idx.selectorsById), labelId)
 	for selId, sel := range idx.selectorsById {
 		idx.updateMatches(selId, sel, labelId, labels)
@@ -123,7 +123,7 @@ func (idx *linearScanIndex) updateMatches(selId interface{}, sel selector.Select
 func (idx *linearScanIndex) storeMatch(selId, labelId interface{}) {
 	previouslyMatched := idx.labelIdsBySelId[selId][labelId]
 	if !previouslyMatched {
-		glog.V(3).Infof("Selector %v now matches labels %v", selId, labelId)
+		log.Debugf("Selector %v now matches labels %v", selId, labelId)
 		labelIds, ok := idx.labelIdsBySelId[selId]
 		if !ok {
 			labelIds = make(map[interface{}]bool)
@@ -145,7 +145,7 @@ func (idx *linearScanIndex) storeMatch(selId, labelId interface{}) {
 func (idx *linearScanIndex) deleteMatch(selId, labelId interface{}) {
 	previouslyMatched := idx.labelIdsBySelId[selId][labelId]
 	if previouslyMatched {
-		glog.V(3).Infof("Selector %v no longer matches labels %v",
+		log.Debugf("Selector %v no longer matches labels %v",
 			selId, labelId)
 
 		delete(idx.labelIdsBySelId[selId], labelId)

@@ -16,14 +16,14 @@ package config
 
 import (
 	"github.com/go-ini/ini"
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"io/ioutil"
 	"os"
 )
 
 func LoadConfigFile(filename string) (map[string]string, error) {
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		glog.V(1).Infof("Ignoring absent config file: %v", filename)
+		log.Infof("Ignoring absent config file: %v", filename)
 		return nil, nil
 	}
 	data, err := ioutil.ReadFile(filename)
@@ -36,15 +36,15 @@ func LoadConfigFile(filename string) (map[string]string, error) {
 func LoadConfigFileData(data []byte) (map[string]string, error) {
 	iniFile, err := ini.Load(data)
 	if err != nil {
-		glog.Errorf("Failed to load config file: %v", err)
+		log.Errorf("Failed to load config file: %v", err)
 		return nil, err
 	}
 	kvs := make(map[string]string)
 	for _, section := range iniFile.Sections() {
-		glog.V(3).Infof("Parsing section %v", section.Name())
+		log.Debugf("Parsing section %v", section.Name())
 		for _, key := range section.Keys() {
 			if _, ok := kvs[key.Name()]; ok {
-				glog.Warningf("Multiple values defined for key %v", key.Name())
+				log.Warningf("Multiple values defined for key %v", key.Name())
 			}
 			kvs[key.Name()] = key.Value()
 		}

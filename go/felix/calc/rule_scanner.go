@@ -14,7 +14,7 @@
 package calc
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/multidict"
 	"github.com/projectcalico/calico/go/datastructures/set"
 	"github.com/tigera/libcalico-go/lib/backend/model"
@@ -72,7 +72,7 @@ func (calc *RuleScanner) OnPolicyInactive(key model.PolicyKey) {
 }
 
 func (calc *RuleScanner) updateRules(key interface{}, inbound, outbound []model.Rule) (parsedRules *ParsedRules) {
-	glog.V(4).Infof("Scanning rules (%v in, %v out) for key %v",
+	log.Debugf("Scanning rules (%v in, %v out) for key %v",
 		len(inbound), len(outbound), key)
 	// Extract all the new selectors/tags.
 	currentUIDToTagOrSel := make(map[string]tagOrSel)
@@ -80,7 +80,7 @@ func (calc *RuleScanner) updateRules(key interface{}, inbound, outbound []model.
 	for ii, rule := range inbound {
 		parsed, allToS, err := ruleToParsedRule(&rule)
 		if err != nil {
-			glog.Fatalf("Bad selector in %v: %v", key, err)
+			log.Fatalf("Bad selector in %v: %v", key, err)
 		}
 		parsedInbound[ii] = parsed
 		for _, tos := range allToS {
@@ -91,7 +91,7 @@ func (calc *RuleScanner) updateRules(key interface{}, inbound, outbound []model.
 	for ii, rule := range outbound {
 		parsed, allToS, err := ruleToParsedRule(&rule)
 		if err != nil {
-			glog.Fatalf("Bad selector in %v: %v", key, err)
+			log.Fatalf("Bad selector in %v: %v", key, err)
 		}
 		parsedOutbound[ii] = parsed
 		for _, tos := range allToS {
@@ -106,9 +106,9 @@ func (calc *RuleScanner) updateRules(key interface{}, inbound, outbound []model.
 	// Figure out which selectors/tags are new.
 	addedUids := set.New()
 	for uid, _ := range currentUIDToTagOrSel {
-		glog.V(4).Infof("Checking if UID %v is new.", uid)
+		log.Debugf("Checking if UID %v is new.", uid)
 		if !calc.rulesIDToUIDs.Contains(key, uid) {
-			glog.V(4).Infof("UID %v is new", uid)
+			log.Debugf("UID %v is new", uid)
 			addedUids.Add(uid)
 		}
 	}
@@ -117,7 +117,7 @@ func (calc *RuleScanner) updateRules(key interface{}, inbound, outbound []model.
 	removedUids := set.New()
 	calc.rulesIDToUIDs.Iter(key, func(uid string) {
 		if _, ok := currentUIDToTagOrSel[uid]; !ok {
-			glog.V(4).Infof("Removed UID: %v", uid)
+			log.Debugf("Removed UID: %v", uid)
 			removedUids.Add(uid)
 		}
 	})
@@ -132,13 +132,13 @@ func (calc *RuleScanner) updateRules(key interface{}, inbound, outbound []model.
 			calc.tagsOrSelsByUID[uid] = tagOrSel
 			if tagOrSel.selector != nil {
 				sel := tagOrSel.selector
-				glog.V(3).Infof("Selector became active: %v -> %v",
+				log.Debugf("Selector became active: %v -> %v",
 					uid, sel)
 				// This selector just became active, trigger event.
 				calc.OnSelectorActive(sel)
 			} else {
 				tag := tagOrSel.tag
-				glog.V(3).Infof("Tag became active: %v -> %v",
+				log.Debugf("Tag became active: %v -> %v",
 					uid, tag)
 				calc.OnTagActive(tag)
 			}
@@ -154,18 +154,18 @@ func (calc *RuleScanner) updateRules(key interface{}, inbound, outbound []model.
 		calc.rulesIDToUIDs.Discard(key, uid)
 		calc.uidsToRulesIDs.Discard(uid, key)
 		if !calc.uidsToRulesIDs.ContainsKey(uid) {
-			glog.V(3).Infof("Selector/tag became inactive: %v", uid)
+			log.Debugf("Selector/tag became inactive: %v", uid)
 			tagOrSel := calc.tagsOrSelsByUID[uid]
 			delete(calc.tagsOrSelsByUID, uid)
 			if tagOrSel.selector != nil {
 				// This selector just became inactive, trigger event.
 				sel := tagOrSel.selector
-				glog.V(3).Infof("Selector became inactive: %v -> %v",
+				log.Debugf("Selector became inactive: %v -> %v",
 					uid, sel)
 				calc.OnSelectorInactive(sel)
 			} else {
 				tag := tagOrSel.tag
-				glog.V(3).Infof("Tag became inactive: %v -> %v",
+				log.Debugf("Tag became inactive: %v -> %v",
 					uid, tag)
 				calc.OnTagInactive(tag)
 			}

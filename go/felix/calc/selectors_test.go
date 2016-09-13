@@ -15,14 +15,14 @@
 package calc_test
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/tigera/libcalico-go/lib/selector"
 )
 
 func selectorId(selStr string) string {
 	sel, err := selector.Parse(selStr)
 	if err != nil {
-		glog.Fatalf("Failed to parse %v: %v", selStr, err)
+		log.Fatalf("Failed to parse %v: %v", selStr, err)
 	}
 	return sel.UniqueId()
 }

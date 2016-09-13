@@ -15,7 +15,7 @@
 package labels
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/multidict"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
@@ -50,32 +50,32 @@ func (l *InheritIndex) OnUpdate(update model.KVPair) (filterOut bool) {
 	switch key := update.Key.(type) {
 	case model.WorkloadEndpointKey:
 		if update.Value != nil {
-			glog.V(4).Infof("Updating ARC with endpoint %v", key)
+			log.Debugf("Updating ARC with endpoint %v", key)
 			endpoint := update.Value.(*model.WorkloadEndpoint)
 			profileIDs := endpoint.ProfileIDs
 			l.UpdateLabels(key, endpoint.Labels, profileIDs)
 		} else {
-			glog.V(4).Infof("Deleting endpoint %v from ARC", key)
+			log.Debugf("Deleting endpoint %v from ARC", key)
 			l.DeleteLabels(key)
 		}
 	case model.HostEndpointKey:
 		if update.Value != nil {
 			// Figure out what's changed and update the cache.
-			glog.V(4).Infof("Updating ARC for host endpoint %v", key)
+			log.Debugf("Updating ARC for host endpoint %v", key)
 			endpoint := update.Value.(*model.HostEndpoint)
 			profileIDs := endpoint.ProfileIDs
 			l.UpdateLabels(key, endpoint.Labels, profileIDs)
 		} else {
-			glog.V(4).Infof("Deleting host endpoint %v from ARC", key)
+			log.Debugf("Deleting host endpoint %v from ARC", key)
 			l.DeleteLabels(key)
 		}
 	case model.ProfileLabelsKey:
 		if update.Value != nil {
-			glog.V(4).Infof("Updating ARC for profile %v", key)
+			log.Debugf("Updating ARC for profile %v", key)
 			labels := update.Value.(map[string]string)
 			l.UpdateParentLabels(key.Name, labels)
 		} else {
-			glog.V(4).Infof("Removing profile %v from ARC", key)
+			log.Debugf("Removing profile %v from ARC", key)
 			l.DeleteParentLabels(key.Name)
 		}
 	}
@@ -94,17 +94,17 @@ func (idx *InheritIndex) DeleteSelector(id interface{}) {
 }
 
 func (idx *InheritIndex) UpdateLabels(id interface{}, labels map[string]string, parents []string) {
-	glog.V(3).Info("Inherit index updating labels for ", id)
-	glog.V(4).Info("Num dirty items ", len(idx.dirtyItemIDs), " items")
+	log.Debug("Inherit index updating labels for ", id)
+	log.Debug("Num dirty items ", len(idx.dirtyItemIDs), " items")
 	idx.labelsByItemID[id] = labels
 	idx.onItemParentsUpdate(id, parents)
 	idx.dirtyItemIDs[id] = true
 	idx.flushUpdates()
-	glog.V(4).Info("Num ending dirty items ", len(idx.dirtyItemIDs), " items")
+	log.Debug("Num ending dirty items ", len(idx.dirtyItemIDs), " items")
 }
 
 func (idx *InheritIndex) DeleteLabels(id interface{}) {
-	glog.V(3).Info("Inherit index deleting labels for ", id)
+	log.Debug("Inherit index deleting labels for ", id)
 	delete(idx.labelsByItemID, id)
 	idx.onItemParentsUpdate(id, []string{})
 	idx.dirtyItemIDs[id] = true
@@ -138,7 +138,7 @@ func (idx *InheritIndex) DeleteParentLabels(parentID string) {
 
 func (idx *InheritIndex) flushChildren(parentID interface{}) {
 	idx.itemIDsByParentID.Iter(parentID, func(itemID interface{}) {
-		glog.V(4).Info("Marking child ", itemID, " dirty")
+		log.Debug("Marking child ", itemID, " dirty")
 		idx.dirtyItemIDs[itemID] = true
 	})
 	idx.flushUpdates()
@@ -146,15 +146,15 @@ func (idx *InheritIndex) flushChildren(parentID interface{}) {
 
 func (idx *InheritIndex) flushUpdates() {
 	for itemID, _ := range idx.dirtyItemIDs {
-		glog.V(4).Infof("Flushing %#v", itemID)
+		log.Debugf("Flushing %#v", itemID)
 		itemLabels, ok := idx.labelsByItemID[itemID]
 		if !ok {
 			// Item deleted.
-			glog.V(4).Infof("Flushing delete of item %v", itemID)
+			log.Debugf("Flushing delete of item %v", itemID)
 			idx.index.DeleteLabels(itemID)
 		} else {
 			// Item updated/created, re-evaluate labels.
-			glog.V(4).Infof("Flushing update of item %v", itemID)
+			log.Debugf("Flushing update of item %v", itemID)
 			combinedLabels := make(map[string]string)
 			parentIDs := idx.parentIDsByItemID[itemID]
 			for _, parentID := range parentIDs {

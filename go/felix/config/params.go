@@ -17,7 +17,7 @@ package config
 import (
 	"errors"
 	"fmt"
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"net"
 	"net/url"
 	"os"
@@ -51,7 +51,7 @@ func (m *metadata) parseFailed(raw, msg string) error {
 }
 
 func (m *metadata) setDefault(config *Config) {
-	glog.V(3).Infof("Defaulting: %v to %v", m.Name, m.Default)
+	log.Debugf("Defaulting: %v to %v", m.Name, m.Default)
 	field := reflect.ValueOf(config).Elem().FieldByName(m.Name)
 	value := reflect.ValueOf(m.Default)
 	field.Set(value)
@@ -145,7 +145,7 @@ func (p *fileParam) Parse(raw string) (result interface{}, err error) {
 	if p.MustExist && raw != "" {
 		_, err = os.Stat(raw)
 		if err != nil {
-			glog.Errorf("Failed to access %v: %v", raw, err)
+			log.Errorf("Failed to access %v: %v", raw, err)
 			err = p.parseFailed(raw, "failed to access file")
 			return
 		}
@@ -229,7 +229,7 @@ type markBitmaskParam struct {
 func (p *markBitmaskParam) Parse(raw string) (interface{}, error) {
 	value, err := strconv.ParseUint(raw, 0, 32)
 	if err != nil {
-		glog.Warningf("Failed to parse %#v as an int: %v", raw, err)
+		log.Warningf("Failed to parse %#v as an int: %v", raw, err)
 		err = p.parseFailed(raw, "invalid mark: should be 32-bit int")
 		return nil, err
 	}

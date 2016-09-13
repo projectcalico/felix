@@ -15,7 +15,7 @@
 package calc
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/ip"
 	"github.com/projectcalico/calico/go/datastructures/labels"
 	"github.com/projectcalico/calico/go/datastructures/tags"
@@ -59,7 +59,7 @@ type PipelineCallbacks interface {
 }
 
 func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDispatcher *store.Dispatcher) {
-	glog.Infof("Creating calculation graph, filtered to hostname %v", hostname)
+	log.Infof("Creating calculation graph, filtered to hostname %v", hostname)
 	// The source of the processing graph, this dispatcher will be fed all
 	// the updates from the datastore, fanning them out to the registered
 	// handlers.
@@ -112,12 +112,12 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDi
 		},
 	)
 	ruleScanner.OnSelectorActive = func(sel selector.Selector) {
-		glog.V(2).Infof("Selector %v now active", sel)
+		log.Infof("Selector %v now active", sel)
 		callbacks.OnIPSetAdded(sel.UniqueId())
 		activeSelectorIndex.UpdateSelector(sel.UniqueId(), sel)
 	}
 	ruleScanner.OnSelectorInactive = func(sel selector.Selector) {
-		glog.V(2).Infof("Selector %v now inactive", sel)
+		log.Infof("Selector %v now inactive", sel)
 		activeSelectorIndex.DeleteSelector(sel.UniqueId())
 		callbacks.OnIPSetRemoved(sel.UniqueId())
 	}
@@ -137,12 +137,12 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDi
 	)
 
 	ruleScanner.OnTagActive = func(tag string) {
-		glog.V(2).Infof("Tag %v now active", tag)
+		log.Infof("Tag %v now active", tag)
 		callbacks.OnIPSetAdded(hash.MakeUniqueID("t", tag))
 		tagIndex.SetTagActive(tag)
 	}
 	ruleScanner.OnTagInactive = func(tag string) {
-		glog.V(2).Infof("Tag %v now inactive", tag)
+		log.Infof("Tag %v now inactive", tag)
 		tagIndex.SetTagInactive(tag)
 		callbacks.OnIPSetRemoved(hash.MakeUniqueID("t", tag))
 	}

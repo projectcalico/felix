@@ -17,7 +17,7 @@ package config
 import (
 	"errors"
 	"fmt"
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/tigera/libcalico-go/lib/api"
 	"github.com/tigera/libcalico-go/lib/backend/etcd"
 	"net"
@@ -147,7 +147,7 @@ type Config struct {
 // If there is a config value already loaded from a higher-priority source, then
 // the new value will be ignored (after validation).
 func (config *Config) UpdateFrom(rawData map[string]string, source Source) (changed bool, err error) {
-	glog.V(2).Infof("Merging in config from %v: %v", source, rawData)
+	log.Infof("Merging in config from %v: %v", source, rawData)
 	for rawName, rawValue := range rawData {
 		currentSource := config.nameToSource[rawName]
 		param, ok := knownParams[strings.ToLower(rawName)]
@@ -159,42 +159,42 @@ func (config *Config) UpdateFrom(rawData map[string]string, source Source) (chan
 				config.RawValues[rawName] = rawValue
 				config.nameToSource[rawName] = source
 			}
-			glog.Warningf("Ignoring unknown configuration parameter: %v", rawName)
+			log.Warningf("Ignoring unknown configuration parameter: %v", rawName)
 			continue
 		}
 		metadata := param.getMetadata()
 		name := metadata.Name
 		if metadata.Local && !source.Local() {
-			glog.Warningf("Ignoring local-only configuration for %v from %v",
+			log.Warningf("Ignoring local-only configuration for %v from %v",
 				name, source)
 			continue
 		}
 
-		glog.V(2).Infof("Parsing value for %v: %v (from %v)",
+		log.Infof("Parsing value for %v: %v (from %v)",
 			name, rawValue, source)
 		var value interface{}
 		if strings.ToLower(rawValue) == "none" {
 			if metadata.NonZero {
 				err = errors.New("Non-zero field cannot be set to none")
-				glog.Errorf(
+				log.Errorf(
 					"Failed to parse value for %v: %v from source %v. %v",
 					name, rawValue, source, err)
 				config.Err = err
 				return
 			}
-			glog.V(2).Infof("Value set to 'none', replacing with zero-value: %#v.",
+			log.Infof("Value set to 'none', replacing with zero-value: %#v.",
 				value)
 			value = metadata.ZeroValue
 		} else {
 			value, err = param.Parse(rawValue)
 			if err != nil {
-				glog.Errorf("%v (source %v)", err, source)
+				log.Errorf("%v (source %v)", err, source)
 				if metadata.DieOnParseFailure {
-					glog.Errorf("Cannot continue with invalid value for %v.", name)
+					log.Errorf("Cannot continue with invalid value for %v.", name)
 					config.Err = err
 					return
 				} else {
-					glog.Errorf("Replacing invalid value with default value for %v: %v",
+					log.Errorf("Replacing invalid value with default value for %v: %v",
 						name, metadata.Default)
 					value = metadata.Default
 					err = nil
@@ -205,24 +205,24 @@ func (config *Config) UpdateFrom(rawData map[string]string, source Source) (chan
 		field := reflect.ValueOf(config).Elem().FieldByName(name)
 		currentValue := field.Interface()
 		if currentValue == value {
-			glog.V(3).Infof("Value of %v hasn't changed, skipping.", name)
+			log.Debugf("Value of %v hasn't changed, skipping.", name)
 			continue
 		}
 
-		glog.V(2).Infof("Parsed value for %v: %v (from %v)",
+		log.Infof("Parsed value for %v: %v (from %v)",
 			name, value, source)
 		if source < currentSource {
-			glog.V(2).Infof("Skipping config value for %v from %v; "+
+			log.Infof("Skipping config value for %v from %v; "+
 				"already have a value from %v", source, currentSource)
 			continue
 		}
-		glog.V(2).Infof(
+		log.Infof(
 			"Now using %v value from %v (preferred to "+
 				"previous value from %v)",
 			name, source, currentSource)
 		field.Set(reflect.ValueOf(value))
 		if config.RawValues[name] != rawValue {
-			glog.V(1).Infof("Configuration value %v changed from %v to %v",
+			log.Infof("Configuration value %v changed from %v to %v",
 				name, config.RawValues[name], rawValue)
 			changed = true
 		}
@@ -293,9 +293,9 @@ func loadParams() {
 		}
 		captures := metaRegexp.FindStringSubmatch(tag)
 		if len(captures) == 0 {
-			glog.Fatalf("Failed to parse metadata for config param %v", field.Name)
+			log.Fatalf("Failed to parse metadata for config param %v", field.Name)
 		}
-		glog.V(3).Infof("%v: metadata captures: %#v", field.Name, captures)
+		log.Debugf("%v: metadata captures: %#v", field.Name, captures)
 		kind := captures[1]       // Type: "int|oneof|bool|port-list|..."
 		kindParams := captures[2] // Parameters for the type: e.g. for oneof "http,https"
 		defaultStr := captures[3] // Default value e.g "1.0"
@@ -312,11 +312,11 @@ func loadParams() {
 				minAndMax := strings.Split(kindParams, ",")
 				min, err = strconv.Atoi(minAndMax[0])
 				if err != nil {
-					glog.Fatalf("Failed to parse min value for %v", field.Name)
+					log.Fatalf("Failed to parse min value for %v", field.Name)
 				}
 				max, err = strconv.Atoi(minAndMax[1])
 				if err != nil {
-					glog.Fatalf("Failed to parse max value for %v", field.Name)
+					log.Fatalf("Failed to parse max value for %v", field.Name)
 				}
 			}
 			param = &intParam{Min: min, Max: max}
@@ -331,7 +331,7 @@ func loadParams() {
 				Msg: "invalid Linux interface name"}
 		case "file":
 			if kindParams != "" && kindParams != "must-exist" {
-				glog.Fatalf("Bad type params for 'file': %#v",
+				log.Fatalf("Bad type params for 'file': %#v",
 					kindParams)
 			}
 			param = &fileParam{MustExist: kindParams == "must-exist"}
@@ -356,7 +356,7 @@ func loadParams() {
 			param = &oneofListParam{
 				lowerCaseOptionsToCanonical: lowerCaseToCanon}
 		default:
-			glog.Fatalf("Unknown type of parameter: %v", kind)
+			log.Fatalf("Unknown type of parameter: %v", kind)
 		}
 
 		metadata := param.getMetadata()
@@ -377,7 +377,7 @@ func loadParams() {
 			// that here ensures that we syntax-check the defaults now.
 			defaultVal, err := param.Parse(defaultStr)
 			if err != nil {
-				glog.Fatalf("Invalid default value: %v", err)
+				log.Fatalf("Invalid default value: %v", err)
 			}
 			metadata.Default = defaultVal
 		} else {
@@ -400,7 +400,7 @@ func New() *Config {
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
-		glog.Warningf("Failed to get hostname from kernel, "+
+		log.Warningf("Failed to get hostname from kernel, "+
 			"trying HOSTNAME variable: %v", err)
 		hostname = os.Getenv("HOSTNAME")
 	}

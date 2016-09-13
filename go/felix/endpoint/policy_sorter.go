@@ -16,7 +16,7 @@ package endpoint
 
 import (
 	"fmt"
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 	"sort"
 )
@@ -96,22 +96,22 @@ func (poc *PolicySorter) Sorted() []*TierInfo {
 			tierInfo.OrderedPolicies = append(tierInfo.OrderedPolicies,
 				PolKV{Key: k, Value: v})
 		}
-		if glog.V(4) {
+		if log.GetLevel() >= log.DebugLevel {
 			names := make([]string, len(tierInfo.OrderedPolicies))
 			for ii, kv := range tierInfo.OrderedPolicies {
 				names[ii] = fmt.Sprintf("%v(%v)",
 					kv.Key.Name, *kv.Value.Order)
 			}
-			glog.Infof("Before sorting policies: %v", names)
+			log.Infof("Before sorting policies: %v", names)
 		}
 		sort.Sort(PolicyByOrder(tierInfo.OrderedPolicies))
-		if glog.V(4) {
+		if log.GetLevel() >= log.DebugLevel {
 			names := make([]string, len(tierInfo.OrderedPolicies))
 			for ii, kv := range tierInfo.OrderedPolicies {
 				names[ii] = fmt.Sprintf("%v(%v)",
 					kv.Key.Name, *kv.Value.Order)
 			}
-			glog.Infof("After sorting policies: %v", names)
+			log.Infof("After sorting policies: %v", names)
 		}
 	}
 	return tiers
@@ -155,7 +155,6 @@ func (a PolicyByOrder) Less(i, j int) bool {
 	if ordersEqual {
 		// Use name as tie-break.
 		result := a[i].Key.Name < a[j].Key.Name
-		glog.V(5).Infof("Sort: comparing name %v < %v = %v", a[i].Key.Name, a[j].Key.Name, result)
 		return result
 	}
 

@@ -15,7 +15,7 @@
 package calc
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 )
@@ -43,11 +43,11 @@ func (cb *ConfigBatcher) OnUpdate(update model.KVPair) (filterOut bool) {
 	switch key := update.Key.(type) {
 	case model.HostConfigKey:
 		if key.Hostname != cb.hostname {
-			glog.V(4).Infof("Ignoring host config not for this host: %v", key)
+			log.Debugf("Ignoring host config not for this host: %v", key)
 			filterOut = true
 			return
 		}
-		glog.V(2).Infof("Host config update for this host: %v", update)
+		log.Infof("Host config update for this host: %v", update)
 		if value, ok := update.Value.(string); value != cb.hostConfig[key.Name] {
 			if ok {
 				cb.hostConfig[key.Name] = value
@@ -57,7 +57,7 @@ func (cb *ConfigBatcher) OnUpdate(update model.KVPair) (filterOut bool) {
 			cb.configDirty = true
 		}
 	case model.GlobalConfigKey:
-		glog.V(2).Infof("Global config update: %v", update)
+		log.Infof("Global config update: %v", update)
 		if value, ok := update.Value.(string); value != cb.globalConfig[key.Name] {
 			if ok {
 				cb.globalConfig[key.Name] = value
@@ -67,7 +67,7 @@ func (cb *ConfigBatcher) OnUpdate(update model.KVPair) (filterOut bool) {
 			cb.configDirty = true
 		}
 	default:
-		glog.Fatalf("Unexpected update: %#v", update)
+		log.Fatalf("Unexpected update: %#v", update)
 	}
 	cb.maybeSendCachedConfig()
 	return
@@ -75,7 +75,7 @@ func (cb *ConfigBatcher) OnUpdate(update model.KVPair) (filterOut bool) {
 
 func (cb *ConfigBatcher) OnDatamodelStatus(status api.SyncStatus) {
 	if !cb.datastoreInSync && status == api.InSync {
-		glog.V(2).Infof("Datamodel in sync, flushing config update")
+		log.Infof("Datamodel in sync, flushing config update")
 		cb.datastoreInSync = true
 		cb.maybeSendCachedConfig()
 	}
@@ -85,7 +85,7 @@ func (cb *ConfigBatcher) maybeSendCachedConfig() {
 	if !cb.configDirty || !cb.datastoreInSync {
 		return
 	}
-	glog.V(2).Infof("Sending config update global: %v, host: %v.",
+	log.Infof("Sending config update global: %v, host: %v.",
 		cb.globalConfig, cb.hostConfig)
 	globalConfigCopy := make(map[string]string)
 	hostConfigCopy := make(map[string]string)

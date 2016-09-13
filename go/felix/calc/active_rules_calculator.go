@@ -15,7 +15,7 @@
 package calc
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/labels"
 	"github.com/projectcalico/calico/go/datastructures/multidict"
 	"github.com/projectcalico/calico/go/datastructures/tags"
@@ -82,24 +82,24 @@ func (arc *ActiveRulesCalculator) OnUpdate(update model.KVPair) (filterOut bool)
 	switch key := update.Key.(type) {
 	case model.WorkloadEndpointKey:
 		if update.Value != nil {
-			glog.V(4).Infof("Updating ARC with endpoint %v", key)
+			log.Debugf("Updating ARC with endpoint %v", key)
 			endpoint := update.Value.(*model.WorkloadEndpoint)
 			profileIDs := endpoint.ProfileIDs
 			arc.updateEndpointProfileIDs(key, profileIDs)
 		} else {
-			glog.V(4).Infof("Deleting endpoint %v from ARC", key)
+			log.Debugf("Deleting endpoint %v from ARC", key)
 			arc.updateEndpointProfileIDs(key, []string{})
 		}
 		arc.labelIndex.OnUpdate(update)
 	case model.HostEndpointKey:
 		if update.Value != nil {
 			// Figure out what's changed and update the cache.
-			glog.V(4).Infof("Updating ARC for host endpoint %v", key)
+			log.Debugf("Updating ARC for host endpoint %v", key)
 			endpoint := update.Value.(*model.HostEndpoint)
 			profileIDs := endpoint.ProfileIDs
 			arc.updateEndpointProfileIDs(key, profileIDs)
 		} else {
-			glog.V(4).Infof("Deleting host endpoint %v from ARC", key)
+			log.Debugf("Deleting host endpoint %v from ARC", key)
 			arc.updateEndpointProfileIDs(key, []string{})
 		}
 		arc.labelIndex.OnUpdate(update)
@@ -110,30 +110,30 @@ func (arc *ActiveRulesCalculator) OnUpdate(update model.KVPair) (filterOut bool)
 			rules := update.Value.(*model.ProfileRules)
 			arc.allProfileRules[key.Name] = rules
 			if arc.profileIDToEndpointKeys.ContainsKey(key.Name) {
-				glog.V(3).Infof("Profile rules updated while active: %v", key.Name)
+				log.Debugf("Profile rules updated while active: %v", key.Name)
 				arc.sendProfileUpdate(key.Name)
 			} else {
-				glog.V(3).Infof("Profile rules updated while inactive: %v", key.Name)
+				log.Debugf("Profile rules updated while inactive: %v", key.Name)
 			}
 		} else {
 			delete(arc.allProfileRules, key.Name)
 			if arc.profileIDToEndpointKeys.ContainsKey(key.Name) {
-				glog.V(3).Info("Profile rules deleted while active, telling listener/felix")
+				log.Debug("Profile rules deleted while active, telling listener/felix")
 				arc.sendProfileUpdate(key.Name)
 			} else {
-				glog.V(3).Infof("Profile rules deleted while inactive: %v", key.Name)
+				log.Debugf("Profile rules deleted while inactive: %v", key.Name)
 			}
 		}
 	case model.PolicyKey:
 		if update.Value != nil {
-			glog.V(4).Infof("Updating ARC for policy %v", key)
+			log.Debugf("Updating ARC for policy %v", key)
 			policy := update.Value.(*model.Policy)
 			arc.allPolicies[key] = policy
 			// Update the index, which will call us back if the selector no
 			// longer matches.
 			sel, err := selector.Parse(policy.Selector)
 			if err != nil {
-				glog.Fatal(err)
+				log.Fatal(err)
 			}
 			arc.labelIndex.UpdateSelector(key, sel)
 
@@ -141,18 +141,18 @@ func (arc *ActiveRulesCalculator) OnUpdate(update model.KVPair) (filterOut bool)
 				// If we get here, the selector still matches something,
 				// update the rules.
 				// TODO: squash duplicate update if labelIndex.UpdateSelector already made this active
-				glog.V(4).Info("Policy updated while active, telling listener")
+				log.Debug("Policy updated while active, telling listener")
 				arc.sendPolicyUpdate(key)
 			}
 		} else {
-			glog.V(4).Infof("Removing policy %v from ARC", key)
+			log.Debugf("Removing policy %v from ARC", key)
 			delete(arc.allPolicies, key)
 			arc.labelIndex.DeleteSelector(key)
 			// No need to call updatePolicy() because we'll have got a matchStopped
 			// callback.
 		}
 	default:
-		glog.V(0).Infof("Ignoring unexpected update: %v %#v",
+		log.Infof("Ignoring unexpected update: %v %#v",
 			reflect.TypeOf(update.Key), update)
 	}
 	return
@@ -164,7 +164,7 @@ func (arc *ActiveRulesCalculator) OnDatamodelStatus(status api.SyncStatus) {
 
 func (arc *ActiveRulesCalculator) updateEndpointProfileIDs(key endpointKey, profileIDs []string) {
 	// Figure out which profiles have been added/removed.
-	glog.V(4).Infof("Endpoint %#v now has profile IDs: %v", key, profileIDs)
+	log.Debugf("Endpoint %#v now has profile IDs: %v", key, profileIDs)
 	removedIDs, addedIDs := arc.endpointKeyToProfileIDs.Update(key, profileIDs)
 
 	// Update the index of required profile IDs for added profiles,
@@ -198,7 +198,7 @@ func (arc *ActiveRulesCalculator) onMatchStarted(selID, labelId interface{}) {
 		// Policy wasn't active before, tell the listener.  The policy
 		// must be in allPolicies because we can only match on a policy
 		// that we've seen.
-		glog.V(3).Infof("Policy %v now matches a local endpoint", polKey)
+		log.Debugf("Policy %v now matches a local endpoint", polKey)
 		arc.sendPolicyUpdate(polKey)
 	}
 	arc.PolicyMatchListener.OnPolicyMatch(polKey, labelId)
@@ -210,7 +210,7 @@ func (arc *ActiveRulesCalculator) onMatchStopped(selID, labelId interface{}) {
 	if !arc.policyIDToEndpointKeys.ContainsKey(selID) {
 		// Policy no longer active.
 		polKey := selID.(model.PolicyKey)
-		glog.V(3).Infof("Policy %v no longer matches a local endpoint", polKey)
+		log.Debugf("Policy %v no longer matches a local endpoint", polKey)
 		arc.sendPolicyUpdate(polKey)
 	}
 	arc.PolicyMatchListener.OnPolicyMatchStopped(polKey, labelId)
@@ -219,7 +219,7 @@ func (arc *ActiveRulesCalculator) onMatchStopped(selID, labelId interface{}) {
 func (arc *ActiveRulesCalculator) sendProfileUpdate(profileID string) {
 	active := arc.profileIDToEndpointKeys.ContainsKey(profileID)
 	rules, known := arc.allProfileRules[profileID]
-	glog.V(3).Infof("Sending profile update for profile %v (known: %v, active: %v)",
+	log.Debugf("Sending profile update for profile %v (known: %v, active: %v)",
 		profileID, known, active)
 	key := model.ProfileRulesKey{ProfileKey: model.ProfileKey{Name: profileID}}
 
@@ -233,7 +233,7 @@ func (arc *ActiveRulesCalculator) sendProfileUpdate(profileID string) {
 func (arc *ActiveRulesCalculator) sendPolicyUpdate(policyKey model.PolicyKey) {
 	policy, known := arc.allPolicies[policyKey]
 	active := arc.policyIDToEndpointKeys.ContainsKey(policyKey)
-	glog.V(3).Infof("Sending policy update for policy %v (known: %v, active: %v)",
+	log.Debugf("Sending policy update for policy %v (known: %v, active: %v)",
 		policyKey, known, active)
 	if known && active {
 		arc.RuleScanner.OnPolicyActive(policyKey, policy)

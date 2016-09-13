@@ -23,3 +23,5 @@ import:
 - package: github.com/tigera/libcalico-go
   subpackages:
   - lib
+- package: github.com/Sirupsen/logrus
+  version: ^0.10.0

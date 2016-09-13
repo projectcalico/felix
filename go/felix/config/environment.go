@@ -15,7 +15,7 @@
 package config
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"strings"
 )
 
@@ -24,7 +24,7 @@ func LoadConfigFromEnvironment(environ []string) map[string]string {
 	for _, kv := range environ {
 		splits := strings.SplitN(kv, "=", 2)
 		if len(splits) < 2 {
-			glog.Warningf("Ignoring malformed environment variable: %#v",
+			log.Warningf("Ignoring malformed environment variable: %#v",
 				kv)
 			continue
 		}
@@ -33,7 +33,7 @@ func LoadConfigFromEnvironment(environ []string) map[string]string {
 		if strings.Index(key, "felix_") == 0 {
 			splits = strings.SplitN(key, "_", 2)
 			paramName := splits[1]
-			glog.V(2).Infof("Found felix environment variable: %#v=%#v",
+			log.Infof("Found felix environment variable: %#v=%#v",
 				paramName, value)
 			result[paramName] = value
 		}

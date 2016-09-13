@@ -15,7 +15,7 @@
 package endpoint
 
 import (
-	"github.com/golang/glog"
+	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/multidict"
 	"github.com/projectcalico/calico/go/datastructures/set"
 	"github.com/tigera/libcalico-go/lib/backend/api"
@@ -59,11 +59,11 @@ func (pr *PolicyResolver) OnUpdate(update model.KVPair) (filterOut bool) {
 		}
 		pr.dirtyEndpoints.Add(key)
 	case model.PolicyKey:
-		glog.V(3).Infof("Policy update: %v", key)
+		log.Debugf("Policy update: %v", key)
 		policiesDirty = pr.policySorter.OnUpdate(update)
 		pr.markEndpointsMatchingPolicyDirty(key)
 	case model.TierKey:
-		glog.V(3).Infof("Tier update: %v", key)
+		log.Debugf("Tier update: %v", key)
 		policiesDirty = pr.policySorter.OnUpdate(update)
 		pr.markAllEndpointsDirty()
 	}
@@ -82,25 +82,25 @@ func (pr *PolicyResolver) OnDatamodelStatus(status api.SyncStatus) {
 func (pr *PolicyResolver) refreshSortOrder() {
 	pr.sortedTierData = pr.policySorter.Sorted()
 	pr.sortRequired = false
-	glog.V(3).Infof("New sort order: %v", pr.sortedTierData)
+	log.Debugf("New sort order: %v", pr.sortedTierData)
 }
 
 func (pr *PolicyResolver) markAllEndpointsDirty() {
-	glog.V(3).Infof("Marking all endpoints dirty")
+	log.Debugf("Marking all endpoints dirty")
 	pr.endpointIDToPolicyIDs.IterKeys(func(epID interface{}) {
 		pr.dirtyEndpoints.Add(epID)
 	})
 }
 
 func (pr *PolicyResolver) markEndpointsMatchingPolicyDirty(polKey model.PolicyKey) {
-	glog.V(3).Infof("Marking all endpoints matching %v dirty", polKey)
+	log.Debugf("Marking all endpoints matching %v dirty", polKey)
 	pr.policyIDToEndpointIDs.Iter(polKey, func(epID interface{}) {
 		pr.dirtyEndpoints.Add(epID)
 	})
 }
 
 func (pr *PolicyResolver) OnPolicyMatch(policyKey model.PolicyKey, endpointKey interface{}) {
-	glog.V(3).Infof("Storing policy match %v -> %v", policyKey, endpointKey)
+	log.Debugf("Storing policy match %v -> %v", policyKey, endpointKey)
 	pr.policyIDToEndpointIDs.Put(policyKey, endpointKey)
 	pr.endpointIDToPolicyIDs.Put(endpointKey, policyKey)
 	pr.dirtyEndpoints.Add(endpointKey)
@@ -108,7 +108,7 @@ func (pr *PolicyResolver) OnPolicyMatch(policyKey model.PolicyKey, endpointKey i
 }
 
 func (pr *PolicyResolver) OnPolicyMatchStopped(policyKey model.PolicyKey, endpointKey interface{}) {
-	glog.V(3).Infof("Deleting policy match %v -> %v", policyKey, endpointKey)
+	log.Debugf("Deleting policy match %v -> %v", policyKey, endpointKey)
 	pr.policyIDToEndpointIDs.Discard(policyKey, endpointKey)
 	pr.endpointIDToPolicyIDs.Discard(endpointKey, policyKey)
 	pr.dirtyEndpoints.Add(endpointKey)
@@ -117,7 +117,7 @@ func (pr *PolicyResolver) OnPolicyMatchStopped(policyKey model.PolicyKey, endpoi
 
 func (pr *PolicyResolver) maybeFlush() {
 	if !pr.InSync {
-		glog.V(3).Infof("Not in sync, skipping flush")
+		log.Debugf("Not in sync, skipping flush")
 		return
 	}
 	if pr.sortRequired {
@@ -128,10 +128,10 @@ func (pr *PolicyResolver) maybeFlush() {
 }
 
 func (pr *PolicyResolver) sendEndpointUpdate(endpointID interface{}) error {
-	glog.V(3).Infof("Sending tier update for endpoint %v", endpointID)
+	log.Debugf("Sending tier update for endpoint %v", endpointID)
 	endpoint, ok := pr.endpoints[endpointID.(model.Key)]
 	if !ok {
-		glog.V(4).Infof("Endpoint is unknown, sending nil update")
+		log.Debugf("Endpoint is unknown, sending nil update")
 		pr.Callbacks.OnEndpointTierUpdate(endpointID.(model.Key),
 			nil, []TierInfo{})
 		return nil
@@ -139,7 +139,7 @@ func (pr *PolicyResolver) sendEndpointUpdate(endpointID interface{}) error {
 	applicableTiers := []TierInfo{}
 	for _, tier := range pr.sortedTierData {
 		if !tier.Valid {
-			glog.V(3).Infof("Tier %v invalid, skipping", tier.Name)
+			log.Debugf("Tier %v invalid, skipping", tier.Name)
 			continue
 		}
 		tierMatches := false
@@ -149,20 +149,20 @@ func (pr *PolicyResolver) sendEndpointUpdate(endpointID interface{}) error {
 			Valid: true,
 		}
 		for _, polKV := range tier.OrderedPolicies {
-			glog.V(4).Infof("Checking if policy %v matches %v", polKV.Key, endpointID)
+			log.Debugf("Checking if policy %v matches %v", polKV.Key, endpointID)
 			if pr.endpointIDToPolicyIDs.Contains(endpointID, polKV.Key) {
-				glog.V(4).Infof("Policy %v matches %v", polKV.Key, endpointID)
+				log.Debugf("Policy %v matches %v", polKV.Key, endpointID)
 				tierMatches = true
 				filteredTier.OrderedPolicies = append(filteredTier.OrderedPolicies,
 					polKV)
 			}
 		}
 		if tierMatches {
-			glog.V(4).Infof("Tier %v matches %v", tier.Name, endpointID)
+			log.Debugf("Tier %v matches %v", tier.Name, endpointID)
 			applicableTiers = append(applicableTiers, filteredTier)
 		}
 	}
-	glog.V(4).Infof("Endpoint tier update: %v -> %v", endpointID, applicableTiers)
+	log.Debugf("Endpoint tier update: %v -> %v", endpointID, applicableTiers)
 	pr.Callbacks.OnEndpointTierUpdate(endpointID.(model.Key),
 		endpoint, applicableTiers)
 	return nil
