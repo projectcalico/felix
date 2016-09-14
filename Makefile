@@ -5,6 +5,11 @@ DEB_VERSION:=$(shell grep calico debian/changelog | \
                      cut -d '-' -f 1)
 DEB_VERSION_TRUSTY:=$(shell echo $(DEB_VERSION) | sed "s/__STREAM__/trusty/g")
 DEB_VERSION_XENIAL:=$(shell echo $(DEB_VERSION) | sed "s/__STREAM__/xenial/g")
+PY_VERSION:=$(shell python2.7 python/setup.py --version 2>>/dev/null)
+GIT_COMMIT:=$(shell git rev-parse HEAD)
+GIT_COMMIT_SHORT:=$(shell git rev-parse --short HEAD)
+
+BUNDLE_FILENAME:=dist/calico-felix-${VERSION}-git-${GIT_COMMIT_SHORT}.tgz
 
 GO_FILES:=$(shell find go/ -type f -name '*.go')
 PY_FILES:=python/calico/felix/felixbackend_pb2.py $(shell find python/ docs/  -type f -name '*.py')
@@ -95,12 +100,33 @@ bin/calico-felix: go/felix/proto/felixbackend.pb.go $(GO_FILES) go/vendor
 	go build -o "$@" -ldflags "-B 0x$(GIT_HASH)" "./go/felix/felix.go"
 
 dist/calico-felix/calico-iptables-plugin dist/calico-felix/calico-felix: $(PY_FILES) docker-build-images/pyi/* bin/calico-felix
-	./build-pyi-bundle.sh
+	# Rebuild the docker container with the latest code.
+	docker build -t calico-pyi-build -f docker-build-images/pyi/Dockerfile .
+	echo "Build calico-pyi-build container"
+
+	# Output version information
+	echo "Calico version: $(PY_VERSION) \n" \
+	     "Git revision: $(GIT_COMMIT)\n" > version.txt
+
+	# Run pyinstaller to generate the distribution directory.
+	echo "Running pyinstaller"
+	docker run --user $(MY_UID) \
+	       -ti \
+	       --rm \
+	       -v `pwd`:/code \
+	       calico-pyi-build \
+	       /code/docker-build-images/pyi/run-pyinstaller.sh
+
+	# Check that the build succeeded and update the mtimes on the target files
+	# since pyinstaller doesn't seem to do so.
 	test -e dist/calico-felix/calico-iptables-plugin && touch dist/calico-felix/calico-iptables-plugin
 	test -e dist/calico-felix/calico-felix && touch dist/calico-felix/calico-felix
 
+$(BUNDLE_FILENAME): dist/calico-felix/calico-iptables-plugin dist/calico-felix/calico-felix
+	tar -czf $(BUNDLE_FILENAME) -C dist calico-felix
+
 .PHONY: pyinstaller
-pyinstaller: dist/calico-felix/calico-iptables-plugin dist/calico-felix/calico-felix
+pyinstaller: $(BUNDLE_FILENAME)
 
 .PHONY: clean
 clean:
