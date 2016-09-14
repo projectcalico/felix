@@ -57,6 +57,13 @@ trusty-deb: dist/trusty/calico-felix_$(DEB_VERSION_TRUSTY)_amd64.deb
 .PHONY: xenial-deb
 xenial-deb: dist/xenial/calico-felix_$(DEB_VERSION_XENIAL)_amd64.deb
 
+.PHONY: env
+env:
+	virtualenv env
+	. env/bin/activate && \
+	    pip install -U pip && \
+	    pip install -e ./python
+
 DOCKER_RUN:=docker run --rm --user $(MY_UID)  -v $${PWD}:/code
 
 dist/trusty/calico-felix_$(DEB_VERSION_TRUSTY)_amd64.deb: dist/calico-felix/calico-felix debian/*
