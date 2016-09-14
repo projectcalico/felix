@@ -34,12 +34,8 @@ mkdir -p $unpacked_src_dir
 cd /code/
 cp -r dist/calico-felix ${unpacked_src_dir}/pyi
 cp -r etc \
-      utils \
-      calico \
-      setup.py \
-      *requirements.txt \
+      python/* \
       LICENSE \
-      MANIFEST.in \
       README.md \
       ${unpacked_src_dir}
 cd /tmp
@@ -47,9 +43,6 @@ tar -czf /tmp/rpmbuild/SOURCES/${dir}.tar.gz $dir
 
 # Build.
 cd rpmbuild
-
-ls -l  /tmp/rpmbuild/SOURCES/calico-1.4.0.tar.gz
-cat /etc/passwd
 rpmbuild --define '_topdir '`pwd` -ba SPECS/${spec}
 
 rm -rf /code/dist/rpms
