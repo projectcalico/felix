@@ -19,12 +19,8 @@ rm -rf ${deb_dir}
 mkdir -p ${unpacked_src_dir}
 cp -r dist/calico-felix ${unpacked_src_dir}/pyi
 cp -r etc \
-      utils \
-      calico \
-      setup.py \
-      *requirements.txt \
+      python/* \
       LICENSE \
-      MANIFEST.in \
       README.md \
       ${unpacked_src_dir}
 

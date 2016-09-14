@@ -16,8 +16,8 @@ RUN ./get-prereqs.sh && \
 
 # Install Calico pre-reqs.
 ENV LD_LIBRARY_PATH=/usr/local/lib
-ADD felix_requirements.txt felix_requirements.txt
-RUN pip install -U -r felix_requirements.txt; \
+ADD python/requirements.txt python/requirements.txt
+RUN pip install -U -r python/requirements.txt; \
     pip install pyinstaller
 
 # Install Calico into site-packages.  It's easier to package up the egg-info
