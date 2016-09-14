@@ -9,8 +9,8 @@ RUN yum -y groupinstall "Development tools"; \
 
 # Build python and conntrack.
 ENV PY_VERSION=2.7.11
-ADD pyi/get-prereqs.sh get-prereqs.sh
-ADD pyi/build-prereqs.sh build-prereqs.sh
+ADD docker-build-images/pyi/get-prereqs.sh get-prereqs.sh
+ADD docker-build-images/pyi/build-prereqs.sh build-prereqs.sh
 RUN ./get-prereqs.sh && \
     ./build-prereqs.sh
 
@@ -26,4 +26,4 @@ RUN pip install -U -r felix_requirements.txt; \
 # (but it does mean that the build script needs to rebuild the container
 # image each time).
 COPY . /code
-RUN cd /code && pip install -v .
+RUN cd /code/python && pip install -v .

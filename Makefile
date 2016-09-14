@@ -7,7 +7,7 @@ DEB_VERSION_TRUSTY:=$(shell echo $(DEB_VERSION) | sed "s/__STREAM__/trusty/g")
 DEB_VERSION_XENIAL:=$(shell echo $(DEB_VERSION) | sed "s/__STREAM__/xenial/g")
 
 GO_FILES:=$(shell find go/ -type f -name '*.go')
-PY_FILES:=*.py calico/felix/felixbackend_pb2.py $(shell find calico/ docs/  -type f -name '*.py')
+PY_FILES:=python/calico/felix/felixbackend_pb2.py $(shell find python/ docs/  -type f -name '*.py')
 MY_UID:=$(shell id -u)
 MY_GID:=$(shell id -g)
 GIT_HASH:=$(shell git rev-parse HEAD)
@@ -80,9 +80,9 @@ go/felix/proto/felixbackend.pb.go: go/felix/proto/felixbackend.proto
 	              --gogofaster_out=. \
 	              felixbackend.proto
 
-calico/felix/felixbackend_pb2.py: go/felix/proto/felixbackend.proto
+python/calico/felix/felixbackend_pb2.py: go/felix/proto/felixbackend.proto
 	$(DOCKER_RUN) -v $${PWD}/go/felix/proto:/src:rw \
-	              -v $${PWD}/calico/felix/:/dst:rw \
+	              -v $${PWD}/python/calico/felix/:/dst:rw \
 	              calico/protoc \
 	              --python_out=/dst/ \
 	              felixbackend.proto
@@ -94,7 +94,7 @@ bin/calico-felix: go/felix/proto/felixbackend.pb.go $(GO_FILES) go/vendor
 	mkdir -p bin
 	go build -o "$@" -ldflags "-B 0x$(GIT_HASH)" "./go/felix/felix.go"
 
-dist/calico-felix/calico-iptables-plugin dist/calico-felix/calico-felix: $(PY_FILES) pyi/* bin/calico-felix
+dist/calico-felix/calico-iptables-plugin dist/calico-felix/calico-felix: $(PY_FILES) docker-build-images/pyi/* bin/calico-felix
 	./build-pyi-bundle.sh
 	test -e dist/calico-felix/calico-iptables-plugin && touch dist/calico-felix/calico-iptables-plugin
 	test -e dist/calico-felix/calico-felix && touch dist/calico-felix/calico-felix
@@ -106,7 +106,8 @@ pyinstaller: dist/calico-felix/calico-iptables-plugin dist/calico-felix/calico-f
 clean:
 	rm -rf bin \
 	       dist \
-	       calico/felix/felixbackend_pb2.py \
+	       build \
+	       python/calico/felix/felixbackend_pb2.py \
 	       go/felix/proto/felixbackend.pb.go \
 	       docker-build-images/passwd \
 	       docker-build-images/group

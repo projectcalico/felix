@@ -31,13 +31,13 @@ block_cipher = None
 extra_files = [
     ('/usr/local/lib/python2.7/site-packages/posix_spawn/c/*',
      'posix_spawn/c'),
-    ('../version.txt', ''),
+    ('../../version.txt', ''),
 ]
 
 # Add egg metadata for our package and dependencies.  Required to allow us to
 # look up our plugins.
 extra_files += copy_metadata("calico")
-with open("../felix_requirements.txt") as reqs:
+with open("../../felix_requirements.txt") as reqs:
     for line in reqs:
         m = re.match(r'^((?:[-_]|\w)+)', line)
         if m:

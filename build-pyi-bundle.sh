@@ -17,10 +17,10 @@ set -x
 set -e
 
 # Rebuild the docker container with the latest code.
-docker build -t calico-pyi-build -f pyi/Dockerfile .
+docker build -t calico-pyi-build -f docker-build-images/pyi/Dockerfile .
 echo "Build calico-pyi-build container"
 
-VERSION=$(python2.7 setup.py --version 2>>/dev/null)
+VERSION=$(python2.7 python/setup.py --version 2>>/dev/null)
 GIT_COMMIT=$(git rev-parse HEAD)
 GIT_COMMIT_SHORT=$(git rev-parse --short HEAD)
 OUTPUT_FILENAME=dist/calico-felix-${VERSION}-git-${GIT_COMMIT_SHORT}.tgz
@@ -36,7 +36,7 @@ docker run --user $UID \
            --rm \
            -v `pwd`:/code \
            calico-pyi-build \
-           /code/pyi/run-pyinstaller.sh
+           /code/docker-build-images/pyi/run-pyinstaller.sh
 
 # Package it up.
 tar -czf ${OUTPUT_FILENAME} -C dist calico-felix
