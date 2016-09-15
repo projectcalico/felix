@@ -22,17 +22,17 @@ MY_GID:=$(shell id -g)
 .PHONY: golang-build-image
 golang-build-image:
 	$(MAKE) docker-build-images/passwd docker-build-images/group
-	cd docker-build-images && docker build . -f golang-build.Dockerfile -t calico-golang-build
+	cd docker-build-images && docker build -f golang-build.Dockerfile -t calico-golang-build .
 
 # Build a docker image used for building debs for trusty.
 .PHONY: trusty-build-image
 trusty-build-image:
-	cd docker-build-images && docker build . -f ubuntu-trusty-build.Dockerfile -t calico-trusty-build
+	cd docker-build-images && docker build -f ubuntu-trusty-build.Dockerfile -t calico-trusty-build .
 
 # Build a docker image used for building debs for xenial.
 .PHONY: xenial-build-image
 xenial-build-image:
-	cd docker-build-images && docker build . -f ubuntu-xenial-build.Dockerfile -t calico-xenial-build
+	cd docker-build-images && docker build -f ubuntu-xenial-build.Dockerfile -t calico-xenial-build .
 
 # Construct a passwd file to embed in the centos docker image with the current
 # user's username.  (The RPM build tools fail if they can't find the current
@@ -62,7 +62,7 @@ docker-build-images/group:
 .PHONY: centos7-build-image
 centos7-build-image:
 	$(MAKE) docker-build-images/passwd docker-build-images/group
-	cd docker-build-images && docker build . -f centos7-build.Dockerfile -t calico-centos7-build
+	cd docker-build-images && docker build -f centos7-build.Dockerfile -t calico-centos7-build .
 
 .PHONY: deb
 deb: trusty-deb xenial-deb
