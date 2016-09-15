@@ -135,6 +135,12 @@ $(BUNDLE_FILENAME): dist/calico-felix/calico-iptables-plugin dist/calico-felix/c
 .PHONY: pyinstaller
 pyinstaller: $(BUNDLE_FILENAME)
 
+# Install or update the tools used by the build
+.PHONY: update-tools
+update-tools:
+	go get -u github.com/Masterminds/glide
+	go get -u github.com/onsi/ginkgo/ginkgo
+
 .PHONY: clean
 clean:
 	rm -rf bin \
