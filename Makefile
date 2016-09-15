@@ -8,23 +8,34 @@ DEB_VERSION_XENIAL:=$(shell echo $(DEB_VERSION) | sed "s/__STREAM__/xenial/g")
 PY_VERSION:=$(shell python2.7 python/setup.py --version 2>>/dev/null)
 GIT_COMMIT:=$(shell git rev-parse HEAD)
 GIT_COMMIT_SHORT:=$(shell git rev-parse --short HEAD)
+GIT_DESCRIPTION:=$(shell git describe --tags)
+DATE:=$(shell date -u +'%FT%T%z')
 
-BUNDLE_FILENAME:=dist/calico-felix-${VERSION}-git-${GIT_COMMIT_SHORT}.tgz
+BUNDLE_FILENAME:=dist/calico-felix-${PY_VERSION}-git-${GIT_COMMIT_SHORT}.tgz
 
 GO_FILES:=$(shell find go/ -type f -name '*.go')
 PY_FILES:=python/calico/felix/felixbackend_pb2.py $(shell find python/ docs/  -type f -name '*.py')
 MY_UID:=$(shell id -u)
 MY_GID:=$(shell id -g)
-GIT_HASH:=$(shell git rev-parse HEAD)
 
+# Build a docker image used for building our go code into a binary.
+.PHONY: golang-build-image
+golang-build-image:
+	cd docker-build-images && docker build . -f golang-build.Dockerfile -t calico-golang-build
+
+# Build a docker image used for building debs for trusty.
 .PHONY: trusty-build-image
 trusty-build-image:
 	cd docker-build-images && docker build . -f ubuntu-trusty-build.Dockerfile -t calico-trusty-build
 
+# Build a docker image used for building debs for xenial.
 .PHONY: xenial-build-image
 xenial-build-image:
 	cd docker-build-images && docker build . -f ubuntu-xenial-build.Dockerfile -t calico-xenial-build
 
+# Construct a passwd file to embed in the centos docker image with the current
+# user's username.  (The RPM build tools fail if they can't find the current
+# user and group.)
 .PHONY: docker-build-images/passwd
 docker-build-images/passwd:
 	echo "user:x:$(MY_UID):$(MY_GID):Build user:/:/bin/bash" > docker-build-images/passwd.new
@@ -34,6 +45,9 @@ docker-build-images/passwd:
 	  mv docker-build-images/passwd.new docker-build-images/passwd
 	rm -f docker-build-images/passwd.new
 
+# Construct a group file to embed in the centos docker image with the current
+# user's username.  (The RPM build tools fail if they can't find the current
+# user and group.)
 .PHONY: docker-build-images/group
 docker-build-images/group:
 	echo "user:x:$(MY_GID):" > docker-build-images/group.new
@@ -43,6 +57,7 @@ docker-build-images/group:
 	  mv docker-build-images/group.new docker-build-images/group
 	rm -f docker-build-images/group.new
 
+# Construct a docker image for building Centos 7 RPMs.
 .PHONY: centos7-build-image
 centos7-build-image:
 	$(MAKE) docker-build-images/passwd docker-build-images/group
@@ -64,7 +79,7 @@ env:
 	    pip install -U pip && \
 	    pip install -e ./python
 
-DOCKER_RUN:=docker run --rm --user $(MY_UID)  -v $${PWD}:/code
+DOCKER_RUN:=docker run --rm --user $(MY_UID):$(MY_GID) -v $${PWD}:/code
 
 dist/trusty/calico-felix_$(DEB_VERSION_TRUSTY)_amd64.deb: dist/calico-felix/calico-felix debian/*
 	$(MAKE) trusty-build-image
@@ -82,10 +97,6 @@ rpm: dist/calico-felix/calico-felix
 	$(DOCKER_RUN) -e RPM_VERSION=$(RPM_VERSION) \
 	              calico-centos7-build rpm/build-rpms
 
-.PHONY: update-vendor
-update-vendor:
-	cd go && glide up
-
 go/felix/proto/felixbackend.pb.go: go/felix/proto/felixbackend.proto
 	$(DOCKER_RUN) -v $${PWD}/go/felix/proto:/src:rw \
 	              calico/protoc \
@@ -99,17 +110,36 @@ python/calico/felix/felixbackend_pb2.py: go/felix/proto/felixbackend.proto
 	              --python_out=/dst/ \
 	              felixbackend.proto
 
-go/vendor:
-	$(MAKE) -C go vendor
+.PHONY: update-vendor
+update-vendor:
+	$(MAKE) -C go update-vendor
 
-bin/calico-felix: go/felix/proto/felixbackend.pb.go $(GO_FILES) go/vendor
+go/vendor go/vendor/.up-to-date: go/glide.lock
+	cd go && glide install --strip-vcs --strip-vendor
+	touch go/vendor/.up-to-date
+
+LDFLAGS:=-ldflags "-X github.com/projectcalico/calico/go/felix/buildinfo.Version=$(GIT_DESCRIPTION) \
+        -X github.com/projectcalico/calico/go/felix/buildinfo.BuildDate=$(DATE) \
+        -X github.com/projectcalico/calico/go/felix/buildinfo.GitRevision=$(GIT_COMMIT) \
+        -B 0x$(GIT_COMMIT)"
+
+bin/calico-felix: go/felix/proto/felixbackend.pb.go \
+                  $(GO_FILES) \
+                  go/vendor/.up-to-date \
+                  docker-build-images/golang-build.Dockerfile
+	# Make sure the docker image exists.  Since it's a PHONY, we can't add it
+	# as a dependency or this job will run every time.  Docker does its own
+	# freshness checking for us.
+	$(MAKE) golang-build-image
 	mkdir -p bin
-	go build -o "$@" -ldflags "-B 0x$(GIT_HASH)" "./go/felix/felix.go"
+	$(DOCKER_RUN) \
+	    -v $${PWD}:/go/src/github.com/projectcalico/calico:rw \
+	    calico-golang-build \
+	    go build -o $@ $(LDFLAGS) "./go/felix/felix.go"
 
 dist/calico-felix/calico-iptables-plugin dist/calico-felix/calico-felix: $(PY_FILES) docker-build-images/pyi/* bin/calico-felix
 	# Rebuild the docker container with the latest code.
 	docker build -t calico-pyi-build -f docker-build-images/pyi/Dockerfile .
-	echo "Build calico-pyi-build container"
 
 	# Output version information
 	echo "Calico version: $(PY_VERSION) \n" \

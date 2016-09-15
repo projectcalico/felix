@@ -16,10 +16,11 @@ package main
 
 import (
 	"encoding/binary"
+	log "github.com/Sirupsen/logrus"
 	"github.com/docopt/docopt-go"
 	pb "github.com/gogo/protobuf/proto"
-	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/ip"
+	"github.com/projectcalico/calico/go/felix/buildinfo"
 	"github.com/projectcalico/calico/go/felix/calc"
 	"github.com/projectcalico/calico/go/felix/config"
 	_ "github.com/projectcalico/calico/go/felix/config"
@@ -41,6 +42,7 @@ Usage:
 
 Options:
   -c --config-file=<config>  Config file to load [default: /etc/calico/felix.cfg].
+  --version                  Print the version and exit.
 `
 
 func main() {
@@ -56,7 +58,10 @@ func main() {
 	log.Infof("Log level set to %v", logLevelScreen)
 
 	// Parse command-line args.
-	arguments, err := docopt.Parse(usage, nil, true, "calico-felix 1.5", false)
+	version := ("Version:    " + buildinfo.Version + "\n" +
+		"Build date: " + buildinfo.BuildDate + "\n" +
+		"Git commit: " + buildinfo.GitRevision)
+	arguments, err := docopt.Parse(usage, nil, true, version, false)
 	if err != nil {
 		println(usage)
 		log.Fatalf("Failed to parse usage, exiting: %v", err)
