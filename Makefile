@@ -159,10 +159,7 @@ dist/calico-felix/calico-iptables-plugin dist/calico-felix/calico-felix: $(PY_FI
 
 	# Run pyinstaller to generate the distribution directory.
 	echo "Running pyinstaller"
-	docker run --user $(MY_UID) \
-	       -ti \
-	       --rm \
-	       -v `pwd`:/code \
+	$(DOCKER_RUN) \
 	       calico-pyi-build \
 	       /code/docker-build-images/pyi/run-pyinstaller.sh
 
