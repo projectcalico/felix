@@ -117,7 +117,16 @@ configRetry:
 	}
 
 	// If we get here, we've loaded the configuration and we're ready to
-	// start the dataplane driver.
+	// start the dataplane driver.  Update the log level.
+	if configParams.LogSeverityScreen != "" {
+		parsedLevel, err := log.ParseLevel(configParams.LogSeverityScreen)
+		if err == nil {
+			logLevelScreen = parsedLevel
+		}
+	} else {
+		logLevelScreen = log.PanicLevel
+	}
+	log.SetLevel(logLevelScreen)
 	log.Infof("Successfully loaded configuration: %+v", configParams)
 
 	// Create a pair of pipes, one for sending messages to the dataplane
