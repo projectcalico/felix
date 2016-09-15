@@ -34,6 +34,13 @@ ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
 
 RUN mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH"
 
+# glide requires the current user to exist inside the container, copy in
+# some user/group entries calculated by the makefile.
+ADD passwd /passwd
+RUN cat /passwd >> /etc/passwd
+ADD group /group
+RUN cat /group >> /etc/group
+
 RUN go get github.com/Masterminds/glide
 RUN go get github.com/onsi/ginkgo/ginkgo
 RUN go get github.com/onsi/gomega

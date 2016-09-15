@@ -21,6 +21,7 @@ MY_GID:=$(shell id -g)
 # Build a docker image used for building our go code into a binary.
 .PHONY: golang-build-image
 golang-build-image:
+	$(MAKE) docker-build-images/passwd docker-build-images/group
 	cd docker-build-images && docker build . -f golang-build.Dockerfile -t calico-golang-build
 
 # Build a docker image used for building debs for trusty.
@@ -112,10 +113,21 @@ python/calico/felix/felixbackend_pb2.py: go/felix/proto/felixbackend.proto
 
 .PHONY: update-vendor
 update-vendor:
-	$(MAKE) -C go update-vendor
+	cd go && glide up
 
 go/vendor go/vendor/.up-to-date: go/glide.lock
-	cd go && glide install --strip-vcs --strip-vendor
+	# Make sure the docker image exists.  Since it's a PHONY, we can't add it
+	# as a dependency or this job will run every time.  Docker does its own
+	# freshness checking for us.
+	$(MAKE) golang-build-image
+	mkdir -p $$HOME/.glide
+	$(DOCKER_RUN) \
+	    --net=host \
+	    -v $${PWD}:/go/src/github.com/projectcalico/calico:rw \
+	    -v $$HOME/.glide:/.glide:rw \
+	    -w /go/src/github.com/projectcalico/calico/go \
+	    calico-golang-build \
+	    glide install --strip-vcs --strip-vendor
 	touch go/vendor/.up-to-date
 
 LDFLAGS:=-ldflags "-X github.com/projectcalico/calico/go/felix/buildinfo.Version=$(GIT_DESCRIPTION) \
