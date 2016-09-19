@@ -80,6 +80,13 @@ var localWlEp1 = WorkloadEndpoint{
 	},
 }
 
+var ep1IPs = []string{
+	"10.0.0.1", // ep1
+	"fc00:fe11::1",
+	"10.0.0.2", // shared with ep2
+	"fc00:fe11::2",
+}
+
 var localWlEp2 = WorkloadEndpoint{
 	State:      "active",
 	Name:       "cali2",
@@ -217,6 +224,119 @@ var localEp1WithPolicy = withPolicy.withKVUpdates(
 	},
 ).withName("ep1 local, policy")
 
+// Policy ordering tests.  We keep the names of the policies the same but we
+// change their orders to check that order trumps name.
+var localEp1WithOneTierPolicy123 = policyOrderState(
+	[3]float32{order10, order20, order30},
+	[3]string{"pol-1", "pol-2", "pol-3"},
+)
+var localEp1WithOneTierPolicy321 = policyOrderState(
+	[3]float32{order30, order20, order10},
+	[3]string{"pol-3", "pol-2", "pol-1"},
+)
+var localEp1WithOneTierPolicyAlpha = policyOrderState(
+	[3]float32{order10, order10, order10},
+	[3]string{"pol-1", "pol-2", "pol-3"},
+)
+
+func policyOrderState(policyOrders [3]float32, expectedOrder [3]string) State {
+	policies := [3]Policy{}
+	for i := range policies {
+		policies[i] = Policy{
+			Order:         &policyOrders[i],
+			Selector:      "a == 'a'",
+			InboundRules:  []Rule{{SrcSelector: allSelector}},
+			OutboundRules: []Rule{{SrcSelector: bEpBSelector}},
+		}
+	}
+	state := initialisedStore.withKVUpdates(
+		KVPair{Key: localWlEpKey1, Value: &localWlEp1},
+		KVPair{Key: TierKey{"tier-1"}, Value: &tier1_order20},
+		KVPair{Key: PolicyKey{Tier: "tier-1", Name: "pol-1"}, Value: &policies[0]},
+		KVPair{Key: PolicyKey{Tier: "tier-1", Name: "pol-2"}, Value: &policies[1]},
+		KVPair{Key: PolicyKey{Tier: "tier-1", Name: "pol-3"}, Value: &policies[2]},
+	).withIPSet(allSelectorId, []string{
+		"10.0.0.1", // ep1
+		"fc00:fe11::1",
+		"10.0.0.2", // ep1 and ep2
+		"fc00:fe11::2",
+	}).withIPSet(bEqBSelectorId, []string{
+		"10.0.0.1",
+		"fc00:fe11::1",
+		"10.0.0.2",
+		"fc00:fe11::2",
+	}).withActivePolicies(
+		proto.PolicyID{"tier-1", "pol-1"},
+		proto.PolicyID{"tier-1", "pol-2"},
+		proto.PolicyID{"tier-1", "pol-3"},
+	).withEndpoint(
+		localWlEp1Id,
+		[]tierInfo{
+			{"tier-1", expectedOrder[:]},
+		},
+	).withName(fmt.Sprintf("ep1 local, 1 tier, policies %v", expectedOrder[:]))
+	return state
+}
+
+// Tier ordering tests.  We keep the names of the tiers constant but adjust
+// their orders.
+var localEp1WithTiers123 = tierOrderState(
+	[3]float32{order10, order20, order30},
+	[3]string{"tier-1", "tier-2", "tier-3"},
+)
+var localEp1WithTiers321 = tierOrderState(
+	[3]float32{order30, order20, order10},
+	[3]string{"tier-3", "tier-2", "tier-1"},
+)
+// These tests use the same order for each tier, checking that the name is
+// used as a tie breaker.
+var localEp1WithTiersAlpha = tierOrderState(
+	[3]float32{order10, order10, order10},
+	[3]string{"tier-1", "tier-2", "tier-3"},
+)
+var localEp1WithTiersAlpha2 = tierOrderState(
+	[3]float32{order20, order20, order20},
+	[3]string{"tier-1", "tier-2", "tier-3"},
+)
+var localEp1WithTiersAlpha3 = tierOrderState(
+	[3]float32{order20, order20, order10},
+	[3]string{"tier-3", "tier-1", "tier-2"},
+)
+
+func tierOrderState(tierOrders [3]float32, expectedOrder [3]string) State {
+	tiers := [3]Tier{}
+	for i := range tiers {
+		tiers[i] = Tier{
+			Order: &tierOrders[i],
+		}
+	}
+	state := initialisedStore.withKVUpdates(
+		KVPair{Key: localWlEpKey1, Value: &localWlEp1},
+		KVPair{Key: TierKey{"tier-1"}, Value: &tiers[0]},
+		KVPair{Key: PolicyKey{Tier: "tier-1", Name: "tier-1-pol"}, Value: &policy1_order20},
+		KVPair{Key: TierKey{"tier-2"}, Value: &tiers[1]},
+		KVPair{Key: PolicyKey{Tier: "tier-2", Name: "tier-2-pol"}, Value: &policy1_order20},
+		KVPair{Key: TierKey{"tier-3"}, Value: &tiers[2]},
+		KVPair{Key: PolicyKey{Tier: "tier-3", Name: "tier-3-pol"}, Value: &policy1_order20},
+	).withIPSet(
+		allSelectorId, ep1IPs,
+	).withIPSet(
+		bEqBSelectorId, ep1IPs,
+	).withActivePolicies(
+		proto.PolicyID{"tier-1", "tier-1-pol"},
+		proto.PolicyID{"tier-2", "tier-2-pol"},
+		proto.PolicyID{"tier-3", "tier-3-pol"},
+	).withEndpoint(
+		localWlEp1Id,
+		[]tierInfo{
+			{expectedOrder[0], []string{expectedOrder[0] + "-pol"}},
+			{expectedOrder[1], []string{expectedOrder[1] + "-pol"}},
+			{expectedOrder[2], []string{expectedOrder[2] + "-pol"}},
+		},
+	).withName(fmt.Sprintf("ep1 local, tiers %v", expectedOrder[:]))
+	return state
+}
+
 // localEp2WithPolicy adds a different endpoint that doesn't match b=="b".
 // This tests an empty IP set.
 var localEp2WithPolicy = withPolicy.withKVUpdates(
@@ -337,9 +457,11 @@ var baseTests = []StateList{
 	{},
 	// Add one endpoint then remove it and add another with overlapping IP.
 	{localEp1WithPolicy, localEp2WithPolicy},
+
 	// Add one endpoint then another with an overlapping IP, then remove
 	// first.
 	{localEp1WithPolicy, localEpsWithPolicy, localEp2WithPolicy},
+
 	// Add both endpoints, then return to empty, then add them both back.
 	{localEpsWithPolicy, initialisedStore, localEpsWithPolicy},
 
@@ -347,10 +469,30 @@ var baseTests = []StateList{
 	// use different tags and selectors.
 	{localEpsWithProfile, localEpsWithUpdatedProfile},
 
+	// Tests of policy ordering.  Each state has one tier but we shuffle
+	// the order of the policies within it.
+	{localEp1WithOneTierPolicy123,
+		localEp1WithOneTierPolicy321,
+		localEp1WithOneTierPolicyAlpha},
+
+	// And tier ordering.
+	{localEp1WithTiers123,
+		localEp1WithTiers321,
+		localEp1WithTiersAlpha,
+		localEp1WithTiersAlpha2,
+		localEp1WithTiers321,
+		localEp1WithTiersAlpha3},
+
 	// String together some complex updates with profiles and policies
 	// coming and going.
-	{localEpsWithProfile, localEpsWithPolicy, localEpsWithUpdatedProfile,
-		localEp1WithPolicy, localEpsWithProfile},
+	{localEpsWithProfile,
+		localEp1WithOneTierPolicy123,
+		localEp1WithTiers321,
+		localEpsWithPolicy,
+		localEpsWithUpdatedProfile,
+		localEp1WithPolicy,
+		localEp1WithTiersAlpha2,
+		localEpsWithProfile},
 }
 
 type StateList []State
@@ -502,9 +644,9 @@ type stateTracker struct {
 
 func newStateTracker() *stateTracker {
 	s := &stateTracker{
-		ipsets:              make(map[string]set.Set),
-		activePolicies:      set.New(),
-		activeProfiles:      set.New(),
+		ipsets:                make(map[string]set.Set),
+		activePolicies:        set.New(),
+		activeProfiles:        set.New(),
 		endpointToPolicyOrder: make(map[string][]tierInfo),
 	}
 	return s
@@ -578,7 +720,7 @@ func (s *stateTracker) UpdateFrom(map[string]string, config.Source) (changed boo
 }
 
 type tierInfo struct {
-	Name string
+	Name        string
 	PolicyNames []string
 }
 
