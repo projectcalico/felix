@@ -32,6 +32,7 @@ type State struct {
 	ExpectedIPSets     map[string]set.Set
 	ExpectedPolicyIDs  set.Set
 	ExpectedProfileIDs set.Set
+	ExpectedEndpointPolicyOrder map[string][]tierInfo
 }
 
 func (s State) String() string {
@@ -47,6 +48,7 @@ func NewState() State {
 		ExpectedIPSets:     make(map[string]set.Set),
 		ExpectedPolicyIDs:  set.New(),
 		ExpectedProfileIDs: set.New(),
+		ExpectedEndpointPolicyOrder: make(map[string][]tierInfo),
 	}
 }
 
@@ -56,6 +58,9 @@ func (s State) copy() State {
 	cpy.DatastoreState = append(cpy.DatastoreState, s.DatastoreState...)
 	for k, ips := range s.ExpectedIPSets {
 		cpy.ExpectedIPSets[k] = ips.Copy()
+	}
+	for k, v := range s.ExpectedEndpointPolicyOrder {
+		cpy.ExpectedEndpointPolicyOrder[k] = v
 	}
 	s.ExpectedPolicyIDs.Iter(func(item interface{}) error {
 		cpy.ExpectedPolicyIDs.Add(item)
@@ -112,6 +117,16 @@ func (s State) withIPSet(name string, members []string) (newState State) {
 		newState.ExpectedIPSets[name] = set
 	}
 	return
+}
+
+func (s State) withEndpoint(id string, tiers []tierInfo) State {
+	newState := s.copy()
+	if tiers == nil {
+		delete(newState.ExpectedEndpointPolicyOrder, id)
+	} else {
+		newState.ExpectedEndpointPolicyOrder[id] = tiers
+	}
+	return newState
 }
 
 func (s State) withName(name string) (newState State) {

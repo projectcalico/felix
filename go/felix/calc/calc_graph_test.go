@@ -60,7 +60,9 @@ var bEqBSelectorId = selectorId(bEpBSelector)
 // Canned workload endpoints.
 
 var localWlEpKey1 = WorkloadEndpointKey{localHostname, "orch", "wl1", "ep1"}
+var localWlEp1Id = "orch/wl1/ep1"
 var localWlEpKey2 = WorkloadEndpointKey{localHostname, "orch", "wl2", "ep2"}
+var localWlEp2Id = "orch/wl2/ep2"
 
 var localWlEp1 = WorkloadEndpoint{
 	State:      "active",
@@ -100,12 +102,42 @@ var order10 = float32(10)
 var order20 = float32(20)
 var order30 = float32(30)
 
-var tier1 = Tier{
+var tier1_order10 = Tier{
+	Order: &order10,
+}
+
+var tier1_order20 = Tier{
 	Order: &order20,
 }
 
-var policy1 = Policy{
+var tier1_order30 = Tier{
+	Order: &order30,
+}
+
+var policy1_order10 = Policy{
+	Order:    &order10,
+	Selector: "a == 'a'",
+	InboundRules: []Rule{
+		{SrcSelector: allSelector},
+	},
+	OutboundRules: []Rule{
+		{SrcSelector: bEpBSelector},
+	},
+}
+
+var policy1_order20 = Policy{
 	Order:    &order20,
+	Selector: "a == 'a'",
+	InboundRules: []Rule{
+		{SrcSelector: allSelector},
+	},
+	OutboundRules: []Rule{
+		{SrcSelector: bEpBSelector},
+	},
+}
+
+var policy1_order30 = Policy{
+	Order:    &order30,
 	Selector: "a == 'a'",
 	InboundRules: []Rule{
 		{SrcSelector: allSelector},
@@ -159,8 +191,8 @@ var initialisedStore = empty.withKVUpdates(
 
 // withPolicy adds a tier and policy containing selectors for all and b=="b"
 var withPolicy = initialisedStore.withKVUpdates(
-	KVPair{Key: TierKey{"tier-1"}, Value: &tier1},
-	KVPair{Key: PolicyKey{Tier: "tier-1", Name: "pol-1"}, Value: &policy1},
+	KVPair{Key: TierKey{"tier-1"}, Value: &tier1_order20},
+	KVPair{Key: PolicyKey{Tier: "tier-1", Name: "pol-1"}, Value: &policy1_order20},
 ).withName("with policy")
 
 // localEp1WithPolicy adds a local endpoint to the mix.  It matches all and b=="b".
@@ -178,6 +210,11 @@ var localEp1WithPolicy = withPolicy.withKVUpdates(
 	"fc00:fe11::2",
 }).withActivePolicies(
 	proto.PolicyID{"tier-1", "pol-1"},
+).withEndpoint(
+	localWlEp1Id,
+	[]tierInfo{
+		{"tier-1", []string{"pol-1"}},
+	},
 ).withName("ep1 local, policy")
 
 // localEp2WithPolicy adds a different endpoint that doesn't match b=="b".
@@ -193,6 +230,11 @@ var localEp2WithPolicy = withPolicy.withKVUpdates(
 	bEqBSelectorId, []string{},
 ).withActivePolicies(
 	proto.PolicyID{"tier-1", "pol-1"},
+).withEndpoint(
+	localWlEp2Id,
+	[]tierInfo{
+		{"tier-1", []string{"pol-1"}},
+	},
 ).withName("ep2 local, policy")
 
 // localEpsWithPolicy contains both of the above endpoints, which have some
@@ -216,6 +258,16 @@ var localEpsWithPolicy = withPolicy.withKVUpdates(
 	"fc00:fe11::2",
 }).withActivePolicies(
 	proto.PolicyID{"tier-1", "pol-1"},
+).withEndpoint(
+	localWlEp1Id,
+	[]tierInfo{
+		{"tier-1", []string{"pol-1"}},
+	},
+).withEndpoint(
+	localWlEp2Id,
+	[]tierInfo{
+		{"tier-1", []string{"pol-1"}},
+	},
 ).withName("2 local, overlapping IPs & a policy")
 
 // withProfile adds a profile to the initialised state.
@@ -245,6 +297,12 @@ var localEpsWithProfile = withProfile.withKVUpdates(
 	"fc00:fe11::2",
 }).withActiveProfiles(
 	proto.ProfileID{"prof-1"},
+).withEndpoint(
+	localWlEp1Id,
+	[]tierInfo{},
+).withEndpoint(
+	localWlEp2Id,
+	[]tierInfo{},
 ).withName("2 local, overlapping IPs & a profile")
 
 // localEpsWithUpdatedProfile Follows on from localEpsWithProfile, changing the
@@ -262,6 +320,12 @@ var localEpsWithUpdatedProfile = localEpsWithProfile.withKVUpdates(
 	"fc00:fe11::2",
 }).withIPSet(
 	tag2LabelId, []string{},
+).withEndpoint(
+	localWlEp1Id,
+	[]tierInfo{},
+).withEndpoint(
+	localWlEp2Id,
+	[]tierInfo{},
 ).withName("2 local, overlapping IPs & updated profile")
 
 // Each entry in baseTests contains a series of states to move through.  Apart
@@ -352,6 +416,7 @@ func squash(baseTests StateList) (desc string, mappedTests StateList) {
 		lastTest = test
 	}
 	mappedTest.DatastoreState = kvs
+	mappedTest.ExpectedEndpointPolicyOrder = lastTest.ExpectedEndpointPolicyOrder
 	mappedTest.Name = fmt.Sprintf("squashed(%v)", baseTests)
 	mappedTests = append(mappedTests, mappedTest)
 	return
@@ -412,13 +477,16 @@ var _ = Describe("Calculation graph", func() {
 					Expect(tracker.activePolicies).To(Equal(state.ExpectedPolicyIDs),
 						"Active policy IDs were incorrect after moving to state: %v",
 						state.Name)
-
 				}))
 				It("should calculate correct active profiles", iterStates(func() {
 					Expect(tracker.activeProfiles).To(Equal(state.ExpectedProfileIDs),
 						"Active profile IDs were incorrect after moving to state: %v",
 						state.Name)
-
+				}))
+				It("should calculate correct workload endpoint policies", iterStates(func() {
+					Expect(tracker.endpointToPolicyOrder).To(Equal(state.ExpectedEndpointPolicyOrder),
+						"Endpoint policy order incorrect after moving to state: %v",
+						state.Name)
 				}))
 			})
 		}
@@ -426,16 +494,18 @@ var _ = Describe("Calculation graph", func() {
 })
 
 type stateTracker struct {
-	ipsets         map[string]set.Set
-	activePolicies set.Set
-	activeProfiles set.Set
+	ipsets                map[string]set.Set
+	activePolicies        set.Set
+	activeProfiles        set.Set
+	endpointToPolicyOrder map[string][]tierInfo
 }
 
 func newStateTracker() *stateTracker {
 	s := &stateTracker{
-		ipsets:         make(map[string]set.Set),
-		activePolicies: set.New(),
-		activeProfiles: set.New(),
+		ipsets:              make(map[string]set.Set),
+		activePolicies:      set.New(),
+		activeProfiles:      set.New(),
+		endpointToPolicyOrder: make(map[string][]tierInfo),
 	}
 	return s
 }
@@ -488,9 +558,33 @@ func (s *stateTracker) onEvent(event interface{}) {
 		s.activeProfiles.Add(*event.Id)
 	case *proto.ActiveProfileRemove:
 		s.activeProfiles.Discard(*event.Id)
+	case *proto.WorkloadEndpointUpdate:
+		tiers := event.Endpoint.Tiers
+		tierInfos := make([]tierInfo, len(tiers))
+		for i, tier := range tiers {
+			tierInfos[i].Name = tier.Name
+			tierInfos[i].PolicyNames = tier.Policies
+		}
+		id := workloadId(*event.Id)
+		s.endpointToPolicyOrder[id.String()] = tierInfos
+	case *proto.WorkloadEndpointRemove:
+		id := workloadId(*event.Id)
+		delete(s.endpointToPolicyOrder, id.String())
 	}
 }
 
 func (s *stateTracker) UpdateFrom(map[string]string, config.Source) (changed bool, err error) {
 	return
+}
+
+type tierInfo struct {
+	Name string
+	PolicyNames []string
+}
+
+type workloadId proto.WorkloadEndpointID
+
+func (w *workloadId) String() string {
+	return fmt.Sprintf("%v/%v/%v",
+		w.OrchestratorId, w.WorkloadId, w.EndpointId)
 }
