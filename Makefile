@@ -1,4 +1,4 @@
-all: pyinstaller
+all: pyinstaller deb rpm
 
 DEB_VERSION:=$(shell grep calico debian/changelog | \
                      head -n 1 | cut -d '(' -f 2 | cut -d ')' -f 1 | \
@@ -179,6 +179,23 @@ pyinstaller: $(BUNDLE_FILENAME)
 update-tools:
 	go get -u github.com/Masterminds/glide
 	go get -u github.com/onsi/ginkgo/ginkgo
+
+.PHONY: python-ut
+	cd python && ./run-unit-test.sh
+
+.PHONY: go-ut
+go-ut: golang-build-image go/vendor/.up-to-date
+	$(DOCKER_RUN) -ti \
+	    --net=host \
+	    -v $${PWD}:/go/src/github.com/projectcalico/calico:rw \
+	    -v $$HOME/.glide:/.glide:rw \
+	    -w /go/src/github.com/projectcalico/calico/go \
+	    calico-golang-build \
+	    ginkgo -v -r
+
+
+.PHONY: ut
+ut: python-ut go-ut
 
 .PHONY: clean
 clean:

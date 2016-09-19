@@ -45,4 +45,6 @@ RUN go get github.com/Masterminds/glide
 RUN go get github.com/onsi/ginkgo/ginkgo
 RUN go get github.com/onsi/gomega
 
+RUN chmod -R a+w /go
+
 WORKDIR /go/src/github.com/projectcalico/calico
