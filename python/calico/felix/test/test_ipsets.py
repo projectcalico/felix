@@ -23,20 +23,23 @@ from collections import defaultdict
 import logging
 from pprint import pformat
 
-from calico.felix.selectors import parse_selector, SelectorExpression
 from mock import *
 from netaddr import IPAddress
 
 from calico.datamodel_v1 import WloadEndpointId, HostEndpointId
 from calico.felix.futils import IPV4, FailedSystemCall, CommandOutput, IPV6
-from calico.felix.ipsets import (EndpointData, IpsetManager, IpsetActor,
-                                 RefCountedIpsetActor, EMPTY_ENDPOINT_DATA, Ipset,
+from calico.felix.ipsets import (IpsetManager, IpsetActor,
+                                 RefCountedIpsetActor, Ipset,
                                  list_ipset_names)
 from calico.felix.refcount import CREATED
 from calico.felix.test.base import BaseTestCase
 
 
 # Logger
+from nose.plugins.skip import Skip
+from unittest2 import SkipTest
+from unittest2 import skip
+
 _log = logging.getLogger(__name__)
 
 patch.object = getattr(patch, "object")  # Keep PyCharm linter happy.
@@ -60,7 +63,6 @@ EP_1_1_LABELS_NEW_IP = {
         "a": "a1",
     }
 }
-EP_DATA_1_1 = EndpointData(["prof1", "prof2"], ["10.0.0.1"])
 
 HOST_EP_ID_1_1 = HostEndpointId("host1", "ep1_1")
 HOST_EP_1_1 = {
@@ -78,7 +80,6 @@ HOST_EP_1_1_LABELS = {
         "a": "a1",
     }
 }
-HOST_EP_DATA_1_1 = EndpointData(["prof1", "prof2"], ["10.0.0.1"])
 
 EP_1_1_NEW_IP = {
     "profile_ids": ["prof1", "prof2"],
@@ -101,7 +102,6 @@ EP_2_1_IPV6 = {
     "profile_ids": ["prof1"],
     "ipv6_nets": ["dead:beef::/128"],
 }
-EP_DATA_2_1 = EndpointData(["prof1"], ["10.0.0.1"])
 
 IPSET_LIST_OUTPUT = """Name: felix-v4-calico_net
 Type: hash:ip
@@ -154,16 +154,14 @@ class TestIpsetManager(BaseTestCase):
         ipset._id = None
         ipset.ref_mgmt_state = CREATED
         ipset.ref_count = 0
-        if isinstance(tag_or_sel, SelectorExpression):
-            name_stem = tag_or_sel.unique_id[:8]
-        else:
-            name_stem = tag_or_sel
+        name_stem = tag_or_sel
         ipset.owned_ipset_names.return_value = ["felix-v4-" + name_stem,
                                                 "felix-v4-tmp-" + name_stem]
         ipset.name_stem = name_stem
         self.created_refs[tag_or_sel].append(ipset)
         return ipset
 
+    @skip("Golang rewrite")
     def test_create(self):
         with patch("calico.felix.ipsets.Ipset") as m_Ipset:
             mgr = IpsetManager(IPV4, self.config)
@@ -186,6 +184,7 @@ class TestIpsetManager(BaseTestCase):
             self.assertEqual(m_maybe_start.mock_calls,
                              [call("tag-123")])
 
+    @skip("Golang rewrite")
     def test_tag_then_endpoint(self):
         # Send in the messages.
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
@@ -199,6 +198,7 @@ class TestIpsetManager(BaseTestCase):
         self.step_mgr()
         self.assert_index_empty()
 
+    @skip("Golang rewrite")
     def test_endpoint_then_tag(self):
         # Send in the messages.
         self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
@@ -207,6 +207,7 @@ class TestIpsetManager(BaseTestCase):
         self.step_mgr()
         self.assert_one_ep_one_tag()
 
+    @skip("Golang rewrite")
     def test_endpoint_then_tag_idempotent(self):
         for _ in xrange(3):
             # Send in the messages.
@@ -226,6 +227,7 @@ class TestIpsetManager(BaseTestCase):
             }
         })
 
+    @skip("Golang rewrite")
     def test_selector_then_endpoint(self):
         # Send in the messages.  this selector should match even though there
         # are no labels in the endpoint.
@@ -245,6 +247,7 @@ class TestIpsetManager(BaseTestCase):
         self.step_mgr()
         self.assert_index_empty()
 
+    @skip("Golang rewrite")
     def test_host_endpoint_expected_ips_indexed(self):
         """Check host endpoint expected IPs are added to index."""
         # Send in the messages.  this selector should match even though there
@@ -273,6 +276,7 @@ class TestIpsetManager(BaseTestCase):
         self.step_mgr()
         self.assert_index_empty()
 
+    @skip("Golang rewrite")
     def test_host_endpoint_no_ips(self):
         """Check host endpoint expected IPs are added to index."""
         # Send in the messages.  this selector should match even though there
@@ -289,6 +293,7 @@ class TestIpsetManager(BaseTestCase):
         # Index should be empty because there's no contribution.
         self.assert_index_empty()
 
+    @skip("Golang rewrite")
     def test_endpoint_then_selector(self):
         # Send in the messages.
         self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
@@ -307,12 +312,14 @@ class TestIpsetManager(BaseTestCase):
         self.step_mgr()
         self.assert_index_empty()
 
+    @skip("Golang rewrite")
     def test_expected_ips_key(self):
         self.mgr.ip_type = IPV4
         self.assertEqual(self.mgr.expected_ips_key, "expected_ipv4_addrs")
         self.mgr.ip_type = IPV6
         self.assertEqual(self.mgr.expected_ips_key, "expected_ipv6_addrs")
 
+    @skip("Golang rewrite")
     def test_non_trivial_selector_parent_match(self):
         """
         Test a selector that relies on both directly-set labels and
@@ -347,6 +354,7 @@ class TestIpsetManager(BaseTestCase):
         self.step_mgr()
         self.assert_index_empty()
 
+    @skip("Golang rewrite")
     def test_endpoint_ip_update_with_selector_match(self):
         """
         Test a selector that relies on both directly-set labels and
@@ -391,10 +399,12 @@ class TestIpsetManager(BaseTestCase):
             }
         })
 
+    @skip("Golang rewrite")
     def assert_index_empty(self):
         self.assertEqual(self.mgr.endpoint_data_by_ep_id, {})
         self.assertEqual(self.mgr.tag_membership_index.ip_owners_by_tag, {})
 
+    @skip("Golang rewrite")
     def test_change_ip(self):
         # Initial set-up.
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
@@ -411,6 +421,7 @@ class TestIpsetManager(BaseTestCase):
             }
         })
 
+    @skip("Golang rewrite")
     def test_tag_updates(self):
         # Initial set-up.
         self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
@@ -448,6 +459,7 @@ class TestIpsetManager(BaseTestCase):
     def step_mgr(self):
         self.step_actor(self.mgr)
 
+    @skip("Golang rewrite")
     def test_update_profile_and_ips(self):
         # Initial set-up.
         self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
@@ -467,6 +479,7 @@ class TestIpsetManager(BaseTestCase):
             "prof3": set([EP_ID_1_1])
         })
 
+    @skip("Golang rewrite")
     def test_optimize_out_v6(self):
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
         self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
@@ -477,6 +490,7 @@ class TestIpsetManager(BaseTestCase):
             EP_ID_1_1: EP_DATA_1_1,
         })
 
+    @skip("Golang rewrite")
     def test_optimize_out_no_nets(self):
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
         self.mgr.on_endpoint_update(EP_ID_1_1, EP_1_1, async=True)
@@ -495,6 +509,7 @@ class TestIpsetManager(BaseTestCase):
             EP_ID_2_1: EP_DATA_2_1,
         })
 
+    @skip("Golang rewrite")
     def test_duplicate_ips(self):
         # Add in two endpoints with the same IP.
         self.mgr.on_tags_update("prof1", ["tag1"], async=True)
@@ -560,6 +575,7 @@ class TestIpsetManager(BaseTestCase):
     def on_ref_acquired(self, tag_id, ipset):
         self.acquired_refs[tag_id] = ipset
 
+    @skip("Golang rewrite")
     @patch("calico.felix.ipsets.list_ipset_names", autospec=True)
     @patch("calico.felix.futils.check_call", autospec=True)
     def test_cleanup(self, m_check_call, m_list_ipsets):
@@ -612,6 +628,7 @@ class TestIpsetManager(BaseTestCase):
                              call(["ipset", "destroy", "felix-v4-baz"]),
                          ]))
 
+    @skip("Golang rewrite")
     def test_update_dirty(self):
         self.mgr._datamodel_in_sync = True
         m_ipset = Mock(spec=RefCountedIpsetActor)
@@ -639,39 +656,6 @@ class TestIpsetManager(BaseTestCase):
             self.mgr.on_object_startup_complete(tag, self.created_refs[tag][0],
                                                 async=True)
         self.step_mgr()
-
-
-class TestEndpointData(BaseTestCase):
-    def test_repr(self):
-        self.assertEqual(repr(EP_DATA_1_1),
-                         "EndpointData(('prof1', 'prof2'),('10.0.0.1',))")
-
-    def test_equals(self):
-        self.assertEqual(EP_DATA_1_1, EP_DATA_1_1)
-        self.assertEqual(EndpointData(["prof2", "prof1"],
-                                      ["10.0.0.2", "10.0.0.1"]),
-                         EndpointData(["prof2", "prof1"],
-                                      ["10.0.0.2", "10.0.0.1"]))
-        self.assertEqual(EndpointData(["prof2", "prof1"],
-                                      ["10.0.0.2", "10.0.0.1"]),
-                         EndpointData(["prof1", "prof2"],
-                                      ["10.0.0.1", "10.0.0.2"]))
-        self.assertNotEquals(EP_DATA_1_1, None)
-        self.assertNotEquals(EP_DATA_1_1, EP_DATA_2_1)
-        self.assertNotEquals(EP_DATA_1_1, EMPTY_ENDPOINT_DATA)
-        self.assertFalse(EndpointData(["prof2", "prof1"],
-                                      ["10.0.0.2", "10.0.0.1"]) !=
-                         EndpointData(["prof2", "prof1"],
-                                      ["10.0.0.2", "10.0.0.1"]))
-
-    def test_hash(self):
-        self.assertEqual(hash(EndpointData(["prof2", "prof1"],
-                                           ["10.0.0.2", "10.0.0.1"])),
-                         hash(EndpointData(["prof1", "prof2"],
-                                           ["10.0.0.1", "10.0.0.2"])))
-
-    def test_really_a_struct(self):
-        self.assertFalse(hasattr(EP_DATA_1_1, "__dict__"))
 
 
 class TestIpsetActor(BaseTestCase):

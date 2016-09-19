@@ -23,13 +23,13 @@ import logging
 from collections import OrderedDict
 from pprint import pformat
 
-from calico.felix.selectors import parse_selector
 from mock import Mock
 
 from calico.datamodel_v1 import TieredPolicyId
 from calico.felix.fiptables import IptablesUpdater
 from calico.felix.profilerules import UnsupportedICMPType
 from calico.felix.test.base import BaseTestCase, load_config
+from unittest2 import skip
 
 _log = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ INPUT_CHAINS = {
     ]
 }
 
-SELECTOR_A_EQ_B = parse_selector("a == 'b'")
+SELECTOR_A_EQ_B = "a == 'b'"
 
 RULES_TESTS = [
     {
@@ -668,6 +668,7 @@ class TestRules(BaseTestCase):
              ['16', '17']]
         )
 
+    @skip("golang rewrite")
     def test_rules_generation(self):
         for test in RULES_TESTS:
             _log.info("Running rules test\n%s", pformat(test))

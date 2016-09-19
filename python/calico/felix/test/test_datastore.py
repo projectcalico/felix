@@ -18,7 +18,6 @@ import socket
 import subprocess
 from datetime import datetime
 
-import etcd
 import gevent
 from calico.datamodel_v1 import WloadEndpointId, TieredPolicyId, HostEndpointId
 from calico.felix.config import Config
@@ -27,17 +26,16 @@ from calico.felix.datastore import (DatastoreReader, DatastoreAPI,
 from calico.felix.futils import IPV4, IPV6
 from calico.felix.ipsets import IpsetActor
 from calico.felix.protocol import MessageReader, MessageWriter, \
-    MSG_TYPE_CONFIG_UPDATE, MSG_TYPE_IN_SYNC, STATUS_RESYNC, MSG_KEY_STATUS, \
-    MSG_TYPE_UPDATE, MSG_KEY_KEY, MSG_KEY_VALUE, MSG_KEY_TYPE, \
+    MSG_TYPE_CONFIG_UPDATE, MSG_TYPE_IN_SYNC, \
+    MSG_KEY_TYPE, \
     MSG_KEY_HOST_CONFIG, MSG_KEY_GLOBAL_CONFIG, MSG_TYPE_CONFIG_RESOLVED, \
     MSG_KEY_LOG_FILE, MSG_KEY_SEV_FILE, MSG_KEY_SEV_SCREEN, MSG_KEY_SEV_SYSLOG, \
-    STATUS_IN_SYNC, SocketClosed, MSG_KEY_PROM_PORT
-from calico.felix.selectors import parse_selector
+    SocketClosed, MSG_KEY_PROM_PORT
 from calico.felix.splitter import UpdateSplitter
 from calico.felix.test.base import BaseTestCase, JSONString
-from etcd import EtcdResult, EtcdException
 from gevent.event import Event
 from mock import Mock, call, patch, ANY
+from unittest2 import skip
 
 _log = logging.getLogger(__name__)
 
@@ -87,13 +85,14 @@ POLICY = {
     "outbound_rules": [],
     "order": 10,
 }
-SELECTOR = parse_selector(POLICY["selector"])
 POLICY_PARSED = {
     "inbound_rules": [],
     "outbound_rules": [],
 }
 POLICY_STR = json.dumps(POLICY)
 
+
+@skip("golang rewrite")
 class TestDatastoreAPI(BaseTestCase):
     def setUp(self):
         super(TestDatastoreAPI, self).setUp()
@@ -158,6 +157,7 @@ class ExpectedException(Exception):
     pass
 
 
+@skip("golang rewrite")
 class TestEtcdWatcher(BaseTestCase):
 
     def setUp(self):
@@ -690,6 +690,7 @@ class TestEtcdWatcher(BaseTestCase):
         self.watcher.dispatcher.handle_event(m_response)
 
 
+@skip("golang rewrite")
 class TestEtcdReporting(BaseTestCase):
     def setUp(self):
         super(TestEtcdReporting, self).setUp()
@@ -768,6 +769,7 @@ class TestEtcdReporting(BaseTestCase):
         ])
 
 
+@skip("golang rewrite")
 class TestStatusReporter(BaseTestCase):
     def setUp(self):
         super(TestStatusReporter, self).setUp()

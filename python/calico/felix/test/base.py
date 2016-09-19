@@ -89,11 +89,16 @@ def load_config(filename, path="calico/felix/test/data/", env_dict=None,
     if global_dict is None:
         global_dict = {}
 
+    global_dict.setdefault("InterfacePrefix", "tap")
+
     with mock.patch.dict("os.environ", env_dict):
         with mock.patch('calico.common.complete_logging'):
-            config = Config(path + filename)
+            config = Config()
+
+    combined_dict = global_dict.copy()
+    combined_dict.update(host_dict)
 
     with mock.patch('calico.common.complete_logging'):
-        config.update_from(host_dict, global_dict)
+        config.update_from(combined_dict)
 
     return config

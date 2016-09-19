@@ -29,6 +29,8 @@ from calico.felix import futils
 from calico.felix.test.base import BaseTestCase, load_config
 
 # Logger
+from unittest2 import skip
+
 log = logging.getLogger(__name__)
 
 
@@ -49,6 +51,7 @@ class TestBasic(BaseTestCase):
         else:
             sys.modules['etcd'] = self._real_etcd
 
+    @skip("golang rewrite")
     @mock.patch("calico.felix.felix.HTTPServer", autospec=True)
     @mock.patch("calico.felix.felix.load_nf_conntrack", autospec=True)
     @mock.patch("os.path.exists", autospec=True, return_value=True)
@@ -116,6 +119,7 @@ class TestBasic(BaseTestCase):
         m_http_server.assert_called_once_with(("0.0.0.0", 9091),
                                               felix.MetricsHandler)
 
+    @skip("golang rewrite")
     @mock.patch("calico.felix.felix.load_nf_conntrack", autospec=True)
     @mock.patch("calico.felix.felix.install_global_rules", autospec=True)
     @mock.patch("os.path.exists", autospec=True, return_value=False)

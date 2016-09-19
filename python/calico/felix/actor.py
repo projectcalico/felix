@@ -511,7 +511,7 @@ class Actor(object):
             len(self._event_queue),
             bool(self.greenlet),
             self._current_msg,
-            self.greenlet.total_time,
+            getattr(self.greenlet, "total_time", -1.0),
         )
 
 

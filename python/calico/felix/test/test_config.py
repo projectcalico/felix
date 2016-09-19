@@ -27,6 +27,7 @@ import sys
 from contextlib import nested
 from calico.felix.config import Config, ConfigException
 from calico.felix.test.base import load_config
+from unittest2 import skip
 
 if sys.version_info < (2, 7):
     import unittest2 as unittest
@@ -61,6 +62,7 @@ class TestConfig(unittest.TestCase):
         self.ghbn_patch.stop()
         super(TestConfig, self).tearDown()
 
+    @skip("golang rewrite")
     def test_default_config(self):
         """
         Test various ways of defaulting config.
@@ -97,6 +99,7 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.IPTABLES_MARK_MASK, 0xff000000)
             self.assertEqual(config.IPTABLES_MARK_ACCEPT, "0x1000000")
 
+    @skip("golang rewrite")
     def test_bad_plugin_name(self):
         env_dict = {"FELIX_IPTABLESGENERATORPLUGIN": "unknown"}
         with self.assertRaisesRegexp(ImportError,
@@ -105,6 +108,7 @@ class TestConfig(unittest.TestCase):
                                      '"calico.felix.iptables_generator".'):
             config = load_config("felix_default.cfg", env_dict=env_dict)
 
+    @skip("golang rewrite")
     def test_invalid_port(self):
         data = { "felix_invalid_port.cfg": "Invalid port in field",
                  "felix_invalid_addr.cfg": "Invalid or unresolvable",
@@ -118,29 +122,34 @@ class TestConfig(unittest.TestCase):
                                          data[filename]):
                 config = Config("calico/felix/test/data/%s" % filename)
 
+    @skip("golang rewrite")
     def test_invalid_action(self):
         with self.assertRaisesRegexp(ConfigException,
                                      "Invalid field value"):
             config = Config("calico/felix/test/data/felix_invalid_action.cfg")
 
+    @skip("golang rewrite")
     def test_etcd_endpoints(self):
         env_dict = { "FELIX_ETCDENDPOINTS": "http://localhost:1, http://localhost:2,http://localhost:3 "}
         conf = load_config("felix_default.cfg", env_dict=env_dict)
         self.assertEqual(conf.ETCD_ADDRS, ["localhost:1", "localhost:2", "localhost:3"])
         self.assertEqual(conf.ETCD_SCHEME, "http")
 
+    @skip("golang rewrite")
     def test_etcd_endpoints_inconsistent_protocols(self):
         env_dict = { "FELIX_ETCDENDPOINTS": "https://a:1, http://b:2,http://c:3 "}
         with self.assertRaisesRegexp(ConfigException,
                                      "Inconsistent protocols in EtcdEndpoints"):
             conf = load_config("felix_default.cfg", env_dict=env_dict)
 
+    @skip("golang rewrite")
     def test_etcd_endpoints_format(self):
         env_dict = { "FELIX_ETCDENDPOINTS": "https://a:1, b:2"}
         with self.assertRaisesRegexp(ConfigException,
                                      "Invalid format of EtcdEndpoints"):
             conf = load_config("felix_default.cfg", env_dict=env_dict)
 
+    @skip("golang rewrite")
     def test_invalid_etcd(self):
         """
         Test that etcd validation works correctly.
@@ -157,6 +166,7 @@ class TestConfig(unittest.TestCase):
                                          data[filename]):
                 config = Config("calico/felix/test/data/%s" % filename)
 
+    @skip("golang rewrite")
     def test_unreadable_etcd_key(self):
         """
         Test that we throw an exception when the etcd key is unreadable
@@ -171,6 +181,7 @@ class TestConfig(unittest.TestCase):
                                          "Cannot read key file"):
                 config = Config("calico/felix/test/data/felix_unreadable_key.cfg")
 
+    @skip("golang rewrite")
     def test_unreadable_etcd_cert(self):
         """
         Test that we throw an exception when the etcd cert is unreadable
@@ -185,6 +196,7 @@ class TestConfig(unittest.TestCase):
                                          "Cannot read cert file"):
                 config = Config("calico/felix/test/data/felix_unreadable_cert.cfg")
 
+    @skip("golang rewrite")
     def test_unreadable_etcd_ca(self):
         """
         Test that we throw an exception when the etcd CA cert is unreadable
@@ -199,6 +211,7 @@ class TestConfig(unittest.TestCase):
                                          "Missing CA certificate"):
                 config = Config("calico/felix/test/data/felix_unreadable_ca.cfg")
 
+    @skip("golang rewrite")
     def test_none_ca(self):
         """
         Test that the CA can be overriden to None.
@@ -212,6 +225,7 @@ class TestConfig(unittest.TestCase):
             config = load_config("felix_none_ca.cfg")
             self.assertEqual(config.ETCD_CA_FILE, None)
 
+    @skip("golang rewrite")
     def test_no_logfile(self):
         # Logging to file can be excluded by explicitly saying "none" -
         # but if in etcd config the file is still created.
@@ -229,6 +243,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.LOGFILE, None)
         self.assertEqual(config.DRIVERLOGFILE, None)
 
+    @skip("golang rewrite")
     def test_no_metadata(self):
         # Metadata can be excluded by explicitly saying "none"
 
@@ -243,6 +258,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.METADATA_IP, None)
         self.assertEqual(config.METADATA_PORT, None)
 
+    @skip("golang rewrite")
     def test_metadata_port_not_int(self):
         cfg_dict = { "InterfacePrefix": "blah",
                      "MetadataAddr": "127.0.0.1",
@@ -252,6 +268,7 @@ class TestConfig(unittest.TestCase):
                                      "Field was not integer.*MetadataPort"):
             load_config("felix_missing.cfg", host_dict=cfg_dict)
 
+    @skip("golang rewrite")
     def test_metadata_port_not_valid_1(self):
         for i in (0, -1, 99999):
             log.debug("Test invalid metadata port %d", i)
@@ -262,6 +279,7 @@ class TestConfig(unittest.TestCase):
                                          "Invalid field value.*MetadataPort"):
                 load_config("felix_missing.cfg", host_dict=cfg_dict)
 
+    @skip("golang rewrite")
     def test_bad_metadata_addr(self):
         cfg_dict = { "InterfacePrefix": "blah",
                      "MetadataAddr": "bloop",
@@ -271,6 +289,7 @@ class TestConfig(unittest.TestCase):
             load_config("felix_missing.cfg", host_dict=cfg_dict)
         self.m_gethostbyname.assert_has_calls([mock.call("bloop")])
 
+    @skip("golang rewrite")
     def test_bad_ipip_addr(self):
         cfg_dict = { "InterfacePrefix": "blah",
                      "IpInIpTunnelAddr": "bloop"}
@@ -280,18 +299,21 @@ class TestConfig(unittest.TestCase):
             load_config("felix_missing.cfg", host_dict=cfg_dict)
         self.m_gethostbyname.assert_has_calls([mock.call("bloop")])
 
+    @skip("golang rewrite")
     def test_none_string_ipip_addr(self):
         cfg_dict = { "InterfacePrefix": "blah",
                      "IpInIpTunnelAddr": "none"}
         conf = load_config("felix_missing.cfg", host_dict=cfg_dict)
         self.assertEqual(conf.IP_IN_IP_ADDR, None)
 
+    @skip("golang rewrite")
     def test_none_ipip_addr(self):
         cfg_dict = { "InterfacePrefix": "blah",
                      "IpInIpTunnelAddr": None}
         conf = load_config("felix_missing.cfg", host_dict=cfg_dict)
         self.assertEqual(conf.IP_IN_IP_ADDR, None)
 
+    @skip("golang rewrite")
     def test_bad_log_level(self):
         for field in ("LogSeverityFile", "LogSeverityScreen", "LogSeveritySys"):
             cfg_dict = { "LogInterfacePrefix": "blah",
@@ -300,6 +322,7 @@ class TestConfig(unittest.TestCase):
                                          "Invalid log level.*%s" % field):
                 load_config("felix_missing.cfg", host_dict=cfg_dict)
 
+    @skip("golang rewrite")
     def test_blank_metadata_addr(self):
         cfg_dict = { "InterfacePrefix": "blah",
                      "MetadataAddr": "",
@@ -308,10 +331,12 @@ class TestConfig(unittest.TestCase):
                                      "Blank value.*MetadataAddr"):
             load_config("felix_missing.cfg", host_dict=cfg_dict)
 
+    @skip("golang rewrite")
     def test_no_iface_prefix(self):
         config = load_config("felix_missing.cfg", host_dict={})
         self.assertEqual(config.IFACE_PREFIX, "cali")
 
+    @skip("golang rewrite")
     def test_file_sections(self):
         """
         Test various ways of defaulting config.
@@ -333,10 +358,12 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.REPORTING_INTERVAL_SECS, 5)
             self.assertEqual(config.REPORTING_TTL_SECS, 11)
 
+    @skip("golang rewrite")
     def test_upper_case_section(self):
         config = load_config("felix_default_section.cfg")
         self.assertEqual(config.ETCD_ADDRS, ["192.168.15.7:2379"])
 
+    @skip("golang rewrite")
     def test_env_var_override(self):
         """
         Test environment variables override config options.
@@ -375,6 +402,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.REPORTING_INTERVAL_SECS, 10)
         self.assertEqual(config.REPORTING_TTL_SECS, 30)
 
+    @skip("golang rewrite")
     def test_ip_in_ip_enabled(self):
         test_values = [
             ("true", True),
@@ -400,6 +428,7 @@ class TestConfig(unittest.TestCase):
                              "%r was mis-interpreted as %r" %
                              (value, config.IP_IN_IP_ENABLED))
 
+    @skip("golang rewrite")
     def test_ip_in_ip_enabled_bad(self):
         cfg_dict = { "InterfacePrefix": "blah",
                      "IpInIpEnabled": "blah" }
@@ -408,6 +437,7 @@ class TestConfig(unittest.TestCase):
                                      ".*IpInIpEnabled"):
             load_config("felix_missing.cfg", host_dict=cfg_dict)
 
+    @skip("golang rewrite")
     def test_reporting_ttl_not_int(self):
         """
         Test exception is raised if status report ttl has invalid (non-integer) value.
@@ -418,6 +448,7 @@ class TestConfig(unittest.TestCase):
                                      "Field was not integer.*"):
             load_config("felix_missing.cfg", host_dict=cfg_dict)
 
+    @skip("golang rewrite")
     def test_reporting_interval_not_int(self):
         """
         Test exception is raised if status reporting interval is invalid.
@@ -428,6 +459,7 @@ class TestConfig(unittest.TestCase):
                                      "Field was not integer.*"):
             load_config("felix_missing.cfg", host_dict=cfg_dict)
 
+    @skip("golang rewrite")
     def test_negative_reporting_interval(self):
         """
         Test that status reporting is disabled if interval time is negative.
@@ -440,6 +472,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.REPORTING_INTERVAL_SECS, 0)
         self.assertEqual(config.REPORTING_TTL_SECS, 0)
 
+    @skip("golang rewrite")
     def test_insufficient_mark_bits(self):
         """
         Test that the mark masks are defaulted when there are insufficient
@@ -453,6 +486,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.IPTABLES_MARK_ACCEPT, "0x1000000")
         self.assertEqual(config.IPTABLES_MARK_NEXT_TIER, "0x2000000")
 
+    @skip("golang rewrite")
     def test_exact_mark_bits(self):
         """
         Test that the IptablesMarkMask works when the minimum number of bits is
@@ -468,6 +502,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.IPTABLES_MARK_ACCEPT, "0x4")
         self.assertEqual(config.IPTABLES_MARK_NEXT_TIER, "0x8")
 
+    @skip("golang rewrite")
     def test_too_many_mark_bits(self):
         """
         Test that the mark masks are defaulted when the option is out of range.
@@ -480,6 +515,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.IPTABLES_MARK_ACCEPT, "0x1000000")
         self.assertEqual(config.IPTABLES_MARK_NEXT_TIER, "0x2000000")
 
+    @skip("golang rewrite")
     def test_hex_mark(self):
         """
         Test that the IptablesMarkMask accepts hexadecimal values.
@@ -492,6 +528,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.IPTABLES_MARK_ACCEPT, "0x20")
         self.assertEqual(config.IPTABLES_MARK_NEXT_TIER, "0x40")
 
+    @skip("golang rewrite")
     def test_default_ttl(self):
         """
         Test that ttl is defaulted to at least 2.5 times the reporting
@@ -506,6 +543,7 @@ class TestConfig(unittest.TestCase):
 
         self.assertEqual(config.REPORTING_TTL_SECS, 52)
 
+    @skip("golang rewrite")
     def test_valid_interval_and_ttl(self):
         """
         Test valid reporting parameters are not changed.
@@ -518,6 +556,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.REPORTING_INTERVAL_SECS, 42)
         self.assertEqual(config.REPORTING_TTL_SECS, 47)
 
+    @skip("golang rewrite")
     def test_reporting_interval_and_ttl_zero(self):
         """
         Test that zero reporting interval and ttl are passed correctly.
@@ -531,6 +570,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.REPORTING_INTERVAL_SECS, 0)
         self.assertEqual(config.REPORTING_TTL_SECS, 0)
 
+    @skip("golang rewrite")
     def test_reporting_float(self):
         """
         Test that float reporting interval and ttl values are rounded down to integer.
@@ -543,6 +583,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.REPORTING_INTERVAL_SECS, 21)
         self.assertEqual(config.REPORTING_TTL_SECS, 63)
 
+    @skip("golang rewrite")
     def test_default_ipset_size(self):
         """
         Test that ipset size is defaulted if out of range.
@@ -558,6 +599,7 @@ class TestConfig(unittest.TestCase):
 
         self.assertEqual(config.MAX_IPSET_SIZE, 2**20)
 
+    @skip("golang rewrite")
     def test_host_if_poll_defaulted(self):
         """
         Test that the poll interval is defaulted if out-of-range
@@ -568,6 +610,7 @@ class TestConfig(unittest.TestCase):
 
         self.assertEqual(config.HOST_IF_POLL_INTERVAL_SECS, 10)
 
+    @skip("golang rewrite")
     def test_prometheus_port_valid(self):
         cfg_dict = {"InterfacePrefix": "blah",
                     "PrometheusMetricsEnabled": True,
@@ -579,6 +622,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.PROM_METRICS_DRIVER_PORT, 9124)
         self.assertEqual(config.PROM_METRICS_ENABLED, True)
 
+    @skip("golang rewrite")
     def test_prometheus_port_invalid(self):
         cfg_dict = {"InterfacePrefix": "blah",
                     "PrometheusMetricsEnabled": False,
@@ -590,6 +634,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.PROM_METRICS_DRIVER_PORT, 9092)
         self.assertEqual(config.PROM_METRICS_ENABLED, False)
 
+    @skip("golang rewrite")
     def test_prometheus_port_defaults(self):
         cfg_dict = {"InterfacePrefix": "blah"}
         config = load_config("felix_missing.cfg", host_dict=cfg_dict)
@@ -598,12 +643,14 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.PROM_METRICS_DRIVER_PORT, 9092)
         self.assertEqual(config.PROM_METRICS_ENABLED, False)
 
+    @skip("golang rewrite")
     def test_failsafe_ports_defaults(self):
         config = load_config("felix_missing.cfg", host_dict=None)
         self.assertEqual(config.FAILSAFE_INBOUND_PORTS, [22])
         self.assertEqual(config.FAILSAFE_OUTBOUND_PORTS,
                          [2379, 2380, 4001, 7001])
 
+    @skip("golang rewrite")
     def test_failsafe_ports(self):
         cfg_dict = {
             "FailsafeInboundHostPorts": "100 , 200",
@@ -622,6 +669,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.FAILSAFE_INBOUND_PORTS, [])
         self.assertEqual(config.FAILSAFE_OUTBOUND_PORTS, [400, 500])
 
+    @skip("golang rewrite")
     def test_failsafe_ports_bad(self):
         cfg_dict = {
             "FailsafeInboundHostPorts": "foo",
@@ -634,6 +682,7 @@ class TestConfig(unittest.TestCase):
         self.assertRaises(ConfigException, load_config,
                           "felix_missing.cfg", host_dict=cfg_dict)
 
+    @skip("golang rewrite")
     def test_failsafe_ports_out_of_range(self):
         cfg_dict = {
             "FailsafeInboundHostPorts": "0",
@@ -646,6 +695,7 @@ class TestConfig(unittest.TestCase):
         self.assertRaises(ConfigException, load_config,
                           "felix_missing.cfg", host_dict=cfg_dict)
 
+    @skip("golang rewrite")
     def test_drop_action_defaulting(self):
         cfg_dict = {
             "DropActionOverride": "foobar",
@@ -653,6 +703,7 @@ class TestConfig(unittest.TestCase):
         config = load_config("felix_missing.cfg", host_dict=cfg_dict)
         self.assertEqual(config.ACTION_ON_DROP, "DROP")
 
+    @skip("golang rewrite")
     def test_drop_valid(self):
         for value in ("DROP", "LOG-and-DROP", "ACCEPT", "LOG-and-ACCEPT"):
             cfg_dict = {

@@ -342,6 +342,10 @@ class IpsetActor(Actor):
 
     def _sync_to_ipset(self):
         _log.debug("Syncing %s to kernel", self.name)
+        if self.changes is None:
+            _log.warning("Haven't received initial snapshot yet.")
+            return
+
         if self.changes.resulting_size > self._ipset.max_elem:
             _log.error("ipset %s exceeds maximum size %s.  ipset will not "
                        "be updated until size drops below %s.",

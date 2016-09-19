@@ -27,6 +27,7 @@ from calico.felix import frules
 from calico.felix.fiptables import IptablesUpdater
 from calico.felix.futils import FailedSystemCall, IPV4
 from calico.felix.test.base import BaseTestCase, load_config
+from unittest2 import skip
 
 _log = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ EXPECTED_TOP_LEVEL_DEPS = {
 
 class TestRules(BaseTestCase):
 
+    @skip("golang rewrite")
     @patch("calico.felix.futils.check_call", autospec=True)
     @patch("calico.felix.frules.devices", autospec=True)
     @patch("calico.felix.frules.HOSTS_IPSET_V4", autospec=True)
@@ -210,6 +212,7 @@ class TestRules(BaseTestCase):
             [call(IPV4, "tunl0", set([IPAddress("10.0.0.1")]))]
         )
 
+    @skip("golang rewrite")
     @patch("calico.felix.futils.check_call", autospec=True)
     @patch("calico.felix.frules.devices", autospec=True)
     @patch("calico.felix.frules.HOSTS_IPSET_V4", autospec=True)
@@ -343,6 +346,7 @@ class TestRules(BaseTestCase):
             async=False
         )
 
+    @skip("golang rewrite")
     @patch("calico.felix.futils.check_call", autospec=True)
     @patch("calico.felix.frules.devices", autospec=True)
     @patch("calico.felix.frules.HOSTS_IPSET_V4", autospec=True)

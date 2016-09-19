@@ -78,6 +78,7 @@ env:
 	virtualenv env
 	. env/bin/activate && \
 	    pip install -U pip && \
+	    pip install -U hypothesis mock nose unittest2 && \
 	    pip install -e ./python
 
 DOCKER_RUN:=docker run --rm --user $(MY_UID):$(MY_GID) -v $${PWD}:/code

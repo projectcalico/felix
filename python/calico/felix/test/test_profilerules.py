@@ -21,7 +21,6 @@ Tests for the profilerules module.
 
 import logging
 
-from calico.felix.selectors import parse_selector, SelectorExpression
 from mock import Mock, call, patch
 from calico.felix import refcount
 from calico.felix.fiptables import IptablesUpdater
@@ -30,7 +29,7 @@ from calico.felix.ipsets import IpsetManager, RefCountedIpsetActor
 from calico.felix.profilerules import ProfileRules, RulesManager
 
 from calico.felix.test.base import BaseTestCase, load_config
-
+from unittest2 import skip
 
 _log = logging.getLogger(__name__)
 
@@ -62,7 +61,7 @@ RULES_1_CHAINS = {
     ]
 }
 
-SELECTOR_1 = parse_selector("a == 'a1'")
+SELECTOR_1 = "a == 'a1'"
 RULES_2 = {
     "id": "prof1",
     "inbound_rules": [
@@ -207,6 +206,7 @@ class TestRulesManager(BaseTestCase):
                              [call("prof-id")])
 
 
+@skip("golang rewrite")
 class TestProfileRules(BaseTestCase):
     def setUp(self):
         super(TestProfileRules, self).setUp()

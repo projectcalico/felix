@@ -28,7 +28,6 @@ from netaddr import IPAddress
 from calico.felix.dispatch import HostEndpointDispatchChains
 from calico.felix.dispatch import WorkloadDispatchChains
 from calico.felix.plugins.fiptgenerator import FelixIptablesGenerator
-from calico.felix.selectors import parse_selector
 
 from calico.felix.endpoint import EndpointManager, WorkloadEndpoint, \
     HostEndpoint
@@ -47,6 +46,7 @@ from calico.felix import endpoint
 from calico.felix import futils
 from calico.datamodel_v1 import WloadEndpointId, TieredPolicyId, HostEndpointId, \
     ResolvedHostEndpointId
+from unittest2 import skip
 
 _log = logging.getLogger(__name__)
 
@@ -92,6 +92,7 @@ class TestEndpointManager(BaseTestCase):
             self.mgr._on_actor_started()
             m_glet.start.assert_called_once_with()
 
+    @skip("golang rewrite")
     def test_on_started(self):
         ep = {"name": "tap1234"}
         self.mgr.on_endpoint_update(ENDPOINT_ID,
@@ -106,6 +107,7 @@ class TestEndpointManager(BaseTestCase):
             [mock.call(ep, async=True)]
         )
 
+    @skip("golang rewrite")
     def test_on_datamodel_in_sync(self):
         ep = {"name": "tap1234"}
         self.mgr.on_endpoint_update(ENDPOINT_ID,
@@ -132,6 +134,7 @@ class TestEndpointManager(BaseTestCase):
         self.step_actor(self.mgr)
         self.assertEqual(self.m_wl_dispatch.apply_snapshot.mock_calls, [])
 
+    @skip("golang rewrite")
     def test_tiered_policy_ordering_and_updates(self):
         """
         Check that the tier_sequence ordering is updated correctly as we
@@ -246,43 +249,7 @@ class TestEndpointManager(BaseTestCase):
                              (expected_call, actual_call))
         m_endpoint.on_tiered_policy_update.reset_mock()
 
-    def test_label_inheritance(self):
-        # Make sure we have an endpoint so that we can check that it gets
-        # put in the dirty set.  These have no labels at all so we test
-        # that no labels gets translated to an empty dict.
-        self.mgr.on_endpoint_update(ENDPOINT_ID, {"name": "tap12345",
-                                                  "profile_ids": ["prof1"]},
-                                    async=True)
-        self.mgr.on_endpoint_update(ENDPOINT_ID_2, {"name": "tap23456",
-                                                    "profile_ids": ["prof2"]},
-                                    async=True)
-        # And we need a selector to pick out one of the endpoints by the labels
-        # attached to its parent.
-        self.mgr.on_policy_selector_update(TieredPolicyId("a", "b"),
-                                           parse_selector('a == "b"'),
-                                           10,
-                                           async=True)
-        self.step_actor(self.mgr)
-
-        with mock.patch.object(self.mgr, "_update_dirty_policy") as m_update:
-            self.mgr.on_prof_labels_set("prof1", {"a": "b"}, async=True)
-            self.step_actor(self.mgr)
-            # Only the first endpoint should end up matching the selector.
-            self.assertEqual(self.mgr.endpoints_with_dirty_policy,
-                             set([ENDPOINT_ID]))
-            # And an update should be triggered.
-            self.assertEqual(m_update.mock_calls, [mock.call()])
-
-    def test_endpoint_update_not_our_host(self):
-        ep = {"name": "tap1234"}
-        with mock.patch.object(self.mgr, "_is_starting_or_live") as m_sol:
-            self.mgr.on_endpoint_update(
-                WloadEndpointId("notus", "b", "c", "d"),
-                ep,
-                async=True)
-            self.step_actor(self.mgr)
-        self.assertFalse(m_sol.called)
-
+    @skip("golang rewrite")
     def test_endpoint_live_obj(self):
         ep = {"name": "tap1234"}
         # First send in an update to trigger creation.
@@ -321,6 +288,7 @@ class TestEndpointManager(BaseTestCase):
             self.step_actor(self.mgr)
         self.assertFalse(m_sol.called)
 
+    @skip("golang rewrite")
     def test_on_interface_update_known(self):
         ep = {"name": "tap1234"}
         m_endpoint = Mock(spec=WorkloadEndpoint)
@@ -335,6 +303,7 @@ class TestEndpointManager(BaseTestCase):
             [mock.call(True, async=True)]
         )
 
+    @skip("golang rewrite")
     def test_on_interface_update_known_but_not_live(self):
         ep = {"name": "tap1234"}
         m_endpoint = Mock(spec=WorkloadEndpoint)
@@ -346,6 +315,7 @@ class TestEndpointManager(BaseTestCase):
             self.step_actor(self.mgr)
         self.assertEqual(m_endpoint.on_interface_update.mock_calls, [])
 
+    @skip("golang rewrite")
     def test_resolve_host_eps_mainline(self):
         ep1 = {"name": "eth0"}
         self.mgr.on_host_ep_update(HostEndpointId("hostname", "ep1"),
@@ -396,6 +366,7 @@ class TestEndpointManager(BaseTestCase):
             None
         )
 
+    @skip("golang rewrite")
     def test_resolve_host_eps_multiple_ips(self):
         ep1 = {"expected_ipv4_addrs": ["10.0.0.1", "10.0.0.2"]}
         self.mgr.on_host_ep_update(HostEndpointId("hostname", "ep1"),
@@ -422,6 +393,7 @@ class TestEndpointManager(BaseTestCase):
             self.step_actor(self.mgr)
         self.assertFalse(m_on_ep_upd.called)
 
+    @skip("golang rewrite")
     def test_resolve_host_eps_multiple_conflicting_matches(self):
         # Check that, if multiple endpoints match an interface, the first
         # one wins.
@@ -1034,6 +1006,7 @@ class TestWorkloadEndpoint(BaseTestCase):
                                                      reset_arp=True)
                 self.assertTrue(local_ep._device_in_sync)
 
+    @skip("golang rewrite")
     @mock.patch("calico.felix.endpoint.devices", autospec=True)
     def test_tiered_policy_mainline(self, m_devices):
         self.config.plugins["iptables_generator"] = self.m_ipt_gen
