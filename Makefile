@@ -181,10 +181,11 @@ update-tools:
 	go get -u github.com/onsi/ginkgo/ginkgo
 
 .PHONY: python-ut
+python-ut:
 	cd python && ./run-unit-test.sh
 
 .PHONY: go-ut
-go-ut: golang-build-image go/vendor/.up-to-date
+go-ut: golang-build-image go/vendor/.up-to-date bin/calico-felix
 	$(DOCKER_RUN) -ti \
 	    --net=host \
 	    -v $${PWD}:/go/src/github.com/projectcalico/calico:rw \
@@ -192,7 +193,6 @@ go-ut: golang-build-image go/vendor/.up-to-date
 	    -w /go/src/github.com/projectcalico/calico/go \
 	    calico-golang-build \
 	    ginkgo -v -r
-
 
 .PHONY: ut
 ut: python-ut go-ut

@@ -3,6 +3,8 @@
 machine:
   post:
     - pyenv global
+  services:
+    - docker
 
 ## Install Calico build/test deps.
 dependencies:
@@ -14,6 +16,6 @@ dependencies:
 ## "deactivate" to get out of the virtualenv that CircleCI creates by default.
 test:
   override:
-    - deactivate && make ut
+    - make ut
   post:
-    - cp -r .coverage coverage.xml htmlcov $CIRCLE_ARTIFACTS
+    - cp -r python/.coverage python/coverage.xml python/htmlcov $CIRCLE_ARTIFACTS
