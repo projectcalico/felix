@@ -182,11 +182,11 @@ update-tools:
 	go get -u github.com/onsi/ginkgo/ginkgo
 
 .PHONY: python-ut
-python-ut:
+python-ut: python/calico/felix/felixbackend_pb2.py
 	cd python && ./run-unit-test.sh
 
 .PHONY: go-ut
-go-ut: golang-build-image go/vendor/.up-to-date bin/calico-felix
+go-ut: golang-build-image go/vendor/.up-to-date go/felix/proto/felixbackend.pb.go
 	$(DOCKER_RUN) -ti \
 	    --net=host \
 	    -v $${PWD}:/go/src/github.com/projectcalico/calico:rw \
