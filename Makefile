@@ -187,7 +187,7 @@ python-ut: python/calico/felix/felixbackend_pb2.py
 
 .PHONY: go-ut
 go-ut: golang-build-image go/vendor/.up-to-date go/felix/proto/felixbackend.pb.go
-	$(DOCKER_RUN) -ti \
+	$(DOCKER_RUN) \
 	    --net=host \
 	    -v $${PWD}:/go/src/github.com/projectcalico/calico:rw \
 	    -v $$HOME/.glide:/.glide:rw \
