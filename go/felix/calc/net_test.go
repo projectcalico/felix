@@ -35,3 +35,8 @@ func mustParseNet(n string) net.IPNet {
 	}
 	return *cidr
 }
+
+func mustParseIP(s string) net.IP {
+	ip := net2.ParseIP(s)
+	return net.IP{ip}
+}

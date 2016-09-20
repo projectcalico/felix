@@ -103,6 +103,47 @@ var localWlEp2 = WorkloadEndpoint{
 	},
 }
 
+
+var hostEpWithName = HostEndpoint{
+	Name:       "eth1",
+	ProfileIDs: []string{"prof-1", "prof-2", "prof-missing"},
+	ExpectedIPv4Addrs: []net.IP{mustParseIP("10.0.0.1"),
+		mustParseIP("10.0.0.2")},
+	ExpectedIPv6Addrs: []net.IP{mustParseIP("fc00:fe11::1"),
+		mustParseIP("fc00:fe11::2")},
+	Labels: map[string]string{
+		"id": "loc-ep-1",
+		"a":  "a",
+		"b":  "b",
+	},
+}
+
+var hostEpWithNameKey = HostEndpointKey{
+	Hostname:localHostname,
+	EndpointID:"named",
+}
+var hostEpWithNameId = "named"
+
+var hostEp2NoName = HostEndpoint{
+	ProfileIDs: []string{"prof-2", "prof-3"},
+	ExpectedIPv4Addrs: []net.IP{mustParseIP("10.0.0.2"),
+		mustParseIP("10.0.0.3")},
+	ExpectedIPv6Addrs: []net.IP{mustParseIP("fc00:fe11::2"),
+		mustParseIP("fc00:fe11::3")},
+	Labels: map[string]string{
+		"id": "loc-ep-2",
+		"a":  "a",
+		"b":  "b2",
+	},
+}
+
+var hostEp2NoNameKey = HostEndpointKey{
+	Hostname:localHostname,
+	EndpointID:"unnamed",
+}
+var hostEpNoNameId = "unnamed"
+
+
 // Canned tiers/policies.
 
 var order10 = float32(10)
@@ -223,6 +264,44 @@ var localEp1WithPolicy = withPolicy.withKVUpdates(
 		{"tier-1", []string{"pol-1"}},
 	},
 ).withName("ep1 local, policy")
+
+var hostEp1WithPolicy = withPolicy.withKVUpdates(
+	KVPair{Key: hostEpWithNameKey, Value: &hostEpWithName},
+).withIPSet(allSelectorId, []string{
+	"10.0.0.1", // ep1
+	"fc00:fe11::1",
+	"10.0.0.2", // ep1 and ep2
+	"fc00:fe11::2",
+}).withIPSet(bEqBSelectorId, []string{
+	"10.0.0.1",
+	"fc00:fe11::1",
+	"10.0.0.2",
+	"fc00:fe11::2",
+}).withActivePolicies(
+	proto.PolicyID{"tier-1", "pol-1"},
+).withEndpoint(
+	hostEpWithNameId,
+	[]tierInfo{
+		{"tier-1", []string{"pol-1"}},
+	},
+).withName("host ep1, policy")
+
+var hostEp2WithPolicy = withPolicy.withKVUpdates(
+	KVPair{Key: hostEp2NoNameKey, Value: &hostEp2NoName},
+).withIPSet(allSelectorId, []string{
+	"10.0.0.2", // ep1 and ep2
+	"fc00:fe11::2",
+	"10.0.0.3", // ep2
+	"fc00:fe11::3",
+}).withIPSet(bEqBSelectorId, []string{
+}).withActivePolicies(
+	proto.PolicyID{"tier-1", "pol-1"},
+).withEndpoint(
+	hostEpNoNameId,
+	[]tierInfo{
+		{"tier-1", []string{"pol-1"}},
+	},
+).withName("host ep2, policy")
 
 // Policy ordering tests.  We keep the names of the policies the same but we
 // change their orders to check that order trumps name.
@@ -493,6 +572,9 @@ var baseTests = []StateList{
 		localEp1WithPolicy,
 		localEp1WithTiersAlpha2,
 		localEpsWithProfile},
+
+	// Host endpoint tests.
+	{hostEp1WithPolicy, hostEp2WithPolicy},
 }
 
 type StateList []State
@@ -625,7 +707,7 @@ var _ = Describe("Calculation graph", func() {
 						"Active profile IDs were incorrect after moving to state: %v",
 						state.Name)
 				}))
-				It("should calculate correct workload endpoint policies", iterStates(func() {
+				It("should calculate correct policies", iterStates(func() {
 					Expect(tracker.endpointToPolicyOrder).To(Equal(state.ExpectedEndpointPolicyOrder),
 						"Endpoint policy order incorrect after moving to state: %v",
 						state.Name)
@@ -712,6 +794,18 @@ func (s *stateTracker) onEvent(event interface{}) {
 	case *proto.WorkloadEndpointRemove:
 		id := workloadId(*event.Id)
 		delete(s.endpointToPolicyOrder, id.String())
+	case *proto.HostEndpointUpdate:
+		tiers := event.Endpoint.Tiers
+		tierInfos := make([]tierInfo, len(tiers))
+		for i, tier := range tiers {
+			tierInfos[i].Name = tier.Name
+			tierInfos[i].PolicyNames = tier.Policies
+		}
+		id := hostEpId(*event.Id)
+		s.endpointToPolicyOrder[id.String()] = tierInfos
+	case *proto.HostEndpointRemove:
+		id := hostEpId(*event.Id)
+		delete(s.endpointToPolicyOrder, id.String())
 	}
 }
 
@@ -729,4 +823,10 @@ type workloadId proto.WorkloadEndpointID
 func (w *workloadId) String() string {
 	return fmt.Sprintf("%v/%v/%v",
 		w.OrchestratorId, w.WorkloadId, w.EndpointId)
+}
+
+type hostEpId proto.HostEndpointID
+
+func (i *hostEpId) String() string {
+	return i.EndpointId
 }
