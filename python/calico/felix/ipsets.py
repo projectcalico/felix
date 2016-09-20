@@ -220,7 +220,7 @@ class IpsetManager(ReferenceManager):
     def on_ipset_removed(self, ipset_id):
         _log.debug("IP set %s no longer active.", ipset_id)
 
-        self._pre_calc_ipsets_by_id.pop(ipset_id)
+        self._pre_calc_ipsets_by_id.pop(ipset_id, None)
         self._pre_calc_added_ips_by_id.pop(ipset_id, None)
         self._pre_calc_removed_ips_by_id.pop(ipset_id, None)
 
