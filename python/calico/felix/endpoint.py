@@ -381,7 +381,7 @@ class EndpointManager(ReferenceManager):
         for combined_id, host_ep in sorted(self.host_eps_by_id.iteritems(),
                                            key=lambda h: repr(h[0])):
             addrs_key = "expected_ipv%s_addrs" % self.ip_version
-            if "name" in host_ep:
+            if host_ep.get("name") is not None:
                 # This interface has an explicit name in the data so it's
                 # already resolved.
                 resolved_id = combined_id.resolve(host_ep["name"])

@@ -1019,7 +1019,7 @@ class FelixIptablesGenerator(FelixPlugin):
                     "mark": mark_bit,
                 }
             )
-            if "log_prefix" in rule:
+            if rule.get("log_prefix") is not None:
                 # We've been asked to log when we hit this rule.
                 extra_rules.append(
                     mark_match_fragment + "--jump " +
