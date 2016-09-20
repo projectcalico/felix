@@ -334,6 +334,8 @@ func convertRules(in []*ParsedRule) (out []*proto.Rule) {
 
 func convertRule(in *ParsedRule) *proto.Rule {
 	out := &proto.Rule{
+		Action: in.Action,
+
 		Protocol:    convertProtocol(in.Protocol),
 		NotProtocol: convertProtocol(in.NotProtocol),
 
