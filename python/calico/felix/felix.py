@@ -20,7 +20,21 @@ felix.felix
 
 The main logic for Felix.
 """
-# Monkey-patch before we do anything else...
+# CentOS/RHEL 7 has a Python that thinks it is 2.7.5, but is actually heavily
+# patched with various backports, and in particular with SSL-related changes
+# for PEP 466, which in the mainline were introduced in Python 2.7.9.  gevent
+# (>= 1.0.2) has support for modifying its monkey-patching accordingly, but
+# that is conditional on whether it thinks the Python version is >= 2.7.9.
+# Happily gevent has a global variable for that, so here we set that global
+# variable to indicate that we are effectively - so far as the SSL-related
+# things that gevent patches are concerned - running on 2.7.9.
+try:
+    from gevent import hub
+    hub.PYGTE279 = True
+except (ImportError, AttributeError):
+    pass
+
+# Now monkey-patch before we do anything else...
 from gevent import monkey
 monkey.patch_all()
 
@@ -87,7 +101,7 @@ def _main_greenlet():
 
         # Ensure the Kernel's global options are correctly configured for
         # Calico.
-        devices.configure_global_kernel_config()
+        devices.configure_global_kernel_config(config)
 
         # Check the commands we require are present.
         futils.check_command_deps()
@@ -147,7 +161,16 @@ def _main_greenlet():
             v4_fip_manager,
         ]
 
-        v6_enabled, ipv6_reason = futils.ipv6_supported()
+        # Determine if ipv6 is enabled using the config option.
+        if config.IPV6_SUPPORT == "true":
+            v6_enabled = True
+            ipv6_reason = None
+        elif config.IPV6_SUPPORT == "auto":
+            v6_enabled, ipv6_reason = futils.detect_ipv6_supported()
+        else:
+            v6_enabled = False
+            ipv6_reason = "Ipv6Support is 'false'"
+
         if v6_enabled:
             v6_raw_updater = IptablesUpdater("raw", ip_version=6, config=config)
             v6_filter_updater = IptablesUpdater("filter", ip_version=6,

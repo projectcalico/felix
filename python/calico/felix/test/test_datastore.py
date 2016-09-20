@@ -102,6 +102,7 @@ class TestDatastoreAPI(BaseTestCase):
         self.m_config.ETCD_KEY_FILE = None
         self.m_config.ETCD_CERT_FILE = None
         self.m_config.ETCD_CA_FILE = None
+        self.m_config.USAGE_REPORT = False
         self.m_hosts_ipset = Mock(spec=IpsetActor)
         with patch("calico.felix.datastore.DatastoreReader",
                    autospec=True) as m_etcd_watcher:
@@ -170,6 +171,7 @@ class TestEtcdWatcher(BaseTestCase):
         self.m_config.ETCD_KEY_FILE = None
         self.m_config.ETCD_CERT_FILE = None
         self.m_config.ETCD_CA_FILE = None
+        self.m_config.USAGE_REPORT = False
         self.m_hosts_ipset = Mock(spec=IpsetActor)
         self.m_api = Mock(spec=DatastoreAPI)
         self.m_status_rep = Mock(spec=DatastoreWriter)
@@ -689,6 +691,33 @@ class TestEtcdWatcher(BaseTestCase):
         m_response.value = value
         self.watcher.dispatcher.handle_event(m_response)
 
+    @patch("gevent.sleep", autospec=True)
+    def test_usage_report_disabled(self,m_sleep):
+        self.m_config.USAGE_REPORT = False
+        self.watcher._periodically_usage_report()
+
+    @patch("calico.felix.futils.report_usage_and_get_warnings", autospec=True)
+    @patch("pkg_resources.require", autospec=True)
+    @patch("random.random", autospec=True)
+    @patch("gevent.sleep", autospec=True)
+    def test_usage_report_enabled(self, m_sleep, m_random, m_pkg, m_report):
+
+        with patch.object(self.watcher, "estimated_host_count") as m_host_count:
+            m_host_count.side_effect = [RuntimeError]
+            m_host_count.return_value = 1
+
+            m_report.side_effect = RuntimeError
+            self.m_config.USAGE_REPORT = True
+            m_random.return_value = 0
+            require = Mock()
+            require.version = "1.4.0"
+            m_pkg.return_value = [require]
+
+
+    def test_usage_report_disabled(self):
+        self.m_config.USAGE_REPORT = 0
+        # self.m_periodically_usage_report()
+
 
 @skip("golang rewrite")
 class TestEtcdReporting(BaseTestCase):
@@ -701,6 +730,7 @@ class TestEtcdReporting(BaseTestCase):
         self.m_config.ETCD_KEY_FILE = None
         self.m_config.ETCD_CERT_FILE = None
         self.m_config.ETCD_CA_FILE = None
+        self.m_config.USAGE_REPORT = False
         self.m_config.HOSTNAME = "hostname"
         self.m_config.RESYNC_INTERVAL = 0
         self.m_config.REPORTING_INTERVAL_SECS = 1
@@ -779,6 +809,7 @@ class TestStatusReporter(BaseTestCase):
         self.m_config.ETCD_KEY_FILE = None
         self.m_config.ETCD_CERT_FILE = None
         self.m_config.ETCD_CA_FILE = None
+        self.m_config.USAGE_REPORT = False
         self.m_config.HOSTNAME = "foo"
         self.m_config.REPORT_ENDPOINT_STATUS = True
         self.m_config.ENDPOINT_REPORT_DELAY = 1

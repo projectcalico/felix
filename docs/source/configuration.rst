@@ -76,6 +76,10 @@ The full list of parameters which can be set is as follows.
 +----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
 | Setting                          | Default                               | Meaning                                                                                   |
 +==================================+=======================================+===========================================================================================+
+| EtcdEndpoints                    | <EtcdScheme>://<EtcdAddr>             | Comma separated list of etcd endpoints, of the form scheme://address:port.  For example,  |
+|                                  |                                       | "https://1.2.3.4:2379,https://1.2.3.5:2379".  This option overrides EtcdScheme and        |
+|                                  |                                       | EtcdAddr.                                                                                 |
++----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
 | EtcdAddr                         | localhost:4001                        | The location (IP / hostname and port) of the etcd node or proxy that Felix should connect |
 |                                  |                                       | to.                                                                                       |
 +----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
@@ -119,6 +123,9 @@ The full list of parameters which can be set is as follows.
 |                                  |                                       | OpenStack deployments, this should be set to "tap".  Calico polices all traffic to/from   |
 |                                  |                                       | interfaces with this prefix.  Calico blocks traffic to/from such interfaces by default.   |
 +----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
+| UsageReportingEnabled            | True                                  | Periodically report cluster version, hostname, size and guid to projectcalico.org.        |
+|                                  |                                       | Receive version deprecation / security warnings.                                          |
++----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
 | LogFilePath                      | /var/log/calico/felix.log             | The full path to the felix log. Set to "none" to disable file logging.                    |
 +----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
 | EtcdDriverLogFilePath            | /var/log/calico/felix-etcd.log        | Felix's etcd driver has its own log file. This parameter contains its full path.          |
@@ -153,7 +160,7 @@ The full list of parameters which can be set is as follows.
 |                                  |                                       | number with at least 8 bits set, none of which clash with any other mark bits in use on   |
 |                                  |                                       | the system.                                                                               |
 +----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
-| PrometheusMetricsEnabled         | "false"                               | Set to "true" to enable the experimental Prometheus metrics server in Felix.              |
+| PrometheusMetricsEnabled         | False                                 | Set to True to enable the experimental Prometheus metrics server in Felix.                |
 +----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
 | PrometheusMetricsPort            | 9091                                  | TCP port that the Prometheus metrics server should bind to.                               |
 +----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
@@ -167,6 +174,11 @@ The full list of parameters which can be set is as follows.
 |                                  |                                       | endpoints to irrespective of the security policy.  This is useful to avoid accidently     |
 |                                  |                                       | cutting off a host with incorrect configuration.  The default value opens etcd's standard |
 |                                  |                                       | ports to ensure that Felix does not get cut off from etcd.                                |
++----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
+| Ipv6Support                      | auto                                  | Whether IPv6 support is enabled.  If 'true', Felix will program ip6tables rules           |
+|                                  |                                       | and any IPv6 routes; if 'false', Felix will not provide any IPv6 function.  If set        |
+|                                  |                                       | to 'auto', Felix will attempt to detect whether the system supports                       |
+|                                  |                                       | IPv6 and use it if it does.                                                               |
 +----------------------------------+---------------------------------------+-------------------------------------------------------------------------------------------+
 
 
