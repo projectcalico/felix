@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"time"
+	"reflect"
 )
 
 const usage = `Felix, the Calico per-host daemon.
@@ -343,15 +344,23 @@ func (fc *DataplaneConn) sendMessagesToDataplaneDriver() {
 	defer func() {
 		fc.failed <- true
 	}()
+
+	var config map[string]string
 	for {
 		msg := <-fc.toFelix
 
-		switch msg.(type) {
+		switch msg := msg.(type) {
 		case *proto.InSync:
 			if !fc.datastoreInSync {
 				fc.datastoreInSync = true
 				fc.inSync <- true
 			}
+		case *proto.ConfigUpdate:
+			if config != nil && !reflect.DeepEqual(msg.Config, config) {
+				log.Fatalf("Felix configuration changed; need to restart. "+
+					"Old config: %v; new config: %v", config, msg.Config)
+			}
+			config = msg.Config
 		}
 
 		fc.marshalToDataplane(msg)
