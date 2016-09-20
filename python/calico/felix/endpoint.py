@@ -368,6 +368,7 @@ class EndpointManager(ReferenceManager):
         """
         # Invert the interface name to IP mapping to allow us to do an IP to
         # interface name lookup.
+        _log.debug("Resolving host endpoints with known interfaces.")
         iface_names_by_ip = defaultdict(set)
         for iface, ips in self.host_ep_ips_by_iface.iteritems():
             for ip in ips:
@@ -378,12 +379,15 @@ class EndpointManager(ReferenceManager):
         # For repeatability, we sort the endpoint data.  We don't care what
         # the sort order is, only that it's stable so we just use the repr()
         # of the ID.
+        addrs_key = "expected_ipv%s_addrs" % self.ip_version
         for combined_id, host_ep in sorted(self.host_eps_by_id.iteritems(),
                                            key=lambda h: repr(h[0])):
-            addrs_key = "expected_ipv%s_addrs" % self.ip_version
+            _log.debug("Examining: %s = %s", combined_id, host_ep)
             if host_ep.get("name") is not None:
                 # This interface has an explicit name in the data so it's
                 # already resolved.
+                _log.debug("Host endpoint has explicit name: %s.",
+                           host_ep["name"])
                 resolved_id = combined_id.resolve(host_ep["name"])
                 resolved_ifaces[resolved_id] = host_ep
             elif addrs_key in host_ep:
