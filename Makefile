@@ -193,7 +193,7 @@ go-ut: golang-build-image go/vendor/.up-to-date go/felix/proto/felixbackend.pb.g
 	    -v $$HOME/.glide:/.glide:rw \
 	    -w /go/src/github.com/projectcalico/calico/go \
 	    calico-golang-build \
-	    ginkgo -v -r
+	    ginkgo -r
 
 .PHONY: ut
 ut: python-ut go-ut
