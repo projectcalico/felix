@@ -34,6 +34,9 @@ import (
 	"os/exec"
 	"time"
 	"reflect"
+	"syscall"
+	"fmt"
+	"os/signal"
 )
 
 const usage = `Felix, the Calico per-host daemon.
@@ -161,10 +164,22 @@ configRetry:
 	if err := cmd.Start(); err != nil {
 		log.Fatalf("Failed to start dataplane driver: %v", err)
 	}
+	failureReportChan := make(chan string)
+	// Start a thread to shut this process down if the driver fails.
 	go func() {
 		err := cmd.Wait()
-		log.Fatalf("Dataplane driver died, must restart: %v", err)
+		failureReportChan <- fmt.Sprintf("Dataplane driver process failed: %v", err)
 	}()
+
+	termSignalChan := make(chan os.Signal)
+	signal.Notify(termSignalChan, syscall.SIGTERM)
+
+	// Once we've got to this point, the dataplane driver is running.
+	// Start a goroutine to sequence the shutdown if we hit an error or
+	// get sent a TERM signal.  This is done on a best-effort basis.  If
+	// we fail to shut down the driver it will exit when its pipe is
+	// closed.
+	go manageShutdown(termSignalChan, failureReportChan, cmd)
 
 	// Now the sub-process is running, close our copy of the file handles
 	// for the child's end of the pipes.
@@ -179,6 +194,31 @@ configRetry:
 	felixConn := NewDataplaneConn(configParams, datastore, toDriverW, fromDriverR)
 	felixConn.Start()
 	felixConn.Join()
+	failureReportChan <- "Dataplane driver communication thread failed"
+	time.Sleep(5 * time.Second)
+	log.Fatal("Managed shutdown failed, exiting.")
+}
+
+func manageShutdown(osSignal <-chan os.Signal, failureReason <-chan string, driverCmd *exec.Cmd) {
+	select {
+	case sig := <- osSignal:
+		log.Infof("Received OS signal %v; shutting down.", sig)
+	case failureReason := <- failureReason:
+		log.Errorf("Detected failure: %v; shutting down.", failureReason)
+	}
+
+	// Make sure we don't wait for ever if the driver is unresponsive.
+	go func() {
+		time.Sleep(5)
+		log.Fatal("Failed to wait for driver to exit, giving up.")
+	}()
+
+	// Signal to the driver to exit.
+	driverCmd.Process.Kill()
+	driverCmd.Wait()
+
+	// Then exit our process.
+	syscall.Exit(1)
 }
 
 func loadConfigFromDatastore(datastore bapi.Client, hostname string) (globalConfig, hostConfig map[string]string) {
@@ -489,5 +529,4 @@ func (fc *DataplaneConn) Start() {
 
 func (fc *DataplaneConn) Join() {
 	_ = <-fc.failed
-	log.Fatal("Background thread failed")
 }
