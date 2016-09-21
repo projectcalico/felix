@@ -19,7 +19,12 @@ import (
 	. "github.com/onsi/gomega"
 
 	"testing"
+	"github.com/projectcalico/calico/go/felix/logutils"
 )
+
+func init() {
+	logutils.HookLogrusForGinkgo()
+}
 
 func TestMultidict(t *testing.T) {
 	RegisterFailHandler(Fail)

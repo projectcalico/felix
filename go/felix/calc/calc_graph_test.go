@@ -17,7 +17,6 @@ package calc_test
 import (
 	. "github.com/projectcalico/calico/go/felix/calc"
 
-	"flag"
 	"fmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -28,19 +27,9 @@ import (
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	. "github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/net"
-	"os"
 	"reflect"
 	"strings"
 )
-
-func init() {
-	// FIXME What to do for logs in tests?
-	flag.Parse()
-	if os.Getenv("GLOG") != "" {
-		flag.Lookup("logtostderr").Value.Set("true")
-		flag.Lookup("v").Value.Set(os.Getenv("GLOG"))
-	}
-}
 
 // Canned hostnames.
 
