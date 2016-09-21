@@ -181,6 +181,10 @@ update-tools:
 	go get -u github.com/Masterminds/glide
 	go get -u github.com/onsi/ginkgo/ginkgo
 
+.PHONY: go-fmt
+go-fmt:
+	cd go && glide nv | xargs go fmt
+
 .PHONY: python-ut
 python-ut: python/calico/felix/felixbackend_pb2.py
 	cd python && ./run-unit-test.sh
