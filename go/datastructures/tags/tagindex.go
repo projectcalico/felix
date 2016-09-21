@@ -74,7 +74,7 @@ func (idx *TagIndex) SetTagInactive(tag string) {
 	if !idx.activeTags[tag] {
 		return
 	}
-	log.Infof("Tag no longer active: %v")
+	log.Infof("Tag no longer active: %v", tag)
 	delete(idx.activeTags, tag)
 	for key, _ := range idx.matches {
 		if key.tag == tag {

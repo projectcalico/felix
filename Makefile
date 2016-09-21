@@ -114,7 +114,7 @@ python/calico/felix/felixbackend_pb2.py: go/felix/proto/felixbackend.proto
 
 .PHONY: update-vendor
 update-vendor:
-	cd go && glide up
+	cd go && glide up --strip-vendor
 
 go/vendor go/vendor/.up-to-date: go/glide.lock
 	# Make sure the docker image exists.  Since it's a PHONY, we can't add it
