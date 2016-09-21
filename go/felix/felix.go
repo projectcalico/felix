@@ -391,11 +391,16 @@ func (fc *DataplaneConn) sendMessagesToDataplaneDriver() {
 
 		switch msg := msg.(type) {
 		case *proto.InSync:
+			log.Info("Datastore now in sync.")
 			if !fc.datastoreInSync {
 				fc.datastoreInSync = true
 				fc.inSync <- true
 			}
 		case *proto.ConfigUpdate:
+			log.WithFields(log.Fields{
+				"old": config,
+				"new": msg.Config,
+			}).Info("Config updated.")
 			if config != nil && !reflect.DeepEqual(msg.Config, config) {
 				log.Fatalf("Felix configuration changed; need to restart. "+
 					"Old config: %v; new config: %v", config, msg.Config)
@@ -498,13 +503,19 @@ func (fc *DataplaneConn) Start() {
 	// Start background thread to read messages from dataplane driver.
 	go fc.readMessagesFromDataplane()
 
+	// Create the datastore syncer, which will feed the calculation graph.
+	syncerToValidator := calc.NewSyncerCallbacksDecoupler()
+	syncer := fc.datastore.Syncer(syncerToValidator)
+
+	validatorToGraph := calc.NewSyncerCallbacksDecoupler()
+	validator := calc.NewValidationFilter(validatorToGraph)
+	go syncerToValidator.SendTo(validator)
+
 	// Create the ipsets/active policy calculation graph, which will
 	// do the dynamic calculation of ipset memberships and active policies
 	// etc.
 	asyncCalcGraph := calc.NewAsyncCalcGraph(fc.config, fc.toFelix)
-
-	// Create the datastore syncer, which will feed the calculation graph.
-	syncer := fc.datastore.Syncer(asyncCalcGraph)
+	go validatorToGraph.SendTo(asyncCalcGraph)
 	log.Debugf("Created Syncer: %#v", syncer)
 
 	// Start the background processing threads.

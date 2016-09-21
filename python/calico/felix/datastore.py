@@ -690,6 +690,8 @@ def convert_pb_rules(pb_rules):
                    pb_rule, pb_rule.__class__)
         d_rule = {}
         for fd, value in pb_rule.ListFields():
+            if value is None:
+                continue
             if fd.type == FieldDescriptor.TYPE_STRING and value == "":
                 continue
             if fd.type in (FieldDescriptor.TYPE_INT32,

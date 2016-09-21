@@ -654,6 +654,7 @@ var _ = Describe("Calculation graph", func() {
 			// Always worth adding an empty to the end of the test.
 			expandedTest = append(expandedTest, empty)
 			Describe(fmt.Sprintf("with input states %v %v", test, desc), func() {
+				var validationFilter *ValidationFilter
 				var calcGraph *store.Dispatcher
 				var tracker *stateTracker
 				var eventBuf *EventBuffer
@@ -665,7 +666,8 @@ var _ = Describe("Calculation graph", func() {
 					eventBuf = NewEventBuffer(tracker)
 					eventBuf.Callback = tracker.onEvent
 					calcGraph = NewCalculationGraph(eventBuf, localHostname)
-					calcGraph.OnDatamodelStatus(api.InSync)
+					validationFilter = NewValidationFilter(calcGraph)
+					validationFilter.OnStatusUpdated(api.InSync)
 					lastState = empty
 					state = empty
 				})
@@ -682,7 +684,7 @@ var _ = Describe("Calculation graph", func() {
 							kvDeltas := state.KVDeltas(lastState)
 							for _, kv := range kvDeltas {
 								fmt.Fprintf(GinkgoWriter, "       -> Injecting KV: %v\n", kv)
-								calcGraph.OnUpdate(kv)
+								validationFilter.OnUpdates([]KVPair{kv})
 							}
 							fmt.Fprintln(GinkgoWriter, "       -- <<FLUSH>>")
 							eventBuf.Flush()
