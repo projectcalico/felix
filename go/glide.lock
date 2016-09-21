@@ -1,5 +1,5 @@
-hash: d9e4ca898e30d6128330eb86dd80dc652953ebb78cd39913eb7760226a527dbf
-updated: 2016-09-21T12:03:47.420525355+01:00
+hash: cad392c82648cfc68227182598d6974d26457f37781f2134729643c1c7958b59
+updated: 2016-09-21T15:26:38.937380406+01:00
 imports:
 - name: github.com/coreos/etcd
   version: e93ee6179c64cac4d8764870b8267f05c1618c40
@@ -37,7 +37,7 @@ imports:
 - name: github.com/Sirupsen/logrus
   version: 4b6ea7319e214d98c938f12692336f7ca9348d6b
 - name: github.com/tigera/libcalico-go
-  version: e9224de4475b4a885a28e8a53b826c4398763756
+  version: c4f062a4ccd9005e44d68ce7f0ec70a9a1d2c199
   subpackages:
   - lib
   - lib/api
