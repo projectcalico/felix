@@ -92,7 +92,6 @@ var localWlEp2 = WorkloadEndpoint{
 	},
 }
 
-
 var hostEpWithName = HostEndpoint{
 	Name:       "eth1",
 	ProfileIDs: []string{"prof-1", "prof-2", "prof-missing"},
@@ -108,8 +107,8 @@ var hostEpWithName = HostEndpoint{
 }
 
 var hostEpWithNameKey = HostEndpointKey{
-	Hostname:localHostname,
-	EndpointID:"named",
+	Hostname:   localHostname,
+	EndpointID: "named",
 }
 var hostEpWithNameId = "named"
 
@@ -127,11 +126,10 @@ var hostEp2NoName = HostEndpoint{
 }
 
 var hostEp2NoNameKey = HostEndpointKey{
-	Hostname:localHostname,
-	EndpointID:"unnamed",
+	Hostname:   localHostname,
+	EndpointID: "unnamed",
 }
 var hostEpNoNameId = "unnamed"
-
 
 // Canned tiers/policies.
 
@@ -282,8 +280,7 @@ var hostEp2WithPolicy = withPolicy.withKVUpdates(
 	"fc00:fe11::2",
 	"10.0.0.3", // ep2
 	"fc00:fe11::3",
-}).withIPSet(bEqBSelectorId, []string{
-}).withActivePolicies(
+}).withIPSet(bEqBSelectorId, []string{}).withActivePolicies(
 	proto.PolicyID{"tier-1", "pol-1"},
 ).withEndpoint(
 	hostEpNoNameId,
@@ -356,6 +353,7 @@ var localEp1WithTiers321 = tierOrderState(
 	[3]float32{order30, order20, order10},
 	[3]string{"tier-3", "tier-2", "tier-1"},
 )
+
 // These tests use the same order for each tier, checking that the name is
 // used as a tie breaker.
 var localEp1WithTiersAlpha = tierOrderState(

@@ -16,7 +16,7 @@ package buildinfo
 
 // Filled in by the build process.
 var (
-	Version string
-	BuildDate string
+	Version     string
+	BuildDate   string
 	GitRevision string
 )

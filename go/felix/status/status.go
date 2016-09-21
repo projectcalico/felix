@@ -17,12 +17,12 @@ package status
 import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/calico/go/datastructures/set"
+	"github.com/projectcalico/calico/go/felix/jitter"
 	"github.com/projectcalico/calico/go/felix/proto"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/errors"
 	"time"
-	"github.com/projectcalico/calico/go/felix/jitter"
 )
 
 type EndpointStatusReporter struct {
@@ -66,7 +66,6 @@ func (esr *EndpointStatusReporter) loopHandlingEndpointStatusUpdates() {
 	resyncRequested := false
 	updatesAllowed := true
 
-	// BUG(smc) Should jitter the tickers.
 	resyncSchedulingTicker := jitter.NewTicker(esr.resyncInterval, esr.resyncInterval/10)
 	updateRateLimitTicker := jitter.NewTicker(esr.reportingDelay, esr.reportingDelay/10)
 	for {

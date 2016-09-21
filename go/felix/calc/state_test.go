@@ -28,10 +28,10 @@ type State struct {
 	Name string
 	// List of KVPairs that are in the datastore.  Stored as a list rather
 	// than a map to give us a deterministic ordering of injection.
-	DatastoreState     []KVPair
-	ExpectedIPSets     map[string]set.Set
-	ExpectedPolicyIDs  set.Set
-	ExpectedProfileIDs set.Set
+	DatastoreState              []KVPair
+	ExpectedIPSets              map[string]set.Set
+	ExpectedPolicyIDs           set.Set
+	ExpectedProfileIDs          set.Set
 	ExpectedEndpointPolicyOrder map[string][]tierInfo
 }
 
@@ -44,10 +44,10 @@ func (s State) String() string {
 
 func NewState() State {
 	return State{
-		DatastoreState:     []KVPair{},
-		ExpectedIPSets:     make(map[string]set.Set),
-		ExpectedPolicyIDs:  set.New(),
-		ExpectedProfileIDs: set.New(),
+		DatastoreState:              []KVPair{},
+		ExpectedIPSets:              make(map[string]set.Set),
+		ExpectedPolicyIDs:           set.New(),
+		ExpectedProfileIDs:          set.New(),
 		ExpectedEndpointPolicyOrder: make(map[string][]tierInfo),
 	}
 }

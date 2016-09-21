@@ -16,6 +16,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	log "github.com/Sirupsen/logrus"
 	"github.com/docopt/docopt-go"
 	pb "github.com/gogo/protobuf/proto"
@@ -32,11 +33,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"time"
+	"os/signal"
 	"reflect"
 	"syscall"
-	"fmt"
-	"os/signal"
+	"time"
 )
 
 const usage = `Felix, the Calico per-host daemon.
@@ -201,9 +201,9 @@ configRetry:
 
 func manageShutdown(osSignal <-chan os.Signal, failureReason <-chan string, driverCmd *exec.Cmd) {
 	select {
-	case sig := <- osSignal:
+	case sig := <-osSignal:
 		log.Infof("Received OS signal %v; shutting down.", sig)
-	case failureReason := <- failureReason:
+	case failureReason := <-failureReason:
 		log.Errorf("Detected failure: %v; shutting down.", failureReason)
 	}
 
@@ -361,7 +361,7 @@ func (fc *DataplaneConn) handleProcessStatusUpdate(msg *proto.ProcessStatusUpdat
 	kv := model.KVPair{
 		Key:   model.ActiveStatusReportKey{Hostname: fc.config.FelixHostname},
 		Value: &statusReport,
-		TTL: time.Duration(fc.config.ReportingTTLSecs) * time.Second,
+		TTL:   time.Duration(fc.config.ReportingTTLSecs) * time.Second,
 	}
 	_, err := fc.datastore.Apply(&kv)
 	if err != nil {

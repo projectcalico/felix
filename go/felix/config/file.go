@@ -15,8 +15,8 @@
 package config
 
 import (
-	"github.com/go-ini/ini"
 	log "github.com/Sirupsen/logrus"
+	"github.com/go-ini/ini"
 	"io/ioutil"
 	"os"
 )

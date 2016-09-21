@@ -15,10 +15,10 @@
 package calc
 
 import (
+	"github.com/Sirupsen/logrus"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/validator"
-	"github.com/Sirupsen/logrus"
 	"reflect"
 )
 
@@ -41,7 +41,7 @@ func (v *ValidationFilter) OnUpdates(updates []model.KVPair) {
 	filteredUpdates := make([]model.KVPair, len(updates))
 	for i, update := range updates {
 		logCxt := logrus.WithFields(logrus.Fields{
-			"key": update.Key,
+			"key":   update.Key,
 			"value": update.Value,
 		})
 		logCxt.Debug("Validating KV pair.")

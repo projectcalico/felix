@@ -15,16 +15,16 @@
 package jitter
 
 import (
-	"time"
 	"github.com/Sirupsen/logrus"
 	"math/rand"
+	"time"
 )
 
 // Ticker tries to emit events on channel C at minDuration intervals plus up to maxJitter.
 type Ticker struct {
-	C <-chan time.Time
+	C           <-chan time.Time
 	minDuration time.Duration
-	maxJitter time.Duration
+	maxJitter   time.Duration
 }
 
 func NewTicker(minDuration time.Duration, maxJitter time.Duration) *Ticker {
@@ -36,9 +36,9 @@ func NewTicker(minDuration time.Duration, maxJitter time.Duration) *Ticker {
 	}
 	c := make(chan time.Time, 1)
 	ticker := &Ticker{
-		C: c,
+		C:           c,
 		minDuration: minDuration,
-		maxJitter: maxJitter,
+		maxJitter:   maxJitter,
 	}
 	go ticker.loop(c)
 	return ticker
