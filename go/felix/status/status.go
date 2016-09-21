@@ -22,6 +22,7 @@ import (
 	"github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/errors"
 	"time"
+	"github.com/projectcalico/calico/go/felix/jitter"
 )
 
 type EndpointStatusReporter struct {
@@ -66,8 +67,8 @@ func (esr *EndpointStatusReporter) loopHandlingEndpointStatusUpdates() {
 	updatesAllowed := true
 
 	// BUG(smc) Should jitter the tickers.
-	resyncSchedulingTicker := time.NewTicker(esr.resyncInterval)
-	updateRateLimitTicker := time.NewTicker(esr.reportingDelay)
+	resyncSchedulingTicker := jitter.NewTicker(esr.resyncInterval, esr.resyncInterval/10)
+	updateRateLimitTicker := jitter.NewTicker(esr.reportingDelay, esr.reportingDelay/10)
 	for {
 		select {
 		case <-resyncSchedulingTicker.C:

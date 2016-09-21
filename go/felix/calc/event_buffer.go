@@ -401,7 +401,6 @@ func convertPort(in numorstring.Port) (out *proto.PortRange) {
 	} else {
 		parts := strings.Split(in.StrVal, ":")
 		if len(parts) == 1 {
-			// BUG(smc) Handle failure to parse
 			port, _ := strconv.Atoi(parts[0])
 			out.First = int32(port)
 			out.Last = int32(port)

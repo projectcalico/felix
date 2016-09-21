@@ -14,3 +14,45 @@
 
 package jitter
 
+import (
+	"time"
+	"github.com/Sirupsen/logrus"
+	"math/rand"
+)
+
+// Ticker tries to emit events on channel C at minDuration intervals plus up to maxJitter.
+type Ticker struct {
+	C <-chan time.Time
+	minDuration time.Duration
+	maxJitter time.Duration
+}
+
+func NewTicker(minDuration time.Duration, maxJitter time.Duration) *Ticker {
+	if minDuration < 0 {
+		logrus.WithField("duration", minDuration).Panic("Negative duration")
+	}
+	if maxJitter < 0 {
+		logrus.WithField("jitter", minDuration).Panic("Negative jitter")
+	}
+	c := make(chan time.Time, 1)
+	ticker := &Ticker{
+		C: c,
+		minDuration: minDuration,
+		maxJitter: maxJitter,
+	}
+	go ticker.loop(c)
+	return ticker
+}
+
+func (t *Ticker) loop(c chan time.Time) {
+	for {
+		jitter := time.Duration(rand.Int63n(int64(t.maxJitter)))
+		delay := t.minDuration + jitter
+		time.Sleep(delay)
+		// Send best-effort then go back to sleep.
+		select {
+		case c <- time.Now():
+		default:
+		}
+	}
+}

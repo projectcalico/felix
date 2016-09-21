@@ -361,8 +361,7 @@ func (fc *DataplaneConn) handleProcessStatusUpdate(msg *proto.ProcessStatusUpdat
 	kv := model.KVPair{
 		Key:   model.ActiveStatusReportKey{Hostname: fc.config.FelixHostname},
 		Value: &statusReport,
-		// BUG(smc) Should honour TTL config
-		TTL: 90 * time.Second,
+		TTL: time.Duration(fc.config.ReportingTTLSecs) * time.Second,
 	}
 	_, err := fc.datastore.Apply(&kv)
 	if err != nil {
