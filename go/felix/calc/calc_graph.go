@@ -24,6 +24,7 @@ import (
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/hash"
+	"github.com/tigera/libcalico-go/lib/net"
 	"github.com/tigera/libcalico-go/lib/selector"
 )
 
@@ -51,11 +52,17 @@ type configCallbacks interface {
 	OnConfigUpdate(globalConfig, hostConfig map[string]string)
 }
 
+type hostIPCallbacks interface {
+	OnHostIPUpdate(hostname string, ip *net.IP)
+	OnHostIPRemove(hostname string)
+}
+
 type PipelineCallbacks interface {
 	ipSetUpdateCallbacks
 	rulesUpdateCallbacks
 	endpointCallbacks
 	configCallbacks
+	hostIPCallbacks
 }
 
 func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDispatcher *store.Dispatcher) {
@@ -173,12 +180,38 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) (sourceDi
 	// And hook its output to the callbacks.
 	polResolver.Callbacks = callbacks
 
+	// Register for host IP updates.
+	hostIPPassthru := NewHostIPPassthru(callbacks)
+	sourceDispatcher.Register(model.HostIPKey{}, hostIPPassthru)
+
 	// Register for config updates.
 	configBatcher := NewConfigBatcher(hostname, callbacks)
 	sourceDispatcher.Register(model.GlobalConfigKey{}, configBatcher)
 	sourceDispatcher.Register(model.HostConfigKey{}, configBatcher)
 
 	return sourceDispatcher
+}
+
+type HostIPPassthru struct {
+	callbacks hostIPCallbacks
+}
+
+func NewHostIPPassthru(callbacks hostIPCallbacks) *HostIPPassthru {
+	return &HostIPPassthru{callbacks: callbacks}
+}
+
+func (h *HostIPPassthru) OnUpdate(update model.KVPair) (filterOut bool) {
+	hostname := update.Key.(model.HostIPKey).Hostname
+	if update.Value == nil {
+		h.callbacks.OnHostIPRemove(hostname)
+	} else {
+		ip := update.Value.(*net.IP)
+		h.callbacks.OnHostIPUpdate(hostname, ip)
+	}
+	return false
+}
+
+func (f *HostIPPassthru) OnDatamodelStatus(status api.SyncStatus) {
 }
 
 func TagIPSetID(tagID string) string {

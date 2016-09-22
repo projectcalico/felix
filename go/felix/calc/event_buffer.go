@@ -294,6 +294,21 @@ func (buf *EventBuffer) OnEndpointTierUpdate(endpointKey model.Key,
 	}
 }
 
+func (buf *EventBuffer) OnHostIPUpdate(hostname string, ip *net.IP) {
+	buf.pendingUpdates = append(buf.pendingUpdates,
+		&proto.HostMetadataUpdate{
+			Hostname: hostname,
+			Ipv4Addr: ip.IP.String(),
+		})
+}
+
+func (buf *EventBuffer) OnHostIPRemove(hostname string) {
+	buf.pendingUpdates = append(buf.pendingUpdates,
+		&proto.HostMetadataRemove{
+			Hostname: hostname,
+		})
+}
+
 func convertBackendTierInfo(filteredTiers []endpoint.TierInfo) []*proto.TierInfo {
 	tiers := make([]*proto.TierInfo, len(filteredTiers))
 	if len(filteredTiers) > 0 {
