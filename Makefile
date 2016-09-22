@@ -202,6 +202,9 @@ go-ut: golang-build-image go/vendor/.up-to-date go/felix/proto/felixbackend.pb.g
 .PHONY: ut
 ut: python-ut go-ut
 
+go/docs/calc.pdf: go/docs/calc.dot
+	cd go/docs/ && dot -Tpdf calc.dot -o calc.pdf
+
 .PHONY: clean
 clean:
 	rm -rf bin \
@@ -210,4 +213,5 @@ clean:
 	       python/calico/felix/felixbackend_pb2.py \
 	       go/felix/proto/felixbackend.pb.go \
 	       docker-build-images/passwd \
-	       docker-build-images/group
+	       docker-build-images/group \
+	       go/docs/calc.pdf
