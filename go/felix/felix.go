@@ -505,21 +505,21 @@ func (fc *DataplaneConn) Start() {
 	// Create the datastore syncer, which will feed the calculation graph.
 	syncerToValidator := calc.NewSyncerCallbacksDecoupler()
 	syncer := fc.datastore.Syncer(syncerToValidator)
-
-	validatorToGraph := calc.NewSyncerCallbacksDecoupler()
-	validator := calc.NewValidationFilter(validatorToGraph)
-	go syncerToValidator.SendTo(validator)
+	log.Debugf("Created Syncer: %#v", syncer)
 
 	// Create the ipsets/active policy calculation graph, which will
 	// do the dynamic calculation of ipset memberships and active policies
 	// etc.
 	asyncCalcGraph := calc.NewAsyncCalcGraph(fc.config, fc.toFelix)
-	go validatorToGraph.SendTo(asyncCalcGraph)
-	log.Debugf("Created Syncer: %#v", syncer)
+
+	// Create the validator, which sits between the syncer and the
+	// calculation graph.
+	validator := calc.NewValidationFilter(asyncCalcGraph)
 
 	// Start the background processing threads.
 	log.Infof("Starting the datastore Syncer/processing graph")
 	syncer.Start()
+	go syncerToValidator.SendTo(validator)
 	asyncCalcGraph.Start()
 	log.Infof("Started the datastore Syncer/processing graph")
 
