@@ -185,6 +185,8 @@ type ParsedRules struct {
 type ParsedRule struct {
 	Action string `codec:"action,omitempty"`
 
+	IPVersion *int
+
 	Protocol *numorstring.Protocol `codec:"protocol,omitempty"`
 
 	SrcNet      *net.IPNet         `codec:"src_net,omitempty"`
@@ -217,6 +219,8 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allTagOrSels []
 
 	parsedRule = &ParsedRule{
 		Action: rule.Action,
+
+		IPVersion: rule.IPVersion,
 
 		Protocol: rule.Protocol,
 

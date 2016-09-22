@@ -21,7 +21,8 @@ import:
 - package: github.com/go-ini/ini
   version: ^1.21.0
 - package: github.com/tigera/libcalico-go
-  version: c4f062a4ccd9005e44d68ce7f0ec70a9a1d2c199
+  repo: https://github.com/fasaxc/libcalico-go.git
+  version: smc-rule-ipver
   subpackages:
   - lib
 - package: github.com/Sirupsen/logrus

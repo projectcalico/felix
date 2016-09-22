@@ -1,5 +1,5 @@
-hash: cad392c82648cfc68227182598d6974d26457f37781f2134729643c1c7958b59
-updated: 2016-09-21T15:26:38.937380406+01:00
+hash: 5210da21dfd1fd09e6ceb3f48f4a119381138acdbf7cfeb486a5b54c2d6e62b4
+updated: 2016-09-22T18:05:41.505518812+01:00
 imports:
 - name: github.com/coreos/etcd
   version: e93ee6179c64cac4d8764870b8267f05c1618c40
@@ -32,12 +32,30 @@ imports:
   version: 23def4e6c14b4da8ac2ed8007337bc5eb5007998
 - name: github.com/kelseyhightower/envconfig
   version: 1e291572dcb9ba673cdcdb15e0f422702415ebaf
+- name: github.com/onsi/ginkgo
+  version: 7b6efc7d7b052568b49ac02d3141c9d7a5a494a4
+  subpackages:
+  - config
+  - internal/codelocation
+  - internal/containernode
+  - internal/failer
+  - internal/leafnodes
+  - internal/remote
+  - internal/spec
+  - internal/specrunner
+  - internal/suite
+  - internal/testingtproxy
+  - internal/writer
+  - reporters
+  - reporters/stenographer
+  - types
 - name: github.com/satori/go.uuid
   version: 0aa62d5ddceb50dbcb909d790b5345affd3669b6
 - name: github.com/Sirupsen/logrus
   version: 4b6ea7319e214d98c938f12692336f7ca9348d6b
 - name: github.com/tigera/libcalico-go
-  version: c4f062a4ccd9005e44d68ce7f0ec70a9a1d2c199
+  version: a618167c65099a7293d6873ba46199a8671584ab
+  repo: https://github.com/fasaxc/libcalico-go.git
   subpackages:
   - lib
   - lib/api
@@ -76,23 +94,6 @@ imports:
   subpackages:
   - patricia
 testImports:
-- name: github.com/onsi/ginkgo
-  version: 7b6efc7d7b052568b49ac02d3141c9d7a5a494a4
-  subpackages:
-  - config
-  - internal/codelocation
-  - internal/containernode
-  - internal/failer
-  - internal/leafnodes
-  - internal/remote
-  - internal/spec
-  - internal/specrunner
-  - internal/suite
-  - internal/testingtproxy
-  - internal/writer
-  - reporters
-  - reporters/stenographer
-  - types
 - name: github.com/onsi/gomega
   version: d59fa0ac68bb5dd932ee8d24eed631cdd519efc3
   subpackages:

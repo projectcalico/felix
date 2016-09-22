@@ -351,6 +351,8 @@ func convertRule(in *ParsedRule) *proto.Rule {
 	out := &proto.Rule{
 		Action: in.Action,
 
+		IpVersion: convertIPVersion(in.IPVersion),
+
 		Protocol:    convertProtocol(in.Protocol),
 		NotProtocol: convertProtocol(in.NotProtocol),
 
@@ -376,6 +378,19 @@ func convertRule(in *ParsedRule) *proto.Rule {
 	}
 
 	return out
+}
+
+func convertIPVersion(in *int) proto.IPVersion {
+	if in == nil {
+		return proto.IPVersion_ANY
+	}
+	switch *in {
+	case 4:
+		return proto.IPVersion_IPV4
+	case 6:
+		return proto.IPVersion_IPV6
+	}
+	return proto.IPVersion_ANY
 }
 
 func convertProtocol(in *numorstring.Protocol) (out *proto.Protocol) {
