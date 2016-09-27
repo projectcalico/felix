@@ -359,8 +359,7 @@ func convertRule(in *ParsedRule) *proto.Rule {
 
 		IpVersion: convertIPVersion(in.IPVersion),
 
-		Protocol:    convertProtocol(in.Protocol),
-		NotProtocol: convertProtocol(in.NotProtocol),
+		Protocol: convertProtocol(in.Protocol),
 
 		SrcNet:      convertNet(in.SrcNet),
 		SrcPorts:    convertPorts(in.SrcPorts),
@@ -371,14 +370,15 @@ func convertRule(in *ParsedRule) *proto.Rule {
 		IcmpType:    convertIntPointer(in.ICMPType),
 		IcmpCode:    convertIntPointer(in.ICMPCode),
 
+		NotProtocol:    convertProtocol(in.NotProtocol),
 		NotSrcNet:      convertNet(in.NotSrcNet),
 		NotSrcPorts:    convertPorts(in.NotSrcPorts),
 		NotDstNet:      convertNet(in.NotDstNet),
 		NotDstPorts:    convertPorts(in.NotDstPorts),
 		NotSrcIpSetIds: in.NotSrcIPSetIDs,
 		NotDstIpSetIds: in.NotDstIPSetIDs,
-		NotIcmpType:    convertIntPointer(in.ICMPType),
-		NotIcmpCode:    convertIntPointer(in.ICMPCode),
+		NotIcmpType:    convertIntPointer(in.NotICMPType),
+		NotIcmpCode:    convertIntPointer(in.NotICMPCode),
 
 		LogPrefix: in.LogPrefix,
 	}
