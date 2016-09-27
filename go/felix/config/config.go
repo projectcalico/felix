@@ -54,6 +54,8 @@ const (
 	EnvironmentVariable
 )
 
+var SourcesInDescendingOrder = []Source{EnvironmentVariable, ConfigFile, DatastorePerHost, DatastoreGlobal}
+
 func (source Source) String() string {
 	switch source {
 	case Default:
@@ -138,9 +140,9 @@ type Config struct {
 	// State tracking.
 
 	// nameToSource tracks where we loaded each config param from.
-	nameToSource map[string]Source
-	RawValues    map[string]string
-	Err          error
+	sourceToRawConfig map[Source]map[string]string
+	rawValues         map[string]string
+	Err               error
 }
 
 // Load parses and merges the rawData from one particular source into this config object.
@@ -148,87 +150,93 @@ type Config struct {
 // the new value will be ignored (after validation).
 func (config *Config) UpdateFrom(rawData map[string]string, source Source) (changed bool, err error) {
 	log.Infof("Merging in config from %v: %v", source, rawData)
-	for rawName, rawValue := range rawData {
-		currentSource := config.nameToSource[rawName]
-		param, ok := knownParams[strings.ToLower(rawName)]
-		if !ok {
-			if source >= currentSource {
-				// Stash the raw value in case it's useful for
-				// a plugin.  Since we don't know the canonical
-				// name, use the raw name.
-				config.RawValues[rawName] = rawValue
-				config.nameToSource[rawName] = source
-			}
-			log.Warningf("Ignoring unknown configuration parameter: %v", rawName)
-			continue
-		}
-		metadata := param.getMetadata()
-		name := metadata.Name
-		if metadata.Local && !source.Local() {
-			log.Warningf("Ignoring local-only configuration for %v from %v",
-				name, source)
-			continue
-		}
+	// Defensively take a copy of the raw data, in case we've been handed
+	// a mutable map by mistake.
+	rawDataCopy := make(map[string]string)
+	for k, v := range rawData {
+		rawDataCopy[k] = v
+	}
+	config.sourceToRawConfig[source] = rawDataCopy
 
-		log.Infof("Parsing value for %v: %v (from %v)",
-			name, rawValue, source)
-		var value interface{}
-		if strings.ToLower(rawValue) == "none" {
-			if metadata.NonZero {
-				err = errors.New("Non-zero field cannot be set to none")
-				log.Errorf(
-					"Failed to parse value for %v: %v from source %v. %v",
-					name, rawValue, source, err)
-				config.Err = err
-				return
+	changed, err = config.resolve()
+	return
+}
+
+func (config *Config) resolve() (changed bool, err error) {
+	newRawValues := make(map[string]string)
+	nameToSource := make(map[string]Source)
+	for _, source := range SourcesInDescendingOrder {
+	valueLoop:
+		for rawName, rawValue := range config.sourceToRawConfig[source] {
+			currentSource := nameToSource[rawName]
+			param, ok := knownParams[strings.ToLower(rawName)]
+			if !ok {
+				if source >= currentSource {
+					// Stash the raw value in case it's useful for
+					// a plugin.  Since we don't know the canonical
+					// name, use the raw name.
+					newRawValues[rawName] = rawValue
+					nameToSource[rawName] = source
+				}
+				log.WithField("raw name", rawName).Info(
+					"Ignoring unknown config param.")
+				continue valueLoop
 			}
-			log.Infof("Value set to 'none', replacing with zero-value: %#v.",
-				value)
-			value = metadata.ZeroValue
-		} else {
-			value, err = param.Parse(rawValue)
-			if err != nil {
-				log.Errorf("%v (source %v)", err, source)
-				if metadata.DieOnParseFailure {
-					log.Errorf("Cannot continue with invalid value for %v.", name)
+			metadata := param.getMetadata()
+			name := metadata.Name
+			if metadata.Local && !source.Local() {
+				log.Warningf("Ignoring local-only configuration for %v from %v",
+					name, source)
+				continue valueLoop
+			}
+
+			log.Infof("Parsing value for %v: %v (from %v)",
+				name, rawValue, source)
+			var value interface{}
+			if strings.ToLower(rawValue) == "none" {
+				if metadata.NonZero {
+					err = errors.New("Non-zero field cannot be set to none")
+					log.Errorf(
+						"Failed to parse value for %v: %v from source %v. %v",
+						name, rawValue, source, err)
 					config.Err = err
 					return
-				} else {
-					log.Errorf("Replacing invalid value with default value for %v: %v",
-						name, metadata.Default)
-					value = metadata.Default
-					err = nil
+				}
+				value = metadata.ZeroValue
+				log.Infof("Value set to 'none', replacing with zero-value: %#v.",
+					value)
+			} else {
+				value, err = param.Parse(rawValue)
+				if err != nil {
+					log.Errorf("%v (source %v)", err, source)
+					if metadata.DieOnParseFailure {
+						log.Errorf("Cannot continue with invalid value for %v.", name)
+						config.Err = err
+						return
+					} else {
+						log.Errorf("Replacing invalid value with default value for %v: %v",
+							name, metadata.Default)
+						value = metadata.Default
+						err = nil
+					}
 				}
 			}
-		}
 
-		field := reflect.ValueOf(config).Elem().FieldByName(name)
-		currentValue := field.Interface()
-		if currentValue == value {
-			log.Debugf("Value of %v hasn't changed, skipping.", name)
-			continue
+			log.Infof("Parsed value for %v: %v (from %v)",
+				name, value, source)
+			if source < currentSource {
+				log.Infof("Skipping config value for %v from %v; "+
+					"already have a value from %v", source, currentSource)
+				continue
+			}
+			field := reflect.ValueOf(config).Elem().FieldByName(name)
+			field.Set(reflect.ValueOf(value))
+			newRawValues[name] = rawValue
+			nameToSource[name] = source
 		}
-
-		log.Infof("Parsed value for %v: %v (from %v)",
-			name, value, source)
-		if source < currentSource {
-			log.Infof("Skipping config value for %v from %v; "+
-				"already have a value from %v", source, currentSource)
-			continue
-		}
-		log.Infof(
-			"Now using %v value from %v (preferred to "+
-				"previous value from %v)",
-			name, source, currentSource)
-		field.Set(reflect.ValueOf(value))
-		if config.RawValues[name] != rawValue {
-			log.Infof("Configuration value %v changed from %v to %v",
-				name, config.RawValues[name], rawValue)
-			changed = true
-		}
-		config.RawValues[name] = rawValue
-		config.nameToSource[name] = source
 	}
+	changed = !reflect.DeepEqual(newRawValues, config.rawValues)
+	config.rawValues = newRawValues
 	return
 }
 
@@ -387,13 +395,17 @@ func loadParams() {
 	}
 }
 
+func (config *Config) RawValues() map[string]string {
+	return config.rawValues
+}
+
 func New() *Config {
 	if knownParams == nil {
 		loadParams()
 	}
 	p := &Config{
-		RawValues:    make(map[string]string),
-		nameToSource: make(map[string]Source),
+		rawValues:         make(map[string]string),
+		sourceToRawConfig: make(map[Source]map[string]string),
 	}
 	for _, param := range knownParams {
 		param.setDefault(p)

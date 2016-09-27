@@ -33,6 +33,7 @@ type EventHandler func(message interface{})
 
 type configInterface interface {
 	UpdateFrom(map[string]string, config.Source) (changed bool, err error)
+	RawValues() map[string]string
 }
 
 type EventBuffer struct {
@@ -171,20 +172,25 @@ func (buf *EventBuffer) flushAddsOrRemoves(setID string) {
 }
 
 func (buf *EventBuffer) OnConfigUpdate(globalConfig, hostConfig map[string]string) {
-	log.Debugf("Config update: %v, %v", globalConfig, hostConfig)
-	changed, err := buf.config.UpdateFrom(globalConfig, config.DatastoreGlobal)
+	logCxt := log.WithFields(log.Fields{
+		"global": globalConfig,
+		"host":   hostConfig,
+	})
+	logCxt.Info("Possible config update.")
+	globalChanged, err := buf.config.UpdateFrom(globalConfig, config.DatastoreGlobal)
 	if err != nil {
-		log.Fatalf("Failed to parse config update: %v", err)
+		logCxt.WithError(err).Fatal("Failed to parse config update")
 	}
-	if changed {
-		log.Fatalf("Config changed, need to restart.")
-	}
-	changed, err = buf.config.UpdateFrom(hostConfig, config.DatastorePerHost)
+	hostChanged, err := buf.config.UpdateFrom(hostConfig, config.DatastorePerHost)
 	if err != nil {
-		log.Fatalf("Failed to parse config update: %v", err)
+		logCxt.WithError(err).Fatal("Failed to parse config update")
 	}
-	if changed {
-		log.Fatalf("Config changed, need to restart.")
+	if globalChanged || hostChanged {
+		rawConfig := buf.config.RawValues()
+		log.WithField("merged", rawConfig).Warn("Config changed. Sending ConfigUpdate message.")
+		buf.pendingUpdates = append(buf.pendingUpdates, &proto.ConfigUpdate{
+			Config: rawConfig,
+		})
 	}
 }
 

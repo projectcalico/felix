@@ -711,6 +711,7 @@ type stateTracker struct {
 	activePolicies        set.Set
 	activeProfiles        set.Set
 	endpointToPolicyOrder map[string][]tierInfo
+	config                map[string]string
 }
 
 func newStateTracker() *stateTracker {
@@ -800,6 +801,10 @@ func (s *stateTracker) onEvent(event interface{}) {
 
 func (s *stateTracker) UpdateFrom(map[string]string, config.Source) (changed bool, err error) {
 	return
+}
+
+func (s *stateTracker) RawValues() map[string]string {
+	return s.config
 }
 
 type tierInfo struct {

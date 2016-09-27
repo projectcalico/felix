@@ -164,11 +164,11 @@ configRetry:
 	if err := cmd.Start(); err != nil {
 		log.Fatalf("Failed to start dataplane driver: %v", err)
 	}
-	failureReportChan := make(chan string)
+	shutdownReasonChan := make(chan string)
 	// Start a thread to shut this process down if the driver fails.
 	go func() {
 		err := cmd.Wait()
-		failureReportChan <- fmt.Sprintf("Dataplane driver process failed: %v", err)
+		shutdownReasonChan <- fmt.Sprintf("Dataplane driver process failed: %v", err)
 	}()
 
 	termSignalChan := make(chan os.Signal)
@@ -179,7 +179,7 @@ configRetry:
 	// get sent a TERM signal.  This is done on a best-effort basis.  If
 	// we fail to shut down the driver it will exit when its pipe is
 	// closed.
-	go manageShutdown(termSignalChan, failureReportChan, cmd)
+	go manageShutdown(termSignalChan, shutdownReasonChan, cmd)
 
 	// Now the sub-process is running, close our copy of the file handles
 	// for the child's end of the pipes.
@@ -191,19 +191,22 @@ configRetry:
 	}
 
 	log.Info("Starting the dataplane driver")
-	felixConn := NewDataplaneConn(configParams, datastore, toDriverW, fromDriverR)
+	failureReportChan := make(chan string)
+	felixConn := NewDataplaneConn(configParams,
+		datastore, toDriverW, fromDriverR, failureReportChan)
 	felixConn.Start()
-	felixConn.Join()
-	failureReportChan <- "Dataplane driver communication thread failed"
+	reason := <-failureReportChan
+	log.Warn("Background worker stopped, attempting managed shutdown.")
+	shutdownReasonChan <- reason
 	time.Sleep(5 * time.Second)
 	log.Fatal("Managed shutdown failed, exiting.")
 }
 
-func manageShutdown(osSignal <-chan os.Signal, failureReason <-chan string, driverCmd *exec.Cmd) {
+func manageShutdown(osSignalChan <-chan os.Signal, failureReportChan <-chan string, driverCmd *exec.Cmd) {
 	select {
-	case sig := <-osSignal:
+	case sig := <-osSignalChan:
 		log.Infof("Received OS signal %v; shutting down.", sig)
-	case failureReason := <-failureReason:
+	case failureReason := <-failureReportChan:
 		log.Errorf("Detected failure: %v; shutting down.", failureReason)
 	}
 
@@ -263,15 +266,15 @@ type ipUpdate struct {
 }
 
 type DataplaneConn struct {
-	config          *config.Config
-	toFelix         chan interface{}
-	endpointUpdates chan interface{}
-	inSync          chan bool
-	failed          chan bool
-	felixReader     io.Reader
-	felixWriter     io.Writer
-	datastore       bapi.Client
-	statusReporter  *status.EndpointStatusReporter
+	config            *config.Config
+	toFelix           chan interface{}
+	endpointUpdates   chan interface{}
+	inSync            chan bool
+	failureReportChan chan<- string
+	felixReader       io.Reader
+	felixWriter       io.Writer
+	datastore         bapi.Client
+	statusReporter    *status.EndpointStatusReporter
 
 	datastoreInSync bool
 
@@ -286,23 +289,24 @@ type Startable interface {
 func NewDataplaneConn(configParams *config.Config,
 	datastore bapi.Client,
 	toDriver io.Writer,
-	fromDriver io.Reader) *DataplaneConn {
+	fromDriver io.Reader,
+	failureReportChan chan<- string) *DataplaneConn {
 	felixConn := &DataplaneConn{
-		config:          configParams,
-		datastore:       datastore,
-		toFelix:         make(chan interface{}),
-		endpointUpdates: make(chan interface{}),
-		inSync:          make(chan bool, 1),
-		failed:          make(chan bool),
-		felixReader:     fromDriver,
-		felixWriter:     toDriver,
+		config:            configParams,
+		datastore:         datastore,
+		toFelix:           make(chan interface{}),
+		endpointUpdates:   make(chan interface{}),
+		inSync:            make(chan bool, 1),
+		failureReportChan: failureReportChan,
+		felixReader:       fromDriver,
+		felixWriter:       toDriver,
 	}
 	return felixConn
 }
 
 func (fc *DataplaneConn) readMessagesFromDataplane() {
 	defer func() {
-		fc.failed <- true
+		fc.shutDownProcess("Failed to read messages from dataplane")
 	}()
 	log.Info("Reading from dataplane driver pipe...")
 	for {
@@ -381,13 +385,12 @@ func (fc *DataplaneConn) handleProcessStatusUpdate(msg *proto.ProcessStatusUpdat
 
 func (fc *DataplaneConn) sendMessagesToDataplaneDriver() {
 	defer func() {
-		fc.failed <- true
+		fc.shutDownProcess("Failed to send messages to dataplane")
 	}()
 
 	var config map[string]string
 	for {
 		msg := <-fc.toFelix
-
 		switch msg := msg.(type) {
 		case *proto.InSync:
 			log.Info("Datastore now in sync.")
@@ -396,19 +399,33 @@ func (fc *DataplaneConn) sendMessagesToDataplaneDriver() {
 				fc.inSync <- true
 			}
 		case *proto.ConfigUpdate:
-			log.WithFields(log.Fields{
+			logCxt := log.WithFields(log.Fields{
 				"old": config,
 				"new": msg.Config,
-			}).Info("Config updated.")
+			})
+			logCxt.Info("Possible config update")
 			if config != nil && !reflect.DeepEqual(msg.Config, config) {
-				log.Fatalf("Felix configuration changed; need to restart. "+
-					"Old config: %v; new config: %v", config, msg.Config)
+				logCxt.Warn("Felix configuration changed. Need to restart.")
+				fc.shutDownProcess("config changed")
+			} else if config == nil {
+				logCxt.Info("Config resolved.")
+				config = make(map[string]string)
+				for k, v := range msg.Config {
+					config[k] = v
+				}
 			}
-			config = msg.Config
 		}
-
 		fc.marshalToDataplane(msg)
 	}
+}
+
+func (fc *DataplaneConn) shutDownProcess(reason string) {
+	// Send a failure report to the managed shutdown thread then give it
+	// a few seconds to do the shutdown.
+	fc.failureReportChan <- reason
+	time.Sleep(5 * time.Second)
+	// The graceful shutdown failed, terminate the process.
+	log.Panic("Managed shutdown failed. Panicking.")
 }
 
 func (fc *DataplaneConn) marshalToDataplane(msg interface{}) {
@@ -496,7 +513,7 @@ func (fc *DataplaneConn) Start() {
 	// Send the opening message to the dataplane driver, giving it its
 	// config.
 	fc.toFelix <- &proto.ConfigUpdate{
-		Config: fc.config.RawValues,
+		Config: fc.config.RawValues(),
 	}
 
 	// Start background thread to read messages from dataplane driver.
@@ -535,8 +552,4 @@ func (fc *DataplaneConn) Start() {
 		)
 		fc.statusReporter.Start()
 	}
-}
-
-func (fc *DataplaneConn) Join() {
-	_ = <-fc.failed
 }
