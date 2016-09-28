@@ -19,11 +19,6 @@ import (
 	"github.com/onsi/ginkgo"
 )
 
-var formatter = logrus.TextFormatter{
-	DisableColors: true,
-	FullTimestamp: true,
-}
-
 func HookLogrusForGinkgo() {
 	logrus.SetOutput(ginkgo.GinkgoWriter)
 	logrus.SetLevel(logrus.DebugLevel)

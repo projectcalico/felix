@@ -136,6 +136,10 @@ configRetry:
 		logLevelScreen = log.PanicLevel
 	}
 	log.SetLevel(logLevelScreen)
+	log.SetFormatter(&log.TextFormatter{
+		DisableColors: true,
+		FullTimestamp: true,
+	})
 	log.Infof("Successfully loaded configuration: %+v", configParams)
 
 	// Create a pair of pipes, one for sending messages to the dataplane

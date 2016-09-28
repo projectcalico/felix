@@ -30,11 +30,12 @@ const (
 )
 
 type AsyncCalcGraph struct {
-	Dispatcher   *store.Dispatcher
-	inputEvents  chan interface{}
-	outputEvents chan<- interface{}
-	eventBuffer  *EventBuffer
-	beenInSync   bool
+	Dispatcher       *store.Dispatcher
+	inputEvents      chan interface{}
+	outputEvents     chan<- interface{}
+	eventBuffer      *EventBuffer
+	beenInSync       bool
+	needToSendInSync bool
 
 	flushTicks       <-chan time.Time
 	flushLeakyBucket int
@@ -76,12 +77,18 @@ func (acg *AsyncCalcGraph) loop() {
 				acg.Dispatcher.OnUpdates(update)
 			case api.SyncStatus:
 				// Sync status changed, check if we're now in-sync.
-				log.Debug("Pulled status update off channel")
+				log.WithField("status", update).Debug(
+					"Pulled status update off channel")
 				acg.Dispatcher.OnStatusUpdated(update)
 				if update == api.InSync && !acg.beenInSync {
 					log.Info("First time we've been in sync")
-					acg.onEvent(&proto.InSync{})
 					acg.beenInSync = true
+					acg.needToSendInSync = true
+					acg.dirty = true
+					if acg.flushLeakyBucket == 0 {
+						// Force a flush.
+						acg.flushLeakyBucket++
+					}
 				}
 			default:
 				log.Fatalf("Unexpected update: %#v", update)
@@ -103,12 +110,17 @@ func (acg *AsyncCalcGraph) maybeFlush() {
 		return
 	}
 	if acg.flushLeakyBucket > 0 {
-		log.Debugf("Not throttled: flushing event buffer")
+		log.Debug("Not throttled: flushing event buffer")
 		acg.flushLeakyBucket--
 		acg.eventBuffer.Flush()
+		if acg.needToSendInSync {
+			log.Info("First flush after becoming in sync, sending InSync message.")
+			acg.onEvent(&proto.InSync{})
+			acg.needToSendInSync = false
+		}
 		acg.dirty = false
 	} else {
-		log.Debugf("Throttled: not flushing event buffer")
+		log.Debug("Throttled: not flushing event buffer")
 	}
 }
 
