@@ -22,7 +22,7 @@ import:
   version: ^1.21.0
 - package: github.com/tigera/libcalico-go
   repo: https://github.com/fasaxc/libcalico-go.git
-  version: smc-rule-ipver
+  version: smc-merged-fixes
   subpackages:
   - lib
 - package: github.com/Sirupsen/logrus
