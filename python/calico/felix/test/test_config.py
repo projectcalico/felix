@@ -91,7 +91,7 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.ETCD_CA_FILE,
                              "/etc/ssl/certs/ca-certificates.crt")
             self.assertEqual(config.HOSTNAME, socket.gethostname())
-            self.assertEqual(config.IFACE_PREFIX, "blah")
+            self.assertEqual(config.IFACE_PREFIX, ["blah"])
             self.assertEqual(config.METADATA_PORT, 123)
             self.assertEqual(config.METADATA_IP, "1.2.3.4")
             self.assertEqual(config.REPORTING_INTERVAL_SECS, 30)
@@ -341,7 +341,7 @@ class TestConfig(unittest.TestCase):
     @skip("golang rewrite")
     def test_no_iface_prefix(self):
         config = load_config("felix_missing.cfg", host_dict={})
-        self.assertEqual(config.IFACE_PREFIX, "cali")
+        self.assertEqual(config.IFACE_PREFIX, ["cali"])
 
     @skip("golang rewrite")
     def test_file_sections(self):
@@ -359,7 +359,7 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(config.ETCD_ADDRS, ["localhost:4001"])
             self.assertEqual(config.HOSTNAME, socket.gethostname())
             self.assertEqual(config.LOGFILE, "/log/nowhere.log")
-            self.assertEqual(config.IFACE_PREFIX, "whatever")
+            self.assertEqual(config.IFACE_PREFIX, ["whatever"])
             self.assertEqual(config.METADATA_PORT, 246)
             self.assertEqual(config.METADATA_IP, "1.2.3.4")
             self.assertEqual(config.REPORTING_INTERVAL_SECS, 5)
@@ -402,7 +402,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.ETCD_ADDRS, ["9.9.9.9:1234"])
         self.assertEqual(config.HOSTNAME, socket.gethostname())
         self.assertEqual(config.LOGFILE, "/log/nowhere.log")
-        self.assertEqual(config.IFACE_PREFIX, "whatever")
+        self.assertEqual(config.IFACE_PREFIX, ["whatever"])
         self.assertEqual(config.METADATA_PORT, 999)
         self.assertEqual(config.METADATA_IP, "1.2.3.4")
         self.assertEqual(config.STARTUP_CLEANUP_DELAY, 42)
@@ -492,6 +492,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.IPTABLES_MARK_MASK, 0xff000000)
         self.assertEqual(config.IPTABLES_MARK_ACCEPT, "0x1000000")
         self.assertEqual(config.IPTABLES_MARK_NEXT_TIER, "0x2000000")
+        self.assertEqual(config.IPTABLES_MARK_ENDPOINTS, "0x4000000")
 
     @skip("golang rewrite")
     def test_exact_mark_bits(self):
@@ -501,13 +502,14 @@ class TestConfig(unittest.TestCase):
         """
         # This test is intended to catch if _validate_cfg() isn't updated when
         # new mark bits are added.
-        cfg_dict = { "InterfacePrefix": "blah",
-                     "IptablesMarkMask": "12" }
+        cfg_dict = {"InterfacePrefix": "blah",
+                    "IptablesMarkMask": "28"}
         config = load_config("felix_missing.cfg", host_dict=cfg_dict)
 
-        self.assertEqual(config.IPTABLES_MARK_MASK, 0x0000000c)
+        self.assertEqual(config.IPTABLES_MARK_MASK, 0x0000001c)
         self.assertEqual(config.IPTABLES_MARK_ACCEPT, "0x4")
         self.assertEqual(config.IPTABLES_MARK_NEXT_TIER, "0x8")
+        self.assertEqual(config.IPTABLES_MARK_ENDPOINTS, "0x10")
 
     @skip("golang rewrite")
     def test_too_many_mark_bits(self):
@@ -521,6 +523,7 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.IPTABLES_MARK_MASK, 0xff000000)
         self.assertEqual(config.IPTABLES_MARK_ACCEPT, "0x1000000")
         self.assertEqual(config.IPTABLES_MARK_NEXT_TIER, "0x2000000")
+        self.assertEqual(config.IPTABLES_MARK_ENDPOINTS, "0x4000000")
 
     @skip("golang rewrite")
     def test_hex_mark(self):
@@ -528,12 +531,13 @@ class TestConfig(unittest.TestCase):
         Test that the IptablesMarkMask accepts hexadecimal values.
         """
         cfg_dict = { "InterfacePrefix": "blah",
-                     "IptablesMarkMask": "0x60" }
+                     "IptablesMarkMask": "0xe0" }
         config = load_config("felix_missing.cfg", host_dict=cfg_dict)
 
-        self.assertEqual(config.IPTABLES_MARK_MASK, 0x00000060)
+        self.assertEqual(config.IPTABLES_MARK_MASK, 0x000000e0)
         self.assertEqual(config.IPTABLES_MARK_ACCEPT, "0x20")
         self.assertEqual(config.IPTABLES_MARK_NEXT_TIER, "0x40")
+        self.assertEqual(config.IPTABLES_MARK_ENDPOINTS, "0x80")
 
     @skip("golang rewrite")
     def test_default_ttl(self):
@@ -718,3 +722,14 @@ class TestConfig(unittest.TestCase):
             }
             config = load_config("felix_missing.cfg", host_dict=cfg_dict)
             self.assertEqual(config.ACTION_ON_DROP, value)
+
+    def test_interface_prefix(self):
+        cfg_dict = {"InterfacePrefix": "foo"}
+        config = load_config("felix_interface_prefix.cfg",
+                             host_dict=cfg_dict)
+        self.assertEqual(config.IFACE_PREFIX, ['foo'])
+
+        cfg_dict = {"InterfacePrefix": "foo,bar"}
+        config = load_config("felix_interface_prefix.cfg",
+                             host_dict=cfg_dict)
+        self.assertEqual(config.IFACE_PREFIX, ['foo', 'bar'])

@@ -51,7 +51,7 @@ MISSING = object()
 class TestCommon(unittest.TestCase):
     def setUp(self):
         self.m_config = mock.Mock()
-        self.m_config.IFACE_PREFIX = "tap"
+        self.m_config.IFACE_PREFIX = ["tap"]
         self.m_config.HOSTNAME = "localhost"
 
     def tearDown(self):
@@ -589,7 +589,7 @@ class _BaseTestValidateEndpoint(unittest.TestCase):
 
     def setUp(self):
         self.m_config = mock.Mock()
-        self.m_config.IFACE_PREFIX = "tap"
+        self.m_config.IFACE_PREFIX = ["tap"]
         self.m_config.HOSTNAME = "localhost"
 
     def create_id(self):

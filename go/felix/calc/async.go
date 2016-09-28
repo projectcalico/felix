@@ -104,7 +104,7 @@ func (acg *AsyncCalcGraph) loop() {
 	}
 }
 
-// maybeFlush flushed the event buffer if: we know it's dirty and we're not throttled.
+// maybeFlush flushes the event buffer if: we know it's dirty and we're not throttled.
 func (acg *AsyncCalcGraph) maybeFlush() {
 	if !acg.dirty {
 		return

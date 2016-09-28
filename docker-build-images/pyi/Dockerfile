@@ -7,7 +7,7 @@ RUN yum -y groupinstall "Development tools"; \
                    sqlite-devel iptables-ipv6 ipset iptables libffi-devel \
                    libffi yajl
 
-# Build python and conntrack.
+# Build Python.
 ENV PY_VERSION=2.7.11
 ADD docker-build-images/pyi/get-prereqs.sh get-prereqs.sh
 ADD docker-build-images/pyi/build-prereqs.sh build-prereqs.sh
