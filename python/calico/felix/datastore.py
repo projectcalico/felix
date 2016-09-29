@@ -708,7 +708,14 @@ def convert_pb_rules(pb_rules):
                 value = convert_pb_protocol(value)
             elif stem.endswith("ip_set_ids"):
                 value = list(value)
-            d_rule[dict_name] = value
+
+            if stem == "icmp":
+                # ICMP is represented by an object, unpack it.
+                d_rule[dict_name + "_type"] = value.type
+                if value.code is not None:
+                    d_rule[dict_name + "_code"] = value.type
+            else:
+                d_rule[dict_name] = value
 
         dict_rules.append(d_rule)
     return dict_rules

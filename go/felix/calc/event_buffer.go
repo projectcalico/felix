@@ -367,8 +367,7 @@ func convertRule(in *ParsedRule) *proto.Rule {
 		DstPorts:    convertPorts(in.DstPorts),
 		SrcIpSetIds: in.SrcIPSetIDs,
 		DstIpSetIds: in.DstIPSetIDs,
-		IcmpType:    convertIntPointer(in.ICMPType),
-		IcmpCode:    convertIntPointer(in.ICMPCode),
+		Icmp:        convertIcmp(in.ICMPType, in.ICMPCode),
 
 		NotProtocol:    convertProtocol(in.NotProtocol),
 		NotSrcNet:      convertNet(in.NotSrcNet),
@@ -377,8 +376,7 @@ func convertRule(in *ParsedRule) *proto.Rule {
 		NotDstPorts:    convertPorts(in.NotDstPorts),
 		NotSrcIpSetIds: in.NotSrcIPSetIDs,
 		NotDstIpSetIds: in.NotDstIPSetIDs,
-		NotIcmpType:    convertIntPointer(in.NotICMPType),
-		NotIcmpCode:    convertIntPointer(in.NotICMPCode),
+		NotIcmp:        convertIcmp(in.ICMPType, in.ICMPCode),
 
 		LogPrefix: in.LogPrefix,
 	}
@@ -450,9 +448,15 @@ func convertPort(in numorstring.Port) (out *proto.PortRange) {
 	return
 }
 
-func convertIntPointer(in *int) (out int32) {
-	if in != nil {
-		out = int32(*in)
+func convertIcmp(icmpType, icmpCode *int) (out *proto.ICMPMatch) {
+	if icmpType == nil {
+		return
+	}
+	out = &proto.ICMPMatch{
+		Type: int32(*icmpType),
+	}
+	if icmpCode != nil {
+		out.Code = int32(*icmpCode)
 	}
 	return
 }
