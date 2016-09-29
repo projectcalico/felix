@@ -376,7 +376,7 @@ func convertRule(in *ParsedRule) *proto.Rule {
 		NotDstPorts:    convertPorts(in.NotDstPorts),
 		NotSrcIpSetIds: in.NotSrcIPSetIDs,
 		NotDstIpSetIds: in.NotDstIPSetIDs,
-		NotIcmp:        convertIcmp(in.ICMPType, in.ICMPCode),
+		NotIcmp:        convertIcmp(in.NotICMPType, in.NotICMPCode),
 
 		LogPrefix: in.LogPrefix,
 	}
