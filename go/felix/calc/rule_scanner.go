@@ -15,8 +15,8 @@ package calc
 
 import (
 	log "github.com/Sirupsen/logrus"
-	"github.com/projectcalico/calico/go/datastructures/multidict"
-	"github.com/projectcalico/calico/go/datastructures/set"
+	"github.com/projectcalico/felix/go/datastructures/multidict"
+	"github.com/projectcalico/felix/go/datastructures/set"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/hash"
 	"github.com/tigera/libcalico-go/lib/net"

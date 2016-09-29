@@ -18,7 +18,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/go/felix/logutils"
+	"github.com/projectcalico/felix/go/felix/logutils"
 	"testing"
 )
 

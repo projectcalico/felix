@@ -15,15 +15,15 @@
 package calc_test
 
 import (
-	. "github.com/projectcalico/calico/go/felix/calc"
+	. "github.com/projectcalico/felix/go/felix/calc"
 
 	"fmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/projectcalico/calico/go/datastructures/set"
-	"github.com/projectcalico/calico/go/felix/config"
-	"github.com/projectcalico/calico/go/felix/proto"
-	"github.com/projectcalico/calico/go/felix/store"
+	"github.com/projectcalico/felix/go/datastructures/set"
+	"github.com/projectcalico/felix/go/felix/config"
+	"github.com/projectcalico/felix/go/felix/proto"
+	"github.com/projectcalico/felix/go/felix/store"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	. "github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/net"

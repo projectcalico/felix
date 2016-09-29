@@ -47,4 +47,4 @@ RUN go get github.com/onsi/gomega
 
 RUN chmod -R a+w /go
 
-WORKDIR /go/src/github.com/projectcalico/calico
+WORKDIR /go/src/github.com/projectcalico/felix

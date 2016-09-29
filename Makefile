@@ -124,16 +124,16 @@ go/vendor go/vendor/.up-to-date: go/glide.lock
 	mkdir -p $$HOME/.glide
 	$(DOCKER_RUN) \
 	    --net=host \
-	    -v $${PWD}:/go/src/github.com/projectcalico/calico:rw \
+	    -v $${PWD}:/go/src/github.com/projectcalico/felix:rw \
 	    -v $$HOME/.glide:/.glide:rw \
-	    -w /go/src/github.com/projectcalico/calico/go \
+	    -w /go/src/github.com/projectcalico/felix/go \
 	    calico-golang-build \
 	    glide install --strip-vcs --strip-vendor
 	touch go/vendor/.up-to-date
 
-LDFLAGS:=-ldflags "-X github.com/projectcalico/calico/go/felix/buildinfo.Version=$(GIT_DESCRIPTION) \
-        -X github.com/projectcalico/calico/go/felix/buildinfo.BuildDate=$(DATE) \
-        -X github.com/projectcalico/calico/go/felix/buildinfo.GitRevision=$(GIT_COMMIT) \
+LDFLAGS:=-ldflags "-X github.com/projectcalico/felix/go/felix/buildinfo.Version=$(GIT_DESCRIPTION) \
+        -X github.com/projectcalico/felix/go/felix/buildinfo.BuildDate=$(DATE) \
+        -X github.com/projectcalico/felix/go/felix/buildinfo.GitRevision=$(GIT_COMMIT) \
         -B 0x$(GIT_COMMIT)"
 
 bin/calico-felix: go/felix/proto/felixbackend.pb.go \
@@ -146,7 +146,7 @@ bin/calico-felix: go/felix/proto/felixbackend.pb.go \
 	$(MAKE) golang-build-image
 	mkdir -p bin
 	$(DOCKER_RUN) \
-	    -v $${PWD}:/go/src/github.com/projectcalico/calico:rw \
+	    -v $${PWD}:/go/src/github.com/projectcalico/felix:rw \
 	    calico-golang-build \
 	    go build -o $@ $(LDFLAGS) "./go/felix/felix.go"
 
@@ -193,9 +193,9 @@ python-ut: python/calico/felix/felixbackend_pb2.py
 go-ut: golang-build-image go/vendor/.up-to-date go/felix/proto/felixbackend.pb.go
 	$(DOCKER_RUN) \
 	    --net=host \
-	    -v $${PWD}:/go/src/github.com/projectcalico/calico:rw \
+	    -v $${PWD}:/go/src/github.com/projectcalico/felix:rw \
 	    -v $$HOME/.glide:/.glide:rw \
-	    -w /go/src/github.com/projectcalico/calico/go \
+	    -w /go/src/github.com/projectcalico/felix/go \
 	    calico-golang-build \
 	    ginkgo -r
 
@@ -214,4 +214,10 @@ clean:
 	       go/felix/proto/felixbackend.pb.go \
 	       docker-build-images/passwd \
 	       docker-build-images/group \
-	       go/docs/calc.pdf
+	       go/docs/calc.pdf \
+	       python/.tox \
+	       htmlcov \
+	       python/htmlcov
+	find . -name "*.coverprofile" -type f -delete
+	find . -name "coverage.xml" -type f -delete
+	find . -name ".coverage" -type f -delete

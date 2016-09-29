@@ -16,8 +16,8 @@ package endpoint
 
 import (
 	log "github.com/Sirupsen/logrus"
-	"github.com/projectcalico/calico/go/datastructures/multidict"
-	"github.com/projectcalico/calico/go/datastructures/set"
+	"github.com/projectcalico/felix/go/datastructures/multidict"
+	"github.com/projectcalico/felix/go/datastructures/set"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 )

@@ -16,7 +16,7 @@ package labels
 
 import (
 	log "github.com/Sirupsen/logrus"
-	"github.com/projectcalico/calico/go/datastructures/multidict"
+	"github.com/projectcalico/felix/go/datastructures/multidict"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/selector"

@@ -16,9 +16,9 @@ package status
 
 import (
 	log "github.com/Sirupsen/logrus"
-	"github.com/projectcalico/calico/go/datastructures/set"
-	"github.com/projectcalico/calico/go/felix/jitter"
-	"github.com/projectcalico/calico/go/felix/proto"
+	"github.com/projectcalico/felix/go/datastructures/set"
+	"github.com/projectcalico/felix/go/felix/jitter"
+	"github.com/projectcalico/felix/go/felix/proto"
 	"github.com/tigera/libcalico-go/lib/backend/api"
 	"github.com/tigera/libcalico-go/lib/backend/model"
 	"github.com/tigera/libcalico-go/lib/errors"

@@ -1,4 +1,4 @@
-package: github.com/projectcalico/calico/go
+package: github.com/projectcalico/felix/go
 homepage: https://projectcalico.org
 license: Apache-2.0
 owners:
