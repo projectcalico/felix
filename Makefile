@@ -221,3 +221,4 @@ clean:
 	find . -name "*.coverprofile" -type f -delete
 	find . -name "coverage.xml" -type f -delete
 	find . -name ".coverage" -type f -delete
+	find . -name "*.pyc" -type f -delete
