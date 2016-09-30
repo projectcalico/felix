@@ -367,7 +367,6 @@ func convertRule(in *ParsedRule) *proto.Rule {
 		DstPorts:    convertPorts(in.DstPorts),
 		SrcIpSetIds: in.SrcIPSetIDs,
 		DstIpSetIds: in.DstIPSetIDs,
-		Icmp:        convertIcmp(in.ICMPType, in.ICMPCode),
 
 		NotProtocol:    convertProtocol(in.NotProtocol),
 		NotSrcNet:      convertNet(in.NotSrcNet),
@@ -376,10 +375,42 @@ func convertRule(in *ParsedRule) *proto.Rule {
 		NotDstPorts:    convertPorts(in.NotDstPorts),
 		NotSrcIpSetIds: in.NotSrcIPSetIDs,
 		NotDstIpSetIds: in.NotDstIPSetIDs,
-		NotIcmp:        convertIcmp(in.NotICMPType, in.NotICMPCode),
 
 		LogPrefix: in.LogPrefix,
 	}
+
+	// Fill in the ICMP fields.  We can't follow the pattern and make a
+	// convertICMP() function because we can't name the return type of the
+	// function (it's private to the protobuf package).
+	if in.ICMPType != nil {
+		if in.ICMPCode != nil {
+			out.Icmp = &proto.Rule_IcmpTypeCode{
+				&proto.IcmpTypeAndCode{
+					Type: int32(*in.ICMPType),
+					Code: int32(*in.ICMPCode),
+				},
+			}
+		} else {
+			out.Icmp = &proto.Rule_IcmpType{
+				IcmpType: int32(*in.ICMPType),
+			}
+		}
+	}
+	if in.NotICMPType != nil {
+		if in.NotICMPCode != nil {
+			out.NotIcmp = &proto.Rule_NotIcmpTypeCode{
+				&proto.IcmpTypeAndCode{
+					Type: int32(*in.NotICMPType),
+					Code: int32(*in.NotICMPCode),
+				},
+			}
+		} else {
+			out.NotIcmp = &proto.Rule_NotIcmpType{
+				NotIcmpType: int32(*in.NotICMPType),
+			}
+		}
+	}
+
 	log.WithFields(log.Fields{
 		"in":  in,
 		"out": out,
@@ -447,19 +478,6 @@ func convertPort(in numorstring.Port) (out *proto.PortRange) {
 			out.First = int32(first)
 			out.Last = int32(last)
 		}
-	}
-	return
-}
-
-func convertIcmp(icmpType, icmpCode *int) (out *proto.ICMPMatch) {
-	if icmpType == nil {
-		return
-	}
-	out = &proto.ICMPMatch{
-		Type: int32(*icmpType),
-	}
-	if icmpCode != nil {
-		out.Code = int32(*icmpCode)
 	}
 	return
 }

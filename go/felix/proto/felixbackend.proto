@@ -169,7 +169,13 @@ message Rule {
   repeated PortRange src_ports = 5;
   string dst_net = 6;
   repeated PortRange dst_ports = 7;
-  ICMPMatch icmp = 8;
+  oneof icmp {
+    // Distinguish between a match on type only and type+code.  We can't use
+    // the fact that fields ar optional because Go can't distinguish 0 from
+    // "not-present".
+    int32 icmp_type = 8;
+    IcmpTypeAndCode icmp_type_code = 9;
+  }
   repeated string src_ip_set_ids = 10;
   repeated string dst_ip_set_ids = 11;
 
@@ -179,16 +185,19 @@ message Rule {
   repeated PortRange not_src_ports = 104;
   string not_dst_net = 105;
   repeated PortRange not_dst_ports = 106;
-  ICMPMatch not_icmp = 107;
+  oneof not_icmp {
+    int32 not_icmp_type = 107;
+    IcmpTypeAndCode not_icmp_type_code = 108;
+  }
   repeated string not_src_ip_set_ids = 109;
   repeated string not_dst_ip_set_ids = 110;
 
   string log_prefix = 200;
 }
 
-message ICMPMatch {
-  int32 type = 8;
-  int32 code = 9;
+message IcmpTypeAndCode {
+  int32 type = 1;
+  int32 code = 2;
 }
 
 message Protocol {

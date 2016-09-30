@@ -709,11 +709,10 @@ def convert_pb_rules(pb_rules):
             elif stem.endswith("ip_set_ids"):
                 value = list(value)
 
-            if stem == "icmp":
-                # ICMP is represented by an object, unpack it.
-                d_rule[dict_name + "_type"] = value.type
-                if value.code is not None:
-                    d_rule[dict_name + "_code"] = value.code
+            if stem == "icmp_type_code":
+                # Special case: ICMP is represented by an object, unpack it.
+                d_rule[("!" if negated else "") + "icmp_type"] = value.type
+                d_rule[("!" if negated else "") + "icmp_code"] = value.code
             else:
                 d_rule[dict_name] = value
 
