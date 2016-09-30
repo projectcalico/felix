@@ -380,7 +380,10 @@ func convertRule(in *ParsedRule) *proto.Rule {
 
 		LogPrefix: in.LogPrefix,
 	}
-
+	log.WithFields(log.Fields{
+		"in":  in,
+		"out": out,
+	}).Debug("Converted rule to protobuf format.")
 	return out
 }
 

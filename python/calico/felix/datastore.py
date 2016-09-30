@@ -713,7 +713,7 @@ def convert_pb_rules(pb_rules):
                 # ICMP is represented by an object, unpack it.
                 d_rule[dict_name + "_type"] = value.type
                 if value.code is not None:
-                    d_rule[dict_name + "_code"] = value.type
+                    d_rule[dict_name + "_code"] = value.code
             else:
                 d_rule[dict_name] = value
 
