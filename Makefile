@@ -112,6 +112,9 @@ python/calico/felix/felixbackend_pb2.py: go/felix/proto/felixbackend.proto
 	              --python_out=/dst/ \
 	              felixbackend.proto
 
+.PHONY: protobuf
+protobuf: python/calico/felix/felixbackend_pb2.py go/felix/proto/felixbackend.pb.go
+
 .PHONY: update-vendor
 update-vendor:
 	cd go && glide up --strip-vendor
