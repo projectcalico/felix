@@ -466,6 +466,10 @@ func (fc *DataplaneConn) marshalToDataplane(msg interface{}) {
 		envelope.Payload = &proto.ToDataplane_WorkloadEndpointUpdate{msg}
 	case *proto.WorkloadEndpointRemove:
 		envelope.Payload = &proto.ToDataplane_WorkloadEndpointRemove{msg}
+	case *proto.HostMetadataUpdate:
+		envelope.Payload = &proto.ToDataplane_HostMetadataUpdate{msg}
+	case *proto.HostMetadataRemove:
+		envelope.Payload = &proto.ToDataplane_HostMetadataRemove{msg}
 	default:
 		log.Fatalf("Unknown message type: %#v", msg)
 	}

@@ -487,7 +487,7 @@ class DatastoreReader(TimedGreenlet):
             _log.debug("Ignoring update to host IP because IP-in-IP disabled")
             return
         _stats.increment("Host IP created/updated")
-        self.ipv4_by_hostname[msg.hostname] = msg.ip
+        self.ipv4_by_hostname[msg.hostname] = msg.ipv4_addr
         self._update_hosts_ipset()
 
     def on_host_meta_remove(self, msg):
