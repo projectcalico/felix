@@ -329,7 +329,7 @@ class Config(object):
         # publicly documented.
         self.add_parameter("DevicesPlugin",
                            "Which devices plugin to use.",
-                           "vpp")
+                           "default")
 
         # Read the environment variables, then the configuration file.
         self._read_env_vars()
