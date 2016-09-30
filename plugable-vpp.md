@@ -44,3 +44,9 @@ To run the VPP version of felix, you must have the following on the local machin
 
 ### Project Status
 This code should be considered alpha / PoC grade. We are working on known issues and would not recommend running this in production.
+
+
+### Demo's
+* Calico CNI integration for Kubernetes. Using this VPP plugin for networking: [https://www.youtube.com/watch?v=1-UDQNLZTQ0](https://www.youtube.com/watch?v=1-UDQNLZTQ0)
+
+* Calico calicoctl docker integration. Using IPv6 connectivity: [https://www.youtube.com/watch?v=SgRmmvZwQvw](https://www.youtube.com/watch?v=SgRmmvZwQvw)
