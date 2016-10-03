@@ -80,6 +80,7 @@ setuptools.setup(
     entry_points={
         'console_scripts': [
             'calico-iptables-plugin = calico.felix.felix:main',
+            'calico-dummydp-plugin = calico.felix.dummydp:main',
             'calico-cleanup = calico.felix.cleanup:main',
         ],
         'calico.felix.iptables_generator': [
