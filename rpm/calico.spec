@@ -149,6 +149,7 @@ rm -rf $RPM_BUILD_ROOT
 %defattr(-,root,root,-)
 /usr/bin/calico-felix
 /usr/bin/calico-iptables-plugin
+/usr/bin/calico-dummydp-plugin
 /opt/calico-felix/*
 /etc/calico/felix.cfg.example
 %if 0%{?el7}
