@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	log "github.com/Sirupsen/logrus"
+	"github.com/kardianos/osext"
 	"net"
 	"net/url"
 	"os"
@@ -143,28 +144,53 @@ type fileParam struct {
 	Executable bool
 }
 
-func (p *fileParam) Parse(raw string) (result interface{}, err error) {
+func (p *fileParam) Parse(raw string) (interface{}, error) {
 	if p.Executable {
-		log.WithField("name", raw).Info("Looking for executable on path")
-		var lookupErr error
-		result, lookupErr = exec.LookPath(raw)
-		if p.MustExist {
-			log.WithError(lookupErr).Error("Executable missing")
-			err = lookupErr
+		// Special case: for executable files, we search our directory
+		// and the system path.
+		logCxt := log.WithField("name", raw)
+		var path string
+		if myDir, err := osext.ExecutableFolder(); err == nil {
+			logCxt.WithField("myDir", myDir).Info(
+				"Looking for executable in my directory")
+			path = myDir + string(os.PathSeparator) + raw
+			stat, err := os.Stat(path)
+			if err == nil {
+				if m := stat.Mode(); !m.IsDir() && m&0111 > 0 {
+					return path, nil
+				}
+			} else {
+				logCxt.WithField("myDir", myDir).Info(
+					"No executable in my directory")
+				path = ""
+			}
+		} else {
+			logCxt.WithError(err).Warn("Failed to get my dir")
 		}
-		log.WithField("path", result).Info("Executable path")
-		return
+		if path == "" {
+			logCxt.Info("Looking for executable on path")
+			var err error
+			path, err = exec.LookPath(raw)
+			if err != nil {
+				logCxt.WithError(err).Warn("Path lookup failed")
+				path = ""
+			}
+		}
+		if path == "" && p.MustExist {
+			log.Error("Executable missing")
+			return nil, p.parseFailed(raw, "missing file")
+		}
+		log.WithField("path", path).Info("Executable path")
+		return path, nil
 	} else if p.MustExist && raw != "" {
 		log.WithField("path", raw).Info("Looking for required file")
-		_, err = os.Stat(raw)
+		_, err := os.Stat(raw)
 		if err != nil {
 			log.Errorf("Failed to access %v: %v", raw, err)
-			err = p.parseFailed(raw, "failed to access file")
-			return
+			return nil, p.parseFailed(raw, "failed to access file")
 		}
 	}
-	result = raw
-	return
+	return raw, nil
 }
 
 type ipv4Param struct {

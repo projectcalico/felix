@@ -21,9 +21,10 @@ import:
 - package: github.com/go-ini/ini
   version: ^1.21.0
 - package: github.com/tigera/libcalico-go
-  repo: https://github.com/fasaxc/libcalico-go.git
   version: smc-merged-fixes
+  repo: https://github.com/fasaxc/libcalico-go.git
   subpackages:
   - lib
 - package: github.com/Sirupsen/logrus
   version: ^0.10.0
+- package: github.com/kardianos/osext

@@ -1,5 +1,5 @@
-hash: 059cd68085417721276b251b71811612daa86cb7a58082839ec2f92b887b01a4
-updated: 2016-09-28T11:33:51.901854315+01:00
+hash: a74fb1757ac43d2b2225356c6e9b9ceb63e8995590ff2a952711164dcd8a0810
+updated: 2016-10-03T14:15:23.821595589+01:00
 imports:
 - name: github.com/coreos/etcd
   version: e93ee6179c64cac4d8764870b8267f05c1618c40
@@ -30,6 +30,8 @@ imports:
   - proto
 - name: github.com/golang/glog
   version: 23def4e6c14b4da8ac2ed8007337bc5eb5007998
+- name: github.com/kardianos/osext
+  version: c2c54e542fb797ad986b31721e1baedf214ca413
 - name: github.com/kelseyhightower/envconfig
   version: 1e291572dcb9ba673cdcdb15e0f422702415ebaf
 - name: github.com/onsi/ginkgo

@@ -16,4 +16,7 @@ coverage.xml
 htmlcov
 bin
 build
-dist
+dist/*.tgz
+dist/trusty
+dist/xenial
+dist/rpm
