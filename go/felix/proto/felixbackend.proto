@@ -8,10 +8,6 @@ option go_package = "proto";
 // it impossible to tell the difference between an empty list of IP set members
 // and a deletion, for example.
 
-service DataplaneApi {
-  rpc Connect(stream FromDataplane) returns (stream ToDataplane);
-}
-
 message ToDataplane {
   // Sequence number incremented with each message.  Useful for correlating
   // messages in logs.
