@@ -64,6 +64,10 @@ centos7-build-image:
 	$(MAKE) docker-build-images/passwd docker-build-images/group
 	cd docker-build-images && docker build -f centos7-build.Dockerfile -t calico-centos7-build .
 
+.PHONY: felix-docker-image
+felix-docker-image: dist/calico-felix/calico-iptables-plugin dist/calico-felix/calico-felix
+	docker build -t calico/felix .
+
 .PHONY: deb
 deb: trusty-deb xenial-deb
 
