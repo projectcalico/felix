@@ -21,6 +21,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -138,11 +139,23 @@ func (p *regexpParam) Parse(raw string) (result interface{}, err error) {
 
 type fileParam struct {
 	metadata
-	MustExist bool
+	MustExist  bool
+	Executable bool
 }
 
 func (p *fileParam) Parse(raw string) (result interface{}, err error) {
-	if p.MustExist && raw != "" {
+	if p.Executable {
+		log.WithField("name", raw).Info("Looking for executable on path")
+		var lookupErr error
+		result, lookupErr = exec.LookPath(raw)
+		if p.MustExist {
+			log.WithError(lookupErr).Error("Executable missing")
+			err = lookupErr
+		}
+		log.WithField("path", result).Info("Executable path")
+		return
+	} else if p.MustExist && raw != "" {
+		log.WithField("path", raw).Info("Looking for required file")
 		_, err = os.Stat(raw)
 		if err != nil {
 			log.Errorf("Failed to access %v: %v", raw, err)

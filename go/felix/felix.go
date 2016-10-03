@@ -153,7 +153,7 @@ configRetry:
 		log.Fatalf("Failed to open pipe for dataplane driver: %v", err)
 	}
 
-	cmd := exec.Command("calico-iptables-plugin")
+	cmd := exec.Command(configParams.DataplaneDriver)
 	driverOut, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Fatal("Failed to create pipe for dataplane driver")

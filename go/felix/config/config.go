@@ -86,6 +86,8 @@ func (source Source) Local() bool {
 type Config struct {
 	// Configuration parameters.
 
+	DataplaneDriver string `config:"file(must-exist,executable);calico-iptables-plugin;non-zero,die-on-fail"`
+
 	FelixHostname string `config:"hostname;;local,non-zero"`
 
 	EtcdAddr      string   `config:"authority;127.0.0.1:2379;local"`
@@ -338,11 +340,10 @@ func loadParams() {
 			param = &regexpParam{Regexp: IfaceNameRegexp,
 				Msg: "invalid Linux interface name"}
 		case "file":
-			if kindParams != "" && kindParams != "must-exist" {
-				log.Fatalf("Bad type params for 'file': %#v",
-					kindParams)
+			param = &fileParam{
+				MustExist:  strings.Contains(kindParams, "must-exist"),
+				Executable: strings.Contains(kindParams, "executable"),
 			}
-			param = &fileParam{MustExist: kindParams == "must-exist"}
 		case "authority":
 			param = &regexpParam{Regexp: AuthorityRegexp,
 				Msg: "invalid URL authority"}
