@@ -1,3 +1,4 @@
+B
 .. # Copyright (c) 2015-2016 Tigera, Inc. All rights reserved.
    #
    #    Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -29,3 +30,6 @@ several options for how you can easily do that, with different systems.
    bare-metal
    next-steps
    support
+\n
+\n
+\n
