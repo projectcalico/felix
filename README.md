@@ -97,7 +97,8 @@ kernel routing table and firewall rules.
 
 ### Docker
 
-Felix can be run inside Docker. See the `docker_build_and_run.sh` script for details on building and running it.
+Felix can be run inside Docker. Do `make felix-docker-image` to build it.
+Then run with `docker run -e FELIX_LOGSEVERITYSCREEN=INFO calico/felix`.
 [![Analytics](https://calico-ga-beacon.appspot.com/UA-52125893-3/calico/README.md?pixel)](https://github.com/igrigorik/ga-beacon)
 
 ### Stand-alone bundle
