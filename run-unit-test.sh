@@ -27,7 +27,7 @@ fi
 
 coverage erase
 
-tox "$@"
+tox -e py27 "$@"
 
 # Make sure we run the following coverage html command with the recent
 # coverage.
