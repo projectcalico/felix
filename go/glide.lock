@@ -1,5 +1,5 @@
-hash: e1af95195ea539f9e90261aeb91345fe708976a8906a60776bb6a77fabb43fc2
-updated: 2016-11-03T10:30:37.828461353Z
+hash: c045cb03f59b239e4b1fc8171090354d797902d6dee736463bf78b0d3f7e96a5
+updated: 2016-11-03T18:26:38.022332947Z
 imports:
 - name: cloud.google.com/go
   version: 20998e5af6b27efa3573ca339e25b68cc8e7e974
@@ -65,7 +65,7 @@ imports:
 - name: github.com/go-openapi/jsonreference
   version: 13c6e3589ad90f49bd3e3bbe2c2cb3d7a4142272
 - name: github.com/go-openapi/spec
-  version: 8f2b3d0e3aa15100eea0ab61dc6fa02f00f5e713
+  version: 75eab8446f49389b08d1c9e7154a1fa16182260b
 - name: github.com/go-openapi/swag
   version: 3b6d86cd965820f968760d5d419cb4add096bdd7
 - name: github.com/gogo/protobuf
@@ -94,7 +94,7 @@ imports:
 - name: github.com/kelseyhightower/envconfig
   version: 9aca109c9aec4633fced9717c4a09ecab3d33111
 - name: github.com/mailru/easyjson
-  version: a620b7294ccc645fb77e9b99e1cc9de6d2b610fb
+  version: 159cdb893c982e3d1bc6450322fedd514f9c9de3
   subpackages:
   - buffer
   - jlexer
@@ -128,7 +128,8 @@ imports:
 - name: github.com/pborman/uuid
   version: 3d4f2ba23642d3cfd06bd4b54cf03d99d95c0f1b
 - name: github.com/projectcalico/libcalico-go
-  version: 07933e320e9c551090fb2b4ef0680d8320c4345f
+  version: d051aae1853b2a44bac9ee9a335b351fe7f31da3
+  repo: https://github.com/fasaxc/libcalico-go.git
   subpackages:
   - lib
   - lib/api
@@ -245,7 +246,7 @@ imports:
 - name: gopkg.in/yaml.v2
   version: a5b47d31c556af34a302ce5d659e6fea44d90de0
 - name: k8s.io/kubernetes
-  version: db68b906e1bf39d5052431df7afd4376d51bba3e
+  version: 758c56cc85e554122602d233cb315a07dd0e6961
   subpackages:
   - pkg/api
   - pkg/api/errors
