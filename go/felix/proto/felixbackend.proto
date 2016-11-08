@@ -145,8 +145,9 @@ message PolicyID {
 }
 
 message Policy {
-  repeated Rule inbound_rules = 1;
-  repeated Rule outbound_rules = 2;
+  bool untracked = 1;
+  repeated Rule inbound_rules = 2;
+  repeated Rule outbound_rules = 3;
 }
 
 enum IPVersion {
