@@ -453,6 +453,7 @@ class DatastoreReader(TimedGreenlet):
         _stats.increment("Rules created/updated")
         profile_id = intern(profile_id.encode("utf8"))
         rules = {
+            "untracked": False,
             "inbound_rules": convert_pb_rules(msg.profile.inbound_rules),
             "outbound_rules": convert_pb_rules(msg.profile.outbound_rules),
         }
@@ -471,6 +472,7 @@ class DatastoreReader(TimedGreenlet):
         _stats.increment("Tiered rules created/updated")
         policy_id = TieredPolicyId(msg.id.tier, msg.id.name)
         rules = {
+            "untracked": msg.policy.untracked,
             "inbound_rules": convert_pb_rules(msg.policy.inbound_rules),
             "outbound_rules": convert_pb_rules(msg.policy.outbound_rules),
         }

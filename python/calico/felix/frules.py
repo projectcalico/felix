@@ -381,6 +381,29 @@ def install_global_rules(config, filter_updater, nat_updater, ip_version,
         "FORWARD --jump %s" % CHAIN_FORWARD,
         async=False)
 
+    if raw_updater:
+        # Set up Calico INPUT and OUTPUT chains in the 'raw' table, so that we
+        # can use them to admit packets that we don't want to be conntracked.
+        #
+        # We support this for host endpoints only, so don't need anything in
+        # the FORWARD chain.
+        raw_updater.rewrite_chains(
+            {
+                CHAIN_INPUT: input_chain,
+                CHAIN_OUTPUT: output_chain,
+            },
+            {
+                CHAIN_INPUT: input_deps,
+                CHAIN_OUTPUT: output_deps,
+            },
+            async=False)
+
+        raw_updater.ensure_rule_inserted(
+            "INPUT --jump %s" % CHAIN_INPUT,
+            async=False)
+        raw_updater.ensure_rule_inserted(
+            "OUTPUT --jump %s" % CHAIN_OUTPUT,
+            async=False)
 
 def _configure_ipip_device(config):
     """Creates and enables the IPIP tunnel device.
