@@ -1,0 +1,114 @@
+raw table
+---------
+
+INPUT
+ felix-INPUT -- install_global_rules CHAIN_INPUT filter_input_chain
+  reset 0x4000000 mark
+  set 0x4000000 mark if from TAP interface
+  felix-FROM-HOST-IF if no 0x4000000 mark
+
+OUTPUT
+ felix-OUTPUT -- install_global_rules CHAIN_OUTPUT filter_output_chain
+  reset 0x4000000 mark
+  set 0x4000000 mark if from TAP interface
+  felix-TO-HOST-IF if no 0x4000000 mark
+
+felix-FROM-HOST-IF -- CHAIN_FROM_IFACE _DispatchChains _reprogram_chains (end of batch processing)
+ felix-from-<name> if from tap<name>
+ RETURN
+
+felix-TO-HOST-IF -- CHAIN_TO_IFACE _DispatchChains _reprogram_chains (end of batch processing)
+ felix-to-<name> if to tap<name>
+ RETURN
+
+felix-from-<name> -- CHAIN_FROM_PREFIX _build_to_or_from_chain
+ reset all marks
+ felix-p-<profile>-o -- CHAIN_PROFILE_PREFIX
+ set [NO-CONNTRACK] if [ACCEPT-UNTRACKED] mark
+ RETURN if [ACCEPT-UNTRACKED] mark
+ DROP
+
+felix-to-<name> -- CHAIN_TO_PREFIX _build_to_or_from_chain
+ reset all marks
+ felix-p-<profile>-i -- CHAIN_PROFILE_PREFIX
+ set [NO-CONNTRACK] if [ACCEPT-UNTRACKED] mark
+ RETURN if [ACCEPT-UNTRACKED] mark
+ DROP
+
+felix-p-<profile>-o -- CHAIN_PROFILE_PREFIX fiptgenerator profile_updates
+ set [ACCEPT-UNTRACKED] mark
+ RETURN
+ reset [ACCEPT-UNTRACKED] mark
+
+felix-p-<profile>-i -- CHAIN_PROFILE_PREFIX fiptgenerator profile_updates
+ set [ACCEPT-UNTRACKED] mark
+ RETURN if src matches <ipset>
+ reset [ACCEPT-UNTRACKED] mark
+
+filter table
+------------
+
+INPUT
+ felix-INPUT -- install_global_rules filter_input_chain
+  ACCEPT if [ACCEPT-UNTRACKED] mark
+  conntrack invalid DROP
+  conntrack related ACCEPT
+  reset 0x4000000 mark
+  set 0x4000000 mark if from TAP interface
+  felix-FROM-HOST-IF if no 0x4000000 mark -- install_global_rules
+  ACCEPT metadata, DHCP, DNS
+  DROP all else
+
+OUTPUT
+ felix-OUTPUT -- install_global_rules filter_output_chain
+  ACCEPT if [ACCEPT-UNTRACKED] mark
+  conntrack invalid DROP
+  conntrack related ACCEPT
+  reset 0x4000000 mark
+  set 0x4000000 mark if from TAP interface
+  felix-TO-HOST-IF if no 0x4000000 mark -- install_global_rules
+
+FORWARD
+ felix-FORWARD -- install_global_rules filter_forward_chain
+  conntrack invalid DROP
+  conntrack related ACCEPT
+  felix-FROM-ENDPOINT if from TAP interface -- install_global_rules
+  felix-TO-ENDPOINT if to TAP interface -- install_global_rules
+  ACCEPT if to or from TAP interface
+
+felix-FROM-HOST-IF
+ RETURN
+
+felix-TO-HOST-IF
+ RETURN
+
+felix-FROM-ENDPOINT
+ felix-from-<name> if from tap<name>
+ DROP
+
+felix-TO-ENDPOINT
+ felix-to-<name> if to tap<name>
+ DROP
+
+felix-from-<name> -- _build_to_or_from_chain
+ reset all marks
+ DROP if wrong MAC
+ felix-p-<profile>-o
+ RETURN if 0x1 mark
+ DROP
+
+felix-to-<name> -- _build_to_or_from_chain
+ reset all marks
+ felix-p-<profile>-i
+ RETURN if 0x1 mark
+ DROP
+
+felix-p-<profile>-o -- profile_updates _rule_to_iptables_fragments
+ set 0x1 mark
+ RETURN
+ reset 0x1 mark
+
+felix-p-<profile>-i
+ set 0x1 mark
+ RETURN if src matches <ipset>
+ reset 0x1 mark
