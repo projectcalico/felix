@@ -128,13 +128,14 @@ def _main_greenlet():
                                         v4_ipset_mgr,
                                         v4_raw_updater)
         v4_ep_dispatch_chains = WorkloadDispatchChains(
-            config, 4, v4_filter_updater)
+            config, 4, v4_filter_updater, None)
         v4_if_dispatch_chains = HostEndpointDispatchChains(
-            config, 4, v4_filter_updater)
+            config, 4, v4_filter_updater, v4_raw_updater)
         v4_fip_manager = FloatingIPManager(config, 4, v4_nat_updater)
         v4_ep_manager = EndpointManager(config,
                                         IPV4,
                                         v4_filter_updater,
+                                        v4_raw_updater,
                                         v4_ep_dispatch_chains,
                                         v4_if_dispatch_chains,
                                         v4_rules_manager,
@@ -185,13 +186,14 @@ def _main_greenlet():
                                             v6_ipset_mgr,
                                             v6_raw_updater)
             v6_ep_dispatch_chains = WorkloadDispatchChains(
-                config, 6, v6_filter_updater)
+                config, 6, v6_filter_updater, None)
             v6_if_dispatch_chains = HostEndpointDispatchChains(
-                config, 6, v6_filter_updater)
+                config, 6, v6_filter_updater, v6_raw_updater)
             v6_fip_manager = FloatingIPManager(config, 6, v6_nat_updater)
             v6_ep_manager = EndpointManager(config,
                                             IPV6,
                                             v6_filter_updater,
+                                            v6_raw_updater,
                                             v6_ep_dispatch_chains,
                                             v6_if_dispatch_chains,
                                             v6_rules_manager,

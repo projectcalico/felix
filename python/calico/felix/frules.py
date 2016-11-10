@@ -382,24 +382,32 @@ def install_global_rules(config, filter_updater, nat_updater, ip_version,
         async=False)
 
     if raw_updater:
-        # Set up Calico INPUT and OUTPUT chains in the 'raw' table, so that we
-        # can use them to admit packets that we don't want to be conntracked.
+        # Set up Calico PREROUTING and OUTPUT chains in the raw table, so that
+        # we can use them to admit packets that we don't want to be
+        # conntracked.
         #
-        # We support this for host endpoints only, so don't need anything in
-        # the FORWARD chain.
+        # (We support this for host endpoints only, so don't need anything in
+        # the FORWARD chain.  In any case the raw table doesn't have a FORWARD
+        # chain.)
+        prerouting_chain, prerouting_deps = (
+            iptables_generator.raw_prerouting_chain(ip_version)
+        )
+        output_chain, output_deps = (
+            iptables_generator.raw_output_chain(ip_version)
+        )
         raw_updater.rewrite_chains(
             {
-                CHAIN_INPUT: input_chain,
+                CHAIN_PREROUTING: prerouting_chain,
                 CHAIN_OUTPUT: output_chain,
             },
             {
-                CHAIN_INPUT: input_deps,
+                CHAIN_PREROUTING: prerouting_deps,
                 CHAIN_OUTPUT: output_deps,
             },
             async=False)
 
         raw_updater.ensure_rule_inserted(
-            "INPUT --jump %s" % CHAIN_INPUT,
+            "PREROUTING --jump %s" % CHAIN_PREROUTING,
             async=False)
         raw_updater.ensure_rule_inserted(
             "OUTPUT --jump %s" % CHAIN_OUTPUT,

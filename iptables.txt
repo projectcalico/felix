@@ -1,17 +1,27 @@
 raw table
 ---------
 
-INPUT
- felix-INPUT -- install_global_rules CHAIN_INPUT filter_input_chain
+Use IPTABLES_MARK_ACCEPT to indicate that packet is already accepted.
+
+raw only has PREROUTING, not INPUT
+
+iptables -t raw -I PREROUTING -j NOTRACK
+iptables -t raw -I OUTPUT -j NOTRACK
+
+
+PREROUTING
+ felix-PREROUTING -- install_global_rules CHAIN_PREROUTING raw_prerouting_chain
   reset 0x4000000 mark
   set 0x4000000 mark if from TAP interface
-  felix-FROM-HOST-IF if no 0x4000000 mark
+  felix-FROM-HOST-IF if no 0x4000000 mark  -- CHAIN_FROM_IFACE
+  -j NOTRACK if [ACCEPT]
 
 OUTPUT
- felix-OUTPUT -- install_global_rules CHAIN_OUTPUT filter_output_chain
+ felix-OUTPUT -- install_global_rules CHAIN_OUTPUT raw_output_chain
   reset 0x4000000 mark
   set 0x4000000 mark if from TAP interface
-  felix-TO-HOST-IF if no 0x4000000 mark
+  felix-TO-HOST-IF if no 0x4000000 mark  -- CHAIN_TO_IFACE
+  -j NOTRACK if [ACCEPT]
 
 felix-FROM-HOST-IF -- CHAIN_FROM_IFACE _DispatchChains _reprogram_chains (end of batch processing)
  felix-from-<name> if from tap<name>
@@ -24,15 +34,13 @@ felix-TO-HOST-IF -- CHAIN_TO_IFACE _DispatchChains _reprogram_chains (end of bat
 felix-from-<name> -- CHAIN_FROM_PREFIX _build_to_or_from_chain
  reset all marks
  felix-p-<profile>-o -- CHAIN_PROFILE_PREFIX
- set [NO-CONNTRACK] if [ACCEPT-UNTRACKED] mark
- RETURN if [ACCEPT-UNTRACKED] mark
- DROP
+ RETURN if [ACCEPT]
+ x DROP
 
 felix-to-<name> -- CHAIN_TO_PREFIX _build_to_or_from_chain
  reset all marks
  felix-p-<profile>-i -- CHAIN_PROFILE_PREFIX
- set [NO-CONNTRACK] if [ACCEPT-UNTRACKED] mark
- RETURN if [ACCEPT-UNTRACKED] mark
+ RETURN if [ACCEPT]
  DROP
 
 felix-p-<profile>-o -- CHAIN_PROFILE_PREFIX fiptgenerator profile_updates
@@ -94,21 +102,21 @@ felix-from-<name> -- _build_to_or_from_chain
  reset all marks
  DROP if wrong MAC
  felix-p-<profile>-o
- RETURN if 0x1 mark
+ RETURN if [ACCEPT]
  DROP
 
 felix-to-<name> -- _build_to_or_from_chain
  reset all marks
  felix-p-<profile>-i
- RETURN if 0x1 mark
+ RETURN if [ACCEPT]
  DROP
 
 felix-p-<profile>-o -- profile_updates _rule_to_iptables_fragments
- set 0x1 mark
+ set [ACCEPT]
  RETURN
- reset 0x1 mark
+ reset [ACCEPT]
 
 felix-p-<profile>-i
- set 0x1 mark
+ set [ACCEPT]
  RETURN if src matches <ipset>
- reset 0x1 mark
+ reset [ACCEPT]

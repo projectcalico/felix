@@ -42,11 +42,12 @@ class _DispatchChains(Actor):
 
     chain_names = None
 
-    def __init__(self, config, ip_version, iptables_updater):
+    def __init__(self, config, ip_version, iptables_updater, untracked_updater):
         super(_DispatchChains, self).__init__(qualifier="v%d" % ip_version)
         self.config = config
         self.ip_version = ip_version
         self.iptables_updater = iptables_updater
+        self.untracked_updater = untracked_updater
         self.iptables_generator = self.config.plugins["iptables_generator"]
         self.chain_to_root = self.chain_names["to_root"]
         self.chain_from_root = self.chain_names["from_root"]
@@ -282,6 +283,16 @@ class _DispatchChains(Actor):
                                                 async=True),
         ]
         wait_and_check(futures)
+
+        if self.untracked_updater:
+            # Establish the same chains in the RAW table.
+            futures = [
+                self.untracked_updater.rewrite_chains(updates, deps,
+                                                      async=True),
+                self.untracked_updater.delete_chains(to_delete,
+                                                     async=True),
+            ]
+            wait_and_check(futures)
 
         # Track our chains so we can clean them up.
         self.programmed_leaf_chains = new_leaf_chains
