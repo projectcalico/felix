@@ -1128,6 +1128,6 @@ class HostEndpoint(LocalEndpoint):
             suffix=self._suffix,
             profile_ids=self.endpoint["profile_ids"],
             pol_ids_by_tier=(self._raw_pol_ids_by_tier if untracked
-                             else self._pol_ids_by_tier)
+                             else self._pol_ids_by_tier),
             default_drop=(not untracked),
         )
