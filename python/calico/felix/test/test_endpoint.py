@@ -1413,13 +1413,24 @@ class TestHostEndpoint(BaseTestCase):
 
             # Check that the iptables generator is called with the direction
             # arguments.  (Host endpoint chain directions are flipped.)
-            self.m_ipt_gen.host_endpoint_updates.assert_called_with(
-                ip_version=4,  # IP version
-                endpoint_id="endpoint_id",
-                suffix="eth0",
-                profile_ids=["prof1"],
-                pol_ids_by_tier={},
-            )
+            self.m_ipt_gen.host_endpoint_updates.assert_has_calls([
+                mock.call(
+                    ip_version=4,  # IP version
+                    endpoint_id="endpoint_id",
+                    suffix="eth0",
+                    profile_ids=["prof1"],
+                    pol_ids_by_tier={},
+                    default_drop=True
+                ),
+                mock.call(
+                    ip_version=4,  # IP version
+                    endpoint_id="endpoint_id",
+                    suffix="eth0",
+                    profile_ids=[],
+                    pol_ids_by_tier={},
+                    default_drop=False
+                ),
+            ])
             # Check that the updates are actually committed.
             self.m_iptables_updater.rewrite_chains.assert_called_once_with(
                 *self.updates, async=False
@@ -1497,13 +1508,24 @@ class TestHostEndpoint(BaseTestCase):
 
             # Check that the iptables generator is called with the direction
             # arguments.  (Host endpoint chain directions are flipped.)
-            self.m_ipt_gen.host_endpoint_updates.assert_called_once_with(
-                ip_version=6,  # IP version
-                endpoint_id="endpoint_id",
-                suffix="eth0",
-                profile_ids=["prof1"],
-                pol_ids_by_tier={},
-            )
+            self.m_ipt_gen.host_endpoint_updates.assert_has_calls([
+                mock.call(
+                    ip_version=6,  # IP version
+                    endpoint_id="endpoint_id",
+                    suffix="eth0",
+                    profile_ids=["prof1"],
+                    pol_ids_by_tier={},
+                    default_drop=True
+                ),
+                mock.call(
+                    ip_version=6,  # IP version
+                    endpoint_id="endpoint_id",
+                    suffix="eth0",
+                    profile_ids=[],
+                    pol_ids_by_tier={},
+                    default_drop=False
+                ),
+            ])
             # Check that the updates are actually committed.
             self.m_iptables_updater.rewrite_chains.assert_called_once_with(
                 *self.updates, async=False

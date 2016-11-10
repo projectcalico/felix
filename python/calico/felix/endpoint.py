@@ -1126,7 +1126,7 @@ class HostEndpoint(LocalEndpoint):
             ip_version=IP_TYPE_TO_VERSION[self.ip_type],
             endpoint_id=self.combined_id.endpoint,
             suffix=self._suffix,
-            profile_ids=self.endpoint["profile_ids"],
+            profile_ids=([] if untracked else self.endpoint["profile_ids"]),
             pol_ids_by_tier=(self._raw_pol_ids_by_tier if untracked
                              else self._pol_ids_by_tier),
             default_drop=(not untracked),
