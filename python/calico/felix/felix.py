@@ -148,11 +148,13 @@ def _main_greenlet():
                     v4_rules_manager,
                     v4_ep_manager,
                     v4_masq_manager,
+                    v4_raw_updater,
                     v4_nat_updater]
 
         actors_to_start = [
             hosts_ipset_v4,
 
+            v4_raw_updater,
             v4_filter_updater,
             v4_nat_updater,
             v4_ipset_mgr,
