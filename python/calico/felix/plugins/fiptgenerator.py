@@ -53,7 +53,7 @@ from calico.felix.frules import (CHAIN_TO_ENDPOINT, CHAIN_FROM_ENDPOINT,
                                  FELIX_PREFIX, CHAIN_FIP_DNAT, CHAIN_FIP_SNAT,
                                  CHAIN_TO_IFACE, CHAIN_FROM_IFACE,
                                  CHAIN_OUTPUT, CHAIN_FAILSAFE_IN,
-                                 CHAIN_FAILSAFE_OUT)
+                                 CHAIN_FAILSAFE_OUT, CHAIN_RPFILTER)
 
 CHAIN_PROFILE_PREFIX = FELIX_PREFIX + "p-"
 
@@ -124,7 +124,7 @@ class FelixIptablesGenerator(FelixPlugin):
         assert ip_version == 6
 
         chain = self.drop_rules(ip_version,
-                                CHAIN_PREROUTING,
+                                CHAIN_RPFILTER,
                                 None,
                                 "IPv6 rpfilter failed")
         return chain, {}

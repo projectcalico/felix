@@ -207,6 +207,7 @@ CHAIN_TO_PREFIX = FELIX_PREFIX + "to-"
 CHAIN_FROM_PREFIX = FELIX_PREFIX + "from-"
 
 # Top-level felix chains.
+CHAIN_RPFILTER = FELIX_PREFIX + "RPFILTER"
 CHAIN_PREROUTING = FELIX_PREFIX + "PREROUTING"
 CHAIN_POSTROUTING = FELIX_PREFIX + "POSTROUTING"
 CHAIN_INPUT = FELIX_PREFIX + "INPUT"
@@ -282,12 +283,12 @@ def install_global_rules(config, filter_updater, nat_updater, ip_version,
     # (For IPv4, this is controlled by a per-interface sysctl.)
     iptables_generator = config.plugins["iptables_generator"]
 
-    if raw_updater:
-        raw_prerouting_chain, raw_prerouting_deps = (
+    if raw_updater and ip_version == 6:
+        raw_rpfilter_chain, raw_rpfilter_deps = (
             iptables_generator.raw_rpfilter_failed_chain(ip_version=ip_version)
         )
-        raw_updater.rewrite_chains({CHAIN_PREROUTING: raw_prerouting_chain},
-                                   {CHAIN_PREROUTING: raw_prerouting_deps},
+        raw_updater.rewrite_chains({CHAIN_RPFILTER: raw_rpfilter_chain},
+                                   {CHAIN_RPFILTER: raw_rpfilter_deps},
                                    async=False)
 
         for iface_prefix in config.IFACE_PREFIX:
@@ -297,7 +298,7 @@ def install_global_rules(config, filter_updater, nat_updater, ip_version,
             raw_updater.ensure_rule_inserted(
                 "PREROUTING --in-interface %s --match rpfilter --invert "
                 "--jump %s" %
-                (iface_match, CHAIN_PREROUTING),
+                (iface_match, CHAIN_RPFILTER),
                 async=False)
 
     # Both IPV4 and IPV6 nat tables need felix-PREROUTING,
