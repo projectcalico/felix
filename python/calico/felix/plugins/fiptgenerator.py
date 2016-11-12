@@ -503,6 +503,10 @@ class FelixIptablesGenerator(FelixPlugin):
 
         chain.append(
             "--append {chain} --jump MARK --set-mark 0/{mark}".format(
+                chain=CHAIN_PREROUTING, mark=self.IPTABLES_MARK_ACCEPT)
+        )
+        chain.append(
+            "--append {chain} --jump MARK --set-mark 0/{mark}".format(
                 chain=CHAIN_PREROUTING, mark=self.IPTABLES_MARK_ENDPOINTS)
         )
         for iface_match in self.IFACE_MATCH:
@@ -550,6 +554,10 @@ class FelixIptablesGenerator(FelixPlugin):
         chain = []
         deps = set()
 
+        chain.append(
+            "--append {chain} --jump MARK --set-mark 0/{mark}".format(
+                chain=CHAIN_OUTPUT, mark=self.IPTABLES_MARK_ACCEPT)
+        )
         chain.append(
             "--append {chain} --jump MARK --set-mark 0/{mark}".format(
                 chain=CHAIN_OUTPUT, mark=self.IPTABLES_MARK_ENDPOINTS)
