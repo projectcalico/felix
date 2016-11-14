@@ -35,6 +35,7 @@ from calico.felix.futils import (
     logging_exceptions, iso_utc_timestamp, IPV4,
     IPV6, StatCounter
 )
+from calico.felix.profilerules import set_untracked
 from calico.felix.protocol import *
 from calico.monotonic import monotonic_time
 from gevent.event import Event
@@ -476,6 +477,7 @@ class DatastoreReader(TimedGreenlet):
             "inbound_rules": convert_pb_rules(msg.policy.inbound_rules),
             "outbound_rules": convert_pb_rules(msg.policy.outbound_rules),
         }
+        set_untracked(policy_id, msg.policy.untracked)
         self.splitter.on_rules_update(policy_id, rules)
 
     def on_tiered_policy_remove(self, msg):

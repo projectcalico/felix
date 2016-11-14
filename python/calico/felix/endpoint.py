@@ -36,7 +36,7 @@ from calico.felix.actor import actor_message, TimedGreenlet
 from calico.felix.futils import FailedSystemCall
 from calico.felix.futils import IPV4, IP_TYPE_TO_VERSION
 from calico.felix.refcount import ReferenceManager, RefCountedActor, RefHelper
-from calico.felix.profilerules import RulesManager
+from calico.felix.profilerules import RulesManager, is_untracked
 from calico.felix.frules import interface_to_chain_suffix
 
 _log = logging.getLogger(__name__)
@@ -899,7 +899,7 @@ class LocalEndpoint(RefCountedActor):
                 raw_pols = []
                 for pol in tier["policies"] or []:
                     pol_id = TieredPolicyId(tier["name"], pol)
-                    if pol.untracked:
+                    if is_untracked(pol_id):
                         raw_pols.append(pol_id)
                     else:
                         pols.append(pol_id)
