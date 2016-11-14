@@ -343,6 +343,12 @@ class HostEndpointDispatchChains(_DispatchChains):
             missing_from_chain_rules,
             async=True
         )
+        if self.untracked_updater:
+            self.untracked_updater.set_missing_chain_override(
+                self.chain_from_root,
+                missing_from_chain_rules,
+                async=True
+            )
         missing_to_chain_rules = [
             '--append %s --jump RETURN --match comment '
             '--comment "Not ready yet, allowing host traffic"' %
@@ -353,6 +359,12 @@ class HostEndpointDispatchChains(_DispatchChains):
             missing_to_chain_rules,
             async=True
         )
+        if self.untracked_updater:
+            self.untracked_updater.set_missing_chain_override(
+                self.chain_to_root,
+                missing_to_chain_rules,
+                async=True
+            )
 
     def end_of_chain_rules(self, chain_name, direction):
         # For host endpoints, we only configure the interfaces we've been
