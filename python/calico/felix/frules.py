@@ -400,10 +400,14 @@ def install_global_rules(config, filter_updater, nat_updater, ip_version,
             {
                 CHAIN_PREROUTING: prerouting_chain,
                 CHAIN_OUTPUT: output_chain,
+                CHAIN_FAILSAFE_IN: failsafe_in_chain,
+                CHAIN_FAILSAFE_OUT: failsafe_out_chain,
             },
             {
                 CHAIN_PREROUTING: prerouting_deps,
                 CHAIN_OUTPUT: output_deps,
+                CHAIN_FAILSAFE_IN: failsafe_in_deps,
+                CHAIN_FAILSAFE_OUT: failsafe_out_deps,
             },
             async=False)
 
