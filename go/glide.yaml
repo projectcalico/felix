@@ -23,7 +23,7 @@ import:
   version: ^1.21.0
 - package: github.com/projectcalico/libcalico-go
   repo: https://github.com/fasaxc/libcalico-go.git
-  version: syncer-rework
+  version: syncer-fix
   subpackages:
   - lib
 - package: github.com/Sirupsen/logrus

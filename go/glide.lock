@@ -1,5 +1,5 @@
-hash: 056d2d13213dc4f003011e53ff6ece8772ee42a397719ee25c3ab18197a68953
-updated: 2016-11-04T13:23:44.691289872-07:00
+hash: 919ebfc4f1780a6bca4ff98250f5728dde949c8d22c93a1fc55ecdb5489dbcd8
+updated: 2016-11-22T17:29:42.04903123Z
 imports:
 - name: bitbucket.org/ww/goautoneg
   version: 75cd24fc2f2c2a2088577d12123ddee5f54e0675
@@ -34,9 +34,7 @@ imports:
 - name: github.com/coreos/go-systemd
   version: bfdc81d0d7e0fb19447b08571f63b774495251ce
   subpackages:
-  - daemon
   - journal
-  - util
 - name: github.com/coreos/pkg
   version: fa29b1d70f0beaddd4c7021607cc3c3be8ce94b8
   subpackages:
@@ -130,7 +128,8 @@ imports:
 - name: github.com/pborman/uuid
   version: ca53cad383cad2479bbba7f7a1a05797ec1386e4
 - name: github.com/projectcalico/libcalico-go
-  version: 2ae440e73785b27eeee2888ecaf772237f8ea41f
+  version: e0801f836a199a79eb96c5b9bc69d7d12e7293d3
+  repo: https://github.com/fasaxc/libcalico-go.git
   subpackages:
   - lib
   - lib/api
@@ -188,8 +187,6 @@ imports:
 - name: golang.org/x/crypto
   version: 1351f936d976c60a0a48d728281922cf63eafb8d
   subpackages:
-  - bcrypt
-  - blowfish
   - ssh/terminal
 - name: golang.org/x/net
   version: 6acef71eb69611914f7a30939ea9f6e194c78172
@@ -367,8 +364,6 @@ testImports:
   version: d59fa0ac68bb5dd932ee8d24eed631cdd519efc3
   subpackages:
   - format
-  - gstruct
-  - gstruct/errors
   - internal/assertion
   - internal/asyncassertion
   - internal/oraclematcher
