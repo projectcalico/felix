@@ -1,3 +1,12 @@
+felix (1.4.5-2~__STREAM__) __STREAM__; urgency=low
+
+  * Felix 1.4.5 (from Git commit 30b7154).
+    - Fix usage reporting
+    - Implement 'untracked' policy
+    - Pin to 0.0.17 prometheus_client
+
+ -- Neil Jerram <neil@tigera.io>  Fri, 25 Nov 2016 17:21:07 +0000
+
 felix (1.4.4-1-xenial) xenial; urgency=low
 
   * felix release (from Git commit 567247c).
