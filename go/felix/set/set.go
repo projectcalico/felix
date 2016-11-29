@@ -14,7 +14,10 @@
 
 package set
 
-import "errors"
+import (
+	"errors"
+	log "github.com/Sirupsen/logrus"
+)
 
 type Set interface {
 	Len() int
@@ -31,10 +34,15 @@ var emptyValue = empty{}
 
 var (
 	StopIteration = errors.New("Stop iteration")
+	RemoveItem    = errors.New("Remove item")
 )
 
 func New() Set {
 	return make(mapSet)
+}
+
+func Empty() Set {
+	return mapSet(nil)
 }
 
 type mapSet map[interface{}]empty
@@ -57,17 +65,25 @@ func (set mapSet) Contains(item interface{}) bool {
 }
 
 func (set mapSet) Iter(visitor func(item interface{}) error) {
-	for item, _ := range set {
+loop:
+	for item := range set {
 		err := visitor(item)
-		if err == StopIteration {
+		switch err {
+		case StopIteration:
+			break loop
+		case RemoveItem:
+			delete(set, item)
+		case nil:
 			break
+		default:
+			log.WithError(err).Panic("Unexpected iteration error")
 		}
 	}
 }
 
-func (sest mapSet) Copy() Set {
+func (set mapSet) Copy() Set {
 	cpy := New()
-	for item, _ := range sest {
+	for item := range set {
 		cpy.Add(item)
 	}
 	return cpy

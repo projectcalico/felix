@@ -21,6 +21,8 @@
 package ip
 
 import (
+	"fmt"
+	log "github.com/Sirupsen/logrus"
 	calinet "github.com/projectcalico/libcalico-go/lib/net"
 	"net"
 )
@@ -72,14 +74,68 @@ func (a V6Addr) String() string {
 	return a.AsNetIP().String()
 }
 
+type CIDR interface {
+	Version() uint8
+	Addr() Addr
+	Prefix() uint8
+	String() string
+	ToIPNet() net.IPNet
+}
+
 type V4CIDR struct {
 	addr   V4Addr
 	prefix uint8
 }
 
+func (c V4CIDR) Version() uint8 {
+	return 4
+}
+
+func (c V4CIDR) Addr() Addr {
+	return c.addr
+}
+
+func (c V4CIDR) Prefix() uint8 {
+	return c.prefix
+}
+
+func (c V4CIDR) ToIPNet() net.IPNet {
+	return net.IPNet{
+		IP:   c.Addr().AsNetIP(),
+		Mask: net.CIDRMask(int(c.Prefix()), 32),
+	}
+}
+
+func (c V4CIDR) String() string {
+	return fmt.Sprintf("%s/%v", c.addr.String(), c.prefix)
+}
+
 type V6CIDR struct {
 	addr   V6Addr
 	prefix uint8
+}
+
+func (c V6CIDR) Version() uint8 {
+	return 6
+}
+
+func (c V6CIDR) Addr() Addr {
+	return c.addr
+}
+
+func (c V6CIDR) Prefix() uint8 {
+	return c.prefix
+}
+
+func (c V6CIDR) ToIPNet() net.IPNet {
+	return net.IPNet{
+		IP:   c.Addr().AsNetIP(),
+		Mask: net.CIDRMask(int(c.Prefix()), 128),
+	}
+}
+
+func (c V6CIDR) String() string {
+	return fmt.Sprintf("%s/%v", c.addr.String(), c.prefix)
 }
 
 func FromNetIP(netIP net.IP) Addr {
@@ -96,4 +152,28 @@ func FromNetIP(netIP net.IP) Addr {
 		}
 		return ip
 	}
+}
+
+func CIDRFromIPNet(ipNet calinet.IPNet) CIDR {
+	ones, _ := ipNet.Mask.Size()
+	ip := FromNetIP(ipNet.IP)
+	if ip.Version() == 4 {
+		return V4CIDR{
+			addr:   ip.(V4Addr),
+			prefix: uint8(ones),
+		}
+	} else {
+		return V6CIDR{
+			addr:   ip.(V6Addr),
+			prefix: uint8(ones),
+		}
+	}
+}
+
+func MustParseCIDR(s string) CIDR {
+	_, ipNet, err := net.ParseCIDR(s)
+	if err != nil {
+		log.WithError(err).WithField("cidr", s).Panic("Failed to parse CIDR")
+	}
+	return CIDRFromIPNet(calinet.IPNet{*ipNet})
 }

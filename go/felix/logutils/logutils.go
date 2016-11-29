@@ -186,17 +186,26 @@ func (f *Formatter) Format(entry *log.Entry) ([]byte, error) {
 	stamp := entry.Time.Format("2006-01-02 15:04:05.000")
 	levelStr := strings.ToUpper(entry.Level.String())
 	pid := os.Getpid()
-	fileName := entry.Data["file"]
-	lineNo := entry.Data["line"]
+	fileName := entry.Data["__file__"]
+	lineNo := entry.Data["__line__"]
 	formatted := fmt.Sprintf("%s [%s][%d] %v %v: %v",
 		stamp, levelStr, pid, fileName, lineNo, entry.Message)
 	b.WriteString(formatted)
 
 	for _, key := range keys {
-		if key == "file" || key == "line" {
+		if key == "__file__" || key == "__line__" {
 			continue
 		}
-		b.WriteString(fmt.Sprintf(" %v=%v", key, entry.Data[key]))
+		var value interface{} = entry.Data[key]
+		var stringifiedValue string
+		if stringer, ok := value.(fmt.Stringer); ok {
+			// Trust the value's String() method.
+			stringifiedValue = stringer.String()
+		} else {
+			// No string method, use %#v to get a more thorough dump.
+			stringifiedValue = fmt.Sprintf("%#v", value)
+		}
+		b.WriteString(fmt.Sprintf(" %v=%v", key, stringifiedValue))
 	}
 
 	b.WriteByte('\n')
@@ -224,8 +233,8 @@ func (hook ContextHook) Fire(entry *log.Entry) error {
 		for {
 			frame, more := frames.Next()
 			if !shouldSkipFrame(frame) {
-				entry.Data["file"] = path.Base(frame.File)
-				entry.Data["line"] = frame.Line
+				entry.Data["__file__"] = path.Base(frame.File)
+				entry.Data["__line__"] = frame.Line
 				break
 			}
 			if !more {
