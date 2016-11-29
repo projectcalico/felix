@@ -16,7 +16,7 @@ RUN ./build-prereqs.sh
 ENV LD_LIBRARY_PATH=/usr/local/lib
 RUN yum install -y libffi-devel libffi yajl
 ADD felix_requirements.txt felix_requirements.txt
-RUN pip install -U -r felix_requirements.txt
+RUN pip install -U -r felix_requirements.txt -e git+https://github.com/projectcalico/python-etcd.git#egg=python-etcd
 
 # Required for IP SAN support.
 RUN pip install urllib3>=1.18
