@@ -356,12 +356,12 @@ func (m *endpointManager) resolveHostEndpoints() error {
 			"ifaceName":  ifaceName,
 			"ifaceAddrs": ifaceAddrs,
 		})
-		var bestHostEpId *proto.HostEndpointID = nil
+		bestHostEpId := proto.HostEndpointID{}
 	HostEpLoop:
 		for id, hostEp := range m.rawHostEndpoints {
 			logCxt := ifaceCxt.WithField("id", id)
-			logCxt.Debug("See if HostEp matches interface")
-			if (bestHostEpId != nil) && (bestHostEpId.EndpointId < id.EndpointId) {
+			logCxt.WithField("bestHostEpId", bestHostEpId).Debug("See if HostEp matches interface")
+			if (bestHostEpId.EndpointId != "") && (bestHostEpId.EndpointId < id.EndpointId) {
 				// We already have a HostEndpointId that is better than
 				// this one, so no point looking any further.
 				logCxt.Debug("No better than existing match")
@@ -371,7 +371,7 @@ func (m *endpointManager) resolveHostEndpoints() error {
 				// The HostEndpoint has an explicit name that matches the
 				// interface.
 				logCxt.Debug("Match on explicit iface name")
-				bestHostEpId = &id
+				bestHostEpId = id
 				continue
 			} else if hostEp.Name != "" {
 				// The HostEndpoint has an explicit name that isn't this
@@ -387,18 +387,18 @@ func (m *endpointManager) resolveHostEndpoints() error {
 						// The HostEndpoint expects an IP address
 						// that is on this interface.
 						logCxt.Debug("Match on address")
-						bestHostEpId = &id
+						bestHostEpId = id
 						continue HostEpLoop
 					}
 				}
 			}
 		}
-		if bestHostEpId != nil {
+		if bestHostEpId.EndpointId != "" {
 			log.WithFields(log.Fields{
 				"ifaceName":    ifaceName,
 				"bestHostEpId": bestHostEpId,
 			}).Debug("Got HostEp for interface")
-			resolvedHostEpIds[ifaceName] = *bestHostEpId
+			resolvedHostEpIds[ifaceName] = bestHostEpId
 		}
 	}
 
@@ -408,7 +408,9 @@ func (m *endpointManager) resolveHostEndpoints() error {
 		log.WithField("id", id).Info("Updating host endpoint chains.")
 		hostEp := m.rawHostEndpoints[id]
 		chains := m.ruleRenderer.HostEndpointToIptablesChains(ifaceName, hostEp)
-		m.filterTable.UpdateChains(chains)
+		if !reflect.DeepEqual(chains, m.activeHostIdToChains[id]) {
+			m.filterTable.UpdateChains(chains)
+		}
 		newHostEpChains[id] = chains
 		delete(m.activeHostIdToChains, id)
 	}
