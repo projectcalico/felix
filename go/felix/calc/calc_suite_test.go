@@ -18,12 +18,16 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
+	"github.com/Sirupsen/logrus"
+	"github.com/projectcalico/felix/go/felix/logutils"
 	"github.com/projectcalico/libcalico-go/lib/testutils"
 	"testing"
 )
 
 func init() {
 	testutils.HookLogrusForGinkgo()
+	logrus.AddHook(&logutils.ContextHook{})
+	logrus.SetFormatter(&logutils.Formatter{})
 }
 
 func TestCalculationGraph(t *testing.T) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2016 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -87,8 +87,8 @@ func (source Source) Local() bool {
 // We use tags to control the parsing and validation.
 type Config struct {
 	// Configuration parameters.
-
-	DataplaneDriver string `config:"file(must-exist,executable);calico-iptables-plugin;non-zero,die-on-fail,skip-default-validation"`
+	UseInternalDataplaneDriver bool   `config:"bool;true"`
+	DataplaneDriver            string `config:"file(must-exist,executable);calico-iptables-plugin;non-zero,die-on-fail,skip-default-validation"`
 
 	DatastoreType string `config:"oneof(kubernetes,etcdv2);etcdv2;non-zero,die-on-fail"`
 
@@ -145,8 +145,8 @@ type Config struct {
 	PrometheusMetricsPort                int  `config:"int(0,65535);9091"`
 	DataplaneDriverPrometheusMetricsPort int  `config:"int(0,65535);9092"`
 
-	FailsafeInboundHostPorts  []int `config:"port-list;22;die-on-fail"`
-	FailsafeOutboundHostPorts []int `config:"port-list;2379,2380,4001,7001;die-on-fail"`
+	FailsafeInboundHostPorts  []uint16 `config:"port-list;22;die-on-fail"`
+	FailsafeOutboundHostPorts []uint16 `config:"port-list;2379,2380,4001,7001;die-on-fail"`
 
 	UsageReportingEnabled bool   `config:"bool;true"`
 	ClusterGUID           string `config:"string;baddecaf"`
@@ -175,6 +175,51 @@ func (config *Config) UpdateFrom(rawData map[string]string, source Source) (chan
 
 	changed, err = config.resolve()
 	return
+}
+
+func (c *Config) InterfacePrefixes() []string {
+	return strings.Split(c.InterfacePrefix, ",")
+}
+
+func (config *Config) OpenstackActive() bool {
+	if strings.Contains(strings.ToLower(config.ClusterType), "openstack") {
+		log.Debug("Cluster type contains OpenStack")
+		return true
+	}
+	if config.MetadataAddr != "127.0.0.1" {
+		log.Debug("OpenStack metadata IP set to non-default, assuming OpenStack active")
+		return true
+	}
+	if config.MetadataPort != 8775 {
+		log.Debug("OpenStack metadata port set to non-default, assuming OpenStack active")
+		return true
+	}
+	for _, prefix := range config.InterfacePrefixes() {
+		if prefix == "tap" {
+			log.Debug("Interface prefix list contains 'tap', assuming OpenStack")
+			return true
+		}
+	}
+	log.Debug("No evidence this is an OpenStack deployment; diabling OpenStack special-cases")
+	return false
+}
+
+func (config *Config) NthIPTablesMark(n int) uint32 {
+	numBitsFound := 0
+	for shift := uint(0); shift < 32; shift++ {
+		candidate := uint32(1) << shift
+		if config.IptablesMarkMask&candidate > 0 {
+			if numBitsFound == n {
+				return candidate
+			}
+			numBitsFound += 1
+		}
+	}
+	log.WithFields(log.Fields{
+		"IptablesMarkMask": config.IptablesMarkMask,
+		"requestedMark":    n,
+	}).Panic("Not enough iptables mark bits available.")
+	return 0
 }
 
 func (config *Config) resolve() (changed bool, err error) {
@@ -223,14 +268,14 @@ func (config *Config) resolve() (changed bool, err error) {
 			} else {
 				value, err = param.Parse(rawValue)
 				if err != nil {
-					log.Errorf("%v (source %v)", err, source)
+					logCxt := log.WithError(err).WithField("source", source)
 					if metadata.DieOnParseFailure {
-						log.Errorf("Cannot continue with invalid value for %v.", name)
+						logCxt.Error("Invalid (required) config value.")
 						config.Err = err
 						return
 					} else {
-						log.Errorf("Replacing invalid value with default value for %v: %v",
-							name, metadata.Default)
+						logCxt.WithField("default", metadata.Default).Warn(
+							"Replacing invalid value with default")
 						value = metadata.Default
 						err = nil
 					}

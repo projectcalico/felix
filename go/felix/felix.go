@@ -1,4 +1,4 @@
-// Copyright (c) 2016 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,26 +15,27 @@
 package main
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	log "github.com/Sirupsen/logrus"
 	"github.com/docopt/docopt-go"
-	pb "github.com/gogo/protobuf/proto"
 	"github.com/projectcalico/felix/go/felix/buildinfo"
 	"github.com/projectcalico/felix/go/felix/calc"
 	"github.com/projectcalico/felix/go/felix/config"
 	_ "github.com/projectcalico/felix/go/felix/config"
-	"github.com/projectcalico/felix/go/felix/ip"
+	"github.com/projectcalico/felix/go/felix/extdataplane"
+	"github.com/projectcalico/felix/go/felix/intdataplane"
+	"github.com/projectcalico/felix/go/felix/ipsets"
 	"github.com/projectcalico/felix/go/felix/logutils"
 	"github.com/projectcalico/felix/go/felix/proto"
+	"github.com/projectcalico/felix/go/felix/rules"
 	"github.com/projectcalico/felix/go/felix/statusrep"
 	"github.com/projectcalico/felix/go/felix/usagerep"
 	"github.com/projectcalico/libcalico-go/lib/backend"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -170,49 +171,67 @@ configRetry:
 	buildInfoLogCxt.WithField("config", configParams).Info(
 		"Successfully loaded configuration.")
 
-	// Create a pair of pipes, one for sending messages to the dataplane
-	// driver, the other for receiving.
-	toDriverR, toDriverW, err := os.Pipe()
-	if err != nil {
-		log.WithError(err).Fatal("Failed to open pipe for dataplane driver")
-	}
-	fromDriverR, fromDriverW, err := os.Pipe()
-	if err != nil {
-		log.WithError(err).Fatal("Failed to open pipe for dataplane driver")
+	// Start up the dataplane driver.  This may be the internal go-based driver or an external
+	// one.
+	var dpDriver dataplaneDriver
+	var dpDriverCmd *exec.Cmd
+	if configParams.UseInternalDataplaneDriver {
+		log.Info("Using internal dataplane driver.")
+		markAccept := configParams.NthIPTablesMark(0)
+		markNextTier := configParams.NthIPTablesMark(1)
+		log.WithFields(log.Fields{
+			"acceptMark": markAccept,
+			"nextMark":   markNextTier,
+		}).Info("Calculated iptables mark bits")
+		dpConfig := intdataplane.Config{
+			RulesConfig: rules.Config{
+				WorkloadIfacePrefixes: configParams.InterfacePrefixes(),
+
+				IPSetConfigV4: ipsets.NewIPVersionConfig(
+					ipsets.IPFamilyV4,
+					rules.IPSetNamePrefix,
+					rules.AllHistoricIPSetNamePrefixes,
+					rules.LegacyV4IPSetNames,
+				),
+				IPSetConfigV6: ipsets.NewIPVersionConfig(
+					ipsets.IPFamilyV6,
+					rules.IPSetNamePrefix,
+					rules.AllHistoricIPSetNamePrefixes,
+					nil,
+				),
+
+				OpenStackSpecialCasesEnabled: configParams.OpenstackActive(),
+				OpenStackMetadataIP:          net.ParseIP(configParams.MetadataAddr),
+				OpenStackMetadataPort:        uint16(configParams.MetadataPort),
+
+				IptablesMarkAccept:   markAccept,
+				IptablesMarkNextTier: markNextTier,
+
+				IPIPEnabled:       configParams.IpInIpEnabled,
+				IPIPTunnelAddress: configParams.IpInIpTunnelAddr,
+
+				ActionOnDrop:         configParams.DropActionOverride,
+				EndpointToHostAction: configParams.DefaultEndpointToHostAction,
+
+				FailsafeInboundHostPorts:  configParams.FailsafeInboundHostPorts,
+				FailsafeOutboundHostPorts: configParams.FailsafeOutboundHostPorts,
+			},
+			IPIPMTU:                 configParams.IpInIpMtu,
+			IptablesRefreshInterval: time.Duration(configParams.IptablesRefreshInterval) * time.Second,
+		}
+		intDP := intdataplane.NewIntDataplaneDriver(dpConfig)
+		intDP.Start()
+		dpDriver = intDP
+	} else {
+		log.WithField("driver", configParams.DataplaneDriver).Info(
+			"Using external dataplane driver.")
+		dpDriver, dpDriverCmd = extdataplane.StartExtDataplaneDriver(configParams.DataplaneDriver)
 	}
 
-	cmd := exec.Command(configParams.DataplaneDriver)
-	driverOut, err := cmd.StdoutPipe()
-	if err != nil {
-		log.WithError(err).Fatal("Failed to create pipe for dataplane driver")
-	}
-	driverErr, err := cmd.StderrPipe()
-	if err != nil {
-		log.WithError(err).Fatal("Failed to create pipe for dataplane driver")
-	}
-	go io.Copy(os.Stdout, driverOut)
-	go io.Copy(os.Stderr, driverErr)
-	cmd.ExtraFiles = []*os.File{toDriverR, fromDriverW}
-	if err := cmd.Start(); err != nil {
-		log.WithError(err).Fatal("Failed to start dataplane driver")
-	}
-
-	// Now the sub-process is running, close our copy of the file handles
-	// for the child's end of the pipes.
-	if err := toDriverR.Close(); err != nil {
-		cmd.Process.Kill()
-		log.WithError(err).Fatal("Failed to close parent's copy of pipe")
-	}
-	if err := fromDriverW.Close(); err != nil {
-		cmd.Process.Kill()
-		log.WithError(err).Fatal("Failed to close parent's copy of pipe")
-	}
-
-	// Create the connection to/from the dataplane driver.
+	// Initialise the glue logic that connects the calculation graph to/from the dataplane driver.
 	log.Info("Connect to the dataplane driver.")
 	failureReportChan := make(chan string)
-	felixConn := NewDataplaneConn(configParams,
-		datastore, toDriverW, fromDriverR, failureReportChan)
+	dpConnector := newConnector(configParams, datastore, dpDriver, failureReportChan)
 
 	// Now create the calculation graph, which receives updates from the
 	// datastore and outputs dataplane updates for the dataplane driver.
@@ -223,7 +242,7 @@ configRetry:
 	// The output of the calculation graph arrives at the dataplane
 	// connection via channel.
 	//
-	// Syncer -chan-> Validator -chan-> Calc graph -chan-> felixConn
+	// Syncer -chan-> Validator -chan-> Calc graph -chan->   dataplane
 	//        KVPair            KVPair             protobufs
 
 	// Get a Syncer from the datastore, which will feed the calculation
@@ -235,7 +254,7 @@ configRetry:
 	// Create the ipsets/active policy calculation graph, which will
 	// do the dynamic calculation of ipset memberships and active policies
 	// etc.
-	asyncCalcGraph := calc.NewAsyncCalcGraph(configParams, felixConn.ToDataplane)
+	asyncCalcGraph := calc.NewAsyncCalcGraph(configParams, dpConnector.ToDataplane)
 
 	if configParams.UsageReportingEnabled {
 		// Usage reporting enabled, add stats collector to graph and
@@ -274,23 +293,23 @@ configRetry:
 		delay := configParams.EndpointReportingDelay()
 		log.WithField("delay", delay).Info(
 			"Endpoint status reporting enabled, starting status reporter")
-		felixConn.statusReporter = statusrep.NewEndpointStatusReporter(
+		dpConnector.statusReporter = statusrep.NewEndpointStatusReporter(
 			configParams.FelixHostname,
-			felixConn.StatusUpdatesFromDataplane,
-			felixConn.InSync,
-			felixConn.datastore,
+			dpConnector.StatusUpdatesFromDataplane,
+			dpConnector.InSync,
+			dpConnector.datastore,
 			delay,
 			delay*180,
 		)
-		felixConn.statusReporter.Start()
+		dpConnector.statusReporter.Start()
 	}
 
 	// Start communicating with the dataplane driver.
-	felixConn.Start()
+	dpConnector.Start()
 
 	// Send the opening message to the dataplane driver, giving it its
 	// config.
-	felixConn.ToDataplane <- &proto.ConfigUpdate{
+	dpConnector.ToDataplane <- &proto.ConfigUpdate{
 		Config: configParams.RawValues(),
 	}
 
@@ -301,7 +320,7 @@ configRetry:
 
 	// Now monitor the worker process and our worker threads and shut
 	// down the process gracefully if they fail.
-	monitorAndManageShutdown(failureReportChan, cmd, stopSignalChans)
+	monitorAndManageShutdown(failureReportChan, dpDriverCmd, stopSignalChans)
 }
 
 func servePrometheusMetrics(port int) {
@@ -320,19 +339,23 @@ func monitorAndManageShutdown(failureReportChan <-chan string, driverCmd *exec.C
 	termSignalChan := make(chan os.Signal)
 	signal.Notify(termSignalChan, syscall.SIGTERM)
 
-	// Start a background thread to tell us when the driver stops.
+	// Start a background thread to tell us when the dataplane driver stops.
 	// If the driver stops unexpectedly, we'll terminate this process.
 	// If this process needs to stop, we'll kill the driver and then wait
 	// for the message from the background thread.
 	driverStoppedC := make(chan bool)
 	go func() {
+		if driverCmd == nil {
+			log.Info("No driver process to monitor")
+			return
+		}
 		err := driverCmd.Wait()
 		log.WithError(err).Warn("Driver process stopped")
 		driverStoppedC <- true
 	}()
 
 	// Wait for one of the channels to give us a reason to shut down.
-	driverAlreadyStopped := false
+	driverAlreadyStopped := driverCmd == nil
 	receivedSignal := false
 	var reason string
 	select {
@@ -446,104 +469,85 @@ func loadConfigFromDatastore(datastore bapi.Client, hostname string) (globalConf
 	return globalConfig, hostConfig
 }
 
-type ipUpdate struct {
-	ipset string
-	ip    ip.Addr
+type dataplaneDriver interface {
+	SendMessage(msg interface{}) error
+	RecvMessage() (msg interface{}, err error)
 }
 
-type DataplaneConn struct {
+type DataplaneConnector struct {
 	config                     *config.Config
 	ToDataplane                chan interface{}
 	StatusUpdatesFromDataplane chan interface{}
 	InSync                     chan bool
 	failureReportChan          chan<- string
-	felixReader                io.Reader
-	felixWriter                io.Writer
+	dataplane                  dataplaneDriver
 	datastore                  bapi.Client
 	statusReporter             *statusrep.EndpointStatusReporter
 
 	datastoreInSync bool
 
 	firstStatusReportSent bool
-	nextSeqNumber         uint64
 }
 
 type Startable interface {
 	Start()
 }
 
-func NewDataplaneConn(configParams *config.Config,
+func newConnector(configParams *config.Config,
 	datastore bapi.Client,
-	toDriver io.Writer,
-	fromDriver io.Reader,
-	failureReportChan chan<- string) *DataplaneConn {
-	felixConn := &DataplaneConn{
+	dataplane dataplaneDriver,
+	failureReportChan chan<- string) *DataplaneConnector {
+	felixConn := &DataplaneConnector{
 		config:                     configParams,
 		datastore:                  datastore,
 		ToDataplane:                make(chan interface{}),
 		StatusUpdatesFromDataplane: make(chan interface{}),
 		InSync:            make(chan bool, 1),
 		failureReportChan: failureReportChan,
-		felixReader:       fromDriver,
-		felixWriter:       toDriver,
+		dataplane:         dataplane,
 	}
 	return felixConn
 }
 
-func (fc *DataplaneConn) readMessagesFromDataplane() {
+func (fc *DataplaneConnector) readMessagesFromDataplane() {
 	defer func() {
 		fc.shutDownProcess("Failed to read messages from dataplane")
 	}()
 	log.Info("Reading from dataplane driver pipe...")
 	for {
-		buf := make([]byte, 8)
-		_, err := io.ReadFull(fc.felixReader, buf)
+		payload, err := fc.dataplane.RecvMessage()
 		if err != nil {
 			log.WithError(err).Error("Failed to read from front-end socket")
 			fc.shutDownProcess("Failed to read from front-end socket")
 		}
-		length := binary.LittleEndian.Uint64(buf)
-
-		data := make([]byte, length)
-		_, err = io.ReadFull(fc.felixReader, data)
-		if err != nil {
-			log.WithError(err).Error("Failed to read from front-end socket")
-			fc.shutDownProcess("Failed to read from front-end socket")
-		}
-
-		msg := proto.FromDataplane{}
-		pb.Unmarshal(data, &msg)
-
-		log.Debugf("Message from Felix: %#v", msg.Payload)
-
-		payload := msg.Payload
+		log.WithField("payload", payload).Debug("New message from dataplane")
 		switch msg := payload.(type) {
-		case *proto.FromDataplane_ProcessStatusUpdate:
-			fc.handleProcessStatusUpdate(msg.ProcessStatusUpdate)
-		case *proto.FromDataplane_WorkloadEndpointStatusUpdate:
+		case *proto.ProcessStatusUpdate:
+			fc.handleProcessStatusUpdate(msg)
+		case *proto.WorkloadEndpointStatusUpdate:
 			if fc.statusReporter != nil {
-				fc.StatusUpdatesFromDataplane <- msg.WorkloadEndpointStatusUpdate
+				fc.StatusUpdatesFromDataplane <- msg
 			}
-		case *proto.FromDataplane_WorkloadEndpointStatusRemove:
+		case *proto.WorkloadEndpointStatusRemove:
 			if fc.statusReporter != nil {
-				fc.StatusUpdatesFromDataplane <- msg.WorkloadEndpointStatusRemove
+				fc.StatusUpdatesFromDataplane <- msg
 			}
-		case *proto.FromDataplane_HostEndpointStatusUpdate:
+		case *proto.HostEndpointStatusUpdate:
 			if fc.statusReporter != nil {
-				fc.StatusUpdatesFromDataplane <- msg.HostEndpointStatusUpdate
+				fc.StatusUpdatesFromDataplane <- msg
 			}
-		case *proto.FromDataplane_HostEndpointStatusRemove:
+		case *proto.HostEndpointStatusRemove:
 			if fc.statusReporter != nil {
-				fc.StatusUpdatesFromDataplane <- msg.HostEndpointStatusRemove
+				fc.StatusUpdatesFromDataplane <- msg
 			}
 		default:
-			log.Warningf("XXXX Unknown message from felix: %#v", msg)
+			log.WithField("msg", msg).Warning("Unknown message from dataplane")
 		}
 		log.Debug("Finished handling message from front-end")
 	}
 }
 
-func (fc *DataplaneConn) handleProcessStatusUpdate(msg *proto.ProcessStatusUpdate) {
+func (fc *DataplaneConnector) handleProcessStatusUpdate(msg *proto.ProcessStatusUpdate) {
 	log.Debugf("Status update from dataplane driver: %v", *msg)
 	statusReport := model.StatusReport{
 		Timestamp:     msg.IsoTimestamp,
@@ -571,7 +575,7 @@ func (fc *DataplaneConn) handleProcessStatusUpdate(msg *proto.ProcessStatusUpdat
 	}
 }
 
-func (fc *DataplaneConn) sendMessagesToDataplaneDriver() {
+func (fc *DataplaneConnector) sendMessagesToDataplaneDriver() {
 	defer func() {
 		fc.shutDownProcess("Failed to send messages to dataplane")
 	}()
@@ -583,6 +587,7 @@ func (fc *DataplaneConn) sendMessagesToDataplaneDriver() {
 		case *proto.InSync:
 			log.Info("Datastore now in sync.")
 			if !fc.datastoreInSync {
+				log.Info("Datastore in sync for first time, sending message to status reporter.")
 				fc.datastoreInSync = true
 				fc.InSync <- true
 			}
@@ -606,11 +611,13 @@ func (fc *DataplaneConn) sendMessagesToDataplaneDriver() {
 			log.Warn("Datastore became unready, need to restart.")
 			fc.shutDownProcess("datastore became unready")
 		}
-		fc.marshalToDataplane(msg)
+		if err := fc.dataplane.SendMessage(msg); err != nil {
+			fc.shutDownProcess("Failed to write to dataplane driver")
+		}
 	}
 }
 
-func (fc *DataplaneConn) shutDownProcess(reason string) {
+func (fc *DataplaneConnector) shutDownProcess(reason string) {
 	// Send a failure report to the managed shutdown thread then give it
 	// a few seconds to do the shutdown.
 	fc.failureReportChan <- reason
@@ -619,75 +626,7 @@ func (fc *DataplaneConn) shutDownProcess(reason string) {
 	log.Panic("Managed shutdown failed. Panicking.")
 }
 
-func (fc *DataplaneConn) marshalToDataplane(msg interface{}) {
-	log.Debugf("Writing msg (%v) to felix: %#v", fc.nextSeqNumber, msg)
-
-	envelope := &proto.ToDataplane{
-		SequenceNumber: fc.nextSeqNumber,
-	}
-	fc.nextSeqNumber += 1
-	switch msg := msg.(type) {
-	case *proto.ConfigUpdate:
-		envelope.Payload = &proto.ToDataplane_ConfigUpdate{msg}
-	case *proto.InSync:
-		envelope.Payload = &proto.ToDataplane_InSync{msg}
-	case *proto.IPSetUpdate:
-		envelope.Payload = &proto.ToDataplane_IpsetUpdate{msg}
-	case *proto.IPSetDeltaUpdate:
-		envelope.Payload = &proto.ToDataplane_IpsetDeltaUpdate{msg}
-	case *proto.IPSetRemove:
-		envelope.Payload = &proto.ToDataplane_IpsetRemove{msg}
-	case *proto.ActivePolicyUpdate:
-		envelope.Payload = &proto.ToDataplane_ActivePolicyUpdate{msg}
-	case *proto.ActivePolicyRemove:
-		envelope.Payload = &proto.ToDataplane_ActivePolicyRemove{msg}
-	case *proto.ActiveProfileUpdate:
-		envelope.Payload = &proto.ToDataplane_ActiveProfileUpdate{msg}
-	case *proto.ActiveProfileRemove:
-		envelope.Payload = &proto.ToDataplane_ActiveProfileRemove{msg}
-	case *proto.HostEndpointUpdate:
-		envelope.Payload = &proto.ToDataplane_HostEndpointUpdate{msg}
-	case *proto.HostEndpointRemove:
-		envelope.Payload = &proto.ToDataplane_HostEndpointRemove{msg}
-	case *proto.WorkloadEndpointUpdate:
-		envelope.Payload = &proto.ToDataplane_WorkloadEndpointUpdate{msg}
-	case *proto.WorkloadEndpointRemove:
-		envelope.Payload = &proto.ToDataplane_WorkloadEndpointRemove{msg}
-	case *proto.HostMetadataUpdate:
-		envelope.Payload = &proto.ToDataplane_HostMetadataUpdate{msg}
-	case *proto.HostMetadataRemove:
-		envelope.Payload = &proto.ToDataplane_HostMetadataRemove{msg}
-	case *proto.IPAMPoolUpdate:
-		envelope.Payload = &proto.ToDataplane_IpamPoolUpdate{msg}
-	case *proto.IPAMPoolRemove:
-		envelope.Payload = &proto.ToDataplane_IpamPoolRemove{msg}
-	default:
-		log.WithField("msg", msg).Panic("Unknown message type")
-	}
-	data, err := pb.Marshal(envelope)
-	if err != nil {
-		log.WithError(err).WithField("msg", msg).Panic(
-			"Failed to marshal data to front end")
-	}
-
-	lengthBuffer := make([]byte, 8)
-	binary.LittleEndian.PutUint64(lengthBuffer, uint64(len(data)))
-
-	numBytes, err := fc.felixWriter.Write(lengthBuffer)
-	if err != nil || numBytes != len(lengthBuffer) {
-		log.WithError(err).WithField("bytesWritten", numBytes).Error(
-			"Failed to write to dataplane driver")
-		fc.shutDownProcess("Failed to write to front end")
-	}
-	numBytes, err = fc.felixWriter.Write(data)
-	if err != nil || numBytes != len(data) {
-		log.WithError(err).WithField("bytesWritten", numBytes).Error(
-			"Failed to write to dataplane driver")
-		fc.shutDownProcess("Failed to write to front end")
-	}
-}
-
-func (fc *DataplaneConn) Start() {
+func (fc *DataplaneConnector) Start() {
 	// Start a background thread to write to the dataplane driver.
 	go fc.sendMessagesToDataplaneDriver()
 
