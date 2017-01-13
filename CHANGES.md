@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.8
+
+- Fix name of package used when looking up metadata.
+
 ## 1.4.7
 
 - Add support for policing forwarded traffic via host endpoints.
