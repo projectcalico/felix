@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2014-2016 Tigera, Inc. All rights reserved.
+# Copyright (c) 2014-2017 Tigera, Inc. All rights reserved.
 # Copyright (c) 2015 Cisco Systems.  All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -845,7 +845,7 @@ class TestWorkloadEndpoint(BaseTestCase):
             else:
                 self.assertFalse(m_exc_fn.called)
 
-    def test_on_endpoint_update_delete_fail_unknown(self):
+    def test_on_endpoint_update_delete_fail_dev_deleted(self):
         self._test_on_endpoint_update_delete_fail(
             FailedSystemCall(
                 "", [], 1,
@@ -853,7 +853,7 @@ class TestWorkloadEndpoint(BaseTestCase):
                 stderr='Foo bar'
             ),
             False,
-            "exception",
+            "info",
         )
 
     def test_on_endpoint_update_delete_fail_deleted(self):
