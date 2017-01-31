@@ -295,10 +295,10 @@ clean:
 	       vendor \
 	       .go-pkg-cache \
 	       release-notes-*
-	find . -name "*.coverprofile" -type f -delete
-	find . -name "coverage.xml" -type f -delete
-	find . -name ".coverage" -type f -delete
-	find . -name "*.pyc" -type f -delete
+	find . -name '*.coverprofile' -type f -delete
+	find . -name 'coverage.xml' -type f -delete
+	find . -name '.coverage' -type f -delete
+	find . -name '*.pyc' -type f -delete
 
 .PHONY: release release-once-tagged
 release: clean

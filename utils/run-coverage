@@ -4,7 +4,7 @@ set -e
 set -x
 
 echo "Removing old coverprofiles..."
-find . -name "*.coverprofile" -type f -delete
+find . -name '*.coverprofile' -type f -delete
 
 echo "Calculating packages to cover..."
 go_dirs=$(find -type f -name '*.go' | \
