@@ -20,11 +20,12 @@ import (
 
 	"errors"
 	"fmt"
+	"net"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/felix/set"
 	"github.com/vishvananda/netlink"
-	"net"
 )
 
 var (

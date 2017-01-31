@@ -17,10 +17,11 @@ package ipsets
 import (
 	"bytes"
 	"fmt"
-	log "github.com/Sirupsen/logrus"
-	"github.com/projectcalico/felix/set"
 	"io"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/projectcalico/felix/set"
 )
 
 const MaxIPSetNameLength = 31

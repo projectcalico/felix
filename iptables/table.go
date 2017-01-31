@@ -17,12 +17,13 @@ package iptables
 import (
 	"bytes"
 	"fmt"
-	log "github.com/Sirupsen/logrus"
-	"github.com/projectcalico/felix/set"
 	"reflect"
 	"regexp"
 	"strings"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/projectcalico/felix/set"
 )
 
 const (

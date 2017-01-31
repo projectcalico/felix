@@ -15,6 +15,8 @@
 package intdataplane
 
 import (
+	"time"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ipsets"
@@ -24,7 +26,6 @@ import (
 	"github.com/projectcalico/felix/routetable"
 	"github.com/projectcalico/felix/rules"
 	"github.com/projectcalico/felix/set"
-	"time"
 )
 
 type Config struct {

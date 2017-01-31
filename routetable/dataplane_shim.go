@@ -15,11 +15,12 @@
 package routetable
 
 import (
+	"net"
+	"os/exec"
+
 	"github.com/projectcalico/felix/conntrack"
 	"github.com/projectcalico/felix/ip"
 	. "github.com/vishvananda/netlink"
-	"net"
-	"os/exec"
 )
 
 type dataplaneIface interface {

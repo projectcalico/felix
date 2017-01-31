@@ -15,9 +15,10 @@
 package rules
 
 import (
+	"strings"
+
 	log "github.com/Sirupsen/logrus"
 	. "github.com/projectcalico/felix/iptables"
-	"strings"
 )
 
 func (r *DefaultRuleRenderer) StaticFilterTableChains(ipVersion uint8) (chains []*Chain) {

@@ -16,6 +16,13 @@ package intdataplane
 
 import (
 	"fmt"
+	"io"
+	"net"
+	"os"
+	"reflect"
+	"regexp"
+	"strings"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
@@ -24,12 +31,6 @@ import (
 	"github.com/projectcalico/felix/routetable"
 	"github.com/projectcalico/felix/rules"
 	"github.com/projectcalico/felix/set"
-	"io"
-	"net"
-	"os"
-	"reflect"
-	"regexp"
-	"strings"
 )
 
 type routeTable interface {

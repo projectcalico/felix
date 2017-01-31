@@ -16,6 +16,11 @@ package routetable
 
 import (
 	"errors"
+	"net"
+	"regexp"
+	"strings"
+	"syscall"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/felix/conntrack"
 	"github.com/projectcalico/felix/ifacemonitor"
@@ -23,10 +28,6 @@ import (
 	"github.com/projectcalico/felix/set"
 	calinet "github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/vishvananda/netlink"
-	"net"
-	"regexp"
-	"strings"
-	"syscall"
 )
 
 var (

@@ -18,15 +18,16 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"os/exec"
+	"strconv"
+	"strings"
+
 	log "github.com/Sirupsen/logrus"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	. "github.com/projectcalico/felix/ipsets"
 	"github.com/projectcalico/felix/set"
-	"io"
-	"os/exec"
-	"strconv"
-	"strings"
 )
 
 // This file contains shared test infrastructure for testing the ipsets package.

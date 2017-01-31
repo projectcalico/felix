@@ -16,6 +16,10 @@ package statusrep
 
 import (
 	"errors"
+	"reflect"
+	"sync"
+	"time"
+
 	log "github.com/Sirupsen/logrus"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -23,9 +27,6 @@ import (
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	calierrors "github.com/projectcalico/libcalico-go/lib/errors"
-	"reflect"
-	"sync"
-	"time"
 )
 
 const hostname = "localhostname"

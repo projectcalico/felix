@@ -15,13 +15,14 @@
 package intdataplane
 
 import (
+	"net"
+	"time"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/felix/ipsets"
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/felix/rules"
 	"github.com/vishvananda/netlink"
-	"net"
-	"time"
 )
 
 // ipipManager manages the all-hosts IP set, which is used by some rules in our static chains

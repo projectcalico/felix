@@ -15,10 +15,11 @@
 package ipsets
 
 import (
-	log "github.com/Sirupsen/logrus"
-	"github.com/projectcalico/felix/set"
 	"regexp"
 	"strings"
+
+	log "github.com/Sirupsen/logrus"
+	"github.com/projectcalico/felix/set"
 )
 
 // A Registry manages the life-cycles of the IP sets for a particular IP version.  All IPSet

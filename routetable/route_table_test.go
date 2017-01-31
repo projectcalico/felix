@@ -19,6 +19,9 @@ import (
 
 	"errors"
 	"fmt"
+	"net"
+	"syscall"
+
 	log "github.com/Sirupsen/logrus"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -26,11 +29,10 @@ import (
 	"github.com/projectcalico/felix/set"
 	"github.com/projectcalico/felix/testutils"
 	"github.com/vishvananda/netlink"
-	"net"
-	"syscall"
+
+	"strings"
 
 	"github.com/projectcalico/felix/ifacemonitor"
-	"strings"
 )
 
 var (

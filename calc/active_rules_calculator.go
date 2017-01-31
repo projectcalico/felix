@@ -15,6 +15,8 @@
 package calc
 
 import (
+	"reflect"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/felix/dispatcher"
 	"github.com/projectcalico/felix/labelindex"
@@ -23,7 +25,6 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/selector"
-	"reflect"
 )
 
 type ruleScanner interface {

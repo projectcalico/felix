@@ -16,10 +16,11 @@ package calc
 
 import (
 	"fmt"
+	"sort"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"sort"
 )
 
 type PolicySorter struct {
