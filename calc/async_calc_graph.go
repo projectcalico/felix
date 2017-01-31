@@ -119,13 +119,14 @@ func (acg *AsyncCalcGraph) loop() {
 				acg.Dispatcher.OnUpdates(update)
 				updEndTime := time.Now()
 				if updEndTime.After(updStartTime) {
+					// Avoid recording a negative delta in case the clock jumps.
 					histUpdateTime.Observe(updEndTime.Sub(updStartTime).Seconds())
 				}
 				// Record stats for the number of messages processed.
 				for _, upd := range update {
 					typeName := reflect.TypeOf(upd.Key).Name()
 					count := countUpdatesProcessed.WithLabelValues(typeName)
-					count.Add(float64(len(update)))
+					count.Inc()
 				}
 			case api.SyncStatus:
 				// Sync status changed, check if we're now in-sync.

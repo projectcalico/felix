@@ -437,6 +437,7 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 			d.apply()
 			applyEnd := time.Now()
 			if applyEnd.After(applyStart) {
+				// Avoid a negative interval in case the clock jumps.
 				histApplyTime.Observe(applyEnd.Sub(applyStart).Seconds())
 			}
 			if d.dataplaneNeedsSync {

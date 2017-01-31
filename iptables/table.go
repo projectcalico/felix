@@ -341,9 +341,8 @@ func (t *Table) UpdateChains(chains []*Chain) {
 
 func (t *Table) UpdateChain(chain *Chain) {
 	t.logCxt.WithField("chainName", chain.Name).Info("Queueing update of chain.")
-	oldChain := t.chainNameToChain[chain.Name]
 	oldNumRules := 0
-	if oldChain != nil {
+	if oldChain := t.chainNameToChain[chain.Name]; oldChain != nil {
 		oldNumRules = len(oldChain.Rules)
 	}
 	t.chainNameToChain[chain.Name] = chain
