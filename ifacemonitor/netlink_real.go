@@ -26,6 +26,7 @@ type netlinkReal struct {
 func (nl *netlinkReal) Subscribe(
 	linkUpdates chan netlink.LinkUpdate,
 	addrUpdates chan netlink.AddrUpdate,
+    routeUpdates chan netlink.RouteUpdate,
 ) error {
 	cancel := make(chan struct{})
 
@@ -35,6 +36,10 @@ func (nl *netlinkReal) Subscribe(
 	}
 	if err := netlink.AddrSubscribe(addrUpdates, cancel); err != nil {
 		log.WithError(err).Fatal("Failed to subscribe to addr updates")
+		return err
+	}
+	if err := netlink.RouteSubscribe(routeUpdates, cancel); err != nil {
+		log.WithError(err).Fatal("Failed to subscribe to route updates")
 		return err
 	}
 

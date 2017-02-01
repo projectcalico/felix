@@ -117,6 +117,16 @@ func (r *RouteTable) OnIfaceStateChanged(ifaceName string, state ifacemonitor.St
 	}
 }
 
+func (r *RouteTable) OnIfaceRouteChanged(ifaceName string) {
+	logCxt := r.logCxt.WithField("ifaceName", ifaceName)
+	if !r.ifacePrefixRegexp.MatchString(ifaceName) {
+		logCxt.Debug("Ignoring interface route change, not a Calico interface.")
+		return
+	}
+	logCxt.Debug("Marking interface for route sync")
+	r.dirtyIfaces.Add(ifaceName)
+}
+
 func (r *RouteTable) SetRoutes(ifaceName string, targets []Target) {
 	r.pendingIfaceNameToTargets[ifaceName] = targets
 	r.dirtyIfaces.Add(ifaceName)

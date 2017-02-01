@@ -28,6 +28,7 @@ type netlinkStub interface {
 	Subscribe(
 		linkUpdates chan netlink.LinkUpdate,
 		addrUpdates chan netlink.AddrUpdate,
+		routeUpdates chan netlink.RouteUpdate,
 	) error
 	LinkList() ([]netlink.Link, error)
 	AddrList(link netlink.Link, family int) ([]netlink.Addr, error)
@@ -42,6 +43,7 @@ const (
 
 type InterfaceStateCallback func(ifaceName string, ifaceState State)
 type AddrStateCallback func(ifaceName string, addrs set.Set)
+type RouteStateCallback func(ifaceName string)
 
 type InterfaceMonitor struct {
 	netlinkStub  netlinkStub
@@ -49,6 +51,7 @@ type InterfaceMonitor struct {
 	upIfaces     set.Set
 	Callback     InterfaceStateCallback
 	AddrCallback AddrStateCallback
+	RouteCallback RouteStateCallback
 	ifaceName    map[int]string
 	ifaceAddrs   map[int]set.Set
 }
@@ -74,7 +77,8 @@ func (m *InterfaceMonitor) MonitorInterfaces() {
 
 	updates := make(chan netlink.LinkUpdate)
 	addrUpdates := make(chan netlink.AddrUpdate)
-	if err := m.netlinkStub.Subscribe(updates, addrUpdates); err != nil {
+	routeUpdates := make(chan netlink.RouteUpdate)
+	if err := m.netlinkStub.Subscribe(updates, addrUpdates, routeUpdates); err != nil {
 		log.WithError(err).Fatal("Failed to subscribe to netlink stub")
 	}
 	log.Info("Subscribed to netlink updates.")
@@ -92,6 +96,7 @@ readLoop:
 		log.WithFields(log.Fields{
 			"updates":     updates,
 			"addrUpdates": addrUpdates,
+			"routeUpdates": routeUpdates,
 			"resyncC":     m.resyncC,
 		}).Debug("About to select on possible triggers")
 		select {
@@ -109,6 +114,13 @@ readLoop:
 				break readLoop
 			}
 			m.handleNetlinkAddrUpdate(addrUpdate)
+		case routeUpdate, ok := <-routeUpdates:
+			log.WithField("routeUpdate", routeUpdate).Debug("Route update")
+			if !ok {
+				log.Warn("Failed to read an route update")
+				break readLoop
+			}
+			m.handleNetlinkRouteUpdate(routeUpdate)
 		case <-m.resyncC:
 			log.Debug("Resync trigger")
 			err := m.resync()
@@ -200,9 +212,10 @@ func (m *InterfaceMonitor) storeAndNotifyLink(ifaceExists bool, link netlink.Lin
 	if ifaceExists {
 		m.ifaceName[ifIndex] = ifaceName
 	} else {
-		log.Debug("Notify link non-existence to address callback consumers")
+		log.Debug("Notify link non-existence to address and route callback consumers")
 		delete(m.ifaceAddrs, ifIndex)
 		m.notifyIfaceAddrs(ifIndex)
+		m.notifyIfaceRoutes(ifIndex)
 		delete(m.ifaceName, ifIndex)
 	}
 
@@ -248,6 +261,33 @@ func (m *InterfaceMonitor) storeAndNotifyLink(ifaceExists bool, link netlink.Lin
 	}
 }
 
+func (m *InterfaceMonitor) handleNetlinkRouteUpdate(update netlink.RouteUpdate) {
+	gw := update.Route.Gw
+	ifIndex := update.Route.LinkIndex
+	log.WithFields(log.Fields{
+		"gw":      gw,
+		"ifIndex": ifIndex,
+	}).Info("Netlink route update.")
+
+	// notifyIfaceRoutes needs m.ifaceName[ifIndex] - because we can only notify when we know the
+	// interface name - so check that we have that.
+	if _, known := m.ifaceName[ifIndex]; !known {
+		// We think this interface does not exist - indicates a race between the link and
+		// route update channels. Routes will be notified when we process the link update.
+		log.WithField("ifIndex", ifIndex).Debug("Link not notified yet.")
+		return
+	}
+	m.notifyIfaceRoutes(ifIndex)
+}
+
+func (m *InterfaceMonitor) notifyIfaceRoutes(ifIndex int) {
+	log.WithField("ifIndex", ifIndex).Debug("notifyIfaceRoutes")
+	if name, known := m.ifaceName[ifIndex]; known {
+		log.WithField("ifIndex", ifIndex).Debug("Known interface")
+		m.RouteCallback(name)
+	}
+}
+
 func (m *InterfaceMonitor) resync() error {
 	log.Debug("Resyncing interface state.")
 	links, err := m.netlinkStub.LinkList()
@@ -274,6 +314,7 @@ func (m *InterfaceMonitor) resync() error {
 		log.WithField("ifaceName", name).Info("Spotted interface removal on resync.")
 		m.Callback(name.(string), StateDown)
 		m.AddrCallback(name.(string), nil)
+		m.RouteCallback(name.(string))
 		return set.RemoveItem
 	})
 	log.Debug("Resync complete")
