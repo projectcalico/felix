@@ -28,6 +28,8 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/docopt/docopt-go"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"github.com/projectcalico/felix/buildinfo"
 	"github.com/projectcalico/felix/calc"
 	"github.com/projectcalico/felix/config"
@@ -43,7 +45,6 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/backend"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 const usage = `Felix, the Calico per-host daemon.

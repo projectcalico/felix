@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	log "github.com/Sirupsen/logrus"
+
 	"github.com/projectcalico/felix/ipsets"
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/felix/rules"

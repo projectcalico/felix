@@ -18,6 +18,7 @@ import (
 	"reflect"
 
 	log "github.com/Sirupsen/logrus"
+
 	"github.com/projectcalico/felix/dispatcher"
 	"github.com/projectcalico/felix/labelindex"
 	"github.com/projectcalico/felix/multidict"

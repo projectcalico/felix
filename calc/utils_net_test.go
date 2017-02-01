@@ -18,6 +18,7 @@ import (
 	net2 "net"
 
 	log "github.com/Sirupsen/logrus"
+
 	"github.com/projectcalico/libcalico-go/lib/net"
 )
 

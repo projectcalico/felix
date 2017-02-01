@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	log "github.com/Sirupsen/logrus"
+
 	"github.com/projectcalico/felix/set"
 )
 

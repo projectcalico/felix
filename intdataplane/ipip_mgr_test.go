@@ -23,9 +23,10 @@ import (
 	"net"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/vishvananda/netlink"
+
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/felix/set"
-	"github.com/vishvananda/netlink"
 )
 
 var (

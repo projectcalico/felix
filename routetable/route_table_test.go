@@ -25,10 +25,11 @@ import (
 	log "github.com/Sirupsen/logrus"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/vishvananda/netlink"
+
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/set"
 	"github.com/projectcalico/felix/testutils"
-	"github.com/vishvananda/netlink"
 
 	"strings"
 

@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	log "github.com/Sirupsen/logrus"
+
 	"github.com/projectcalico/felix/config"
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/multidict"

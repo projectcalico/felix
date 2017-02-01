@@ -25,6 +25,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	pb "github.com/gogo/protobuf/proto"
+
 	_ "github.com/projectcalico/felix/config"
 	"github.com/projectcalico/felix/proto"
 )

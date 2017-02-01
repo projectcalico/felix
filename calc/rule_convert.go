@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 
 	log "github.com/Sirupsen/logrus"
+
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"

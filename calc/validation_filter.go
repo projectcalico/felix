@@ -19,6 +19,7 @@ import (
 	"reflect"
 
 	"github.com/Sirupsen/logrus"
+
 	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/validator"

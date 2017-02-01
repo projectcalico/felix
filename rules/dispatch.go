@@ -18,6 +18,7 @@ import (
 	"sort"
 
 	log "github.com/Sirupsen/logrus"
+
 	. "github.com/projectcalico/felix/iptables"
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/felix/stringutils"

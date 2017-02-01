@@ -22,12 +22,13 @@ import (
 	"syscall"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/vishvananda/netlink"
+
 	"github.com/projectcalico/felix/conntrack"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/set"
 	calinet "github.com/projectcalico/libcalico-go/lib/net"
-	"github.com/vishvananda/netlink"
 )
 
 var (

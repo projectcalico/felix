@@ -18,6 +18,7 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+
 	"github.com/projectcalico/felix/jitter"
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/felix/set"

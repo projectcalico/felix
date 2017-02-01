@@ -25,6 +25,7 @@ import (
 	"net"
 
 	log "github.com/Sirupsen/logrus"
+
 	calinet "github.com/projectcalico/libcalico-go/lib/net"
 )
 

@@ -26,6 +26,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
 	. "github.com/projectcalico/felix/iptables"
 	"github.com/projectcalico/felix/set"
 )

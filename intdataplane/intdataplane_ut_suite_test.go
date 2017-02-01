@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/Sirupsen/logrus"
+
 	"github.com/projectcalico/felix/logutils"
 	"github.com/projectcalico/libcalico-go/lib/testutils"
 )

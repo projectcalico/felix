@@ -19,8 +19,9 @@ import (
 	"strings"
 
 	log "github.com/Sirupsen/logrus"
-	"github.com/projectcalico/felix/set"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/projectcalico/felix/set"
 )
 
 var (
