@@ -24,6 +24,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/felix/set"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -44,7 +45,47 @@ var (
 	chainCreateRegexp = regexp.MustCompile(`^:(\S+)`)
 	// appendRegexp matches an iptables-save output line for an append operation.
 	appendRegexp = regexp.MustCompile(`^-A (\S+)`)
+
+	// Prometheus metrics.
+	countNumRestoreCalls = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "felix_iptables_restore_calls",
+		Help: "Number of iptables-restore calls.",
+	})
+	countNumRestoreErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "felix_iptables_restore_errors",
+		Help: "Number of iptables-restore errors.",
+	})
+	countNumSaveCalls = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "felix_iptables_save_calls",
+		Help: "Number of iptables-save calls.",
+	})
+	countNumSaveErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "felix_iptables_save_errors",
+		Help: "Number of iptables-save errors.",
+	})
+	gaugeNumChains = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "felix_iptables_chains",
+		Help: "Number of active iptables chains.",
+	}, []string{"ip_version", "table"})
+	gaugeNumRules = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "felix_iptables_rules",
+		Help: "Number of active iptables rules.",
+	}, []string{"ip_version", "table"})
+	countNumLinesExecuted = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "felix_iptables_lines_executed",
+		Help: "Number of iptables rule updates executed.",
+	}, []string{"ip_version", "table"})
 )
+
+func init() {
+	prometheus.MustRegister(countNumRestoreCalls)
+	prometheus.MustRegister(countNumRestoreErrors)
+	prometheus.MustRegister(countNumSaveCalls)
+	prometheus.MustRegister(countNumSaveErrors)
+	prometheus.MustRegister(gaugeNumChains)
+	prometheus.MustRegister(gaugeNumRules)
+	prometheus.MustRegister(countNumLinesExecuted)
+}
 
 // Table represents a single one of the iptables tables i.e. "raw", "nat", "filter", etc.  It
 // caches the desired state of that table, then attempts to bring it into sync when Apply() is
@@ -174,6 +215,10 @@ type Table struct {
 
 	logCxt *log.Entry
 
+	gaugeNumChains        prometheus.Gauge
+	gaugeNumRules         prometheus.Gauge
+	countNumLinesExecuted prometheus.Counter
+
 	// Factory for making commands, used by UTs to shim exec.Command().
 	newCmd cmdFactory
 	// sleep is a shim for time.Sleep.
@@ -264,6 +309,10 @@ func NewTable(
 
 		newCmd: newCmd,
 		sleep:  sleep,
+
+		gaugeNumChains:        gaugeNumChains.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
+		gaugeNumRules:         gaugeNumRules.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
+		countNumLinesExecuted: countNumLinesExecuted.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
 	}
 
 	if ipVersion == 4 {
@@ -278,7 +327,10 @@ func NewTable(
 
 func (t *Table) SetRuleInsertions(chainName string, rules []Rule) {
 	t.logCxt.WithField("chainName", chainName).Debug("Updating rule insertions")
+	oldRules := t.chainToInsertedRules[chainName]
 	t.chainToInsertedRules[chainName] = rules
+	numRulesDelta := len(rules) - len(oldRules)
+	t.gaugeNumRules.Add(float64(numRulesDelta))
 	t.dirtyInserts.Add(chainName)
 }
 
@@ -290,7 +342,13 @@ func (t *Table) UpdateChains(chains []*Chain) {
 
 func (t *Table) UpdateChain(chain *Chain) {
 	t.logCxt.WithField("chainName", chain.Name).Info("Queueing update of chain.")
+	oldNumRules := 0
+	if oldChain := t.chainNameToChain[chain.Name]; oldChain != nil {
+		oldNumRules = len(oldChain.Rules)
+	}
 	t.chainNameToChain[chain.Name] = chain
+	numRulesDelta := len(chain.Rules) - oldNumRules
+	t.gaugeNumRules.Add(float64(numRulesDelta))
 	t.dirtyChains.Add(chain.Name)
 }
 
@@ -302,7 +360,8 @@ func (t *Table) RemoveChains(chains []*Chain) {
 
 func (t *Table) RemoveChainByName(name string) {
 	t.logCxt.WithField("chainName", name).Info("Queing deletion of chain.")
-	if _, known := t.chainNameToChain[name]; known {
+	if oldChain, known := t.chainNameToChain[name]; known {
+		t.gaugeNumRules.Sub(float64(len(oldChain.Rules)))
 		delete(t.chainNameToChain, name)
 		t.dirtyChains.Add(name)
 	}
@@ -421,8 +480,10 @@ func (t *Table) getHashesFromDataplane() map[string][]string {
 	// us from spamming a panic into the log when we're being gracefully shut down by a SIGTERM.
 	for {
 		cmd := t.newCmd(t.iptablesSaveCmd, "-t", t.Name)
+		countNumSaveCalls.Inc()
 		output, err := cmd.Output()
 		if err != nil {
+			countNumSaveErrors.Inc()
 			t.logCxt.WithError(err).Warnf("%s command failed", t.iptablesSaveCmd)
 			if retries > 0 {
 				retries--
@@ -550,6 +611,8 @@ func (t *Table) Apply() {
 		}
 		break
 	}
+
+	t.gaugeNumChains.Set(float64(len(t.chainNameToChain)))
 }
 
 func (t *Table) applyUpdates() error {
@@ -572,6 +635,7 @@ func (t *Table) applyUpdates() error {
 		}
 		if chainNeedsToBeFlushed {
 			inputBuf.WriteString(fmt.Sprintf(":%s - -\n", chainName))
+			t.countNumLinesExecuted.Inc()
 		}
 		return nil
 	})
@@ -607,6 +671,7 @@ func (t *Table) applyUpdates() error {
 				}
 				inputBuf.WriteString(line)
 				inputBuf.WriteString("\n")
+				t.countNumLinesExecuted.Inc()
 			}
 		}
 		return nil // Delay clearing the set until we've programmed iptables.
@@ -638,6 +703,7 @@ func (t *Table) applyUpdates() error {
 				line := deleteRule(chainName, ruleNum)
 				inputBuf.WriteString(line)
 				inputBuf.WriteString("\n")
+				t.countNumLinesExecuted.Inc()
 			}
 		}
 
@@ -652,6 +718,7 @@ func (t *Table) applyUpdates() error {
 				line := rules[i].RenderInsert(chainName, prefixFrag)
 				inputBuf.WriteString(line)
 				inputBuf.WriteString("\n")
+				t.countNumLinesExecuted.Inc()
 			}
 		} else {
 			log.Debug("Rendering append rules.")
@@ -660,6 +727,7 @@ func (t *Table) applyUpdates() error {
 				line := rules[i].RenderAppend(chainName, prefixFrag)
 				inputBuf.WriteString(line)
 				inputBuf.WriteString("\n")
+				t.countNumLinesExecuted.Inc()
 			}
 		}
 
@@ -678,6 +746,7 @@ func (t *Table) applyUpdates() error {
 		if _, ok := t.chainNameToChain[chainName]; !ok {
 			// Chain deletion
 			inputBuf.WriteString(fmt.Sprintf("--delete-chain %s\n", chainName))
+			t.countNumLinesExecuted.Inc()
 			newHashes[chainName] = nil
 		}
 		return nil // Delay clearing the set until we've programmed iptables.
@@ -699,6 +768,7 @@ func (t *Table) applyUpdates() error {
 		cmd.SetStdin(&inputBuf)
 		cmd.SetStdout(&outputBuf)
 		cmd.SetStderr(&errBuf)
+		countNumRestoreCalls.Inc()
 		err := cmd.Run()
 		if err != nil {
 			t.logCxt.WithFields(log.Fields{
@@ -708,6 +778,7 @@ func (t *Table) applyUpdates() error {
 				"input":       input,
 			}).Warn("Failed to execute ip(6)tables-restore command")
 			t.inSyncWithDataPlane = false
+			countNumRestoreErrors.Inc()
 			return err
 		}
 	}
