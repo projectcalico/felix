@@ -15,17 +15,15 @@
 package intdataplane
 
 import (
+	"io/ioutil"
+	"os"
 	"reflect"
+	"strconv"
+	"strings"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/prometheus/client_golang/prometheus"
-
-	"io/ioutil"
-	"os"
-	"strconv"
-
-	"strings"
 
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ipsets"
@@ -504,7 +502,9 @@ func (d *InternalDataplane) configureKernel() {
 			log.Fatal("Kernel's RPF check is set to 'loose'.  This would " +
 				"allow endpoints to spoof their IP address.  Calico " +
 				"requires net.ipv4.conf.all.rp_filter to be set to " +
-				"0 or 1.")
+				"0 or 1. If you require loose RPF and you are not concerned " +
+				"about spoofing, this check can be disabled by setting the " +
+				"IgnoreLooseRPF configuration parameter to 'true'.")
 		}
 	}
 
