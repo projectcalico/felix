@@ -214,6 +214,12 @@ type Table struct {
 	// to top-level chains.
 	insertMode string
 
+	// Record when we did our most recent updates and refreshes of the table.  We use these to
+	// calculate the next time we should force a refresh.
+	lastUpdateTime  time.Time
+	lastRefreshTime time.Time
+	refreshInterval time.Duration
+
 	logCxt *log.Entry
 
 	gaugeNumChains        prometheus.Gauge
@@ -222,19 +228,23 @@ type Table struct {
 
 	// Factory for making commands, used by UTs to shim exec.Command().
 	newCmd cmdFactory
-	// sleep is a shim for time.Sleep.
-	sleep func(d time.Duration)
+	// Shims for time.XXX functions:
+	timeSleep func(d time.Duration)
+	timeNow   func() time.Time
 }
 
 type TableOptions struct {
 	HistoricChainPrefixes    []string
 	ExtraCleanupRegexPattern string
 	InsertMode               string
+	RefreshInterval          time.Duration
 
 	// NewCmdOverride for tests, if non-nil, factory to use instead of the real exec.Command()
 	NewCmdOverride cmdFactory
 	// SleepOverride for tests, if non-nil, replacement for time.Sleep()
 	SleepOverride func(d time.Duration)
+	// NowOverride for tests, if non-nil, replacement for time.Now()
+	NowOverride func() time.Time
 }
 
 func NewTable(
@@ -289,6 +299,10 @@ func NewTable(
 	if options.SleepOverride != nil {
 		sleep = options.SleepOverride
 	}
+	now := time.Now
+	if options.NowOverride != nil {
+		now = options.NowOverride
+	}
 
 	table := &Table{
 		Name:                   name,
@@ -308,8 +322,11 @@ func NewTable(
 		oldInsertRegexp:   oldInsertRegexp,
 		insertMode:        insertMode,
 
-		newCmd: newCmd,
-		sleep:  sleep,
+		refreshInterval: options.RefreshInterval,
+
+		newCmd:    newCmd,
+		timeSleep: sleep,
+		timeNow:   now,
 
 		gaugeNumChains:        gaugeNumChains.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
 		gaugeNumRules:         gaugeNumRules.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
@@ -333,6 +350,12 @@ func (t *Table) SetRuleInsertions(chainName string, rules []Rule) {
 	numRulesDelta := len(rules) - len(oldRules)
 	t.gaugeNumRules.Add(float64(numRulesDelta))
 	t.dirtyInserts.Add(chainName)
+
+	// Defensive: make sure we re-read the dataplane state before we make updates.  While the
+	// code was originally designed not to need this, we found that other users of
+	// iptables-restore can still clobber out updates so it's safest to re-read the state before
+	// each write.
+	t.InvalidateDataplaneCache("insertion")
 }
 
 func (t *Table) UpdateChains(chains []*Chain) {
@@ -351,6 +374,12 @@ func (t *Table) UpdateChain(chain *Chain) {
 	numRulesDelta := len(chain.Rules) - oldNumRules
 	t.gaugeNumRules.Add(float64(numRulesDelta))
 	t.dirtyChains.Add(chain.Name)
+
+	// Defensive: make sure we re-read the dataplane state before we make updates.  While the
+	// code was originally designed not to need this, we found that other users of
+	// iptables-restore can still clobber out updates so it's safest to re-read the state before
+	// each write.
+	t.InvalidateDataplaneCache("chain update")
 }
 
 func (t *Table) RemoveChains(chains []*Chain) {
@@ -366,11 +395,18 @@ func (t *Table) RemoveChainByName(name string) {
 		delete(t.chainNameToChain, name)
 		t.dirtyChains.Add(name)
 	}
+
+	// Defensive: make sure we re-read the dataplane state before we make updates.  While the
+	// code was originally designed not to need this, we found that other users of
+	// iptables-restore can still clobber out updates so it's safest to re-read the state before
+	// each write.
+	t.InvalidateDataplaneCache("chain removal")
 }
 
 func (t *Table) loadDataplaneState() {
 	// Load the hashes from the dataplane.
 	t.logCxt.Info("Scanning for out-of-sync iptables chains")
+	t.lastRefreshTime = t.timeNow()
 	dataplaneHashes := t.getHashesFromDataplane()
 
 	// Check that the rules we think we've programmed are still there and mark any inconsistent
@@ -488,7 +524,7 @@ func (t *Table) getHashesFromDataplane() map[string][]string {
 			t.logCxt.WithError(err).Warnf("%s command failed", t.iptablesSaveCmd)
 			if retries > 0 {
 				retries--
-				t.sleep(retryDelay)
+				t.timeSleep(retryDelay)
 				retryDelay *= 2
 			} else {
 				t.logCxt.Panicf("%s command failed after retries", t.iptablesSaveCmd)
@@ -560,11 +596,60 @@ func (t *Table) getHashesFromBuffer(buf *bytes.Buffer) map[string][]string {
 	return newHashes
 }
 
-func (t *Table) InvalidateDataplaneCache() {
+func (t *Table) InvalidateDataplaneCache(reason string) {
+	log.WithField("reason", reason).Info("Invalidating dataplane cache")
 	t.inSyncWithDataPlane = false
 }
 
-func (t *Table) Apply() {
+var (
+	postUpdateRefreshDelays = []time.Duration{
+		1000 * time.Millisecond,
+		500 * time.Millisecond,
+		200 * time.Millisecond,
+		100 * time.Millisecond,
+		50 * time.Millisecond,
+	}
+)
+
+func (t *Table) Apply() (rescheduleAfter time.Duration) {
+	if t.inSyncWithDataPlane {
+		// We _think_ we're in sync, check if there are any reasons to think we might
+		// not be in sync.
+		now := t.timeNow()
+		timeSinceLastRefresh := now.Sub(t.lastRefreshTime)
+		timeSinceLastUpdate := now.Sub(t.lastUpdateTime)
+
+		logCxt := t.logCxt.WithFields(log.Fields{
+			"sinceLastUpdate":  timeSinceLastUpdate,
+			"sinceLastRefresh": timeSinceLastRefresh,
+			"refreshInterval":  t.refreshInterval,
+		})
+		if t.refreshInterval > 0 && timeSinceLastRefresh >= t.refreshInterval {
+			logCxt.Info("Periodic refresh due")
+			t.InvalidateDataplaneCache("refresh timer")
+		} else {
+			// Work-around for our rules potentially being clobbered by another
+			// process due to a concurrent write (as per the following Github issue:
+			// https://github.com/projectcalico/felix/issues/1325):
+			//
+			// After a write, re-check the dataplane state at increasing intervals
+			// to ensure that our write is still in place.  It's very unlikely that
+			// another process would clobber our rules after they've been in place
+			// for over a second (but we have the backstop refresh interval above to
+			// cover that case).
+			timeFromUpdToRefresh := t.lastRefreshTime.Sub(t.lastUpdateTime)
+			for _, step := range postUpdateRefreshDelays {
+				if timeSinceLastUpdate >= step {
+					if timeFromUpdToRefresh < step {
+						logCxt.Info("Forcing post-update iptables refresh")
+						t.InvalidateDataplaneCache("post-update")
+					}
+					break
+				}
+			}
+		}
+	}
+
 	// Retry until we succeed.  There are several reasons that updating iptables may fail:
 	//
 	// - A concurrent write may invalidate iptables-restore's compare-and-swap; this manifests
@@ -590,7 +675,7 @@ func (t *Table) Apply() {
 			if retries > 0 {
 				retries--
 				t.logCxt.WithError(err).Warn("Failed to program iptables, will retry")
-				t.sleep(backoffTime)
+				t.timeSleep(backoffTime)
 				backoffTime *= 2
 				t.logCxt.WithError(err).Warn("Retrying...")
 				failedAtLeastOnce = true
@@ -614,6 +699,43 @@ func (t *Table) Apply() {
 	}
 
 	t.gaugeNumChains.Set(float64(len(t.chainNameToChain)))
+
+	// Check whether we need to be rescheduled.
+	now := t.timeNow()
+	timeSinceLastRefresh := now.Sub(t.lastRefreshTime)
+	timeSinceLastUpdate := now.Sub(t.lastUpdateTime)
+
+	logCxt := t.logCxt.WithFields(log.Fields{
+		"sinceLastUpdate":  timeSinceLastUpdate,
+		"sinceLastRefresh": timeSinceLastRefresh,
+		"refreshInterval":  t.refreshInterval,
+	})
+	if t.refreshInterval != 0 {
+		timeToNextRefresh := t.lastRefreshTime.Add(t.refreshInterval).Sub(now)
+		if timeToNextRefresh > 0 {
+			logCxt.WithField("timeToNextRefresh", timeToNextRefresh).Debug(
+				"Time to next refresh.")
+			rescheduleAfter = timeToNextRefresh
+		} else {
+			// Refresh must have become due while we were processing above.
+			rescheduleAfter = 1 * time.Millisecond
+		}
+	}
+
+	for i := len(postUpdateRefreshDelays) - 1; i >= 0; i-- {
+		step := postUpdateRefreshDelays[i]
+		if timeSinceLastUpdate < step {
+			timeToNextStep := step - timeSinceLastUpdate
+			logCxt.WithField("timeToNextStep", timeToNextStep).Debug(
+				"Time to next refresh step.")
+			if rescheduleAfter == 0 || timeToNextStep < rescheduleAfter {
+				rescheduleAfter = timeToNextStep
+			}
+			break
+		}
+	}
+
+	return
 }
 
 func (t *Table) applyUpdates() error {
@@ -782,6 +904,7 @@ func (t *Table) applyUpdates() error {
 			countNumRestoreErrors.Inc()
 			return err
 		}
+		t.lastUpdateTime = t.timeNow()
 	}
 
 	// Now we've successfully updated iptables, clear the dirty sets.  We do this even if we
@@ -798,6 +921,7 @@ func (t *Table) applyUpdates() error {
 			t.chainToDataplaneHashes[chainName] = hashes
 		}
 	}
+
 	return nil
 }
 
