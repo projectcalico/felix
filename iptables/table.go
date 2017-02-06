@@ -214,11 +214,12 @@ type Table struct {
 	// to top-level chains.
 	insertMode string
 
-	// Record when we did our most recent updates and refreshes of the table.  We use these to
+	// Record when we did our most recent reads and writes of the table.  We use these to
 	// calculate the next time we should force a refresh.
-	lastUpdateTime  time.Time
-	lastRefreshTime time.Time
-	refreshInterval time.Duration
+	lastReadTime      time.Time
+	lastWriteTime     time.Time
+	postWriteInterval time.Duration
+	refreshInterval   time.Duration
 
 	logCxt *log.Entry
 
@@ -304,6 +305,12 @@ func NewTable(
 		now = options.NowOverride
 	}
 
+	refreshInterval := options.RefreshInterval
+	if refreshInterval == 0 {
+		const maxDuration time.Duration = 1<<63 - 1
+		refreshInterval = maxDuration
+	}
+
 	table := &Table{
 		Name:                   name,
 		IPVersion:              ipVersion,
@@ -322,7 +329,7 @@ func NewTable(
 		oldInsertRegexp:   oldInsertRegexp,
 		insertMode:        insertMode,
 
-		refreshInterval: options.RefreshInterval,
+		refreshInterval: refreshInterval,
 
 		newCmd:    newCmd,
 		timeSleep: sleep,
@@ -406,7 +413,7 @@ func (t *Table) RemoveChainByName(name string) {
 func (t *Table) loadDataplaneState() {
 	// Load the hashes from the dataplane.
 	t.logCxt.Info("Scanning for out-of-sync iptables chains")
-	t.lastRefreshTime = t.timeNow()
+	t.lastReadTime = t.timeNow()
 	dataplaneHashes := t.getHashesFromDataplane()
 
 	// Check that the rules we think we've programmed are still there and mark any inconsistent
@@ -601,54 +608,28 @@ func (t *Table) InvalidateDataplaneCache(reason string) {
 	t.inSyncWithDataPlane = false
 }
 
-var (
-	postUpdateRefreshDelays = []time.Duration{
-		1000 * time.Millisecond,
-		500 * time.Millisecond,
-		200 * time.Millisecond,
-		100 * time.Millisecond,
-		50 * time.Millisecond,
-	}
-)
-
 func (t *Table) Apply() (rescheduleAfter time.Duration) {
-	if t.inSyncWithDataPlane {
-		// We _think_ we're in sync, check if there are any reasons to think we might
-		// not be in sync.
-		now := t.timeNow()
-		timeSinceLastRefresh := now.Sub(t.lastRefreshTime)
-		timeSinceLastUpdate := now.Sub(t.lastUpdateTime)
-
-		logCxt := t.logCxt.WithFields(log.Fields{
-			"sinceLastUpdate":  timeSinceLastUpdate,
-			"sinceLastRefresh": timeSinceLastRefresh,
-			"refreshInterval":  t.refreshInterval,
-		})
-		if t.refreshInterval > 0 && timeSinceLastRefresh >= t.refreshInterval {
-			logCxt.Info("Periodic refresh due")
-			t.InvalidateDataplaneCache("refresh timer")
-		} else {
-			// Work-around for our rules potentially being clobbered by another
-			// process due to a concurrent write (as per the following Github issue:
-			// https://github.com/projectcalico/felix/issues/1325):
-			//
-			// After a write, re-check the dataplane state at increasing intervals
-			// to ensure that our write is still in place.  It's very unlikely that
-			// another process would clobber our rules after they've been in place
-			// for over a second (but we have the backstop refresh interval above to
-			// cover that case).
-			timeFromUpdToRefresh := t.lastRefreshTime.Sub(t.lastUpdateTime)
-			for _, step := range postUpdateRefreshDelays {
-				if timeSinceLastUpdate >= step {
-					if timeFromUpdToRefresh < step {
-						logCxt.Info("Forcing post-update iptables refresh")
-						t.InvalidateDataplaneCache("post-update")
-					}
-					break
-				}
-			}
+	now := t.timeNow()
+	// We _think_ we're in sync, check if there are any reasons to think we might
+	// not be in sync.
+	lastReadToNow := now.Sub(t.lastReadTime)
+	invalidated := false
+	if lastReadToNow > t.refreshInterval {
+		// Too long since we've forced a refresh.
+		t.InvalidateDataplaneCache("refresh timer")
+		invalidated = true
+	}
+	// To workaround the possibility of another process clobbering our
+	// updates, we refresh the dataplane after we do a write at exponentially
+	// increasing intervals.  We do a refresh if the delta from the last write
+	// to now is twice the delta from the last read.
+	for t.postWriteInterval != 0 && !now.Before(t.lastWriteTime.Add(t.postWriteInterval)) {
+		t.postWriteInterval *= 2
+		if !invalidated {
+			t.InvalidateDataplaneCache("post update")
 		}
 	}
+	log.WithField("newPostWriteInterval", t.postWriteInterval).Debug("Updating post-write interval")
 
 	// Retry until we succeed.  There are several reasons that updating iptables may fail:
 	//
@@ -700,39 +681,14 @@ func (t *Table) Apply() (rescheduleAfter time.Duration) {
 
 	t.gaugeNumChains.Set(float64(len(t.chainNameToChain)))
 
-	// Check whether we need to be rescheduled.
-	now := t.timeNow()
-	timeSinceLastRefresh := now.Sub(t.lastRefreshTime)
-	timeSinceLastUpdate := now.Sub(t.lastUpdateTime)
-
-	logCxt := t.logCxt.WithFields(log.Fields{
-		"sinceLastUpdate":  timeSinceLastUpdate,
-		"sinceLastRefresh": timeSinceLastRefresh,
-		"refreshInterval":  t.refreshInterval,
-	})
-	if t.refreshInterval != 0 {
-		timeToNextRefresh := t.lastRefreshTime.Add(t.refreshInterval).Sub(now)
-		if timeToNextRefresh > 0 {
-			logCxt.WithField("timeToNextRefresh", timeToNextRefresh).Debug(
-				"Time to next refresh.")
-			rescheduleAfter = timeToNextRefresh
-		} else {
-			// Refresh must have become due while we were processing above.
-			rescheduleAfter = 1 * time.Millisecond
-		}
-	}
-
-	for i := len(postUpdateRefreshDelays) - 1; i >= 0; i-- {
-		step := postUpdateRefreshDelays[i]
-		if timeSinceLastUpdate < step {
-			timeToNextStep := step - timeSinceLastUpdate
-			logCxt.WithField("timeToNextStep", timeToNextStep).Debug(
-				"Time to next refresh step.")
-			if rescheduleAfter == 0 || timeToNextStep < rescheduleAfter {
-				rescheduleAfter = timeToNextStep
-			}
-			break
-		}
+	// Check whether we need to be rescheduled and how soon.
+	lastReadToNow = now.Sub(t.lastReadTime)
+	rescheduleAfter = t.refreshInterval - lastReadToNow
+	postWriteReched := t.lastWriteTime.Add(t.postWriteInterval).Sub(now)
+	if postWriteReched <= 0 {
+		rescheduleAfter = 1 * time.Millisecond
+	} else if postWriteReched < rescheduleAfter {
+		rescheduleAfter = postWriteReched
 	}
 
 	return
@@ -904,7 +860,8 @@ func (t *Table) applyUpdates() error {
 			countNumRestoreErrors.Inc()
 			return err
 		}
-		t.lastUpdateTime = t.timeNow()
+		t.lastWriteTime = t.timeNow()
+		t.postWriteInterval = 50 * time.Millisecond
 	}
 
 	// Now we've successfully updated iptables, clear the dirty sets.  We do this even if we

@@ -429,86 +429,67 @@ func describePostUpdateCheckTests(enableRefresh bool) {
 		table.Apply()
 	})
 
-	advanceAndReset := func(amount time.Duration) func() {
+	resetAndAdvance := func(amount time.Duration) func() {
 		return func() {
-			requestedDelay = -1 * time.Second
 			dataplane.ResetCmds()
 			dataplane.AdvanceTimeBy(amount)
 			requestedDelay = table.Apply()
 		}
 	}
-	itShouldRecheck := func() {
-		It("should recheck the dataplane", func() {
-			Expect(dataplane.CmdNames).To(ConsistOf("iptables-save"))
-		})
+	assertRecheck := func() {
+		Expect(dataplane.CmdNames).To(ConsistOf("iptables-save"))
 	}
-	itShouldRequestDelay := func(delay time.Duration) {
-		It("should request correct delay", func() {
-			Expect(requestedDelay).To(Equal(delay))
-		})
+	assertDelayMillis := func(delay int64) func() {
+		return func() {
+			Expect(requestedDelay).To(Equal(time.Duration(delay) * time.Millisecond))
+		}
 	}
-	itShouldNotRecheck := func() {
-		It("should not recheck the dataplane", func() {
-			Expect(dataplane.CmdNames).To(BeEmpty())
-		})
+	assertNoCheck := func() {
+		Expect(dataplane.CmdNames).To(BeEmpty())
 	}
 
 	Describe("after advancing time 49ms", func() {
-		BeforeEach(advanceAndReset(49 * time.Millisecond))
-		itShouldNotRecheck()
-		itShouldRequestDelay(1 * time.Millisecond)
+		BeforeEach(resetAndAdvance(49 * time.Millisecond))
+		It("should not recheck", assertNoCheck)
+		It("should request correct delay", assertDelayMillis(1))
 
 		Describe("after advancing time to 50ms", func() {
-			BeforeEach(advanceAndReset(1 * time.Millisecond))
-			itShouldRecheck()
-			itShouldRequestDelay(50 * time.Millisecond)
+			BeforeEach(resetAndAdvance(1 * time.Millisecond))
+			It("should recheck", assertRecheck)
+			It("should request correct delay", assertDelayMillis(50))
 
 			Describe("after advancing time to 51ms", func() {
-				BeforeEach(advanceAndReset(1 * time.Millisecond))
-				itShouldNotRecheck()
-				itShouldRequestDelay(49 * time.Millisecond)
+				BeforeEach(resetAndAdvance(1 * time.Millisecond))
+				It("should not recheck", assertNoCheck)
+				It("should request correct delay", assertDelayMillis(49))
 
 				Describe("after advancing time to 100ms", func() {
-					BeforeEach(advanceAndReset(49 * time.Millisecond))
-					itShouldRecheck()
-					itShouldRequestDelay(100 * time.Millisecond)
+					BeforeEach(resetAndAdvance(49 * time.Millisecond))
+					It("should recheck", assertRecheck)
+					It("should request correct delay", assertDelayMillis(100))
 				})
 			})
 		})
 		Describe("after advancing time to 999ms", func() {
-			BeforeEach(advanceAndReset(950 * time.Millisecond))
-			itShouldRecheck()
-			itShouldRequestDelay(1 * time.Millisecond)
+			BeforeEach(resetAndAdvance(950 * time.Millisecond))
+			It("should recheck", assertRecheck)
+			It("should request correct delay", assertDelayMillis(601)) // i.e. at 1.6s
 
 			if enableRefresh {
-				Describe("after advancing time to 1001ms", func() {
-					BeforeEach(advanceAndReset(2 * time.Millisecond))
-					itShouldRecheck()
+				Describe("after advancing time 60s", func() {
+					BeforeEach(resetAndAdvance(60 * time.Second))
+					It("should recheck", assertRecheck)
 
 					// Now waiting for the next refresh interval.
-					itShouldRequestDelay(30000 * time.Millisecond)
-
-					Describe("after advancing time to 3001ms", func() {
-						BeforeEach(advanceAndReset(2000 * time.Millisecond))
-						itShouldNotRecheck()
-
-						// Now waiting for the next refresh interval.
-						itShouldRequestDelay(28000 * time.Millisecond)
-
-						Describe("after advancing time further", func() {
-							BeforeEach(advanceAndReset(28000 * time.Millisecond))
-							itShouldRecheck()
-							itShouldRequestDelay(30000 * time.Millisecond)
-						})
-					})
+					It("should request correct delay", assertDelayMillis(30000))
 				})
 			} else {
-				Describe("after advancing time to 1001ms", func() {
-					BeforeEach(advanceAndReset(2 * time.Millisecond))
-					itShouldRecheck()
+				Describe("after advancing time 60s", func() {
+					BeforeEach(resetAndAdvance(60 * time.Second))
+					It("should recheck", assertRecheck)
 
-					// Refresh disabled
-					itShouldRequestDelay(0)
+					// Refresh disabled, it just keeps increasing
+					It("should request correct delay", assertDelayMillis(41401))
 				})
 			}
 		})

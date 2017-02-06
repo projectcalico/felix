@@ -607,10 +607,10 @@ func (d *InternalDataplane) apply() {
 		d.cleanupPending = false
 	}
 
-	// Set up any needed rescheduling kick.  Any pending kick will have been recalculated above
-	// so we always cancel and reschedule.
+	// Set up any needed rescheduling kick.
 	if d.reschedC != nil {
-		// We have an active rescheduling timer, stop it so we can reset it below if needed.
+		// We have an active rescheduling timer, stop it so we can restart it with a
+		// different timeout below if it is still needed.
 		// This snippet comes from the docs for Timer.Stop().
 		if !d.reschedTimer.Stop() {
 			// Timer had already popped, drain its channel.
