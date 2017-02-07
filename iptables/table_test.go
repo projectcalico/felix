@@ -58,6 +58,10 @@ var _ = Describe("Table with an empty dataplane", func() {
 		}))
 	})
 
+	It("should have a refresh scheduled at start-of-day", func() {
+		Expect(table.Apply()).To(Equal(50 * time.Millisecond))
+	})
+
 	It("Should defer updates until Apply is called", func() {
 		table.SetRuleInsertions("FORWARD", []Rule{
 			{Action: DropAction{}},

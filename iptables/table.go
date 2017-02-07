@@ -329,6 +329,13 @@ func NewTable(
 		oldInsertRegexp:   oldInsertRegexp,
 		insertMode:        insertMode,
 
+		// Initialise the write tracking as if we'd just done a write, this will trigger
+		// us to recheck the dataplane at exponentially increasing intervals at startup.
+		// Note: if we didn't do this, the calculation logic would need to be modified
+		// to cope with zero values for these fields.
+		lastWriteTime:     now(),
+		postWriteInterval: 50 * time.Millisecond,
+
 		refreshInterval: refreshInterval,
 
 		newCmd:    newCmd,
@@ -604,7 +611,7 @@ func (t *Table) getHashesFromBuffer(buf *bytes.Buffer) map[string][]string {
 }
 
 func (t *Table) InvalidateDataplaneCache(reason string) {
-	log.WithField("reason", reason).Info("Invalidating dataplane cache")
+	t.logCxt.WithField("reason", reason).Info("Invalidating dataplane cache")
 	t.inSyncWithDataPlane = false
 }
 
@@ -625,11 +632,11 @@ func (t *Table) Apply() (rescheduleAfter time.Duration) {
 	// to now is twice the delta from the last read.
 	for t.postWriteInterval != 0 && !now.Before(t.lastWriteTime.Add(t.postWriteInterval)) {
 		t.postWriteInterval *= 2
+		t.logCxt.WithField("newPostWriteInterval", t.postWriteInterval).Debug("Updating post-write interval")
 		if !invalidated {
 			t.InvalidateDataplaneCache("post update")
 		}
 	}
-	log.WithField("newPostWriteInterval", t.postWriteInterval).Debug("Updating post-write interval")
 
 	// Retry until we succeed.  There are several reasons that updating iptables may fail:
 	//
@@ -788,7 +795,7 @@ func (t *Table) applyUpdates() error {
 
 		rules := t.chainToInsertedRules[chainName]
 		if t.insertMode == "insert" {
-			log.Debug("Rendering insert rules.")
+			t.logCxt.Debug("Rendering insert rules.")
 			// Since each insert is pushed onto the top of the chain, do the inserts in
 			// reverse order so that they end up in the correct order in the final
 			// state of the chain.
@@ -800,7 +807,7 @@ func (t *Table) applyUpdates() error {
 				t.countNumLinesExecuted.Inc()
 			}
 		} else {
-			log.Debug("Rendering append rules.")
+			t.logCxt.Debug("Rendering append rules.")
 			for i := 0; i < len(rules); i++ {
 				prefixFrag := t.commentFrag(newRuleHashes[i])
 				line := rules[i].RenderAppend(chainName, prefixFrag)
