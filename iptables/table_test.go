@@ -487,6 +487,21 @@ func describePostUpdateCheckTests(enableRefresh bool) {
 					// Now waiting for the next refresh interval.
 					It("should request correct delay", assertDelayMillis(30000))
 				})
+				Describe("after advancing time by an hour", func() {
+					BeforeEach(resetAndAdvance(time.Hour))
+					It("should recheck", assertRecheck)
+
+					// Now waiting for the next refresh interval.
+					It("should request correct delay", assertDelayMillis(30000))
+
+					Describe("after advancing time by an hour", func() {
+						BeforeEach(resetAndAdvance(time.Hour))
+						It("should recheck", assertRecheck)
+
+						// Now waiting for the next refresh interval.
+						It("should request correct delay", assertDelayMillis(30000))
+					})
+				})
 			} else {
 				Describe("after advancing time 60s", func() {
 					BeforeEach(resetAndAdvance(60 * time.Second))
@@ -494,6 +509,20 @@ func describePostUpdateCheckTests(enableRefresh bool) {
 
 					// Refresh disabled, it just keeps increasing
 					It("should request correct delay", assertDelayMillis(41401))
+				})
+				Describe("after advancing time by an hour", func() {
+					BeforeEach(resetAndAdvance(time.Hour))
+					// Last recheck due to the post-write check.
+					It("should recheck", assertRecheck)
+
+					// Then, it should give up.
+					It("should request correct delay", assertDelayMillis(0))
+
+					Describe("after advancing time by an hour", func() {
+						BeforeEach(resetAndAdvance(time.Hour))
+						It("should not recheck", assertNoCheck)
+						It("should request correct delay", assertDelayMillis(0))
+					})
 				})
 			}
 		})

@@ -305,12 +305,6 @@ func NewTable(
 		now = options.NowOverride
 	}
 
-	refreshInterval := options.RefreshInterval
-	if refreshInterval == 0 {
-		const maxDuration time.Duration = 1<<63 - 1
-		refreshInterval = maxDuration
-	}
-
 	table := &Table{
 		Name:                   name,
 		IPVersion:              ipVersion,
@@ -336,7 +330,7 @@ func NewTable(
 		lastWriteTime:     now(),
 		postWriteInterval: 50 * time.Millisecond,
 
-		refreshInterval: refreshInterval,
+		refreshInterval: options.RefreshInterval,
 
 		newCmd:    newCmd,
 		timeSleep: sleep,
@@ -621,16 +615,18 @@ func (t *Table) Apply() (rescheduleAfter time.Duration) {
 	// not be in sync.
 	lastReadToNow := now.Sub(t.lastReadTime)
 	invalidated := false
-	if lastReadToNow > t.refreshInterval {
+	if t.refreshInterval > 0 && lastReadToNow > t.refreshInterval {
 		// Too long since we've forced a refresh.
 		t.InvalidateDataplaneCache("refresh timer")
 		invalidated = true
 	}
-	// To workaround the possibility of another process clobbering our
-	// updates, we refresh the dataplane after we do a write at exponentially
-	// increasing intervals.  We do a refresh if the delta from the last write
-	// to now is twice the delta from the last read.
-	for t.postWriteInterval != 0 && !now.Before(t.lastWriteTime.Add(t.postWriteInterval)) {
+	// To workaround the possibility of another process clobbering our updates, we refresh the
+	// dataplane after we do a write at exponentially increasing intervals.  We do a refresh
+	// if the delta from the last write to now is twice the delta from the last read.
+	for t.postWriteInterval != 0 &&
+		t.postWriteInterval < time.Hour &&
+		!now.Before(t.lastWriteTime.Add(t.postWriteInterval)) {
+
 		t.postWriteInterval *= 2
 		t.logCxt.WithField("newPostWriteInterval", t.postWriteInterval).Debug("Updating post-write interval")
 		if !invalidated {
@@ -689,13 +685,18 @@ func (t *Table) Apply() (rescheduleAfter time.Duration) {
 	t.gaugeNumChains.Set(float64(len(t.chainNameToChain)))
 
 	// Check whether we need to be rescheduled and how soon.
-	lastReadToNow = now.Sub(t.lastReadTime)
-	rescheduleAfter = t.refreshInterval - lastReadToNow
-	postWriteReched := t.lastWriteTime.Add(t.postWriteInterval).Sub(now)
-	if postWriteReched <= 0 {
-		rescheduleAfter = 1 * time.Millisecond
-	} else if postWriteReched < rescheduleAfter {
-		rescheduleAfter = postWriteReched
+	if t.refreshInterval > 0 {
+		// Refresh interval is set, start with that.
+		lastReadToNow = now.Sub(t.lastReadTime)
+		rescheduleAfter = t.refreshInterval - lastReadToNow
+	}
+	if t.postWriteInterval < time.Hour {
+		postWriteReched := t.lastWriteTime.Add(t.postWriteInterval).Sub(now)
+		if postWriteReched <= 0 {
+			rescheduleAfter = 1 * time.Millisecond
+		} else if t.refreshInterval <= 0 || postWriteReched < rescheduleAfter {
+			rescheduleAfter = postWriteReched
+		}
 	}
 
 	return
