@@ -133,7 +133,7 @@ calico/felix: bin/calico-felix
 
 .PHONY: scale-test
 scale-test: calico/felix
-	docker run --rm \
+	docker run --rm --privileged \
 	-e FELIX_DATASTORETYPE=fv \
 	-e FELIX_LOGSEVERITYSCREEN=debug \
 	calico/felix
