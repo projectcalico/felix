@@ -131,6 +131,13 @@ calico/felix: bin/calico-felix
 	cp bin/calico-felix docker-image/bin/
 	docker build -t calico/felix docker-image
 
+.PHONY: scale-test
+scale-test: calico/felix
+	docker run --rm \
+	-e FELIX_DATASTORETYPE=fv \
+	-e FELIX_LOGSEVERITYSCREEN=debug \
+	calico/felix
+
 # Pre-configured docker run command that runs as this user with the repo
 # checked out to /code, uses the --rm flag to avoid leaving the container
 # around afterwards.

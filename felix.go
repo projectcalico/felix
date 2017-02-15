@@ -35,6 +35,7 @@ import (
 	"github.com/projectcalico/felix/config"
 	_ "github.com/projectcalico/felix/config"
 	"github.com/projectcalico/felix/extdataplane"
+	"github.com/projectcalico/felix/fv"
 	"github.com/projectcalico/felix/intdataplane"
 	"github.com/projectcalico/felix/ipsets"
 	"github.com/projectcalico/felix/logutils"
@@ -145,7 +146,11 @@ configRetry:
 		// We should now have enough config to connect to the datastore
 		// so we can load the remainder of the config.
 		datastoreConfig := configParams.DatastoreConfig()
-		datastore, err = backend.NewClient(datastoreConfig)
+		if datastoreConfig.Spec.DatastoreType == "fv" {
+			datastore, err = fv.NewTestDatastore(datastoreConfig)
+		} else {
+			datastore, err = backend.NewClient(datastoreConfig)
+		}
 		if err != nil {
 			log.WithError(err).Error("Failed to connect to datastore")
 			time.Sleep(1 * time.Second)
