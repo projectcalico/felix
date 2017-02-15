@@ -19,12 +19,13 @@ package fv
 
 import (
 	"errors"
+	"time"
+
 	log "github.com/Sirupsen/logrus"
 	"github.com/projectcalico/libcalico-go/lib/api"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/compat"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"time"
 )
 
 func NewTestDatastore(config api.CalicoAPIConfig) (c bapi.Client, err error) {
