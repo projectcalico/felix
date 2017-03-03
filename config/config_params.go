@@ -317,6 +317,7 @@ func (config *Config) DatastoreConfig() api.CalicoAPIConfig {
 		if err != nil {
 			log.WithError(err).Panic("Failed to create empty config")
 		}
+		cfg.Spec.DatastoreType = api.Kubernetes
 		return *cfg
 	} else {
 		var etcdEndpoints string
