@@ -25,6 +25,8 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"sync"
+
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ipsets"
 	"github.com/projectcalico/felix/iptables"
@@ -52,20 +54,14 @@ var (
 		Name: "felix_int_dataplane_messages",
 		Help: "Number dataplane messages by type.",
 	}, []string{"type"})
-	histApplyTime = prometheus.NewHistogram(prometheus.HistogramOpts{
+	summaryApplyTime = prometheus.NewSummary(prometheus.SummaryOpts{
 		Name: "felix_int_dataplane_apply_time_seconds",
 		Help: "Time in seconds that it took to apply a dataplane update.",
-		Buckets: []float64{
-			0.02, 0.05, 0.1, 0.2, 0.5, 1.0,
-		},
 	})
-	histBatchSize = prometheus.NewHistogram(prometheus.HistogramOpts{
+	summaryBatchSize = prometheus.NewSummary(prometheus.SummaryOpts{
 		Name: "felix_int_dataplane_msg_batch_size",
 		Help: "Number of messages processed in each batch. Higher values indicate we're " +
 			"doing more batching to try to keep up.",
-		Buckets: []float64{
-			1, 2, 5, 10, 20, 50,
-		},
 	})
 
 	processStartTime time.Time
@@ -73,9 +69,9 @@ var (
 
 func init() {
 	prometheus.MustRegister(countDataplaneSyncErrors)
-	prometheus.MustRegister(histApplyTime)
+	prometheus.MustRegister(summaryApplyTime)
 	prometheus.MustRegister(countMessages)
-	prometheus.MustRegister(histBatchSize)
+	prometheus.MustRegister(summaryBatchSize)
 	processStartTime = time.Now()
 }
 
@@ -495,7 +491,7 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 				}
 			}
 			d.dataplaneNeedsSync = true
-			histBatchSize.Observe(float64(batchSize))
+			summaryBatchSize.Observe(float64(batchSize))
 		case ifaceUpdate := <-d.ifaceUpdates:
 			log.WithField("msg", ifaceUpdate).Info("Received interface update")
 			for _, mgr := range d.allManagers {
@@ -543,7 +539,7 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 				applyTime := time.Since(applyStart)
 				if applyTime > 0 {
 					// Avoid a negative interval in case the clock jumps.
-					histApplyTime.Observe(applyTime.Seconds())
+					summaryApplyTime.Observe(applyTime.Seconds())
 				}
 
 				if d.dataplaneNeedsSync {
@@ -666,32 +662,64 @@ func (d *InternalDataplane) apply() {
 
 	// Next, create/update IP sets.  We defer deletions of IP sets until after we update
 	// iptables.
-	for _, w := range d.ipSets {
-		w.ApplyUpdates()
+	var ipSetsWG sync.WaitGroup
+	for _, ipSets := range d.ipSets {
+		ipSetsWG.Add(1)
+		go func(ipSets *ipsets.IPSets) {
+			ipSets.ApplyUpdates()
+			ipSetsWG.Done()
+		}(ipSets)
 	}
+
+	// Update the routing table in parallel with the other updates.  We'll wait for it to finish
+	// before we return.
+	var routesWG sync.WaitGroup
+	for _, r := range d.routeTables {
+		routesWG.Add(1)
+		go func(r *routetable.RouteTable) {
+			err := r.Apply()
+			if err != nil {
+				log.Warn("Failed to synchronize routing table, will retry...")
+				d.dataplaneNeedsSync = true
+			}
+			routesWG.Done()
+		}(r)
+	}
+
+	// Wait for the IP sets update to finish.  We can't update iptables until it has.
+	ipSetsWG.Wait()
 
 	// Update iptables, this should sever any references to now-unused IP sets.
+	var reschedDelayMutex sync.Mutex
 	var reschedDelay time.Duration
+	var iptablesWG sync.WaitGroup
 	for _, t := range d.allIptablesTables {
-		tableReschedAfter := t.Apply()
-		if tableReschedAfter != 0 && (reschedDelay == 0 || tableReschedAfter < reschedDelay) {
-			reschedDelay = tableReschedAfter
-		}
-	}
+		iptablesWG.Add(1)
+		go func(t *iptables.Table) {
+			tableReschedAfter := t.Apply()
 
-	// Update the routing table.
-	for _, r := range d.routeTables {
-		err := r.Apply()
-		if err != nil {
-			log.Warn("Failed to synchronize routing table, will retry...")
-			d.dataplaneNeedsSync = true
-		}
+			reschedDelayMutex.Lock()
+			defer reschedDelayMutex.Unlock()
+			if tableReschedAfter != 0 && (reschedDelay == 0 || tableReschedAfter < reschedDelay) {
+				reschedDelay = tableReschedAfter
+			}
+			iptablesWG.Done()
+		}(t)
 	}
+	iptablesWG.Wait()
 
 	// Now clean up any left-over IP sets.
-	for _, w := range d.ipSets {
-		w.ApplyDeletions()
+	for _, ipSets := range d.ipSets {
+		ipSetsWG.Add(1)
+		go func(s *ipsets.IPSets) {
+			s.ApplyDeletions()
+			ipSetsWG.Done()
+		}(ipSets)
 	}
+	ipSetsWG.Wait()
+
+	// Wait for the route updates to finish.
+	routesWG.Wait()
 
 	// And publish and status updates.
 	d.endpointStatusCombiner.Apply()
