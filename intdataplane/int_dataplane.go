@@ -140,6 +140,7 @@ type InternalDataplane struct {
 	ifaceMonitor     *ifacemonitor.InterfaceMonitor
 	ifaceUpdates     chan *ifaceUpdate
 	ifaceAddrUpdates chan *ifaceAddrsUpdate
+	ifaceRouteUpdates chan *string
 
 	endpointStatusCombiner *endpointStatusCombiner
 
@@ -178,12 +179,14 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		ifaceMonitor:      ifacemonitor.New(),
 		ifaceUpdates:      make(chan *ifaceUpdate, 100),
 		ifaceAddrUpdates:  make(chan *ifaceAddrsUpdate, 100),
+		ifaceRouteUpdates: make(chan *string, 100),
 		config:            config,
 		applyThrottle:     throttle.New(10),
 	}
 
 	dp.ifaceMonitor.Callback = dp.onIfaceStateChange
 	dp.ifaceMonitor.AddrCallback = dp.onIfaceAddrsChange
+	dp.ifaceMonitor.RouteCallback = dp.onIfaceRoutesChange
 
 	natTableV4 := iptables.NewTable(
 		"nat",
@@ -373,6 +376,15 @@ type ifaceAddrsUpdate struct {
 	Addrs set.Set
 }
 
+// onIfaceRoutesChange is our interface route monitor callback.  It gets called
+// from the monitor's thread.
+func (d *InternalDataplane) onIfaceRoutesChange(ifaceName string) {
+	log.WithFields(log.Fields{
+		"ifaceName": ifaceName,
+	}).Info("Linux interface routes changed.")
+	d.ifaceRouteUpdates <- &ifaceName
+}
+
 func (d *InternalDataplane) SendMessage(msg interface{}) error {
 	d.toDataplane <- msg
 	return nil
@@ -511,6 +523,15 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 			log.WithField("msg", ifaceAddrsUpdate).Info("Received interface addresses update")
 			for _, mgr := range d.allManagers {
 				mgr.OnUpdate(ifaceAddrsUpdate)
+			}
+			d.dataplaneNeedsSync = true
+		case ifaceRoutesUpdate := <-d.ifaceRouteUpdates:
+			log.WithField("msg", ifaceRoutesUpdate).Info("Received interface routes update")
+			for _, mgr := range d.allManagers {
+				mgr.OnUpdate(ifaceRoutesUpdate)
+			}
+			for _, routeTable := range d.routeTables {
+				routeTable.OnIfaceRouteChanged(*ifaceRoutesUpdate)
 			}
 			d.dataplaneNeedsSync = true
 		case <-refreshC:
