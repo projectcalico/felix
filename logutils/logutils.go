@@ -27,8 +27,8 @@ import (
 	"sync"
 
 	log "github.com/Sirupsen/logrus"
-	logrus_syslog "github.com/Sirupsen/logrus/hooks/syslog"
-	"github.com/mipearson/rfw"
+	//logrus_syslog "github.com/Sirupsen/logrus/hooks/syslog"
+	//"github.com/mipearson/rfw"
 
 	"github.com/projectcalico/felix/config"
 )
@@ -109,51 +109,50 @@ func ConfigureLogging(configParams *config.Config) {
 	// Screen target.
 	if configParams.LogSeverityScreen != "" {
 		screenLevels := filterLevels(logLevelScreen)
-		log.AddHook(&StreamHook{
-			writer: os.Stdout,
-			levels: screenLevels,
-		})
+		bgHook := NewBackgroundHook(screenLevels, os.Stdout)
+		bgHook.Start()
+		log.AddHook(bgHook)
 	}
-
-	// File target.
-	if configParams.LogSeverityFile != "" {
-		fileLevels := filterLevels(logLevelFile)
-		if err := os.MkdirAll(path.Dir(configParams.LogFilePath), 0755); err != nil {
-			log.WithError(err).Fatal("Failed to create log dir")
-		}
-		rotAwareFile, err := rfw.Open(configParams.LogFilePath, 0644)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to open log file")
-		}
-		log.AddHook(&StreamHook{
-			writer: rotAwareFile,
-			levels: fileLevels,
-		})
-	}
-
-	if configParams.LogSeveritySys != "" {
-		// Syslog target.
-		// Set net/addr to "" so we connect to the system syslog server rather
-		// than a remote one.
-		net := ""
-		addr := ""
-		// The priority parameter is a combination of facility and default
-		// severity.  We want to log with the standard LOG_USER facility; the
-		// severity is actually irrelevant because the hook always overrides
-		// it.
-		priority := syslog.LOG_USER | syslog.LOG_INFO
-		tag := "calico-felix"
-		if hook, err := logrus_syslog.NewSyslogHook(net, addr, priority, tag); err != nil {
-			log.WithError(err).WithField("level", configParams.LogSeveritySys).Error("Failed to connect to syslog")
-		} else {
-			syslogLevels := filterLevels(logLevelSyslog)
-			levHook := &LeveledHook{
-				hook:   hook,
-				levels: syslogLevels,
-			}
-			log.AddHook(levHook)
-		}
-	}
+	//
+	//// File target.
+	//if configParams.LogSeverityFile != "" {
+	//	fileLevels := filterLevels(logLevelFile)
+	//	if err := os.MkdirAll(path.Dir(configParams.LogFilePath), 0755); err != nil {
+	//		log.WithError(err).Fatal("Failed to create log dir")
+	//	}
+	//	rotAwareFile, err := rfw.Open(configParams.LogFilePath, 0644)
+	//	if err != nil {
+	//		log.WithError(err).Fatal("Failed to open log file")
+	//	}
+	//	log.AddHook(&StreamHook{
+	//		writer: rotAwareFile,
+	//		levels: fileLevels,
+	//	})
+	//}
+	//
+	//if configParams.LogSeveritySys != "" {
+	//	// Syslog target.
+	//	// Set net/addr to "" so we connect to the system syslog server rather
+	//	// than a remote one.
+	//	net := ""
+	//	addr := ""
+	//	// The priority parameter is a combination of facility and default
+	//	// severity.  We want to log with the standard LOG_USER facility; the
+	//	// severity is actually irrelevant because the hook always overrides
+	//	// it.
+	//	priority := syslog.LOG_USER | syslog.LOG_INFO
+	//	tag := "calico-felix"
+	//	if hook, err := logrus_syslog.NewSyslogHook(net, addr, priority, tag); err != nil {
+	//		log.WithError(err).WithField("level", configParams.LogSeveritySys).Error("Failed to connect to syslog")
+	//	} else {
+	//		syslogLevels := filterLevels(logLevelSyslog)
+	//		levHook := &LeveledHook{
+	//			hook:   hook,
+	//			levels: syslogLevels,
+	//		}
+	//		log.AddHook(levHook)
+	//	}
+	//}
 }
 
 // filterLevels returns all the logrus.Level values <= maxLevel.
@@ -253,6 +252,65 @@ func shouldSkipFrame(frame runtime.Frame) bool {
 	return strings.LastIndex(frame.File, "exported.go") > 0 ||
 		strings.LastIndex(frame.File, "logger.go") > 0 ||
 		strings.LastIndex(frame.File, "entry.go") > 0
+}
+
+type queuedLog struct {
+	level log.Level
+	msg   []byte
+}
+
+type BackgroundHook struct {
+	queue       chan queuedLog
+	levels      []log.Level
+	destination io.Writer
+}
+
+func NewBackgroundHook(levels []log.Level, dest io.Writer) *BackgroundHook {
+	return &BackgroundHook{
+		queue:       make(chan queuedLog, 10000),
+		levels:      levels,
+		destination: dest,
+	}
+}
+
+func (h *BackgroundHook) Levels() []log.Level {
+	return h.levels
+}
+
+func (h *BackgroundHook) Fire(entry *log.Entry) (err error) {
+	var serialized []byte
+	if serialized, err = entry.Logger.Formatter.Format(entry); err != nil {
+		return
+	}
+
+	// serialised will be reused after we return so take a copy.  TODO: manage buffers.
+	bufCopy := make([]byte, len(serialized))
+	copy(bufCopy, serialized)
+
+	ql := queuedLog{
+		entry.Level,
+		bufCopy,
+	}
+	select {
+	case h.queue <- ql:
+	default:
+		// Background thread isn't keeping up.  Drop the log.  Not much else we can do.
+	}
+	return
+}
+
+func (h *BackgroundHook) Start() {
+	go h.writeToStream()
+}
+
+func (h *BackgroundHook) writeToStream() {
+	for {
+		ql := <-h.queue
+		_, err := h.destination.Write(ql.msg)
+		if err != nil {
+			panic(err)
+		}
+	}
 }
 
 // StreamHook is a logrus Hook that writes to a stream when fired.
