@@ -119,9 +119,9 @@ type Config struct {
 
 	LogFilePath string `config:"file;/var/log/calico/felix.log;die-on-fail"`
 
-	LogSeverityFile   string `config:"oneof(DEBUG,INFO,WARNING,ERROR,CRITICAL);INFO"`
-	LogSeverityScreen string `config:"oneof(DEBUG,INFO,WARNING,ERROR,CRITICAL);INFO"`
-	LogSeveritySys    string `config:"oneof(DEBUG,INFO,WARNING,ERROR,CRITICAL);INFO"`
+	LogSeverityFile   string `config:"oneof(DEBUG,INFO,WARN,WARNING,ERROR,CRITICAL);INFO"`
+	LogSeverityScreen string `config:"oneof(DEBUG,INFO,WARN,WARNING,ERROR,CRITICAL);INFO"`
+	LogSeveritySys    string `config:"oneof(DEBUG,INFO,WARN,WARNING,ERROR,CRITICAL);INFO"`
 
 	IpInIpEnabled    bool   `config:"bool;false"`
 	IpInIpMtu        int    `config:"int;1440;non-zero"`
