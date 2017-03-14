@@ -15,7 +15,6 @@
 package logutils
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log/syslog"
@@ -24,25 +23,29 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"sync"
 
 	log "github.com/Sirupsen/logrus"
-	//logrus_syslog "github.com/Sirupsen/logrus/hooks/syslog"
-	//"github.com/mipearson/rfw"
+	"github.com/gavv/monotime"
+	"github.com/mipearson/rfw"
+
+	"bytes"
+	"sync/atomic"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/projectcalico/felix/config"
 )
 
-// logrusToSyslogLevel maps logrus.Level to the matching syslog level used by
-// the syslog hook.  The syslog hook does filtering after doing the same
-// conversion so we need to give it a syslog level.
-var logrusToSyslogLevel = map[log.Level]syslog.Priority{
-	log.DebugLevel: syslog.LOG_DEBUG,
-	log.InfoLevel:  syslog.LOG_INFO,
-	log.WarnLevel:  syslog.LOG_WARNING,
-	log.ErrorLevel: syslog.LOG_ERR,
-	log.FatalLevel: syslog.LOG_CRIT,
-	log.PanicLevel: syslog.LOG_CRIT,
+var (
+	counterDroppedLogs = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "felix_logs_dropped",
+		Help: "Number of logs dropped because the output stream was blocked.",
+	})
+)
+
+func init() {
+	prometheus.MustRegister(counterDroppedLogs)
 }
 
 // ConfigureEarlyLogging installs our logging adapters, and enables early logging to stderr
@@ -97,62 +100,72 @@ func ConfigureLogging(configParams *config.Config) {
 	if logLevelSyslog > mostVerboseLevel {
 		mostVerboseLevel = logLevelScreen
 	}
-	// Disable all more-verbose levels using the global setting, this
-	// ensures that debug logs are filtered as early as possible in the
-	// pipeline.
+	// Disable all more-verbose levels using the global setting, this ensures that debug logs
+	// are filtered out as early as possible.
 	log.SetLevel(mostVerboseLevel)
 
-	// Disable logrus' default output, which only supports a single
-	// destination at the global log level.
+	// Screen target.
+	var dests []Destination
+	if configParams.LogSeverityScreen != "" {
+		screenDest := NewStreamDestination(logLevelScreen, os.Stdout)
+		dests = append(dests, screenDest)
+	}
+
+	// File target.  We record any errors so we can log them out below after finishing set-up
+	// of the logger.
+	var fileDirErr, fileOpenErr error
+	if configParams.LogSeverityFile != "" {
+		fileDirErr = os.MkdirAll(path.Dir(configParams.LogFilePath), 0755)
+		var rotAwareFile io.Writer
+		rotAwareFile, fileOpenErr = rfw.Open(configParams.LogFilePath, 0644)
+		if fileDirErr == nil && fileOpenErr == nil {
+			fileDest := NewStreamDestination(logLevelFile, rotAwareFile)
+			dests = append(dests, fileDest)
+		}
+	}
+
+	// Syslog target.  Again, we record the error if we fail to connect to syslog.
+	var sysErr error
+	if configParams.LogSeveritySys != "" {
+		// Set net/addr to "" so we connect to the system syslog server rather
+		// than a remote one.
+		net := ""
+		addr := ""
+		// The priority parameter is a combination of facility and default
+		// severity.  We want to log with the standard LOG_USER facility; the
+		// severity is actually irrelevant because the hook always overrides
+		// it.
+		priority := syslog.LOG_USER | syslog.LOG_INFO
+		tag := "calico-felix"
+		w, sysErr := syslog.Dial(net, addr, priority, tag)
+		if sysErr == nil {
+			syslogDest := NewSyslogDestination(logLevelSyslog, w)
+			dests = append(dests, syslogDest)
+		}
+	}
+
+	hook := NewBackgroundHook(filterLevels(mostVerboseLevel), logLevelSyslog, dests)
+	hook.Start()
+	log.AddHook(hook)
+
+	// Disable logrus' default output, which only supports a single destination.  We use the
+	// hook above to fan out logs to multiple destinations.
 	log.SetOutput(&NullWriter{})
 
-	// Screen target.
-	if configParams.LogSeverityScreen != "" {
-		screenLevels := filterLevels(logLevelScreen)
-		bgHook := NewBackgroundHook(screenLevels, os.Stdout)
-		bgHook.Start()
-		log.AddHook(bgHook)
+	// Since we push our logs onto a second thread via a channel, we can disable the
+	// Logger's built-in mutex completely.
+	log.StandardLogger().SetNoLock()
+
+	// Do any deferred error logging.
+	if fileDirErr != nil {
+		log.WithError(fileDirErr).Fatal("Failed to create log file directory.")
 	}
-	//
-	//// File target.
-	//if configParams.LogSeverityFile != "" {
-	//	fileLevels := filterLevels(logLevelFile)
-	//	if err := os.MkdirAll(path.Dir(configParams.LogFilePath), 0755); err != nil {
-	//		log.WithError(err).Fatal("Failed to create log dir")
-	//	}
-	//	rotAwareFile, err := rfw.Open(configParams.LogFilePath, 0644)
-	//	if err != nil {
-	//		log.WithError(err).Fatal("Failed to open log file")
-	//	}
-	//	log.AddHook(&StreamHook{
-	//		writer: rotAwareFile,
-	//		levels: fileLevels,
-	//	})
-	//}
-	//
-	//if configParams.LogSeveritySys != "" {
-	//	// Syslog target.
-	//	// Set net/addr to "" so we connect to the system syslog server rather
-	//	// than a remote one.
-	//	net := ""
-	//	addr := ""
-	//	// The priority parameter is a combination of facility and default
-	//	// severity.  We want to log with the standard LOG_USER facility; the
-	//	// severity is actually irrelevant because the hook always overrides
-	//	// it.
-	//	priority := syslog.LOG_USER | syslog.LOG_INFO
-	//	tag := "calico-felix"
-	//	if hook, err := logrus_syslog.NewSyslogHook(net, addr, priority, tag); err != nil {
-	//		log.WithError(err).WithField("level", configParams.LogSeveritySys).Error("Failed to connect to syslog")
-	//	} else {
-	//		syslogLevels := filterLevels(logLevelSyslog)
-	//		levHook := &LeveledHook{
-	//			hook:   hook,
-	//			levels: syslogLevels,
-	//		}
-	//		log.AddHook(levHook)
-	//	}
-	//}
+	if fileOpenErr != nil {
+		log.WithError(fileOpenErr).Fatal("Failed to open log file.")
+	}
+	if sysErr != nil {
+		log.WithError(sysErr).Error("Failed to connect to syslog.")
+	}
 }
 
 // filterLevels returns all the logrus.Level values <= maxLevel.
@@ -167,7 +180,7 @@ func filterLevels(maxLevel log.Level) []log.Level {
 }
 
 // Formatter is our custom log formatter, which mimics the style used by the Python version of
-// Felix.  In particular, it uses a sortable timestamp and it includes the level, PID file and line
+// Felix.  In particular, it uses a sortable timestamp and it includes the level, PID, file and line
 // number.
 //
 //    2017-01-05 09:17:48.238 [INFO][85386] endpoint_mgr.go 434: Skipping configuration of
@@ -182,16 +195,16 @@ func (f *Formatter) Format(entry *log.Entry) ([]byte, error) {
 	}
 	sort.Strings(keys)
 
-	b := &bytes.Buffer{}
-
+	b := entry.Buffer
+	if b == nil {
+		b = &bytes.Buffer{}
+	}
 	stamp := entry.Time.Format("2006-01-02 15:04:05.000")
 	levelStr := strings.ToUpper(entry.Level.String())
 	pid := os.Getpid()
 	fileName := entry.Data["__file__"]
 	lineNo := entry.Data["__line__"]
-	formatted := fmt.Sprintf("%s [%s][%d] %v %v: %v",
-		stamp, levelStr, pid, fileName, lineNo, entry.Message)
-	b.WriteString(formatted)
+	fmt.Fprintf(b, "%s [%s][%d] %v %v: %v", stamp, levelStr, pid, fileName, lineNo, entry.Message)
 
 	for _, key := range keys {
 		if key == "__file__" || key == "__line__" {
@@ -208,11 +221,54 @@ func (f *Formatter) Format(entry *log.Entry) ([]byte, error) {
 			// No string method, use %#v to get a more thorough dump.
 			stringifiedValue = fmt.Sprintf("%#v", value)
 		}
-		b.WriteString(fmt.Sprintf(" %v=%v", key, stringifiedValue))
+		fmt.Fprintf(b, " %v=%v", key, stringifiedValue)
 	}
 
 	b.WriteByte('\n')
 	return b.Bytes(), nil
+}
+
+// FormatForSyslog formats logs in a way tailored for syslog.  It avoids logging information that is
+// already included in the syslog metadata such as timestamp and PID.  The log level _is_ included
+// because syslog doesn't seem to output it by default and it's very useful.
+//
+//    INFO endpoint_mgr.go 434: Skipping configuration of interface because it is oper down.
+//    ifaceName="cali1234"
+func FormatForSyslog(entry *log.Entry) string {
+	// Sort the keys for consistent output.
+	var keys []string = make([]string, 0, len(entry.Data))
+	for k := range entry.Data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	levelStr := strings.ToUpper(entry.Level.String())
+	fileName := entry.Data["__file__"]
+	lineNo := entry.Data["__line__"]
+	b := entry.Buffer
+	if b == nil {
+		b = &bytes.Buffer{}
+	}
+	fmt.Fprintf(b, "%s %v %v: %v", levelStr, fileName, lineNo, entry.Message)
+	for _, key := range keys {
+		if key == "__file__" || key == "__line__" {
+			continue
+		}
+		var value interface{} = entry.Data[key]
+		var stringifiedValue string
+		if err, ok := value.(error); ok {
+			stringifiedValue = err.Error()
+		} else if stringer, ok := value.(fmt.Stringer); ok {
+			// Trust the value's String() method.
+			stringifiedValue = stringer.String()
+		} else {
+			// No string method, use %#v to get a more thorough dump.
+			stringifiedValue = fmt.Sprintf("%#v", value)
+		}
+		fmt.Fprintf(b, " %v=%v", key, stringifiedValue)
+	}
+	b.WriteByte('\n')
+	return b.String()
 }
 
 // NullWriter is a dummy writer that always succeeds and does nothing.
@@ -255,21 +311,168 @@ func shouldSkipFrame(frame runtime.Frame) bool {
 }
 
 type queuedLog struct {
-	level log.Level
-	msg   []byte
+	level     log.Level
+	msgLine   []byte
+	syslogMsg string
+}
+
+func NewStreamDestination(level log.Level, writer io.Writer) *StreamDestination {
+	return &StreamDestination{
+		level:   level,
+		writer:  writer,
+		channel: make(chan queuedLog, 10000),
+	}
+}
+
+type StreamDestination struct {
+	level   log.Level
+	writer  io.Writer
+	channel chan queuedLog
+
+	// Our own copy of the dropped logs counter, used for logging out when we drop logs.
+	// Must be read/updated using atomic.XXX.
+	numDroppedLogs  uint64
+	lastDropLogTime time.Duration
+}
+
+func (d *StreamDestination) Level() log.Level {
+	return d.level
+}
+
+func (d *StreamDestination) Channel() chan<- queuedLog {
+	return d.channel
+}
+
+func (d *StreamDestination) OnLogDropped() {
+	atomic.AddUint64(&d.numDroppedLogs, 1)
+}
+
+func (d *StreamDestination) LoopWritingLogs() {
+	var numSeenDroppedLogs uint64
+	for {
+		// Wait for something to log.
+		ql := <-d.channel
+
+		// If it's been a while since our last check, see if we're dropping logs.
+		timeSinceLastCheck := monotime.Since(d.lastDropLogTime)
+		if timeSinceLastCheck > time.Second {
+			currentNumDroppedLogs := atomic.LoadUint64(&d.numDroppedLogs)
+			if currentNumDroppedLogs > numSeenDroppedLogs {
+				fmt.Fprintf(d.writer, "... dropped %d logs in %v ...\n",
+					currentNumDroppedLogs-numSeenDroppedLogs,
+					timeSinceLastCheck)
+				numSeenDroppedLogs = currentNumDroppedLogs
+			}
+			d.lastDropLogTime = monotime.Now()
+		}
+
+		_, err := d.writer.Write(ql.msgLine)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write to log: %v", err)
+		}
+	}
+}
+
+func NewSyslogDestination(level log.Level, writer *syslog.Writer) *SyslogDestination {
+	return &SyslogDestination{
+		level:   level,
+		writer:  writer,
+		channel: make(chan queuedLog, 10000),
+	}
+}
+
+type SyslogDestination struct {
+	level   log.Level
+	writer  *syslog.Writer
+	channel chan queuedLog
+
+	// Our own copy of the dropped logs counter, used for logging out when we drop logs.
+	// Must be read/updated using atomic.XXX.
+	numDroppedLogs  uint64
+	lastDropLogTime time.Duration
+}
+
+func (d *SyslogDestination) Level() log.Level {
+	return d.level
+}
+
+func (d *SyslogDestination) Channel() chan<- queuedLog {
+	return d.channel
+}
+
+func (d *SyslogDestination) OnLogDropped() {
+	atomic.AddUint64(&d.numDroppedLogs, 1)
+}
+
+func (d *SyslogDestination) LoopWritingLogs() {
+	var numSeenDroppedLogs uint64
+	for {
+		// Wait for something to log.
+		ql := <-d.channel
+
+		// If it's been a while since our last check, see if we're dropping logs.
+		timeSinceLastCheck := monotime.Since(d.lastDropLogTime)
+		if timeSinceLastCheck > time.Second {
+			currentNumDroppedLogs := atomic.LoadUint64(&d.numDroppedLogs)
+			if currentNumDroppedLogs > numSeenDroppedLogs {
+				d.writer.Warning(fmt.Sprintf("... dropped %d logs in %v ...\n",
+					currentNumDroppedLogs-numSeenDroppedLogs,
+					timeSinceLastCheck))
+				numSeenDroppedLogs = currentNumDroppedLogs
+			}
+			d.lastDropLogTime = monotime.Now()
+		}
+
+		err := d.write(ql)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write to syslog: %v", err)
+		}
+	}
+}
+
+func (d *SyslogDestination) write(ql queuedLog) error {
+	switch ql.level {
+	case log.PanicLevel:
+		return d.writer.Crit(ql.syslogMsg)
+	case log.FatalLevel:
+		return d.writer.Crit(ql.syslogMsg)
+	case log.ErrorLevel:
+		return d.writer.Err(ql.syslogMsg)
+	case log.WarnLevel:
+		return d.writer.Warning(ql.syslogMsg)
+	case log.InfoLevel:
+		return d.writer.Info(ql.syslogMsg)
+	case log.DebugLevel:
+		return d.writer.Debug(ql.syslogMsg)
+	default:
+		return nil
+	}
+}
+
+type Destination interface {
+	Level() log.Level
+	LoopWritingLogs()
+	Channel() chan<- queuedLog
+	OnLogDropped()
 }
 
 type BackgroundHook struct {
-	queue       chan queuedLog
 	levels      []log.Level
-	destination io.Writer
+	syslogLevel log.Level
+
+	destinations []Destination
+
+	// Our own copy of the dropped logs counter, used for logging out when we drop logs.
+	// Must be read/updated using atomic.XXX.
+	numDroppedLogs  uint64
+	lastDropLogTime time.Duration
 }
 
-func NewBackgroundHook(levels []log.Level, dest io.Writer) *BackgroundHook {
+func NewBackgroundHook(levels []log.Level, syslogLevel log.Level, destinations []Destination) *BackgroundHook {
 	return &BackgroundHook{
-		queue:       make(chan queuedLog, 10000),
-		levels:      levels,
-		destination: dest,
+		destinations: destinations,
+		levels:       levels,
+		syslogLevel:  syslogLevel,
 	}
 }
 
@@ -283,59 +486,45 @@ func (h *BackgroundHook) Fire(entry *log.Entry) (err error) {
 		return
 	}
 
-	// serialised will be reused after we return so take a copy.  TODO: manage buffers.
+	// entry's buffer will be reused after we return but we're about to send the message over
+	// a channel; take a copy.
 	bufCopy := make([]byte, len(serialized))
 	copy(bufCopy, serialized)
+	if entry.Buffer != nil {
+		entry.Buffer.Truncate(0)
+	}
 
 	ql := queuedLog{
-		entry.Level,
-		bufCopy,
+		level:   entry.Level,
+		msgLine: bufCopy,
 	}
-	select {
-	case h.queue <- ql:
-	default:
-		// Background thread isn't keeping up.  Drop the log.  Not much else we can do.
+
+	if entry.Level <= h.syslogLevel {
+		// Special-case: syslog gets its own log string since out default log string
+		// duplicates a lot of syslog metadata.  Only calculate that string if it's needed.
+		ql.syslogMsg = FormatForSyslog(entry)
+	}
+
+	for _, dest := range h.destinations {
+		if ql.level > dest.Level() {
+			continue
+		}
+		select {
+		case dest.Channel() <- ql:
+		default:
+			// Background thread isn't keeping up.  Drop the log and count how many
+			// we've dropped.
+			counterDroppedLogs.Inc()
+			dest.OnLogDropped()
+		}
 	}
 	return
 }
 
 func (h *BackgroundHook) Start() {
-	go h.writeToStream()
-}
-
-func (h *BackgroundHook) writeToStream() {
-	for {
-		ql := <-h.queue
-		_, err := h.destination.Write(ql.msg)
-		if err != nil {
-			panic(err)
-		}
+	for _, d := range h.destinations {
+		go d.LoopWritingLogs()
 	}
-}
-
-// StreamHook is a logrus Hook that writes to a stream when fired.
-// It supports configuration of log levels at which is fires.
-type StreamHook struct {
-	mu     sync.Mutex
-	writer io.Writer
-	levels []log.Level
-}
-
-func (h *StreamHook) Levels() []log.Level {
-	return h.levels
-}
-
-func (h *StreamHook) Fire(entry *log.Entry) (err error) {
-	var serialized []byte
-	if serialized, err = entry.Logger.Formatter.Format(entry); err != nil {
-		return
-	}
-
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	_, err = h.writer.Write(serialized)
-	return
 }
 
 type LeveledHook struct {

@@ -1,5 +1,5 @@
 hash: 25c836fa323ae2eb87ab26a6b12064b5bda7cfd743b42020c40c759465d0ce5e
-updated: 2017-03-14T13:21:17.214096655Z
+updated: 2017-03-14T15:18:36.260602185Z
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -191,8 +191,6 @@ imports:
   version: b061729afc07e77a8aa4fad0a2fd840958f1942a
 - name: github.com/Sirupsen/logrus
   version: 1deb2db2a6fff8a35532079061b903c3a25eed52
-  subpackages:
-  - hooks/syslog
 - name: github.com/spf13/pflag
   version: 08b1a584251b5b62f458943640fc8ebd4d50aaa5
 - name: github.com/ugorji/go
