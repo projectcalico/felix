@@ -1,19 +1,21 @@
-hash: 25c836fa323ae2eb87ab26a6b12064b5bda7cfd743b42020c40c759465d0ce5e
-updated: 2017-03-14T13:21:17.214096655Z
+hash: eb8cf66c5385cd4acbbd1e82a99a6c2359a7f1fe1dee4202a5c012fe26dfe6bd
+updated: 2017-03-15T15:50:57.588404953-07:00
 imports:
+- name: bitbucket.org/ww/goautoneg
+  version: 75cd24fc2f2c2a2088577d12123ddee5f54e0675
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
   subpackages:
   - compute/metadata
   - internal
 - name: github.com/beorn7/perks
-  version: 4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9
+  version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
   subpackages:
   - quantile
 - name: github.com/blang/semver
   version: 31b736133b98f26d5e078ec9eb591666edfd091f
 - name: github.com/coreos/etcd
-  version: 1a6be700d80073bb36f7cdf36e4834f8c7c7a3b8
+  version: 17ae440991da3bdb2df4309936dd2074f66ec394
   subpackages:
   - client
   - pkg/pathutil
@@ -61,7 +63,7 @@ imports:
 - name: github.com/ghodss/yaml
   version: 73d445a93680fa1a78ae23a5839bad48f32ba1ee
 - name: github.com/go-ini/ini
-  version: 98c45284d68a05a0e0a576de574bd975946ef9ad
+  version: 1730955e3146956d6a087861380f9b4667ed5071
 - name: github.com/go-openapi/jsonpointer
   version: 46af16f9f7b149af66e5d1bd010e3574dc06de98
 - name: github.com/go-openapi/jsonreference
@@ -78,7 +80,7 @@ imports:
 - name: github.com/golang/glog
   version: 44145f04b68cf362d9c4df2182967c2275eaefed
 - name: github.com/golang/protobuf
-  version: c9c7427a2a70d2eb3bafa0ab2dc163e45f143317
+  version: 4bd1920723d7b7c925de087aa32e2187708897f7
   subpackages:
   - proto
 - name: github.com/google/gofuzz
@@ -102,13 +104,13 @@ imports:
   - jlexer
   - jwriter
 - name: github.com/matttproud/golang_protobuf_extensions
-  version: c12348ce28de40eed0136aa2b644d0ee0650e56c
+  version: fc2b8d3a73c4867e51861bbdd5ae3c1f0869dd6a
   subpackages:
   - pbutil
 - name: github.com/mipearson/rfw
   version: b66ec87bd85055de3f749a8640e9e4c8053052e4
 - name: github.com/onsi/ginkgo
-  version: ab07225d112dc7a93c289ac5b2e12735c2c46035
+  version: bb93381d543b0e5725244abe752214a110791d01
   subpackages:
   - config
   - extensions/table
@@ -138,7 +140,7 @@ imports:
 - name: github.com/projectcalico/go-yaml-wrapper
   version: 598e54215bee41a19677faa4f0c32acd2a87eb56
 - name: github.com/projectcalico/libcalico-go
-  version: 70c9896a09b3dd8b4a3398f6eade318e07d464b9
+  version: 42a36f79c2f92d07467c6ee15603a340e9cf6035
   subpackages:
   - lib
   - lib/api
@@ -170,19 +172,16 @@ imports:
   - prometheus
   - prometheus/promhttp
 - name: github.com/prometheus/client_model
-  version: 6f3806018612930941127f2a7c6c453ba2c527d2
+  version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
   subpackages:
   - go
 - name: github.com/prometheus/common
-  version: 49fee292b27bfff7f354ee0f64e1bc4850462edf
+  version: ffe929a3f4c4faeaa10f2b9535c2b1be3ad15650
   subpackages:
   - expfmt
-  - internal/bitbucket.org/ww/goautoneg
   - model
 - name: github.com/prometheus/procfs
-  version: a1dba9ce8baed984a2495b658c82687f8157b98f
-  subpackages:
-  - xfs
+  version: 454a56f35412459b5e684fd5ec0f9211b94f002a
 - name: github.com/PuerkitoBio/purell
   version: 8a290539e2e8629dbc4e6bad948158f790ec31f4
 - name: github.com/PuerkitoBio/urlesc
@@ -190,7 +189,7 @@ imports:
 - name: github.com/satori/go.uuid
   version: b061729afc07e77a8aa4fad0a2fd840958f1942a
 - name: github.com/Sirupsen/logrus
-  version: 1deb2db2a6fff8a35532079061b903c3a25eed52
+  version: 0208149b40d863d2c1a2f8fe5753096a9cf2cc8b
   subpackages:
   - hooks/syslog
 - name: github.com/spf13/pflag
@@ -228,7 +227,7 @@ imports:
   - jws
   - jwt
 - name: golang.org/x/sys
-  version: 99f16d856c9836c42d24e7ab64ea72916925fa97
+  version: 8f0908ab3b2457e2e15403d3697c9ef5cb4b57a9
   subpackages:
   - unix
 - name: golang.org/x/text
@@ -385,7 +384,7 @@ imports:
   - transport
 testImports:
 - name: github.com/onsi/gomega
-  version: 1de7ab2df9105aa5c15c4d7e14a8a514e3cb8d4b
+  version: c463cd2a8578290d4be7a25cba69de81cf35785e
   subpackages:
   - format
   - internal/assertion
