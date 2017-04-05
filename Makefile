@@ -155,7 +155,7 @@ calico/felix: bin/calico-felix
 GET_CONTAINER_IP := docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
 K8S_VERSION=1.5.3
 .PHONY: k8s-fv-test run-k8s-apiserver stop-k8s-apiserver run-etcd stop-etcd
-k8s-fv-test: calico/felix run-k8s-apiserver k8sfv/k8sfv.test
+k8sfv-ci: calico/felix run-k8s-apiserver k8sfv/k8sfv.test
 	@-docker rm -f k8sfv-felix
 	sleep 1
 	K8S_IP=`$(GET_CONTAINER_IP) k8sfv-apiserver` && \
@@ -170,7 +170,7 @@ k8s-fv-test: calico/felix run-k8s-apiserver k8sfv/k8sfv.test
 	/bin/sh -c "for n in 1 2; do calico-felix; done"
 	sleep 1
 	K8S_IP=`$(GET_CONTAINER_IP) k8sfv-apiserver` && \
-	docker exec k8sfv-felix /testcode/k8sfv/k8sfv.test -ginkgo.v https://$${K8S_IP}:6443
+	docker exec k8sfv-felix /testcode/k8sfv/k8sfv.test -ginkgo.v -ginkgo.focus=\\[ci\\] https://$${K8S_IP}:6443
 
 run-k8s-apiserver: stop-k8s-apiserver run-etcd
 	ETCD_IP=`$(GET_CONTAINER_IP) k8sfv-etcd` && \
