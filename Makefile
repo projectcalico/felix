@@ -155,12 +155,13 @@ calico/felix: bin/calico-felix
 GET_CONTAINER_IP := docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
 K8S_VERSION=1.5.3
 GRAFANA_VERSION=4.1.2
+K8SFV_PREFIX := $(shell basename $(shell mktemp -t k8sfv-XXXX))
 .PHONY: k8sfv-test run-k8s-apiserver stop-k8s-apiserver run-etcd stop-etcd
 k8sfv-test: calico/felix run-k8s-apiserver k8sfv/k8sfv.test
-	@-docker rm -f k8sfv-felix
+	@-docker rm -f $(K8SFV_PREFIX)-felix
 	sleep 1
-	K8S_IP=`$(GET_CONTAINER_IP) k8sfv-apiserver` && \
-	docker run --detach --privileged --name=k8sfv-felix \
+	K8S_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-apiserver` && \
+	docker run --detach --privileged --name=$(K8SFV_PREFIX)-felix \
 	-e FELIX_LOGSEVERITYSCREEN=info \
 	-e FELIX_DATASTORETYPE=kubernetes \
 	-e FELIX_PROMETHEUSMETRICSENABLED=true \
@@ -173,31 +174,34 @@ k8sfv-test: calico/felix run-k8s-apiserver k8sfv/k8sfv.test
 	calico/felix \
 	/bin/sh -c "for n in 1 2; do calico-felix; done"
 	sleep 1
-	FELIX_IP=`$(GET_CONTAINER_IP) k8sfv-felix` && \
-	K8S_IP=`$(GET_CONTAINER_IP) k8sfv-apiserver` && \
-	docker exec k8sfv-felix /bin/sh -c "cd /testcode/k8sfv && /testcode/k8sfv/k8sfv.test -ginkgo.v https://$${K8S_IP}:6443 $${FELIX_IP}"
+	FELIX_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-felix` && \
+	K8S_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-apiserver` && \
+	docker exec $(K8SFV_PREFIX)-felix /bin/sh -c "cd /testcode/k8sfv && /testcode/k8sfv/k8sfv.test -ginkgo.v https://$${K8S_IP}:6443 $${FELIX_IP}"
+	docker rm -f $(K8SFV_PREFIX)-felix
+	docker rm -f $(K8SFV_PREFIX)-apiserver
+	docker rm -f $(K8SFV_PREFIX)-etcd
 
 run-k8s-apiserver: stop-k8s-apiserver run-etcd
-	ETCD_IP=`$(GET_CONTAINER_IP) k8sfv-etcd` && \
+	ETCD_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-etcd` && \
 	docker run --detach \
-	  --name k8sfv-apiserver \
+	  --name $(K8SFV_PREFIX)-apiserver \
 	gcr.io/google_containers/hyperkube-amd64:v$(K8S_VERSION) \
 		  /hyperkube apiserver --etcd-servers=http://$${ETCD_IP}:2379 \
 		  --service-cluster-ip-range=10.101.0.0/16 -v=10
 
 stop-k8s-apiserver: stop-etcd
-	@-docker rm -f k8sfv-apiserver
+	@-docker rm -f $(K8SFV_PREFIX)-apiserver
 	sleep 2
 
 run-etcd: stop-etcd
 	docker run --detach \
-	--name k8sfv-etcd quay.io/coreos/etcd \
+	--name $(K8SFV_PREFIX)-etcd quay.io/coreos/etcd \
 	etcd \
 	--advertise-client-urls "http://127.0.0.1:2379,http://127.0.0.1:4001" \
 	--listen-client-urls "http://0.0.0.0:2379,http://0.0.0.0:4001"
 
 stop-etcd:
-	@-docker rm -f k8sfv-etcd
+	@-docker rm -f $(K8SFV_PREFIX)-etcd
 
 PROMETHEUS_DATA_DIR := $$HOME/prometheus-data
 K8SFV_PROMETHEUS_DATA_DIR := $(PROMETHEUS_DATA_DIR)/k8sfv
@@ -207,9 +211,9 @@ $(K8SFV_PROMETHEUS_DATA_DIR):
 
 .PHONY: run-prometheus run-grafana stop-prometheus stop-grafana
 run-prometheus: stop-prometheus $(K8SFV_PROMETHEUS_DATA_DIR)
-	FELIX_IP=`$(GET_CONTAINER_IP) k8sfv-felix` && \
+	FELIX_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-felix` && \
 	sed "s/__FELIX_IP__/$${FELIX_IP}/" < $(K8SFV_DIR)/prometheus/prometheus.yml.in > $(K8SFV_DIR)/prometheus/prometheus.yml
-	docker run --detach --name k8sfv-prometheus \
+	docker run --detach --name $(K8SFV_PREFIX)-prometheus \
 	-v $${PWD}/$(K8SFV_DIR)/prometheus/prometheus.yml:/etc/prometheus.yml \
 	-v $(K8SFV_PROMETHEUS_DATA_DIR):/prometheus \
 	prom/prometheus \
@@ -217,24 +221,24 @@ run-prometheus: stop-prometheus $(K8SFV_PROMETHEUS_DATA_DIR)
 	-storage.local.path=/prometheus
 
 stop-prometheus:
-	@-docker rm -f k8sfv-prometheus
+	@-docker rm -f $(K8SFV_PREFIX)-prometheus
 	sleep 2
 
 run-grafana: stop-grafana run-prometheus
-	docker run --detach --name k8sfv-grafana -p 3000:3000 \
+	docker run --detach --name $(K8SFV_PREFIX)-grafana -p 3000:3000 \
 	-v $${PWD}/$(K8SFV_DIR)/grafana:/etc/grafana \
 	-v $${PWD}/$(K8SFV_DIR)/grafana-dashboards:/etc/grafana-dashboards \
 	grafana/grafana:$(GRAFANA_VERSION) --config /etc/grafana/grafana.ini
 	# Wait for it to get going.
 	sleep 5
 	# Configure prometheus data source.
-	PROMETHEUS_IP=`$(GET_CONTAINER_IP) k8sfv-prometheus` && \
+	PROMETHEUS_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-prometheus` && \
 	sed "s/__PROMETHEUS_IP__/$${PROMETHEUS_IP}/" < $(K8SFV_DIR)/grafana-datasources/my-prom.json.in | \
 	curl 'http://admin:admin@127.0.0.1:3000/api/datasources' -X POST \
 	    -H 'Content-Type: application/json;charset=UTF-8' --data-binary @-
 
 stop-grafana:
-	@-docker rm -f k8sfv-grafana
+	@-docker rm -f $(K8SFV_PREFIX)-grafana
 	sleep 2
 
 # Pre-configured docker run command that runs as this user with the repo
