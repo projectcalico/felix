@@ -82,4 +82,4 @@ prompg_ip=$(get_container_ip ${prefix}-prompg)
 
 # Run the test suite.
 docker exec ${prefix}-felix /bin/sh -c \
-       "cd /testcode/k8sfv && /testcode/k8sfv/k8sfv.test -ginkgo.v ${k8s_api_endpoint} ${felix_ip} ${prompg_ip}"
+       "cd /testcode/k8sfv && /testcode/bin/k8sfv.test -ginkgo.v ${k8s_api_endpoint} ${felix_ip} ${prompg_ip}"
