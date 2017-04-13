@@ -50,6 +50,13 @@ docker run --detach --name ${prefix}-apiserver \
        --etcd-servers=http://${etcd_ip}:2379 \
        --service-cluster-ip-range=10.101.0.0/16 -v=10
 k8s_ip=$(get_container_ip ${prefix}-apiserver)
+k8s_api_endpoint=https://${k8s_ip}:6443
+
+# Wait until the newly launched API server can respond to a request,
+# before continuing.
+while ! curl ${k8s_api_endpoint}/apis/extensions/v1beta1/thirdpartyresources; do
+    sleep 2
+done
 
 # Run Felix.
 docker run --detach --privileged --name ${prefix}-felix \
@@ -58,7 +65,7 @@ docker run --detach --privileged --name ${prefix}-felix \
        -e FELIX_PROMETHEUSMETRICSENABLED=true \
        -e FELIX_USAGEREPORTINGENABLED=false \
        -e FELIX_DEBUGMEMORYPROFILEPATH="heap-<timestamp>" \
-       -e K8S_API_ENDPOINT=https://${k8s_ip}:6443 \
+       -e K8S_API_ENDPOINT=${k8s_api_endpoint} \
        -e K8S_INSECURE_SKIP_TLS_VERIFY=true \
        -v ${PWD}:/testcode \
        -w /testcode/k8sfv \
@@ -68,4 +75,4 @@ felix_ip=$(get_container_ip ${prefix}-felix)
 
 # Run the test suite.
 docker exec ${prefix}-felix /bin/sh -c \
-       "cd /testcode/k8sfv && /testcode/k8sfv/k8sfv.test -ginkgo.v https://${k8s_ip}:6443 ${felix_ip}"
+       "cd /testcode/k8sfv && /testcode/k8sfv/k8sfv.test -ginkgo.v ${k8s_api_endpoint} ${felix_ip}"
