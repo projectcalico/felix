@@ -13,9 +13,15 @@ prefix=$(basename $(mktemp -t k8sfv-XXXX))
 
 # Arrange to always clean up the containers that we create.
 function cleanup {
+    # Clean up the names that we generate now.
     docker rm -f ${prefix}-felix || true
     docker rm -f ${prefix}-apiserver || true
     docker rm -f ${prefix}-etcd || true
+    # Also clean up the non-unique names that used to use.
+    docker rm -f k8sfv-felix || true
+    docker rm -f k8sfv-apiserver || true
+    docker rm -f k8sfv-etcd || true
+    # List all remaining containers.
     docker ps -a
 }
 trap cleanup EXIT SIGINT SIGQUIT
@@ -54,7 +60,7 @@ docker run --detach --privileged --name ${prefix}-felix \
        -e FELIX_DEBUGMEMORYPROFILEPATH="heap-<timestamp>" \
        -e K8S_API_ENDPOINT=https://${k8s_ip}:6443 \
        -e K8S_INSECURE_SKIP_TLS_VERIFY=true \
-       -v $${PWD}:/testcode \
+       -v ${PWD}:/testcode \
        -w /testcode/k8sfv \
        calico/felix \
        /bin/sh -c "for n in 1 2; do calico-felix; done"
