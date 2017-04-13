@@ -16,6 +16,7 @@ function cleanup {
     docker rm -f ${prefix}-felix || true
     docker rm -f ${prefix}-apiserver || true
     docker rm -f ${prefix}-etcd || true
+    docker ps -a
 }
 trap cleanup EXIT SIGINT SIGQUIT
 
