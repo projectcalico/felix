@@ -5,22 +5,23 @@
 # operations through the k8s API server.
 
 # Config.
-K8S_VERSION=1.5.3
+#
+# What version of the k8s API server to use.
+: ${K8S_VERSION:=1.5.3}
+# A string to insert into the container names that we use to make them
+# unique.
+: ${UNIQUE:=}
 
 # Generate a unique prefix for the names of the containers that we
 # will create.
-prefix=$(basename $(mktemp -t k8sfv-XXXX))
+prefix=k8sfv${UNIQUE}
 
 # Arrange to always clean up the containers that we create.
 function cleanup {
-    # Clean up the names that we generate now.
+    # Clean up the containers that this script generates.
     docker rm -f ${prefix}-felix || true
     docker rm -f ${prefix}-apiserver || true
     docker rm -f ${prefix}-etcd || true
-    # Also clean up the non-unique names that used to use.
-    docker rm -f k8sfv-felix || true
-    docker rm -f k8sfv-apiserver || true
-    docker rm -f k8sfv-etcd || true
     # List all remaining containers.
     docker ps -a
 }
