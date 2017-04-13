@@ -74,6 +74,12 @@ docker run --detach --privileged --name ${prefix}-felix \
        /bin/sh -c "for n in 1 2; do calico-felix; done"
 felix_ip=$(get_container_ip ${prefix}-felix)
 
+# Run a Prometheus push gateway, if there isn't already one.
+if ! docker inspect ${prefix}-prompg >/dev/null; then
+    docker run --detach --name ${prefix}-prompg prom/pushgateway
+fi
+prompg_ip=$(get_container_ip ${prefix}-prompg)
+
 # Run the test suite.
 docker exec ${prefix}-felix /bin/sh -c \
-       "cd /testcode/k8sfv && /testcode/k8sfv/k8sfv.test -ginkgo.v ${k8s_api_endpoint} ${felix_ip}"
+       "cd /testcode/k8sfv && /testcode/k8sfv/k8sfv.test -ginkgo.v ${k8s_api_endpoint} ${felix_ip} ${prompg_ip}"

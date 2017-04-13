@@ -156,7 +156,7 @@ GET_CONTAINER_IP := docker inspect --format='{{range .NetworkSettings.Networks}}
 GRAFANA_VERSION=4.1.2
 .PHONY: k8sfv-test
 k8sfv-test: calico/felix bin/k8sfv.test
-	utils/run-k8sfv-test
+	k8sfv/run-test
 
 PROMETHEUS_DATA_DIR := $$HOME/prometheus-data
 K8SFV_PROMETHEUS_DATA_DIR := $(PROMETHEUS_DATA_DIR)/k8sfv
