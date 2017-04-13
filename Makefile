@@ -155,7 +155,7 @@ calico/felix: bin/calico-felix
 GET_CONTAINER_IP := docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
 GRAFANA_VERSION=4.1.2
 .PHONY: k8sfv-test
-k8sfv-test: calico/felix k8sfv/k8sfv.test
+k8sfv-test: calico/felix bin/k8sfv.test
 	utils/run-k8sfv-test
 
 PROMETHEUS_DATA_DIR := $$HOME/prometheus-data
@@ -294,10 +294,10 @@ bin/calico-felix: $(FELIX_GO_FILES) vendor/.up-to-date
                ( ldd bin/calico-felix 2>&1 | grep -q "Not a valid dynamic program" || \
 	             ( echo "Error: bin/calico-felix was not statically linked"; false ) )'
 
-k8sfv/k8sfv.test: $(K8SFV_GO_FILES)
+bin/k8sfv.test: $(K8SFV_GO_FILES)
 	@echo Building $@...
 	$(DOCKER_GO_BUILD) \
-	    sh -c 'ginkgo build k8sfv && \
+	    sh -c 'go test -c -o $@ ./k8sfv && \
                ( ldd $@ 2>&1 | grep -q "Not a valid dynamic program" || \
 	             ( echo "Error: $@ was not statically linked"; false ) )'
 
