@@ -153,55 +153,10 @@ calico/felix: bin/calico-felix
 # Targets for Felix testing with the k8s backend and a k8s API server,
 # with k8s model resources being injected by a separate test client.
 GET_CONTAINER_IP := docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
-K8S_VERSION=1.5.3
 GRAFANA_VERSION=4.1.2
-K8SFV_PREFIX := $(shell basename $(shell mktemp -t k8sfv-XXXX))
-.PHONY: k8sfv-test run-k8s-apiserver stop-k8s-apiserver run-etcd stop-etcd
-k8sfv-test: calico/felix run-k8s-apiserver k8sfv/k8sfv.test
-	@-docker rm -f $(K8SFV_PREFIX)-felix
-	sleep 1
-	K8S_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-apiserver` && \
-	docker run --detach --privileged --name=$(K8SFV_PREFIX)-felix \
-	-e FELIX_LOGSEVERITYSCREEN=info \
-	-e FELIX_DATASTORETYPE=kubernetes \
-	-e FELIX_PROMETHEUSMETRICSENABLED=true \
-	-e FELIX_USAGEREPORTINGENABLED=false \
-	-e FELIX_DEBUGMEMORYPROFILEPATH="heap-<timestamp>" \
-	-e K8S_API_ENDPOINT=https://$${K8S_IP}:6443 \
-	-e K8S_INSECURE_SKIP_TLS_VERIFY=true \
-	-v $${PWD}:/testcode \
-	-w /testcode/k8sfv \
-	calico/felix \
-	/bin/sh -c "for n in 1 2; do calico-felix; done"
-	sleep 1
-	FELIX_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-felix` && \
-	K8S_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-apiserver` && \
-	docker exec $(K8SFV_PREFIX)-felix /bin/sh -c "cd /testcode/k8sfv && /testcode/k8sfv/k8sfv.test -ginkgo.v https://$${K8S_IP}:6443 $${FELIX_IP}"
-	docker rm -f $(K8SFV_PREFIX)-felix
-	docker rm -f $(K8SFV_PREFIX)-apiserver
-	docker rm -f $(K8SFV_PREFIX)-etcd
-
-run-k8s-apiserver: stop-k8s-apiserver run-etcd
-	ETCD_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-etcd` && \
-	docker run --detach \
-	  --name $(K8SFV_PREFIX)-apiserver \
-	gcr.io/google_containers/hyperkube-amd64:v$(K8S_VERSION) \
-		  /hyperkube apiserver --etcd-servers=http://$${ETCD_IP}:2379 \
-		  --service-cluster-ip-range=10.101.0.0/16 -v=10
-
-stop-k8s-apiserver: stop-etcd
-	@-docker rm -f $(K8SFV_PREFIX)-apiserver
-	sleep 2
-
-run-etcd: stop-etcd
-	docker run --detach \
-	--name $(K8SFV_PREFIX)-etcd quay.io/coreos/etcd \
-	etcd \
-	--advertise-client-urls "http://127.0.0.1:2379,http://127.0.0.1:4001" \
-	--listen-client-urls "http://0.0.0.0:2379,http://0.0.0.0:4001"
-
-stop-etcd:
-	@-docker rm -f $(K8SFV_PREFIX)-etcd
+.PHONY: k8sfv-test
+k8sfv-test: calico/felix k8sfv/k8sfv.test
+	utils/run-k8sfv-test
 
 PROMETHEUS_DATA_DIR := $$HOME/prometheus-data
 K8SFV_PROMETHEUS_DATA_DIR := $(PROMETHEUS_DATA_DIR)/k8sfv
