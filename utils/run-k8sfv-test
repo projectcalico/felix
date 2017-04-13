@@ -4,6 +4,9 @@
 # running with the Kubernetes datastore driver, driven by CRUD
 # operations through the k8s API server.
 
+# Config.
+K8S_VERSION=1.5.3
+
 # Generate a unique prefix for the names of the containers that we
 # will create.
 prefix=$(basename $(mktemp -t k8sfv-XXXX))
@@ -35,7 +38,7 @@ etcd_ip=$(get_container_ip ${prefix}-etcd)
 
 # Run k8s API server.
 docker run --detach --name ${prefix}-apiserver \
-       gcr.io/google_containers/hyperkube-amd64:v$(K8S_VERSION) \
+       gcr.io/google_containers/hyperkube-amd64:v${K8S_VERSION} \
        /hyperkube apiserver \
        --etcd-servers=http://${etcd_ip}:2379 \
        --service-cluster-ip-range=10.101.0.0/16 -v=10
