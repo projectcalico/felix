@@ -166,9 +166,9 @@ $(K8SFV_PROMETHEUS_DATA_DIR):
 
 .PHONY: run-prometheus run-grafana stop-prometheus stop-grafana
 run-prometheus: stop-prometheus $(K8SFV_PROMETHEUS_DATA_DIR)
-	FELIX_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-felix` && \
+	FELIX_IP=`$(GET_CONTAINER_IP) k8sfv-felix` && \
 	sed "s/__FELIX_IP__/$${FELIX_IP}/" < $(K8SFV_DIR)/prometheus/prometheus.yml.in > $(K8SFV_DIR)/prometheus/prometheus.yml
-	docker run --detach --name $(K8SFV_PREFIX)-prometheus \
+	docker run --detach --name k8sfv-prometheus \
 	-v $${PWD}/$(K8SFV_DIR)/prometheus/prometheus.yml:/etc/prometheus.yml \
 	-v $(K8SFV_PROMETHEUS_DATA_DIR):/prometheus \
 	prom/prometheus \
@@ -176,24 +176,24 @@ run-prometheus: stop-prometheus $(K8SFV_PROMETHEUS_DATA_DIR)
 	-storage.local.path=/prometheus
 
 stop-prometheus:
-	@-docker rm -f $(K8SFV_PREFIX)-prometheus
+	@-docker rm -f k8sfv-prometheus
 	sleep 2
 
 run-grafana: stop-grafana run-prometheus
-	docker run --detach --name $(K8SFV_PREFIX)-grafana -p 3000:3000 \
+	docker run --detach --name k8sfv-grafana -p 3000:3000 \
 	-v $${PWD}/$(K8SFV_DIR)/grafana:/etc/grafana \
 	-v $${PWD}/$(K8SFV_DIR)/grafana-dashboards:/etc/grafana-dashboards \
 	grafana/grafana:$(GRAFANA_VERSION) --config /etc/grafana/grafana.ini
 	# Wait for it to get going.
 	sleep 5
 	# Configure prometheus data source.
-	PROMETHEUS_IP=`$(GET_CONTAINER_IP) $(K8SFV_PREFIX)-prometheus` && \
+	PROMETHEUS_IP=`$(GET_CONTAINER_IP) k8sfv-prometheus` && \
 	sed "s/__PROMETHEUS_IP__/$${PROMETHEUS_IP}/" < $(K8SFV_DIR)/grafana-datasources/my-prom.json.in | \
 	curl 'http://admin:admin@127.0.0.1:3000/api/datasources' -X POST \
 	    -H 'Content-Type: application/json;charset=UTF-8' --data-binary @-
 
 stop-grafana:
-	@-docker rm -f $(K8SFV_PREFIX)-grafana
+	@-docker rm -f k8sfv-grafana
 	sleep 2
 
 # Pre-configured docker run command that runs as this user with the repo
