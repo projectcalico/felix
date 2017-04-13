@@ -54,7 +54,7 @@ k8s_api_endpoint=https://${k8s_ip}:6443
 
 # Wait until the newly launched API server can respond to a request,
 # before continuing.
-while ! curl ${k8s_api_endpoint}/apis/extensions/v1beta1/thirdpartyresources; do
+while ! curl -k ${k8s_api_endpoint}/apis/extensions/v1beta1/thirdpartyresources; do
     sleep 2
 done
 
