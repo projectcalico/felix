@@ -153,51 +153,10 @@ calico/felix: bin/calico-felix
 # Targets for Felix testing with the k8s backend and a k8s API server,
 # with k8s model resources being injected by a separate test client.
 GET_CONTAINER_IP := docker inspect --format='{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
-K8S_VERSION=1.5.3
 GRAFANA_VERSION=4.1.2
-.PHONY: k8sfv-test run-k8s-apiserver stop-k8s-apiserver run-etcd stop-etcd
-k8sfv-test: calico/felix run-k8s-apiserver k8sfv/k8sfv.test
-	@-docker rm -f k8sfv-felix
-	sleep 1
-	K8S_IP=`$(GET_CONTAINER_IP) k8sfv-apiserver` && \
-	docker run --detach --privileged --name=k8sfv-felix \
-	-e FELIX_LOGSEVERITYSCREEN=info \
-	-e FELIX_DATASTORETYPE=kubernetes \
-	-e FELIX_PROMETHEUSMETRICSENABLED=true \
-	-e FELIX_USAGEREPORTINGENABLED=false \
-	-e FELIX_DEBUGMEMORYPROFILEPATH="heap-<timestamp>" \
-	-e K8S_API_ENDPOINT=https://$${K8S_IP}:6443 \
-	-e K8S_INSECURE_SKIP_TLS_VERIFY=true \
-	-v $${PWD}:/testcode \
-	-w /testcode/k8sfv \
-	calico/felix \
-	/bin/sh -c "for n in 1 2; do calico-felix; done"
-	sleep 1
-	FELIX_IP=`$(GET_CONTAINER_IP) k8sfv-felix` && \
-	K8S_IP=`$(GET_CONTAINER_IP) k8sfv-apiserver` && \
-	docker exec k8sfv-felix /bin/sh -c "cd /testcode/k8sfv && /testcode/k8sfv/k8sfv.test -ginkgo.v https://$${K8S_IP}:6443 $${FELIX_IP}"
-
-run-k8s-apiserver: stop-k8s-apiserver run-etcd
-	ETCD_IP=`$(GET_CONTAINER_IP) k8sfv-etcd` && \
-	docker run --detach \
-	  --name k8sfv-apiserver \
-	gcr.io/google_containers/hyperkube-amd64:v$(K8S_VERSION) \
-		  /hyperkube apiserver --etcd-servers=http://$${ETCD_IP}:2379 \
-		  --service-cluster-ip-range=10.101.0.0/16 -v=10
-
-stop-k8s-apiserver: stop-etcd
-	@-docker rm -f k8sfv-apiserver
-	sleep 2
-
-run-etcd: stop-etcd
-	docker run --detach \
-	--name k8sfv-etcd quay.io/coreos/etcd \
-	etcd \
-	--advertise-client-urls "http://127.0.0.1:2379,http://127.0.0.1:4001" \
-	--listen-client-urls "http://0.0.0.0:2379,http://0.0.0.0:4001"
-
-stop-etcd:
-	@-docker rm -f k8sfv-etcd
+.PHONY: k8sfv-test
+k8sfv-test: calico/felix bin/k8sfv.test
+	k8sfv/run-test
 
 PROMETHEUS_DATA_DIR := $$HOME/prometheus-data
 K8SFV_PROMETHEUS_DATA_DIR := $(PROMETHEUS_DATA_DIR)/k8sfv
@@ -205,10 +164,16 @@ K8SFV_PROMETHEUS_DATA_DIR := $(PROMETHEUS_DATA_DIR)/k8sfv
 $(K8SFV_PROMETHEUS_DATA_DIR):
 	mkdir -p $@
 
-.PHONY: run-prometheus run-grafana stop-prometheus stop-grafana
-run-prometheus: stop-prometheus $(K8SFV_PROMETHEUS_DATA_DIR)
-	FELIX_IP=`$(GET_CONTAINER_IP) k8sfv-felix` && \
-	sed "s/__FELIX_IP__/$${FELIX_IP}/" < $(K8SFV_DIR)/prometheus/prometheus.yml.in > $(K8SFV_DIR)/prometheus/prometheus.yml
+.PHONY: $(K8SFV_DIR)/prometheus/prometheus.yml
+$(K8SFV_DIR)/prometheus/prometheus.yml: $(K8SFV_DIR)/prometheus/prometheus.yml.in
+	cat $^ > $@
+	for id in `docker ps -f name=felix --format="{{.ID}}"`; do \
+	    felix_ip=`$(GET_CONTAINER_IP) $${id}`; \
+	    echo "      - targets: ['$${felix_ip}:9091']"; \
+	done >> $@
+
+.PHONY: run-prometheus stop-prometheus
+run-prometheus: stop-prometheus $(K8SFV_PROMETHEUS_DATA_DIR) $(K8SFV_DIR)/prometheus/prometheus.yml
 	docker run --detach --name k8sfv-prometheus \
 	-v $${PWD}/$(K8SFV_DIR)/prometheus/prometheus.yml:/etc/prometheus.yml \
 	-v $(K8SFV_PROMETHEUS_DATA_DIR):/prometheus \
@@ -220,7 +185,8 @@ stop-prometheus:
 	@-docker rm -f k8sfv-prometheus
 	sleep 2
 
-run-grafana: stop-grafana run-prometheus
+.PHONY: run-grafana stop-grafana
+run-grafana: stop-grafana
 	docker run --detach --name k8sfv-grafana -p 3000:3000 \
 	-v $${PWD}/$(K8SFV_DIR)/grafana:/etc/grafana \
 	-v $${PWD}/$(K8SFV_DIR)/grafana-dashboards:/etc/grafana-dashboards \
@@ -328,10 +294,10 @@ bin/calico-felix: $(FELIX_GO_FILES) vendor/.up-to-date
                ( ldd bin/calico-felix 2>&1 | grep -q "Not a valid dynamic program" || \
 	             ( echo "Error: bin/calico-felix was not statically linked"; false ) )'
 
-k8sfv/k8sfv.test: $(K8SFV_GO_FILES)
+bin/k8sfv.test: $(K8SFV_GO_FILES)
 	@echo Building $@...
 	$(DOCKER_GO_BUILD) \
-	    sh -c 'ginkgo build k8sfv && \
+	    sh -c 'go test -c -o $@ ./k8sfv && \
                ( ldd $@ 2>&1 | grep -q "Not a valid dynamic program" || \
 	             ( echo "Error: $@ was not statically linked"; false ) )'
 
