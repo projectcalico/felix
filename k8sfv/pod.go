@@ -15,8 +15,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand"
+	"os/exec"
 	"strings"
 	"sync"
 
@@ -123,8 +125,21 @@ func createPod(clientset *kubernetes.Clientset, d deployment, nsName string, spe
 		panicIfError(err)
 		err = netlink.LinkSetNsFd(podIf, int(podNamespace.Fd()))
 		panicIfError(err)
-		err = podNamespace.Do(func(_ ns.NetNS) error {
-			return netlink.LinkSetUp(podIf)
+		err = podNamespace.Do(func(_ ns.NetNS) (err error) {
+			err = netlink.LinkSetUp(podIf)
+			if err != nil {
+				return
+			}
+			err = runCommand("ip", "a", "a", ip+"/32", "dev", veth.PeerName)
+			if err != nil {
+				return
+			}
+			err = runCommand("ip", "r", "a", "169.254.169.254/32", "dev", veth.PeerName)
+			if err != nil {
+				return
+			}
+			err = runCommand("ip", "r", "a", "default", "via", "169.254.169.254", "dev", veth.PeerName)
+			return
 		})
 		panicIfError(err)
 
@@ -226,3 +241,31 @@ func cleanupAllPods(clientset *kubernetes.Clientset, nsPrefix string) {
 var zeroGracePeriod int64 = 0
 
 var deleteImmediately = &v1.DeleteOptions{GracePeriodSeconds: &zeroGracePeriod}
+
+func runCommand(command string, args ...string) error {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command(command, args...)
+	log.Infof("Running '%s %s'", cmd.Path, strings.Join(cmd.Args, " "))
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	log.Infof("stdout: %v", stdout.String())
+	log.Infof("stderr: %v", stderr.String())
+	return err
+}
+
+func runNmap(pod1, pod2 *v1.Pod) {
+	log.WithField("from", pod1.Status.PodIP).WithField("to", pod2.Status.PodIP).Info("Run nmap")
+
+	// Lock mutex, as we do pod cleanup from multiple goroutines.
+	localNetworkingMutex.Lock()
+	defer localNetworkingMutex.Unlock()
+
+	err := localNetworkingMap[pod1.ObjectMeta.Namespace+"."+pod1.ObjectMeta.Name].namespace.Do(func(_ ns.NetNS) (err error) {
+		//err = runCommand("ifconfig")
+		//err = runCommand("ip", "r")
+		err = runCommand("ping", "-c", "1", "-W", "1", pod2.Status.PodIP)
+		err = runCommand("nmap", "-Pn", "-T5", pod2.Status.PodIP)
+		return
+	})
+	panicIfError(err)
+}

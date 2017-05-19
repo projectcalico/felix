@@ -15,9 +15,13 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"os/exec"
+	"strconv"
+	"strings"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -160,6 +164,49 @@ var _ = Context("with a k8s clientset", func() {
 			d = NewDeployment(clientset, 0, true)
 		})
 
+		It("denied packets between 2 local endpoints", func() {
+			for cycle, isolated := range []bool{false, true, false, true, false, true} {
+				nsName := nsPrefix + "test" + fmt.Sprintf("%v", cycle)
+				if isolated {
+					createIsolatedNamespace(clientset, nsName, nil)
+				} else {
+					createNamespace(clientset, nsName, nil)
+				}
+				pod1 := createPod(clientset, d, nsName, podSpec{})
+				pod2 := createPod(clientset, d, nsName, podSpec{})
+				for ii := 0; ii < 5; ii++ {
+					// Run an nmap scan between the pods.
+					runNmap(pod1, pod2)
+					sumCalicoDeniedPackets(felixIP)
+
+					// Get Felix to GC and dump heap memory profile.
+					exec.Command("pkill", "-USR1", "calico-felix").Run()
+					time.Sleep(2 * time.Second)
+
+					// Get current occupancy.
+					heapInUse := getFelixFloatMetric("go_memstats_heap_inuse_bytes")
+					heapAlloc := getFelixFloatMetric("go_memstats_heap_alloc_bytes")
+					log.WithFields(log.Fields{
+						"iteration": cycle*10 + ii,
+						"heapInUse": heapInUse,
+						"heapAlloc": heapAlloc,
+					}).Info("Bytes in use now")
+
+					gaugeVecHeapAllocBytes.WithLabelValues(
+						"felix",
+						testName,
+						fmt.Sprintf("cycle%diteration%d", cycle, ii),
+						codeLevel,
+					).Set(
+						heapAlloc,
+					)
+				}
+				panicIfError(clientset.Pods(nsName).Delete(pod1.ObjectMeta.Name, deleteImmediately))
+				panicIfError(clientset.Pods(nsName).Delete(pod2.ObjectMeta.Name, deleteImmediately))
+				panicIfError(clientset.Namespaces().Delete(nsName, deleteImmediately))
+			}
+		})
+
 		It("should handle a local endpoint", func() {
 			createNamespace(clientset, nsPrefix+"test", nil)
 			createPod(clientset, d, nsPrefix+"test", podSpec{})
@@ -219,3 +266,48 @@ var _ = Context("with a k8s clientset", func() {
 		})
 	})
 })
+
+func getCalicoMetrics(felixIP, name string) (metrics []string, err error) {
+	var resp *http.Response
+	for retry := 0; retry < 5; retry++ {
+		resp, err = http.Get("http://" + felixIP + ":9092/metrics")
+		if err == nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if err != nil {
+		return
+	}
+	log.Infof("Metric response %#v", resp)
+	defer resp.Body.Close()
+
+	metrics = []string{}
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		log.Infof("Line: %v", line)
+		if strings.HasPrefix(line, name) {
+			metrics = append(metrics, strings.TrimSpace(strings.TrimPrefix(line, name)))
+		}
+	}
+	err = scanner.Err()
+	return
+}
+
+func sumCalicoDeniedPackets(felixIP string) (sum int64) {
+	metrics, err := getCalicoMetrics(felixIP, "calico_denied_packets")
+	if err == nil {
+		sum = 0
+		for _, metric := range metrics {
+			words := strings.Split(metric, " ")
+			count, err := strconv.ParseInt(words[1], 10, 64)
+			Expect(err).NotTo(HaveOccurred())
+			sum += count
+		}
+		log.Infof("Denied packets = %v", sum)
+	} else {
+		log.Info("Calico metrics are not available")
+	}
+	return
+}
