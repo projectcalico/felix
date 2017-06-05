@@ -21,8 +21,8 @@ imports:
   version: d267ca9c184e953554257d0acdd1dc9c47d38229
   subpackages:
   - client
-  - pkg/fileutil
   - pkg/pathutil
+  - pkg/srv
   - pkg/tlsutil
   - pkg/transport
   - pkg/types
@@ -43,7 +43,6 @@ imports:
 - name: github.com/coreos/pkg
   version: fa29b1d70f0beaddd4c7021607cc3c3be8ce94b8
   subpackages:
-  - capnslog
   - health
   - httputil
   - timeutil
@@ -83,7 +82,7 @@ imports:
   - proto
   - sortkeys
 - name: github.com/golang/glog
-  version: 44145f04b68cf362d9c4df2182967c2275eaefed
+  version: 23def4e6c14b4da8ac2ed8007337bc5eb5007998
 - name: github.com/golang/protobuf
   version: 5a0f697c9ed9d68fef0116532c6e05cfeae00e55
   subpackages:
@@ -188,7 +187,7 @@ imports:
   subpackages:
   - go
 - name: github.com/prometheus/common
-  version: 13ba4ddd0caa9c28ca7b7bffe1dfa9ed8d5ef207
+  version: 49fee292b27bfff7f354ee0f64e1bc4850462edf
   subpackages:
   - expfmt
   - internal/bitbucket.org/ww/goautoneg
@@ -277,6 +276,29 @@ imports:
   - patricia
 - name: gopkg.in/yaml.v2
   version: 53feefa2559fb8dfa8d81baad31be332c97d6c77
+- name: k8s.io/apimachinery
+  version: 2de00c78cb6d6127fb51b9531c1b3def1cbcac8c
+  subpackages:
+  - pkg/api/resource
+  - pkg/apis/meta/v1
+  - pkg/conversion
+  - pkg/conversion/queryparams
+  - pkg/fields
+  - pkg/labels
+  - pkg/openapi
+  - pkg/runtime
+  - pkg/runtime/schema
+  - pkg/selection
+  - pkg/types
+  - pkg/util/errors
+  - pkg/util/intstr
+  - pkg/util/net
+  - pkg/util/runtime
+  - pkg/util/sets
+  - pkg/util/validation
+  - pkg/util/wait
+  - pkg/watch
+  - third_party/forked/golang/reflect
 - name: k8s.io/client-go
   version: 243d8a9cb66a51ad8676157f79e71033b4014a2a
   subpackages:
