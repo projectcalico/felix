@@ -106,8 +106,9 @@ type Config struct {
 	TyphaK8sServiceName string `config:"string;"`
 	TyphaK8sNamespace   string `config:"string;kube-system;non-zero"`
 
-	Ipv6Support    bool `config:"bool;true"`
-	IgnoreLooseRPF bool `config:"bool;false"`
+	Ipv6Support        bool   `config:"bool;true"`
+	IgnoreLooseRPF     bool   `config:"bool;false"`
+	NatSnatDestination string `config:"oneof(private,any);private;non-zero,die-on-fail"`
 
 	IptablesRefreshInterval            time.Duration `config:"seconds;10"`
 	IptablesPostWriteCheckIntervalSecs time.Duration `config:"seconds;1"`

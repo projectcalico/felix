@@ -280,6 +280,8 @@ configRetry:
 				FailsafeOutboundHostPorts: configParams.FailsafeOutboundHostPorts,
 
 				DisableConntrackInvalid: configParams.DisableConntrackInvalidCheck,
+
+				NatSnatDestination: configParams.NatSnatDestination,
 			},
 			IPIPMTU:                        configParams.IpInIpMtu,
 			IptablesRefreshInterval:        configParams.IptablesRefreshInterval,

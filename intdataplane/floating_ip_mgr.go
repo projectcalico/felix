@@ -149,7 +149,7 @@ func (m *floatingIPManager) CompleteDeferredWork() error {
 		}
 		// Render chains for those NATs.
 		dnatChains := m.ruleRenderer.DNATsToIptablesChains(dnats)
-		snatChains := m.ruleRenderer.SNATsToIptablesChains(snats)
+		snatChains := m.ruleRenderer.SNATsToIptablesChains(snats, m.ipVersion)
 		// Update iptables if they have changed.
 		if !reflect.DeepEqual(m.activeDNATChains, dnatChains) {
 			m.natTable.RemoveChains(m.activeDNATChains)
