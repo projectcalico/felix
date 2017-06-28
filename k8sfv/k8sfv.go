@@ -39,6 +39,7 @@ var (
 	felixHostname     string // e.g. "b6fc45dcc1cb"
 	prometheusPushURL string // e.g. "http://172.17.0.3:9091"
 	codeLevel         string // e.g. "master"
+	typhaIP           string // e.g. "172.17.0.4"
 )
 
 // Prometheus metrics.
@@ -69,6 +70,7 @@ var _ = BeforeSuite(func() {
 		"felixHostname":     felixHostname,
 		"prometheusPushURL": prometheusPushURL,
 		"codeLevel":         codeLevel,
+		"typhaIP":           typhaIP,
 	}).Info("Args")
 
 	// Register Prometheus metrics.

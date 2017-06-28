@@ -39,6 +39,7 @@ func init() {
 	flag.StringVar(&felixHostname, "felix-hostname", "", "")
 	flag.StringVar(&prometheusPushURL, "prometheus-push-url", "", "")
 	flag.StringVar(&codeLevel, "code-level", "", "")
+	flag.StringVar(&typhaIP, "typha-ip", "", "")
 }
 
 func TestMain(t *testing.T) {
