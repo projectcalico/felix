@@ -349,7 +349,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		dp.allIptablesTables = append(dp.allIptablesTables, t)
 	}
 
-	// Register that we will report a liveness indicator.
+	// Register that we will report liveness and readiness.
 	if config.HealthAggregator != nil {
 		config.HealthAggregator.RegisterReporter(
 			healthName,
