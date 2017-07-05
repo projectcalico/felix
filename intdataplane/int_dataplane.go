@@ -672,6 +672,7 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 					d.config.PostInSyncCallback()
 				}
 			}
+			d.reportHealth()
 		}
 	}
 }
