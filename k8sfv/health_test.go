@@ -56,10 +56,12 @@ var _ = Describe("health", func() {
 	})
 
 	It("Typha should be ready", func() {
+		skipIfNoTypha()
 		Eventually(getTyphaStatus("readiness"), "8s", "0.5s").Should(BeNumerically("==", health.StatusGood))
 	})
 
 	It("Typha should be live", func() {
+		skipIfNoTypha()
 		Eventually(getTyphaStatus("liveness"), "8s", "0.5s").Should(BeNumerically("==", health.StatusGood))
 	})
 
@@ -78,10 +80,12 @@ var _ = Describe("health", func() {
 		})
 
 		It("Typha should be ready", func() {
+			skipIfNoTypha()
 			Eventually(getTyphaStatus("readiness"), "8s", "0.5s").Should(BeNumerically("==", health.StatusGood))
 		})
 
 		It("Typha should be live", func() {
+			skipIfNoTypha()
 			Eventually(getTyphaStatus("liveness"), "8s", "0.5s").Should(BeNumerically("==", health.StatusGood))
 		})
 	})
@@ -115,4 +119,10 @@ func getTyphaStatus(endpoint string) func() int {
 func triggerFelixRestart() {
 	exec.Command("pkill", "-TERM", "calico-felix").Run()
 	time.Sleep(1 * time.Second)
+}
+
+func skipIfNoTypha() {
+	if typhaIP == "" {
+		Skip("No Typha in this test run")
+	}
 }
