@@ -75,6 +75,20 @@ var _ = Describe("health", func() {
 			Eventually(getFelixStatus("readiness"), "8s", "0.5s").Should(BeNumerically("==", health.StatusGood))
 		})
 
+		Context("with API server hidden", func() {
+			BeforeEach(func() {
+				hideAPIServer()
+			})
+
+			AfterEach(func() {
+				revealAPIServer()
+			})
+
+			It("Felix should become non-ready", func() {
+				Eventually(getFelixStatus("readiness"), "60s", "5s").Should(BeNumerically("==", health.StatusBad))
+			})
+		})
+
 		It("Felix should be live", func() {
 			Eventually(getFelixStatus("liveness"), "8s", "0.5s").Should(BeNumerically("==", health.StatusGood))
 		})
@@ -125,4 +139,26 @@ func skipIfNoTypha() {
 	if typhaIP == "" {
 		Skip("No Typha in this test run")
 	}
+}
+
+func ebtablesArgsToHideOrRevealAPIServer(addOrDelete string) []string {
+	return []string{
+		addOrDelete,
+		"FORWARD",
+		"-p",
+		"IPV4",
+		"--ip-destination",
+		k8sServerIP,
+		"-j",
+		"DROP",
+	}
+}
+
+func hideAPIServer() {
+	exec.Command("ebtables", ebtablesArgsToHideOrRevealAPIServer("-A")...).Run()
+	exec.Command("conntrack", "-D", "-d", k8sServerIP).Run()
+}
+
+func revealAPIServer() {
+	exec.Command("ebtables", ebtablesArgsToHideOrRevealAPIServer("-D")...).Run()
 }
