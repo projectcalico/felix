@@ -153,7 +153,7 @@ type RuleRenderer interface {
 	NATOutgoingChain(active bool, ipVersion uint8) *iptables.Chain
 
 	DNATsToIptablesChains(dnats map[string]string) []*iptables.Chain
-	SNATsToIptablesChains(snats map[string]string) []*iptables.Chain
+	SNATsToIptablesChains(snats map[string]string, ipVersion uint8) []*iptables.Chain
 }
 
 type DefaultRuleRenderer struct {
@@ -183,6 +183,7 @@ type Config struct {
 	IptablesMarkAccept       uint32
 	IptablesMarkPass         uint32
 	IptablesMarkFromWorkload uint32
+	IptablesMarkSnatSkip     uint32
 
 	OpenStackMetadataIP          net.IP
 	OpenStackMetadataPort        uint16
@@ -199,6 +200,8 @@ type Config struct {
 	FailsafeOutboundHostPorts []config.ProtoPort
 
 	DisableConntrackInvalid bool
+
+	NatSnatDestination string
 }
 
 func NewRenderer(config Config) RuleRenderer {

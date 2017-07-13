@@ -239,10 +239,12 @@ configRetry:
 		markAccept := configParams.NextIptablesMark()
 		markPass := configParams.NextIptablesMark()
 		markWorkload := configParams.NextIptablesMark()
+		markSnatSkip := configParams.NextIptablesMark()
 		log.WithFields(log.Fields{
 			"acceptMark":   markAccept,
 			"passMark":     markPass,
 			"workloadMark": markWorkload,
+			"snatSkipMark": markSnatSkip,
 		}).Info("Calculated iptables mark bits")
 		dpConfig := intdataplane.Config{
 			RulesConfig: rules.Config{
@@ -268,6 +270,7 @@ configRetry:
 				IptablesMarkAccept:       markAccept,
 				IptablesMarkPass:         markPass,
 				IptablesMarkFromWorkload: markWorkload,
+				IptablesMarkSnatSkip:     markSnatSkip,
 
 				IPIPEnabled:       configParams.IpInIpEnabled,
 				IPIPTunnelAddress: configParams.IpInIpTunnelAddr,
@@ -280,6 +283,8 @@ configRetry:
 				FailsafeOutboundHostPorts: configParams.FailsafeOutboundHostPorts,
 
 				DisableConntrackInvalid: configParams.DisableConntrackInvalidCheck,
+
+				NatSnatDestination: configParams.NatSnatDestination,
 			},
 			IPIPMTU:                        configParams.IpInIpMtu,
 			IptablesRefreshInterval:        configParams.IptablesRefreshInterval,
