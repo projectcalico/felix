@@ -30,7 +30,7 @@ import:
   subpackages:
   - lib
 - package: github.com/Sirupsen/logrus
-  version: ^0.11.5
+  version: ^0.10.0
 - package: github.com/kardianos/osext
 - package: github.com/mipearson/rfw
 - package: github.com/prometheus/client_golang

@@ -1,5 +1,5 @@
-hash: 61968ec828d44a6523e18d88ac7cd2eb8bbd3a08138f8f4e31e51e59489193ae
-updated: 2017-07-20T10:32:22.392864782Z
+hash: 4e70dde3cca857af28b19966551f36dc993072b3b263cc8142e13c7021ad791c
+updated: 2017-07-21T13:25:48.962554034-07:00
 imports:
 - name: github.com/beorn7/perks
   version: 4c0e84591b9aa9e6dcfdf3e020114cd81f89d5f9
@@ -69,7 +69,7 @@ imports:
 - name: github.com/golang/glog
   version: 44145f04b68cf362d9c4df2182967c2275eaefed
 - name: github.com/golang/protobuf
-  version: 0a4f71a498b7c4812f64969510bcb4eca251e33a
+  version: 4bd1920723d7b7c925de087aa32e2187708897f7
   subpackages:
   - proto
 - name: github.com/google/gofuzz
@@ -231,7 +231,7 @@ imports:
   - idna
   - lex/httplex
 - name: golang.org/x/sys
-  version: 7a4fde3fda8ef580a89dbae8138c26041be14299
+  version: 8f0908ab3b2457e2e15403d3697c9ef5cb4b57a9
   subpackages:
   - unix
 - name: golang.org/x/text
