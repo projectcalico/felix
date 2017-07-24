@@ -95,6 +95,8 @@ type Config struct {
 
 	FelixHostname string `config:"hostname;;local,non-zero"`
 
+	NetworkingBackend string `config:"oneof(bird,gobgp,none);bird"`
+
 	EtcdAddr      string   `config:"authority;127.0.0.1:2379;local"`
 	EtcdScheme    string   `config:"oneof(http,https);http;local"`
 	EtcdKeyFile   string   `config:"file(must-exist);;local"`
