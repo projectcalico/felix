@@ -304,6 +304,8 @@ configRetry:
 
 			PostInSyncCallback: func() { dumpHeapMemoryProfile(configParams) },
 			HealthAggregator:   healthAggregator,
+
+			DebugSimulateDataplaneHangAfter: configParams.DebugSimulateDataplaneHangAfter,
 		}
 		intDP := intdataplane.NewIntDataplaneDriver(dpConfig)
 		intDP.Start()
