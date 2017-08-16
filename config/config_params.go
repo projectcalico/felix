@@ -136,7 +136,7 @@ type Config struct {
 	LogSeveritySys    string `config:"oneof(DEBUG,INFO,WARNING,ERROR,CRITICAL);INFO"`
 
 	IpInIpEnabled    bool   `config:"bool;false"`
-	IpInIpMtu        int    `config:"int;1440;non-zero"`
+	IpInIpMtu        int    `config:"int;1430;non-zero"`
 	IpInIpTunnelAddr net.IP `config:"ipv4;"`
 
 	ReportingIntervalSecs time.Duration `config:"seconds;30"`
