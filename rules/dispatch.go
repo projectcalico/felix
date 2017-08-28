@@ -88,6 +88,47 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 	}
 }
 
+func (r *DefaultRuleRenderer) HostDispatchChainsForward(
+	endpoints map[string]proto.HostEndpointID,
+	to bool, from bool,
+) []*Chain {
+	// Extract endpoint names.
+	log.WithField("numEndpoints", len(endpoints)).Debug("Rendering host dispatch chains forward")
+	names := make([]string, 0, len(endpoints))
+	for ifaceName := range endpoints {
+		names = append(names, ifaceName)
+	}
+
+	chains := []*Chain{}
+	if from {
+		cs := r.dispatchChains(
+			names,
+			HostFromEndpointForwardPfx,
+			"",
+			ChainDispatchFromHostEndPointForward,
+			"",
+			false,
+		)
+
+		chains = append(chains, cs...)
+	}
+
+	if to {
+		cs := r.dispatchChains(
+			names,
+			HostFromEndpointForwardPfx,
+			HostToEndpointForwardPfx,
+			"",
+			ChainDispatchToHostEndpointForward,
+			false,
+		)
+
+		chains = append(chains, cs...)
+	}
+
+	return chains
+}
+
 func (r *DefaultRuleRenderer) dispatchChains(
 	names []string,
 	fromEndpointPfx,
@@ -272,9 +313,10 @@ func (r *DefaultRuleRenderer) dispatchChains(
 		Rules: rootToEndpointRules,
 	}
 	if toEndpointPfx != "" {
-		chains = append(chains, fromEndpointDispatchChain, toEndpointDispatchChain)
-	} else {
-		// Only emit from endpoint chains.
+		chains = append(chains, toEndpointDispatchChain)
+	}
+
+	if fromEndpointPfx != "" {
 		chains = append(chains, fromEndpointDispatchChain)
 	}
 

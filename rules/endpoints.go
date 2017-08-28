@@ -92,6 +92,53 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 	}
 }
 
+func (r *DefaultRuleRenderer) HostEndpointToFilterChainsForward(
+	ifaceName string,
+	ingressPolicyNames []string,
+	egressPolicyNames []string,
+	profileIDs []string,
+) []*Chain {
+	log.WithField("ifaceName", ifaceName).Debug("Rendering forward filter host endpoint chain.")
+
+	chains := []*Chain{}
+	if len(egressPolicyNames) > 0 {
+		// Chain for traffic _to_ the endpoint.
+		// Apply host endpoint policies when needed.
+		c := r.endpointIptablesChain(
+			egressPolicyNames,
+			profileIDs,
+			ifaceName,
+			PolicyOutboundPfx,
+			ProfileOutboundPfx,
+			HostToEndpointForwardPfx,
+			ChainFailsafeOut,
+			chainTypeNormal,
+			true, // Host endpoints are always admin up.
+		)
+		chains = append(chains, c)
+	}
+
+	if len(ingressPolicyNames) > 0 {
+		// Chain for traffic _from_ the endpoint.
+		// Apply host endpoint policies when needed.
+		c := r.endpointIptablesChain(
+			ingressPolicyNames,
+			profileIDs,
+			ifaceName,
+			PolicyInboundPfx,
+			ProfileInboundPfx,
+			HostFromEndpointForwardPfx,
+			ChainFailsafeIn,
+			chainTypeNormal,
+			true, // Host endpoints are always admin up.
+		)
+		chains = append(chains, c)
+	}
+
+	return chains
+
+}
+
 func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 	ifaceName string,
 	ingressPolicyNames []string,
@@ -283,6 +330,8 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 			Comment: "Drop if no profiles matched",
 		})
 	}
+	log.WithField("chainname", chainName).Debug("GJM rendering chain.")
+	log.WithField("rules", rules).Debug("GJM rendering chain.")
 
 	return &Chain{
 		Name:  chainName,
