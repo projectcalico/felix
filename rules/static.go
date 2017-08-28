@@ -289,14 +289,13 @@ func (r *DefaultRuleRenderer) StaticFilterForwardChains() []*Chain {
 			Action: ClearMarkAction{Mark: r.allCalicoMarkBits() &^ r.IptablesMarkAccept},
 		},
 		Rule{
-			// Unless the packet has already been accepted by untracked or pre-DNAT
-			// processing, apply normal policy for the incoming host endpoint.
+			// Apply forward policy for the incoming Host endpoint.
 			Match:  Match().MarkClear(r.IptablesMarkAccept),
-			Action: JumpAction{Target: ChainDispatchFromHostEndpoint},
+			Action: JumpAction{Target: ChainDispatchFromHostEndPointForward},
 		},
 		Rule{
-			// Apply normal policy for the outgoing host endpoint.
-			Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+			// Apply forward policy for the outgoing host endpoint.
+			Action: JumpAction{Target: ChainDispatchToHostEndpointForward},
 		},
 		Rule{
 			Match:   Match().MarkSet(r.IptablesMarkAccept),

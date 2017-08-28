@@ -71,14 +71,18 @@ const (
 	ChainFromWorkloadDispatch = ChainNamePrefix + "from-wl-dispatch"
 	ChainToWorkloadDispatch   = ChainNamePrefix + "to-wl-dispatch"
 
-	ChainDispatchToHostEndpoint   = ChainNamePrefix + "to-host-endpoint"
-	ChainDispatchFromHostEndpoint = ChainNamePrefix + "from-host-endpoint"
+	ChainDispatchToHostEndpoint          = ChainNamePrefix + "to-host-endpoint"
+	ChainDispatchFromHostEndpoint        = ChainNamePrefix + "from-host-endpoint"
+	ChainDispatchToHostEndpointForward   = ChainNamePrefix + "to-hep-forward"
+	ChainDispatchFromHostEndPointForward = ChainNamePrefix + "from-hep-forward"
 
 	WorkloadToEndpointPfx   = ChainNamePrefix + "tw-"
 	WorkloadFromEndpointPfx = ChainNamePrefix + "fw-"
 
-	HostToEndpointPfx   = ChainNamePrefix + "th-"
-	HostFromEndpointPfx = ChainNamePrefix + "fh-"
+	HostToEndpointPfx          = ChainNamePrefix + "th-"
+	HostFromEndpointPfx        = ChainNamePrefix + "fh-"
+	HostToEndpointForwardPfx   = ChainNamePrefix + "thfw-"
+	HostFromEndpointForwardPfx = ChainNamePrefix + "fhfw-"
 
 	RuleHashPrefix = "cali:"
 
@@ -143,8 +147,15 @@ type RuleRenderer interface {
 	) []*iptables.Chain
 
 	HostDispatchChains(map[string]proto.HostEndpointID) []*iptables.Chain
+	HostDispatchChainsForward(map[string]proto.HostEndpointID, bool, bool) []*iptables.Chain
 	FromHostDispatchChains(map[string]proto.HostEndpointID) []*iptables.Chain
 	HostEndpointToFilterChains(
+		ifaceName string,
+		ingressPolicyNames []string,
+		egressPolicyNames []string,
+		profileIDs []string,
+	) []*iptables.Chain
+	HostEndpointToFilterChainsForward(
 		ifaceName string,
 		ingressPolicyNames []string,
 		egressPolicyNames []string,
