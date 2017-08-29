@@ -22,6 +22,11 @@ import (
 	"github.com/projectcalico/felix/proto"
 )
 
+var (
+	toForwardPfxMap   = map[bool]string{true: HostToEndpointForwardPfx, false: HostToEndpointPfx}
+	fromForwardPfxMap = map[bool]string{true: HostFromEndpointForwardPfx, false: HostFromEndpointPfx}
+)
+
 func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 	ifaceName string,
 	adminUp bool,
@@ -62,6 +67,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 	ingressPolicyNames []string,
 	egressPolicyNames []string,
 	profileIDs []string,
+	isForward bool,
 ) []*Chain {
 	log.WithField("ifaceName", ifaceName).Debug("Rendering filter host endpoint chain.")
 	return []*Chain{
@@ -72,7 +78,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			ifaceName,
 			PolicyOutboundPfx,
 			ProfileOutboundPfx,
-			HostToEndpointPfx,
+			toForwardPfxMap[isForward],
 			ChainFailsafeOut,
 			chainTypeNormal,
 			true, // Host endpoints are always admin up.
@@ -84,59 +90,12 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			ifaceName,
 			PolicyInboundPfx,
 			ProfileInboundPfx,
-			HostFromEndpointPfx,
+			fromForwardPfxMap[isForward],
 			ChainFailsafeIn,
 			chainTypeNormal,
 			true, // Host endpoints are always admin up.
 		),
 	}
-}
-
-func (r *DefaultRuleRenderer) HostEndpointToFilterChainsForward(
-	ifaceName string,
-	ingressPolicyNames []string,
-	egressPolicyNames []string,
-	profileIDs []string,
-) []*Chain {
-	log.WithField("ifaceName", ifaceName).Debug("Rendering forward filter host endpoint chain.")
-
-	chains := []*Chain{}
-	if len(egressPolicyNames) > 0 {
-		// Chain for traffic _to_ the endpoint.
-		// Apply host endpoint policies when needed.
-		c := r.endpointIptablesChain(
-			egressPolicyNames,
-			profileIDs,
-			ifaceName,
-			PolicyOutboundPfx,
-			ProfileOutboundPfx,
-			HostToEndpointForwardPfx,
-			ChainFailsafeOut,
-			chainTypeNormal,
-			true, // Host endpoints are always admin up.
-		)
-		chains = append(chains, c)
-	}
-
-	if len(ingressPolicyNames) > 0 {
-		// Chain for traffic _from_ the endpoint.
-		// Apply host endpoint policies when needed.
-		c := r.endpointIptablesChain(
-			ingressPolicyNames,
-			profileIDs,
-			ifaceName,
-			PolicyInboundPfx,
-			ProfileInboundPfx,
-			HostFromEndpointForwardPfx,
-			ChainFailsafeIn,
-			chainTypeNormal,
-			true, // Host endpoints are always admin up.
-		)
-		chains = append(chains, c)
-	}
-
-	return chains
-
 }
 
 func (r *DefaultRuleRenderer) HostEndpointToRawChains(

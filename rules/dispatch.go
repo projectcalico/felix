@@ -46,25 +46,38 @@ func (r *DefaultRuleRenderer) WorkloadDispatchChains(
 
 func (r *DefaultRuleRenderer) HostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
+	isForward bool,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, false)
+	return r.hostDispatchChains(endpoints, false, isForward)
 }
 
 func (r *DefaultRuleRenderer) FromHostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, true)
+	return r.hostDispatchChains(endpoints, true, false)
 }
 
 func (r *DefaultRuleRenderer) hostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
 	fromOnly bool,
+	isForward bool,
 ) []*Chain {
 	// Extract endpoint names.
 	log.WithField("numEndpoints", len(endpoints)).Debug("Rendering host dispatch chains")
 	names := make([]string, 0, len(endpoints))
 	for ifaceName := range endpoints {
 		names = append(names, ifaceName)
+	}
+
+	if isForward {
+		return r.dispatchChains(
+			names,
+			HostFromEndpointForwardPfx,
+			HostToEndpointForwardPfx,
+			ChainDispatchFromHostEndPointForward,
+			ChainDispatchToHostEndpointForward,
+			false,
+		)
 	}
 
 	if fromOnly {
@@ -86,47 +99,6 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 			false,
 		)
 	}
-}
-
-func (r *DefaultRuleRenderer) HostDispatchChainsForward(
-	endpoints map[string]proto.HostEndpointID,
-	to bool, from bool,
-) []*Chain {
-	// Extract endpoint names.
-	log.WithField("numEndpoints", len(endpoints)).Debug("Rendering host dispatch chains forward")
-	names := make([]string, 0, len(endpoints))
-	for ifaceName := range endpoints {
-		names = append(names, ifaceName)
-	}
-
-	chains := []*Chain{}
-	if from {
-		cs := r.dispatchChains(
-			names,
-			HostFromEndpointForwardPfx,
-			"",
-			ChainDispatchFromHostEndPointForward,
-			"",
-			false,
-		)
-
-		chains = append(chains, cs...)
-	}
-
-	if to {
-		cs := r.dispatchChains(
-			names,
-			HostFromEndpointForwardPfx,
-			HostToEndpointForwardPfx,
-			"",
-			ChainDispatchToHostEndpointForward,
-			false,
-		)
-
-		chains = append(chains, cs...)
-	}
-
-	return chains
 }
 
 func (r *DefaultRuleRenderer) dispatchChains(
@@ -313,10 +285,9 @@ func (r *DefaultRuleRenderer) dispatchChains(
 		Rules: rootToEndpointRules,
 	}
 	if toEndpointPfx != "" {
-		chains = append(chains, toEndpointDispatchChain)
-	}
-
-	if fromEndpointPfx != "" {
+		chains = append(chains, fromEndpointDispatchChain, toEndpointDispatchChain)
+	} else {
+		// Only emit from endpoint chains.
 		chains = append(chains, fromEndpointDispatchChain)
 	}
 
