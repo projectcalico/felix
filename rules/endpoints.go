@@ -23,8 +23,8 @@ import (
 )
 
 var (
-	toForwardPfxMap   = map[bool]string{true: HostToEndpointForwardPfx, false: HostToEndpointPfx}
-	fromForwardPfxMap = map[bool]string{true: HostFromEndpointForwardPfx, false: HostFromEndpointPfx}
+	toHepForwardPfxMap   = map[bool]string{true: HostToEndpointForwardPfx, false: HostToEndpointPfx}
+	fromHepForwardPfxMap = map[bool]string{true: HostFromEndpointForwardPfx, false: HostFromEndpointPfx}
 )
 
 func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
@@ -78,7 +78,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			ifaceName,
 			PolicyOutboundPfx,
 			ProfileOutboundPfx,
-			toForwardPfxMap[isForward],
+			toHepForwardPfxMap[isForward],
 			ChainFailsafeOut,
 			chainTypeNormal,
 			true, // Host endpoints are always admin up.
@@ -90,7 +90,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			ifaceName,
 			PolicyInboundPfx,
 			ProfileInboundPfx,
-			fromForwardPfxMap[isForward],
+			fromHepForwardPfxMap[isForward],
 			ChainFailsafeIn,
 			chainTypeNormal,
 			true, // Host endpoints are always admin up.

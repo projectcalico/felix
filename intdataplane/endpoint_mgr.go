@@ -654,8 +654,8 @@ func (m *endpointManager) resolveHostEndpoints() {
 
 		// Update the filter chain, for forward traffic.
 		if len(hostEp.Tiers) > 0 {
-			ingressPolicyNames = hostEp.Tiers[0].IngressPolicies
-			egressPolicyNames = hostEp.Tiers[0].EgressPolicies
+			ingressPolicyNames = hostEp.ForwardTiers[0].IngressPolicies
+			egressPolicyNames = hostEp.ForwardTiers[0].EgressPolicies
 		}
 
 		filtChainsForward := m.ruleRenderer.HostEndpointToFilterChains(
