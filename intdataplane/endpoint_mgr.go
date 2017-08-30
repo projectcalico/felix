@@ -89,15 +89,13 @@ type endpointManager struct {
 	// hostEndpointsDirty is set to true when host endpoints are updated.
 	hostEndpointsDirty bool
 	// activeHostIfaceToChains maps host interface name to the chains that we've programmed.
-	activeHostIfaceToRawChains         map[string][]*iptables.Chain
-	activeHostIfaceToFiltChains        map[string][]*iptables.Chain
-	activeHostIfaceToFiltChainsForward map[string][]*iptables.Chain
-	activeHostIfaceToMangleChains      map[string][]*iptables.Chain
+	activeHostIfaceToRawChains    map[string][]*iptables.Chain
+	activeHostIfaceToFiltChains   map[string][]*iptables.Chain
+	activeHostIfaceToMangleChains map[string][]*iptables.Chain
 	// Dispatch chains that we've programmed for host endpoints.
-	activeHostRawDispatchChains           map[string]*iptables.Chain
-	activeHostFilterDispatchChains        map[string]*iptables.Chain
-	activeHostFilterDispatchChainsForward map[string]*iptables.Chain
-	activeHostMangleDispatchChains        map[string]*iptables.Chain
+	activeHostRawDispatchChains    map[string]*iptables.Chain
+	activeHostFilterDispatchChains map[string]*iptables.Chain
+	activeHostMangleDispatchChains map[string]*iptables.Chain
 	// activeHostEpIDToIfaceNames records which interfaces we resolved each host endpoint to.
 	activeHostEpIDToIfaceNames map[proto.HostEndpointID][]string
 	// activeIfaceNameToHostEpID records which endpoint we resolved each host interface to.
@@ -186,12 +184,11 @@ func newEndpointManagerWithShims(
 
 		// Caches of the current dispatch chains indexed by chain name.  We use these to
 		// calculate deltas when we need to update the chains.
-		activeWlDispatchChains:                map[string]*iptables.Chain{},
-		activeHostFilterDispatchChains:        map[string]*iptables.Chain{},
-		activeHostFilterDispatchChainsForward: map[string]*iptables.Chain{},
-		activeHostMangleDispatchChains:        map[string]*iptables.Chain{},
-		activeHostRawDispatchChains:           map[string]*iptables.Chain{},
-		needToCheckDispatchChains:             true, // Need to do start-of-day update.
+		activeWlDispatchChains:         map[string]*iptables.Chain{},
+		activeHostFilterDispatchChains: map[string]*iptables.Chain{},
+		activeHostMangleDispatchChains: map[string]*iptables.Chain{},
+		activeHostRawDispatchChains:    map[string]*iptables.Chain{},
+		needToCheckDispatchChains:      true, // Need to do start-of-day update.
 
 		OnEndpointStatusUpdate: onWorkloadEndpointStatusUpdate,
 	}
@@ -625,25 +622,31 @@ func (m *endpointManager) resolveHostEndpoints() {
 		}
 	}
 
-	// Set up programming for the host endpoints that are now to be used on filter chain.
+	// Set up programming for the host endpoints that are now to be used.
 	newHostIfaceFiltChains := map[string][]*iptables.Chain{}
-	newHostIfaceFiltChainsForward := map[string][]*iptables.Chain{}
 	for ifaceName, id := range newIfaceNameToHostEpID {
 		log.WithField("id", id).Info("Updating host endpoint chains.")
 		hostEp := m.rawHostEndpoints[id]
 
 		// Update the filter chain, for normal traffic.
 		var ingressPolicyNames, egressPolicyNames []string
+		var ingressForwardPolicyNames, egressForwardPolicyNames []string
 		if len(hostEp.Tiers) > 0 {
 			ingressPolicyNames = hostEp.Tiers[0].IngressPolicies
 			egressPolicyNames = hostEp.Tiers[0].EgressPolicies
 		}
+		if len(hostEp.ForwardTiers) > 0 {
+			ingressForwardPolicyNames = hostEp.ForwardTiers[0].IngressPolicies
+			egressForwardPolicyNames = hostEp.ForwardTiers[0].EgressPolicies
+		}
+
 		filtChains := m.ruleRenderer.HostEndpointToFilterChains(
 			ifaceName,
 			ingressPolicyNames,
 			egressPolicyNames,
+			ingressForwardPolicyNames,
+			egressForwardPolicyNames,
 			hostEp.ProfileIds,
-			false,
 		)
 
 		if !reflect.DeepEqual(filtChains, m.activeHostIfaceToFiltChains[ifaceName]) {
@@ -651,30 +654,6 @@ func (m *endpointManager) resolveHostEndpoints() {
 		}
 		newHostIfaceFiltChains[ifaceName] = filtChains
 		delete(m.activeHostIfaceToFiltChains, ifaceName)
-
-		// Update the filter chain, for forward traffic.
-		if len(hostEp.Tiers) > 0 {
-			ingressPolicyNames = hostEp.ForwardTiers[0].IngressPolicies
-			egressPolicyNames = hostEp.ForwardTiers[0].EgressPolicies
-		}
-
-		filtChainsForward := m.ruleRenderer.HostEndpointToFilterChains(
-			ifaceName,
-			ingressPolicyNames,
-			egressPolicyNames,
-			hostEp.ProfileIds,
-			true,
-		)
-
-		if !reflect.DeepEqual(filtChainsForward, m.activeHostIfaceToFiltChainsForward[ifaceName]) {
-			m.filterTable.UpdateChains(filtChainsForward)
-		}
-		newHostIfaceFiltChainsForward[ifaceName] = filtChainsForward
-		delete(m.activeHostIfaceToFiltChainsForward, ifaceName)
-
-		var h rules.Helper
-		log.WithField("chain", h.StringChains(filtChains)).Info("GJM host endpoint policy chain")
-		log.WithField("chain", h.StringChains(filtChainsForward)).Info("GJM host endpoint policy chain forward")
 	}
 
 	newHostIfaceMangleChains := map[string][]*iptables.Chain{}
@@ -727,11 +706,6 @@ func (m *endpointManager) resolveHostEndpoints() {
 			"Host interface no longer protected, deleting its normal chains.")
 		m.filterTable.RemoveChains(chains)
 	}
-	for ifaceName, chains := range m.activeHostIfaceToFiltChainsForward {
-		log.WithField("ifaceName", ifaceName).Info(
-			"Host interface no longer protected, deleting its normal chains.")
-		m.filterTable.RemoveChains(chains)
-	}
 	for ifaceName, chains := range m.activeHostIfaceToMangleChains {
 		log.WithField("ifaceName", ifaceName).Info(
 			"Host interface no longer protected, deleting its preDNAT chains.")
@@ -747,24 +721,13 @@ func (m *endpointManager) resolveHostEndpoints() {
 	m.activeIfaceNameToHostEpID = newIfaceNameToHostEpID
 	m.activeHostEpIDToIfaceNames = newHostEpIDToIfaceNames
 	m.activeHostIfaceToFiltChains = newHostIfaceFiltChains
-	m.activeHostIfaceToFiltChainsForward = newHostIfaceFiltChainsForward
 	m.activeHostIfaceToMangleChains = newHostIfaceMangleChains
 	m.activeHostIfaceToRawChains = newHostIfaceRawChains
 
-	// Rewrite the filter dispatch chains if they've changed for normal traffic.
-	log.WithField("resolvedHostEpIds", newIfaceNameToHostEpID).Debug("Rewrite filter dispatch chains for normal traffic")
-	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, false)
+	// Rewrite the filter dispatch chains if they've changed.
+	log.WithField("resolvedHostEpIds", newIfaceNameToHostEpID).Debug("Rewrite filter dispatch chains?")
+	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID)
 	m.updateDispatchChains(m.activeHostFilterDispatchChains, newFilterDispatchChains, m.filterTable)
-
-	var h rules.Helper
-	log.WithField("filter", h.StringChains(newFilterDispatchChains)).Info("GJM filter dispatch chains")
-
-	// Rewrite the filter dispatch chains if they've changed for forward traffic.
-	log.WithField("resolvedHostEpIds", newIfaceNameToHostEpID).Debug("Rewrite filter dispatch chains for forward traffic")
-	newFilterDispatchChainsForward := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, true)
-	m.updateDispatchChains(m.activeHostFilterDispatchChainsForward, newFilterDispatchChainsForward, m.filterTable)
-
-	log.WithField("filter", h.StringChains(newFilterDispatchChainsForward)).Info("GJM filter dispatch chains forward")
 
 	// Rewrite the mangle dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newPreDNATIfaceNameToHostEpID).Debug("Rewrite mangle dispatch chains?")
@@ -773,7 +736,7 @@ func (m *endpointManager) resolveHostEndpoints() {
 
 	// Rewrite the raw dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newUntrackedIfaceNameToHostEpID).Debug("Rewrite raw dispatch chains?")
-	newRawDispatchChains := m.ruleRenderer.HostDispatchChains(newUntrackedIfaceNameToHostEpID, false)
+	newRawDispatchChains := m.ruleRenderer.HostDispatchChains(newUntrackedIfaceNameToHostEpID)
 	m.updateDispatchChains(m.activeHostRawDispatchChains, newRawDispatchChains, m.rawTable)
 
 	log.Debug("Done resolving host endpoints.")
