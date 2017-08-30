@@ -146,14 +146,15 @@ type RuleRenderer interface {
 		profileIDs []string,
 	) []*iptables.Chain
 
-	HostDispatchChains(map[string]proto.HostEndpointID, bool) []*iptables.Chain
+	HostDispatchChains(map[string]proto.HostEndpointID) []*iptables.Chain
 	FromHostDispatchChains(map[string]proto.HostEndpointID) []*iptables.Chain
 	HostEndpointToFilterChains(
 		ifaceName string,
 		ingressPolicyNames []string,
 		egressPolicyNames []string,
+		ingressForwardPolicyNames []string,
+		egressForwardPolicyNames []string,
 		profileIDs []string,
-		isForward bool,
 	) []*iptables.Chain
 	HostEndpointToRawChains(
 		ifaceName string,

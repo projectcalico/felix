@@ -590,12 +590,6 @@ func addPolicyToTierInfo(pol *PolKV, tierInfo *proto.TierInfo, egressAllowed boo
 
 func tierInfoToProtoTierInfo(filteredTiers []tierInfo) (normalTiers, untrackedTiers, preDNATTiers, forwardTiers []*proto.TierInfo) {
 	if len(filteredTiers) > 0 {
-		checkAndAddToTiers := func(tiers []*proto.TierInfo, tierInfo *proto.TierInfo) []*proto.TierInfo {
-			if len(tierInfo.IngressPolicies) > 0 || len(tierInfo.EgressPolicies) > 0 {
-				return append(tiers, tierInfo)
-			}
-			return tiers
-		}
 		for _, ti := range filteredTiers {
 			untrackedTierInfo := &proto.TierInfo{Name: ti.Name}
 			preDNATTierInfo := &proto.TierInfo{Name: ti.Name}
@@ -606,16 +600,26 @@ func tierInfoToProtoTierInfo(filteredTiers []tierInfo) (normalTiers, untrackedTi
 					addPolicyToTierInfo(&pol, untrackedTierInfo, true)
 				} else if pol.Value.PreDNAT {
 					addPolicyToTierInfo(&pol, preDNATTierInfo, false)
-				} else if *pol.Value.ApplyOnForward {
-					addPolicyToTierInfo(&pol, forwardTierInfo, true)
 				} else {
+					if pol.GovernsApplyOnForward() {
+						addPolicyToTierInfo(&pol, forwardTierInfo, true)
+					}
 					addPolicyToTierInfo(&pol, normalTierInfo, true)
 				}
 			}
-			checkAndAddToTiers(forwardTiers, forwardTierInfo)
-			checkAndAddToTiers(untrackedTiers, untrackedTierInfo)
-			checkAndAddToTiers(preDNATTiers, preDNATTierInfo)
-			checkAndAddToTiers(normalTiers, normalTierInfo)
+
+			if len(untrackedTierInfo.IngressPolicies) > 0 || len(untrackedTierInfo.EgressPolicies) > 0 {
+				untrackedTiers = append(untrackedTiers, untrackedTierInfo)
+			}
+			if len(preDNATTierInfo.IngressPolicies) > 0 || len(preDNATTierInfo.EgressPolicies) > 0 {
+				preDNATTiers = append(preDNATTiers, preDNATTierInfo)
+			}
+			if len(forwardTierInfo.IngressPolicies) > 0 || len(forwardTierInfo.EgressPolicies) > 0 {
+				forwardTiers = append(forwardTiers, forwardTierInfo)
+			}
+			if len(normalTierInfo.IngressPolicies) > 0 || len(normalTierInfo.EgressPolicies) > 0 {
+				normalTiers = append(normalTiers, normalTierInfo)
+			}
 		}
 	}
 	return

@@ -46,38 +46,25 @@ func (r *DefaultRuleRenderer) WorkloadDispatchChains(
 
 func (r *DefaultRuleRenderer) HostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	isForward bool,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, false, isForward)
+	return r.hostDispatchChains(endpoints, false)
 }
 
 func (r *DefaultRuleRenderer) FromHostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, true, false)
+	return r.hostDispatchChains(endpoints, true)
 }
 
 func (r *DefaultRuleRenderer) hostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
 	fromOnly bool,
-	isForward bool,
 ) []*Chain {
 	// Extract endpoint names.
 	log.WithField("numEndpoints", len(endpoints)).Debug("Rendering host dispatch chains")
 	names := make([]string, 0, len(endpoints))
 	for ifaceName := range endpoints {
 		names = append(names, ifaceName)
-	}
-
-	if isForward {
-		return r.dispatchChains(
-			names,
-			HostFromEndpointForwardPfx,
-			HostToEndpointForwardPfx,
-			ChainDispatchFromHostEndPointForward,
-			ChainDispatchToHostEndpointForward,
-			false,
-		)
 	}
 
 	if fromOnly {
@@ -90,13 +77,23 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 			false,
 		)
 	} else {
-		return r.dispatchChains(
-			names,
-			HostFromEndpointPfx,
-			HostToEndpointPfx,
-			ChainDispatchFromHostEndpoint,
-			ChainDispatchToHostEndpoint,
-			false,
+		return append(
+			r.dispatchChains(
+				names,
+				HostFromEndpointPfx,
+				HostToEndpointPfx,
+				ChainDispatchFromHostEndpoint,
+				ChainDispatchToHostEndpoint,
+				false,
+			),
+			r.dispatchChains(
+				names,
+				HostFromEndpointForwardPfx,
+				HostToEndpointForwardPfx,
+				ChainDispatchFromHostEndPointForward,
+				ChainDispatchToHostEndpointForward,
+				false,
+			)...,
 		)
 	}
 }

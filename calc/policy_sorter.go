@@ -61,7 +61,7 @@ func (poc *PolicySorter) OnUpdate(update api.Update) (dirty bool) {
 				oldPolicy.Order != newPolicy.Order ||
 				oldPolicy.DoNotTrack != newPolicy.DoNotTrack ||
 				oldPolicy.PreDNAT != newPolicy.PreDNAT ||
-				oldPolicy.ApplyOnForward != newPolicy.ApplyOnForward ||
+				*oldPolicy.ApplyOnForward != *newPolicy.ApplyOnForward ||
 				!policyTypesEqual(oldPolicy, newPolicy) {
 				dirty = true
 			}
@@ -111,6 +111,20 @@ func (p PolKV) String() string {
 		}
 	}
 	return fmt.Sprintf("%s(%s)", p.Key.Name, orderStr)
+}
+
+func (p *PolKV) GovernsApplyOnForward() bool {
+	if p.Value != nil {
+		if p.Value.ApplyOnForward != nil {
+			return *p.Value.ApplyOnForward
+		}
+
+		// If ApplyOnForward flag pointer is nil, this policy has been created by old version of calico.
+		// Apply on forward traffic as default.
+		return true
+	}
+
+	return false
 }
 
 func (p *PolKV) governsType(wanted string) bool {
@@ -195,11 +209,10 @@ func (t tierInfo) String() string {
 			}
 
 			//Append ApplyOnForward flag.
-			if *pol.Value.ApplyOnForward {
+			if pol.GovernsApplyOnForward() {
 				polType = polType + "f"
 			}
 		}
-
 		policies[ii] = fmt.Sprintf("%v(%v)", pol.Key.Name, polType)
 	}
 	return fmt.Sprintf("%v -> %v", t.Name, policies)

@@ -22,11 +22,6 @@ import (
 	"github.com/projectcalico/felix/proto"
 )
 
-var (
-	toHepForwardPfxMap   = map[bool]string{true: HostToEndpointForwardPfx, false: HostToEndpointPfx}
-	fromHepForwardPfxMap = map[bool]string{true: HostFromEndpointForwardPfx, false: HostFromEndpointPfx}
-)
-
 func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 	ifaceName string,
 	adminUp bool,
@@ -66,31 +61,56 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 	ifaceName string,
 	ingressPolicyNames []string,
 	egressPolicyNames []string,
+	ingressForwardPolicyNames []string,
+	egressForwardPolicyNames []string,
 	profileIDs []string,
-	isForward bool,
 ) []*Chain {
 	log.WithField("ifaceName", ifaceName).Debug("Rendering filter host endpoint chain.")
 	return []*Chain{
-		// Chain for traffic _to_ the endpoint.
+		// Chain for output traffic _to_ the endpoint.
 		r.endpointIptablesChain(
 			egressPolicyNames,
 			profileIDs,
 			ifaceName,
 			PolicyOutboundPfx,
 			ProfileOutboundPfx,
-			toHepForwardPfxMap[isForward],
+			HostToEndpointPfx,
 			ChainFailsafeOut,
 			chainTypeNormal,
 			true, // Host endpoints are always admin up.
 		),
-		// Chain for traffic _from_ the endpoint.
+		// Chain for input traffic _from_ the endpoint.
 		r.endpointIptablesChain(
 			ingressPolicyNames,
 			profileIDs,
 			ifaceName,
 			PolicyInboundPfx,
 			ProfileInboundPfx,
-			fromHepForwardPfxMap[isForward],
+			HostFromEndpointPfx,
+			ChainFailsafeIn,
+			chainTypeNormal,
+			true, // Host endpoints are always admin up.
+		),
+		// Chain for forward traffic _to_ the endpoint.
+		r.endpointIptablesChain(
+			egressForwardPolicyNames,
+			profileIDs,
+			ifaceName,
+			PolicyOutboundPfx,
+			ProfileOutboundPfx,
+			HostToEndpointForwardPfx,
+			ChainFailsafeOut,
+			chainTypeNormal,
+			true, // Host endpoints are always admin up.
+		),
+		// Chain for forward traffic _from_ the endpoint.
+		r.endpointIptablesChain(
+			ingressForwardPolicyNames,
+			profileIDs,
+			ifaceName,
+			PolicyInboundPfx,
+			ProfileInboundPfx,
+			HostFromEndpointForwardPfx,
 			ChainFailsafeIn,
 			chainTypeNormal,
 			true, // Host endpoints are always admin up.
@@ -289,8 +309,6 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 			Comment: "Drop if no profiles matched",
 		})
 	}
-	log.WithField("chainname", chainName).Debug("GJM rendering chain.")
-	log.WithField("rules", rules).Debug("GJM rendering chain.")
 
 	return &Chain{
 		Name:  chainName,
