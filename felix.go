@@ -46,6 +46,7 @@ import (
 	_ "github.com/projectcalico/felix/config"
 	"github.com/projectcalico/felix/extdataplane"
 	"github.com/projectcalico/felix/intdataplane"
+	"github.com/projectcalico/felix/ippool"
 	"github.com/projectcalico/felix/ipsets"
 	"github.com/projectcalico/felix/logutils"
 	"github.com/projectcalico/felix/proto"
@@ -226,6 +227,16 @@ configRetry:
 	// again.
 	buildInfoLogCxt.WithField("config", configParams).Info(
 		"Successfully loaded configuration.")
+
+	// If network back end is gobgp and datastore backend is etcd run watcher.
+	watcher, err := ippool.NewWatcher(configParams)
+	if err != nil {
+		log.Warning("Failed to start watcher for ippool.")
+	} else if watcher != nil {
+		watcher.Watcher()
+	} else {
+		log.Info("No condition to run ippool watcher")
+	}
 
 	// Health monitoring, for liveness and readiness endpoints.
 	healthAggregator := health.NewHealthAggregator()
