@@ -1,3 +1,5 @@
+// +build fvtests
+
 // Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,39 +14,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package k8s_test
 
 import (
-	"flag"
 	"os"
 	"testing"
 
+	log "github.com/Sirupsen/logrus"
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/reporters"
 	. "github.com/onsi/gomega"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/felix/logutils"
-	"github.com/projectcalico/libcalico-go/lib/testutils"
 )
 
 func init() {
-	testutils.HookLogrusForGinkgo()
+	//testutils.HookLogrusForGinkgo()
 	logutils.ConfigureEarlyLogging()
 	logLevel, err := log.ParseLevel(os.Getenv("K8SFV_LOG_LEVEL"))
-	panicIfError(err)
-	log.SetLevel(logLevel)
-	flag.StringVar(&k8sServerIP, "k8s-apiserver-ip", "", "")
-	flag.StringVar(&k8sServerEndpoint, "k8s-api-endpoint", "", "")
-	flag.StringVar(&felixIP, "felix-ip", "", "")
-	flag.StringVar(&felixHostname, "felix-hostname", "", "")
-	flag.StringVar(&prometheusPushURL, "prometheus-push-url", "", "")
-	flag.StringVar(&codeLevel, "code-level", "", "")
-	flag.StringVar(&typhaIP, "typha-ip", "", "")
+	if err == nil {
+		log.SetLevel(logLevel)
+	}
+	log.SetLevel(log.InfoLevel)
+	//flag.StringVar(&k8sServerIP, "k8s-apiserver-ip", "", "")
+	//flag.StringVar(&k8sServerEndpoint, "k8s-api-endpoint", "", "")
+	//flag.StringVar(&felixIP, "felix-ip", "", "")
+	//flag.StringVar(&felixHostname, "felix-hostname", "", "")
+	//flag.StringVar(&prometheusPushURL, "prometheus-push-url", "", "")
+	//flag.StringVar(&codeLevel, "code-level", "", "")
+	//flag.StringVar(&typhaIP, "typha-ip", "", "")
 }
 
-func TestMain(t *testing.T) {
+func TestWithKubernetesServer(t *testing.T) {
 	RegisterFailHandler(Fail)
 	junitReporter := reporters.NewJUnitReporter("junit.xml")
-	RunSpecsWithDefaultAndCustomReporters(t, "Felix/KDD FV tests", []Reporter{junitReporter})
+	RunSpecsWithDefaultAndCustomReporters(t, "Felix/KDD FV tests",
+		[]Reporter{junitReporter})
 }

@@ -77,21 +77,36 @@ func (d *localPlusRemotes) ensureNodeDefined(
 ) {
 	d.mutex.Lock()
 	if !d.k8sCreated[hostName] {
-		if hostCIDR == "" {
-			hostCIDR = GetNextRemoteHostCIDR()
-		}
-		node_in := &v1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: hostName,
-				Annotations: map[string]string{
-					"projectcalico.org/IPv4Address": hostCIDR,
+		var node_out *v1.Node
+		node_existing, err := clientset.Nodes().Get(hostName, metav1.GetOptions{})
+		if err != nil {
+			// Need to create Node.
+			if hostCIDR == "" {
+				hostCIDR = GetNextRemoteHostCIDR()
+			}
+			node_in := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: hostName,
+					Annotations: map[string]string{
+						"projectcalico.org/IPv4Address": hostCIDR,
+					},
 				},
-			},
-			Spec: v1.NodeSpec{},
+				Spec: v1.NodeSpec{},
+			}
+			log.WithField("node_in", node_in).Debug("Node defined")
+			node_out, err = clientset.Nodes().Create(node_in)
+			log.WithField("node_out", node_out).Debug("Created node")
+		} else {
+			if node_existing.ObjectMeta.Annotations == nil {
+				node_existing.ObjectMeta.Annotations = map[string]string{
+					"projectcalico.org/IPv4Address": hostCIDR,
+				}
+			} else {
+				node_existing.ObjectMeta.Annotations["projectcalico.org/IPv4Address"] = hostCIDR
+			}
+			node_out, err = clientset.Nodes().Update(node_existing)
+			log.WithField("node_out", node_out).Debug("Updated node")
 		}
-		log.WithField("node_in", node_in).Debug("Node defined")
-		node_out, err := clientset.Nodes().Create(node_in)
-		log.WithField("node_out", node_out).Debug("Created node")
 		if err != nil {
 			panic(err)
 		}

@@ -157,6 +157,7 @@ if ${USE_TYPHA}; then
     # Run Typha.
     docker run --detach --privileged --name ${prefix}-typha \
 	   -e CALICO_DATASTORE_TYPE=kubernetes \
+	   -e TYPHA_HEALTHENABLED=true \
 	   -e TYPHA_LOGSEVERITYSCREEN=${TYPHA_LOG_LEVEL} \
 	   -e TYPHA_DATASTORETYPE=kubernetes \
 	   -e K8S_API_ENDPOINT=${k8s_api_endpoint} \
@@ -168,8 +169,10 @@ if ${USE_TYPHA}; then
     typha_ip=$(get_container_ip ${prefix}-typha)
     typha_hostname=$(get_container_hostname ${prefix}-typha)
     typha_felix_args="-e FELIX_TYPHAADDR=${typha_ip}:5473"
+    typha_k8sfv_args="-typha-ip ${typha_ip}"
 else
     typha_felix_args=
+    typha_k8sfv_args=
 fi
 
 # Run Felix.
@@ -197,7 +200,7 @@ felix_ip=$(get_container_ip ${prefix}-felix)
 felix_hostname=$(get_container_hostname ${prefix}-felix)
 
 # Run the test suite.
-run="cd /testcode/k8sfv/output && /testcode/bin/k8sfv.test -ginkgo.v -k8s-api-endpoint ${k8s_api_endpoint} -felix-ip ${felix_ip} -felix-hostname ${felix_hostname} -prometheus-push-url \"${PROMPG_URL}\" -code-level \"${CODE_LEVEL}\""
+run="cd /testcode/k8sfv/output && /testcode/bin/k8sfv.test -ginkgo.v -k8s-apiserver-ip ${k8s_ip} -k8s-api-endpoint ${k8s_api_endpoint} -felix-ip ${felix_ip} -felix-hostname ${felix_hostname} -prometheus-push-url \"${PROMPG_URL}\" -code-level \"${CODE_LEVEL}\" ${typha_k8sfv_args}"
 if test -n "${GINKGO_FOCUS}"; then
     docker exec ${prefix}-felix /bin/sh -c \
 	   "${run} -ginkgo.focus \"${GINKGO_FOCUS}\""

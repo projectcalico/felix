@@ -34,11 +34,13 @@ import (
 
 // Global config - these are set by arguments on the ginkgo command line.
 var (
+	k8sServerIP       string // e.g. "172.17.0.2"
 	k8sServerEndpoint string // e.g. "http://172.17.0.2:6443"
 	felixIP           string // e.g. "172.17.0.3"
 	felixHostname     string // e.g. "b6fc45dcc1cb"
 	prometheusPushURL string // e.g. "http://172.17.0.3:9091"
 	codeLevel         string // e.g. "master"
+	typhaIP           string // e.g. "172.17.0.4"
 )
 
 // Prometheus metrics.
@@ -64,11 +66,13 @@ var (
 var _ = BeforeSuite(func() {
 	log.Info(">>> BeforeSuite <<<")
 	log.WithFields(log.Fields{
+		"k8sServerIP":       k8sServerIP,
 		"k8sServerEndpoint": k8sServerEndpoint,
 		"felixIP":           felixIP,
 		"felixHostname":     felixHostname,
 		"prometheusPushURL": prometheusPushURL,
 		"codeLevel":         codeLevel,
+		"typhaIP":           typhaIP,
 	}).Info("Args")
 
 	// Register Prometheus metrics.
