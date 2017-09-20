@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -49,10 +50,10 @@ func (c *Container) Stop() {
 	if c == nil {
 		log.Info("Stop no-op because nil container")
 	} else if c.runCmd == nil {
-		log.WithField("container", c).Info("Stop no-op because container is not running")
+		log.WithField("container", c.Name).Info("Stop no-op because container is not running")
 	} else {
 		log.WithField("container", c).Info("Stop")
-		c.runCmd.Process.Signal(os.Interrupt)
+		c.runCmd.Process.Signal(syscall.SIGTERM)
 		c.WaitNotRunning(10 * time.Second)
 		c.runCmd = nil
 
@@ -68,7 +69,7 @@ func Run(namePrefix string, args ...string) (c *Container) {
 	c = &Container{Name: fmt.Sprintf("%v-%d-%d-", namePrefix, os.Getpid(), containerIdx)}
 
 	// Start the container.
-	log.WithField("container", c).Info("About to run container")
+	log.WithField("container", c.Name).Info("About to run container")
 	runArgs := append([]string{"run", "--name", c.Name}, args...)
 	c.runCmd = exec.Command("docker", runArgs...)
 	err := c.runCmd.Start()
@@ -120,7 +121,7 @@ func (c *Container) WaitRunning(timeout time.Duration) {
 			break
 		}
 		if time.Since(start) > timeout {
-			log.Panic("Timed out waiting for container to be listed.")
+			log.WithField("container", c.Name).Panic("Timed out waiting for container to be listed.")
 		}
 	}
 }
@@ -136,7 +137,7 @@ func (c *Container) WaitNotRunning(timeout time.Duration) {
 			break
 		}
 		if time.Since(start) > timeout {
-			log.Panic("Timed out waiting for container not to be listed.")
+			log.WithField("container", c.Name).Panic("Timed out waiting for container not to be listed.")
 		}
 	}
 }
