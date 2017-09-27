@@ -44,6 +44,15 @@ type Container struct {
 
 var containerIdx = 0
 
+var etcdImage string
+
+func init() {
+	etcdImage = os.Getenv("ETCD_IMAGE")
+	if etcdImage == "" {
+		etcdImage = "quay.io/coreos/etcd"
+	}
+}
+
 func (c *Container) Stop() {
 	if c == nil {
 		log.Info("Stop no-op because nil container")
@@ -241,7 +250,7 @@ func RunEtcd() *Container {
 		"--privileged", // So that we can add routes inside the etcd container,
 		// when using the etcd container to model an external client connecting
 		// into the cluster.
-		"quay.io/coreos/etcd",
+		etcdImage,
 		"etcd",
 		"--advertise-client-urls", "http://127.0.0.1:2379",
 		"--listen-client-urls", "http://0.0.0.0:2379")
