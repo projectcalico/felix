@@ -683,6 +683,11 @@ func loadConfigFromDatastore(
 		Name:      "node." + hostname,
 		Namespace: "",
 	}, "")
+	n, err := client.Get(ctx, model.ResourceKey{
+		Kind:      apiv2.KindNode,
+		Name:      hostname,
+		Namespace: "",
+	}, "")
 	if _, ok := err.(errors2.ErrorResourceDoesNotExist); err != nil && !ok {
 		return
 	}
@@ -702,6 +707,15 @@ func loadConfigFromDatastore(
 	hostConfig, err = convertV2ConfigToMap("per-host", h)
 	if err != nil {
 		return
+	}
+
+	// Merge in the node config.
+	nodeResourceConfig, err := convertNodeResourceToMap(n)
+	if err != nil {
+		return
+	}
+	for k, v := range nodeResourceConfig {
+		hostConfig[k] = v
 	}
 
 	// Merge in the global cluster info config.
@@ -745,6 +759,24 @@ func convertV2ConfigToMap(configType string, v2Config *model.KVPair) (map[string
 				logCxt.WithField("KV", v1KV).Warn("Skipping config of unknown KV type.")
 			}
 		}
+	}
+	return c, nil
+}
+
+// convertNodeResourceToMap converts a v2 datamodel node resource struct into
+// a map of any relevant felix host configuration options contained within.
+func convertNodeResourceToMap(node *model.KVPair) (map[string]string, error) {
+	if node == nil {
+		log.Info("No Node resource config")
+		return nil, nil
+	}
+	n, ok := node.Value.(*apiv2.Node)
+	if !ok {
+		return nil, fmt.Errorf("failed to parse object as a node: %+v", node)
+	}
+	c := map[string]string{}
+	if n.Spec.BGP != nil && n.Spec.BGP.IPv4IPIPTunnelAddr != "" {
+		c["IpInIpTunnelAddr"] = n.Spec.BGP.IPv4IPIPTunnelAddr
 	}
 	return c, nil
 }
