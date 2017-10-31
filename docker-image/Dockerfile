@@ -1,4 +1,4 @@
-FROM alpine:3.4
+FROM alpine:3.6
 MAINTAINER Shaun Crampton <shaun@tigera.io>
 
 # Since our binary isn't designed to run as PID 1, run it via the tini init daemon.
