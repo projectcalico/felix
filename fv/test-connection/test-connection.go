@@ -109,13 +109,19 @@ func tryConnect(ipAddress, port string, sourcePort string, protocol string) erro
 		remoteAddr := ipAddress + ":" + port
 		log.Infof("Connecting from %v to %v", localAddr, remoteAddr)
 		d.D.LocalAddr, err = net.ResolveUDPAddr("udp", localAddr)
+		if err != nil {
+			panic(err)
+		}
 		conn, err := d.Dial("udp", remoteAddr)
 		if err != nil {
 			panic(err)
 		}
 		defer conn.Close()
 
-		fmt.Fprintf(conn, testMessage+"\n")
+		_, err = fmt.Fprintf(conn, testMessage+"\n")
+		if err != nil {
+			panic(err)
+		}
 		reply, err := bufio.NewReader(conn).ReadString('\n')
 		if err != nil {
 			panic(err)

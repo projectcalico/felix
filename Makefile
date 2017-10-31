@@ -52,11 +52,11 @@ ARCH?=amd64
 ARCHTAG?=
 
 ifeq ($(ARCH),amd64)
-GO_BUILD_VER:=v0.6
+GO_BUILD_VER?=v0.8
 endif
 
 ifeq ($(ARCH),ppc64le)
-GO_BUILD_VER:=latest
+GO_BUILD_VER?=latest
 endif
 
 GO_BUILD_CONTAINER?=calico/go-build$(ARCHTAG):$(GO_BUILD_VER)
