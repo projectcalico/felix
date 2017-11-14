@@ -1,5 +1,5 @@
-hash: 0f2ac5057060bc5aebdc665b77a43c90d02385f9dce12849b5d836783671294c
-updated: 2017-11-14T17:14:46.218732434Z
+hash: 139bff6ca6488aea354cdfaafe3ce80535fcc329f8b0f78188ad328ab9e2663b
+updated: 2017-11-14T10:32:49.610637171-08:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -190,7 +190,7 @@ imports:
   version: 598e54215bee41a19677faa4f0c32acd2a87eb56
 - name: github.com/projectcalico/libcalico-go
   version: b519402af8053c6f6b5bb6cd36826f649970bf77
-  repo: git@github.com:bcreane/libcalico-go.git
+  repo: https://github.com/bcreane/libcalico-go.git
   subpackages:
   - lib
   - lib/apiconfig
@@ -225,7 +225,7 @@ imports:
   - lib/selector/tokenizer
   - lib/set
   - lib/testutils
-  - lib/validator
+  - lib/validator/v1
   - lib/validator/v3
   - lib/watch
 - name: github.com/projectcalico/typha
@@ -272,7 +272,7 @@ imports:
 - name: github.com/whyrusleeping/go-logging
   version: 0457bb6b88fc1973573aaf6b5145d8d3ae972390
 - name: golang.org/x/crypto
-  version: 81e90905daefcd6fd217b62423c0908922eadb30
+  version: 9f005a07e0d31d45e6656d241bb5c0f2efd4bc94
   subpackages:
   - ssh/terminal
 - name: golang.org/x/net

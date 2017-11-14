@@ -26,7 +26,7 @@ import:
 - package: github.com/go-ini/ini
   version: ^1.21.0
 - package: github.com/projectcalico/libcalico-go
-  repo:    git@github.com:bcreane/libcalico-go.git
+  repo:    https://github.com/bcreane/libcalico-go.git
   version: b519402af8053c6f6b5bb6cd36826f649970bf77
   subpackages:
   - lib
