@@ -1,5 +1,5 @@
 hash: e655f5e95db5cafaeeceda30ff776c0f67ccf09711b3598e7ab53e76520b0c8e
-updated: 2017-11-16T10:22:39.149211301Z
+updated: 2017-11-16T10:54:25.617676666Z
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -224,7 +224,7 @@ imports:
   - lib/selector/tokenizer
   - lib/set
   - lib/testutils
-  - lib/validator
+  - lib/validator/v1
   - lib/validator/v3
   - lib/watch
 - name: github.com/projectcalico/typha
