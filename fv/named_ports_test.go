@@ -35,10 +35,10 @@ import (
 )
 
 var _ = Context("TCP: Destination named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
-	describeNamedPortTests(false, "tcp")
+	describeNamedPortTests(false, "TCP")
 })
 var _ = Context("TCP: Source named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
-	describeNamedPortTests(true, "tcp")
+	describeNamedPortTests(true, "TCP")
 })
 
 var _ = Context("UDP: Destination named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
@@ -716,7 +716,7 @@ var _ = Describe("with a simulated kubernetes nginx and client", func() {
 			"cali123nginx",
 			"10.65.0.1",
 			"80,81",
-			"tcp",
+			"TCP",
 		)
 		nginx.WorkloadEndpoint.Labels = map[string]string{
 			"name": "nginx",
@@ -725,7 +725,7 @@ var _ = Describe("with a simulated kubernetes nginx and client", func() {
 			{
 				Port:     80,
 				Name:     "http-port",
-				Protocol: numorstring.ProtocolFromString("tcp"),
+				Protocol: numorstring.ProtocolFromString("TCP"),
 			},
 		}
 		nginx.WorkloadEndpoint.Spec.Profiles = []string{"kns.test"}
@@ -739,7 +739,7 @@ var _ = Describe("with a simulated kubernetes nginx and client", func() {
 			"cali123client",
 			"10.65.0.2",
 			"1000",
-			"tcp",
+			"TCP",
 		)
 		nginxClient.WorkloadEndpoint.Spec.Profiles = []string{"kns.test"}
 		nginxClient.Configure(client)
@@ -758,7 +758,7 @@ var _ = Describe("with a simulated kubernetes nginx and client", func() {
 		allowHTTPPolicy = api.NewNetworkPolicy()
 		allowHTTPPolicy.Namespace = "fv"
 		allowHTTPPolicy.Name = "knp.default.access-nginx"
-		protoStruct := numorstring.ProtocolFromString("tcp")
+		protoStruct := numorstring.ProtocolFromString("TCP")
 		apiRule := api.Rule{
 			Action:   api.Allow,
 			Protocol: &protoStruct,
@@ -864,12 +864,12 @@ var _ = Describe("tests with mixed TCP/UDP", func() {
 				{
 					Port:     80,
 					Name:     "tcp-port",
-					Protocol: numorstring.ProtocolFromString("tcp"),
+					Protocol: numorstring.ProtocolFromString("TCP"),
 				},
 				{
 					Port:     81,
 					Name:     "udp-port",
-					Protocol: numorstring.ProtocolFromString("udp"),
+					Protocol: numorstring.ProtocolFromString("UDP"),
 				},
 			}
 			w.WorkloadEndpoint.Spec.Profiles = []string{"open"}
@@ -877,8 +877,8 @@ var _ = Describe("tests with mixed TCP/UDP", func() {
 			return w
 		}
 
-		targetTCPWorkload = createTarget("10.65.0.2", "tcp")
-		targetUDPWorkload = createTarget("10.65.0.3", "udp")
+		targetTCPWorkload = createTarget("10.65.0.2", "UDP")
+		targetUDPWorkload = createTarget("10.65.0.3", "TCP")
 
 		// Create client workload.
 		clientWorkload = workload.Run(
@@ -887,7 +887,7 @@ var _ = Describe("tests with mixed TCP/UDP", func() {
 			"cali123client",
 			"10.65.0.1",
 			"1000",
-			"tcp", // Note: protocol isn't relevant for client.
+			"TCP", // Note: protocol isn't relevant for client.
 		)
 		clientWorkload.WorkloadEndpoint.Spec.Profiles = []string{"open"}
 		clientWorkload.Configure(client)
@@ -896,8 +896,8 @@ var _ = Describe("tests with mixed TCP/UDP", func() {
 		allowConfusedProtocolPolicy = api.NewNetworkPolicy()
 		allowConfusedProtocolPolicy.Namespace = "fv"
 		allowConfusedProtocolPolicy.Name = "knp.default.confused"
-		protoUDPStruct := numorstring.ProtocolFromString("udp")
-		protoTCPStruct := numorstring.ProtocolFromString("tcp")
+		protoUDPStruct := numorstring.ProtocolFromString("UDP")
+		protoTCPStruct := numorstring.ProtocolFromString("TCP")
 		allowConfusedProtocolPolicy.Spec.Ingress = []api.Rule{
 			{
 				Action:   api.Allow,
@@ -921,8 +921,8 @@ var _ = Describe("tests with mixed TCP/UDP", func() {
 		allowConfusedProtocolPolicy.Spec.Selector = "name == 'nginx'"
 		allowConfusedProtocolPolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
 
-		udpCC = &workload.ConnectivityChecker{Protocol: "udp"}
-		tcpCC = &workload.ConnectivityChecker{Protocol: "tcp"}
+		udpCC = &workload.ConnectivityChecker{Protocol: "UDP"}
+		tcpCC = &workload.ConnectivityChecker{Protocol: "TCP"}
 	})
 
 	AfterEach(func() {

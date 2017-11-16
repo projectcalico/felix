@@ -262,7 +262,7 @@ func (s IP) ToMatcher(explicitPort ...uint16) *connectivityMatcher {
 		ip:         string(s),
 		port:       port,
 		targetName: string(s) + ":" + port,
-		protocol:   "tcp",
+		protocol:   "TCP",
 	}
 }
 
@@ -281,7 +281,7 @@ func (w *Workload) ToMatcher(explicitPort ...uint16) *connectivityMatcher {
 		ip:         w.IP,
 		port:       port,
 		targetName: fmt.Sprintf("%s on port %s", w.Name, port),
-		protocol:   "tcp",
+		protocol:   "TCP",
 	}
 }
 
@@ -366,7 +366,7 @@ func (c *ConnectivityChecker) ActualConnectivity() []string {
 		wg.Add(1)
 		go func(i int, exp expectation) {
 			defer wg.Done()
-			p := "tcp"
+			p := "TCP"
 			if c.Protocol != "" {
 				p = c.Protocol
 			}

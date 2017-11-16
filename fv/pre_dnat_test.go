@@ -64,7 +64,7 @@ var _ = Context("with initialized Felix, etcd datastore, 2 workloads", func() {
 		// Create workloads, using that profile.
 		for ii := range w {
 			iiStr := strconv.Itoa(ii)
-			w[ii] = workload.Run(felix, "w"+iiStr, "cali1"+iiStr, "10.65.0.1"+iiStr, "8055", "tcp")
+			w[ii] = workload.Run(felix, "w"+iiStr, "cali1"+iiStr, "10.65.0.1"+iiStr, "8055", "TCP")
 			w[ii].Configure(client)
 		}
 
@@ -160,7 +160,7 @@ var _ = Context("with initialized Felix, etcd datastore, 2 workloads", func() {
 					policy.Spec.Order = &order
 					policy.Spec.PreDNAT = true
 					policy.Spec.ApplyOnForward = true
-					protocol := numorstring.ProtocolFromString("tcp")
+					protocol := numorstring.ProtocolFromString("TCP")
 					ports := numorstring.SinglePort(32010)
 					policy.Spec.Ingress = []api.Rule{{
 						Action:   api.Allow,
@@ -193,7 +193,7 @@ var _ = Context("with initialized Felix, etcd datastore, 2 workloads", func() {
 					policy.Spec.Order = &order
 					policy.Spec.PreDNAT = true
 					policy.Spec.ApplyOnForward = true
-					protocol := numorstring.ProtocolFromString("tcp")
+					protocol := numorstring.ProtocolFromString("TCP")
 					ports := numorstring.SinglePort(8055)
 					policy.Spec.Ingress = []api.Rule{{
 						Action:   api.Allow,
