@@ -520,7 +520,7 @@ var _ = Describe("Static", func() {
 					Rules: []Rule{
 						// Untracked packets already matched in raw table.
 						{Match: Match().MarkSet(0x10),
-							Action: AcceptAction{}},
+							Action: ReturnAction{}},
 
 						// Per-prefix workload jump rules.  Note use of goto so that we
 						// don't return here.
@@ -544,7 +544,7 @@ var _ = Describe("Static", func() {
 					Rules: []Rule{
 						// Untracked packets already matched in raw table.
 						{Match: Match().MarkSet(0x10),
-							Action: AcceptAction{}},
+							Action: ReturnAction{}},
 
 						// To workload traffic.
 						{Match: Match().OutInterface("cali+").IPVSConnection(), Action: JumpAction{Target: "cali-to-wl-dispatch"}},

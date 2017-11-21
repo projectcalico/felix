@@ -44,7 +44,7 @@ func (r *DefaultRuleRenderer) acceptAlreadyAccepted() []Rule {
 	return []Rule{
 		{
 			Match:  Match().MarkSet(r.IptablesMarkAccept),
-			Action: AcceptAction{},
+			Action: r.filterAllowAction,
 		},
 	}
 }
@@ -122,7 +122,7 @@ func (r *DefaultRuleRenderer) filterWorkloadToHostChain(ipVersion uint8) *Chain 
 				Match: Match().
 					ProtocolNum(ProtoICMPv6).
 					ICMPV6Type(icmpType),
-				Action: AcceptAction{},
+				Action: r.filterAllowAction,
 			})
 		}
 	}
