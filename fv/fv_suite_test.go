@@ -17,17 +17,27 @@
 package fv_test
 
 import (
+	"os"
 	"testing"
 
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/reporters"
 	. "github.com/onsi/gomega"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/libcalico-go/lib/testutils"
 )
 
 func init() {
 	testutils.HookLogrusForGinkgo()
+	logLevelSetting := os.Getenv("FV_LOG_LEVEL")
+	if logLevelSetting != "" {
+		logLevel, err := log.ParseLevel(logLevelSetting)
+		if err != nil {
+			panic(err)
+		}
+		log.SetLevel(logLevel)
+	}
 }
 
 func TestFv(t *testing.T) {
