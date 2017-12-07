@@ -54,11 +54,13 @@ var _ = Context("with initialized etcd datastore", func() {
 		etcd.Stop()
 	})
 
-	Context("with 150k workloads", func() {
+	const NUM_WORKLOADS = 15000
+
+	Context(fmt.Sprintf("with %d workloads", NUM_WORKLOADS), func() {
 
 		BeforeEach(func() {
-			log.Info("Configuring WorkloadEndpoints...")
-			for ii := 0; ii < 150000; ii++ {
+			log.Infof("Configuring %d WorkloadEndpoints...", NUM_WORKLOADS)
+			for ii := 0; ii < NUM_WORKLOADS; ii++ {
 				iiStr := fmt.Sprintf("%06d", ii)
 				hostNum := ii % 247
 				hostStr := fmt.Sprintf("%04d", hostNum)
@@ -82,10 +84,33 @@ var _ = Context("with initialized etcd datastore", func() {
 					log.Infof("Configured %d WorkloadEndpoints", ii+1)
 				}
 			}
+			log.Info("Finished configuring WorkloadEndpoints")
 		})
 
+		const CALICO_UPGRADE = "/home/neil/Downloads/calico-upgrade"
+
 		It("should be possible to upgrade that data", func() {
-			time.Sleep(10 * time.Minute)
+			// Test and time upgrade validation.
+			validateStart := time.Now()
+			utils.Run("/bin/sh", "-c", fmt.Sprintf(
+				"APIV1_ETCD_ENDPOINTS=http://%s:2379 ETCD_ENDPOINTS=http://%s:2379 %s validate",
+				etcd.IP,
+				etcd.IP,
+				CALICO_UPGRADE,
+			))
+			validateTime := time.Since(validateStart)
+			log.Infof("Took %s to validate upgrade of %d WorkloadEndpoints", validateTime, NUM_WORKLOADS)
+
+			// Test and time actual upgrade.
+			convertStart := time.Now()
+			utils.Run("/bin/sh", "-c", fmt.Sprintf(
+				"echo yes | APIV1_ETCD_ENDPOINTS=http://%s:2379 ETCD_ENDPOINTS=http://%s:2379 %s start",
+				etcd.IP,
+				etcd.IP,
+				CALICO_UPGRADE,
+			))
+			convertTime := time.Since(convertStart)
+			log.Infof("Took %s to upgrade %d WorkloadEndpoints", convertTime, NUM_WORKLOADS)
 		})
 	})
 })
