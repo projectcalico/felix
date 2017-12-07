@@ -54,7 +54,7 @@ var _ = Context("with initialized etcd datastore", func() {
 		etcd.Stop()
 	})
 
-	const NUM_WORKLOADS = 15000
+	const NUM_WORKLOADS = 150000
 
 	Context(fmt.Sprintf("with %d workloads", NUM_WORKLOADS), func() {
 
