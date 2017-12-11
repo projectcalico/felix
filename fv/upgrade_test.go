@@ -341,7 +341,7 @@ var _ = FContext("with initialized etcd datastore", func() {
 			// Test and time upgrade validation.
 			validateStart := time.Now()
 			utils.Run("/bin/sh", "-c", fmt.Sprintf(
-				"APIV1_ETCD_ENDPOINTS=http://%s:2379 ETCD_ENDPOINTS=http://%s:2379 %s %s validate",
+				"APIV1_ETCD_ENDPOINTS=http://%s:2379 ETCD_ENDPOINTS=http://%s:2379 %s %s dryrun",
 				etcd.IP,
 				etcd.IP,
 				MEASURE,
