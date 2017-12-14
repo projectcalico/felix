@@ -19,6 +19,7 @@ package fv_test
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -321,6 +322,7 @@ var _ = FContext("with initialized etcd datastore", func() {
 	const MEASURE_FILE = "timing.txt"
 	const MEASURE = "/usr/bin/time -o " + MEASURE_FILE + " -f " + MEASURE_FORMAT
 	const CALICO_UPGRADE = "/home/neil/Downloads/calico-upgrade"
+	var OUTPUT_DIR = "--output-dir=fv-upgrade-test" + strconv.Itoa(os.Getpid())
 
 	testUpgrade := func(resources map[string]int) {
 		description := ""
@@ -341,11 +343,12 @@ var _ = FContext("with initialized etcd datastore", func() {
 			// Test and time upgrade validation.
 			validateStart := time.Now()
 			utils.Run("/bin/sh", "-c", fmt.Sprintf(
-				"APIV1_ETCD_ENDPOINTS=http://%s:2379 ETCD_ENDPOINTS=http://%s:2379 %s %s dryrun",
+				"APIV1_ETCD_ENDPOINTS=http://%s:2379 ETCD_ENDPOINTS=http://%s:2379 %s %s dryrun %s",
 				etcd.IP,
 				etcd.IP,
 				MEASURE,
 				CALICO_UPGRADE,
+				OUTPUT_DIR,
 			))
 			validateTime := time.Since(validateStart)
 			utils.Run("cat", MEASURE_FILE)
@@ -362,11 +365,12 @@ var _ = FContext("with initialized etcd datastore", func() {
 			// Test and time actual upgrade.
 			convertStart := time.Now()
 			utils.Run("/bin/sh", "-c", fmt.Sprintf(
-				"echo yes | APIV1_ETCD_ENDPOINTS=http://%s:2379 ETCD_ENDPOINTS=http://%s:2379 %s %s start",
+				"echo yes | APIV1_ETCD_ENDPOINTS=http://%s:2379 ETCD_ENDPOINTS=http://%s:2379 %s %s start %s",
 				etcd.IP,
 				etcd.IP,
 				MEASURE,
 				CALICO_UPGRADE,
+				OUTPUT_DIR,
 			))
 			convertTime := time.Since(convertStart)
 			utils.Run("cat", MEASURE_FILE)
