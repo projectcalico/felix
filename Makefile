@@ -344,19 +344,19 @@ bin/calico-felix: $(FELIX_GO_FILES) vendor/.up-to-date
 		-e "not a dynamic executable" || \
 		( echo "Error: bin/calico-felix was not statically linked"; false ) )'
 
-bin/iptables-locker: $(FELIX_GO_FILES) vendor/.up-to-date
+bin/iptables-locker: fv/iptables-locker/*.go iptables/*.go vendor/.up-to-date
 	@echo Building iptables-locker...
 	mkdir -p bin
 	$(DOCKER_GO_BUILD) \
 	    sh -c 'go build -v -i -o $@ -v $(LDFLAGS) "github.com/projectcalico/felix/fv/iptables-locker"'
 
-bin/test-workload: $(FELIX_GO_FILES) vendor/.up-to-date
+bin/test-workload: fv/test-workload/*.go fv/utils/*.go vendor/.up-to-date
 	@echo Building test-workload...
 	mkdir -p bin
 	$(DOCKER_GO_BUILD) \
 	    sh -c 'go build -v -i -o $@ -v $(LDFLAGS) "github.com/projectcalico/felix/fv/test-workload"'
 
-bin/test-connection: $(FELIX_GO_FILES) vendor/.up-to-date
+bin/test-connection: fv/test-connection/*.go fv/utils/*.go vendor/.up-to-date
 	@echo Building test-connection...
 	mkdir -p bin
 	$(DOCKER_GO_BUILD) \
