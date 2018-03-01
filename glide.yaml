@@ -21,13 +21,15 @@ import:
   version: 66aacef3dd8a676686c7ae3716979581e8b03c47
   subpackages:
   - context
+- package: golang.org/x/sys
+  version: 314a259e304ff91bd6985da2a7149bbf91237993
 - package: gopkg.in/go-playground/validator.v8
 - package: github.com/satori/go.uuid
   version: ^1.1.0
 - package: github.com/go-ini/ini
   version: ^1.21.0
 - package: github.com/projectcalico/libcalico-go
-  version: 13d015d6433fd53fb260dc2b3ab50340c34f5749
+  version: cdaa88541f981f2f889389c5214cafb529386fe8
   subpackages:
   - lib
 - package: github.com/sirupsen/logrus
@@ -44,7 +46,7 @@ import:
 - package: k8s.io/client-go
   version: 82aa063804cf055e16e8911250f888bc216e8b61
 - package: github.com/projectcalico/typha
-  version: 4ab01481018b09155c39708a81165a01c5277c4b
+  version: 815c337a37ac1414205d7d2d1553c62cc55c9e08
   subpackages:
   - pkg/syncclient
 - package: github.com/emicklei/go-restful
