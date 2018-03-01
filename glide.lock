@@ -1,5 +1,5 @@
-hash: 48b9f1cbc93ee638f0c3e36a62e900fdd48366e53a85b2ca166995ca3bd4f919
-updated: 2018-02-09T14:50:24.755409597Z
+hash: fe5eecdec053942d1270780aa1621f539a08cc8fdb235d9e26b5ebd1d4912683
+updated: 2018-03-01T17:43:50.729932199Z
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -184,7 +184,7 @@ imports:
   - matchers/support/goraph/util
   - types
 - name: github.com/opentracing/opentracing-go
-  version: db37fa5964ade72399b2ac8201123b8623256d75
+  version: 3999fca714c888484b78cb78d68cd49afc9eca7d
   subpackages:
   - ext
   - log
@@ -201,7 +201,7 @@ imports:
 - name: github.com/projectcalico/go-yaml-wrapper
   version: 598e54215bee41a19677faa4f0c32acd2a87eb56
 - name: github.com/projectcalico/libcalico-go
-  version: 13d015d6433fd53fb260dc2b3ab50340c34f5749
+  version: cdaa88541f981f2f889389c5214cafb529386fe8
   subpackages:
   - lib
   - lib/apiconfig
@@ -240,7 +240,7 @@ imports:
   - lib/validator/v3
   - lib/watch
 - name: github.com/projectcalico/typha
-  version: 4ab01481018b09155c39708a81165a01c5277c4b
+  version: 815c337a37ac1414205d7d2d1553c62cc55c9e08
   subpackages:
   - pkg/syncclient
   - pkg/syncproto
@@ -255,7 +255,7 @@ imports:
   subpackages:
   - go
 - name: github.com/prometheus/common
-  version: 89604d197083d4781071d3c65855d24ecfb0a563
+  version: 6fb6fce6f8b75884b92e1889c150403fc0872c5e
   subpackages:
   - expfmt
   - internal/bitbucket.org/ww/goautoneg
@@ -275,7 +275,7 @@ imports:
 - name: github.com/spf13/pflag
   version: 9ff6c6923cfffbcd502984b8e0c80539a94968b7
 - name: github.com/vishvananda/netlink
-  version: d35d6b58e1cb692b27b94fc403170bf44058ac3e
+  version: 5236321576c0c97ab02c078e60f9b1c5c1828807
   subpackages:
   - nl
 - name: github.com/vishvananda/netns
@@ -283,7 +283,7 @@ imports:
 - name: github.com/whyrusleeping/go-logging
   version: 0457bb6b88fc1973573aaf6b5145d8d3ae972390
 - name: golang.org/x/crypto
-  version: 5119cf507ed5294cc409c092980c7497ee5d6fd2
+  version: 91a49db82a88618983a78a06c1cbd4e00ab749ab
   subpackages:
   - ssh/terminal
 - name: golang.org/x/net
