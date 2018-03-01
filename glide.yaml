@@ -21,6 +21,8 @@ import:
   version: 66aacef3dd8a676686c7ae3716979581e8b03c47
   subpackages:
   - context
+- package: golang.org/x/sys
+  version: 314a259e304ff91bd6985da2a7149bbf91237993
 - package: gopkg.in/go-playground/validator.v8
 - package: github.com/satori/go.uuid
   version: ^1.1.0
