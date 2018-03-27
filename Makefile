@@ -77,11 +77,6 @@ GO_BUILD_VER ?= v0.10
 # For building, we use the go-build image for the *host* architecture, even if the target is different
 # the one for the host should contain all the necessary cross-compilation tools
 GO_BUILD_CONTAINER = calico/go-build:$(GO_BUILD_VER)-$(BUILDARCH)
-PROTOC_VER ?= v0.1
-PROTOC_CONTAINER ?= calico/protoc:$(PROTOC_VER)-$(BUILDARCH)
-FV_ETCDIMAGE ?= quay.io/coreos/etcd:v3.2.5-$(BUILDARCH)
-FV_K8SIMAGE ?= gcr.io/google_containers/hyperkube-$(BUILDARCH):v1.7.5
-FV_TYPHAIMAGE ?= calico/typha:latest-$(BUILDARCH)
 FV_FELIXIMAGE ?= calico/felix:latest-$(BUILDARCH)
 
 # If building on amd64 omit the arch in the container name.  Fixme!
@@ -91,6 +86,12 @@ ifeq ($(BUILDARCH),amd64)
         FV_ETCDIMAGE=quay.io/coreos/etcd:v3.2.5
         FV_K8SIMAGE=gcr.io/google_containers/hyperkube:v1.7.5
         FV_TYPHAIMAGE=calico/typha:v0.6.0-beta1-16-g512a0f2
+else
+        PROTOC_VER ?= latest
+        PROTOC_CONTAINER ?= calico/protoc:$(PROTOC_VER)-$(BUILDARCH)
+        FV_ETCDIMAGE ?= quay.io/coreos/etcd:v3.2.5-$(BUILDARCH)
+        FV_K8SIMAGE ?= gcr.io/google_containers/hyperkube-$(BUILDARCH):v1.7.5
+        FV_TYPHAIMAGE ?= calico/typha:latest-$(BUILDARCH)
 endif
 
 # Total number of ginkgo batches to run.  The CI system sets this according to the number
