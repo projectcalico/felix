@@ -1,4 +1,4 @@
-#!/bin/bash -ex
+#!/bin/bash -x
 
 # Copyright (c) 2018 Tigera, Inc. All rights reserved.
 #
@@ -21,21 +21,19 @@
 : ${GINKGO_FOCUS:=.*}
 
 for batch in ${FV_BATCHES_TO_RUN}; do
-  (
-     echo "Running FV batch ${batch}"
-     ./fv.test -ginkgo.parallel.node ${batch} \
-               -ginkgo.parallel.total ${FV_NUM_BATCHES} \
-               -ginkgo.seed 1 \
-               -ginkgo.randomizeAllSpecs=true \
-               -ginkgo.slowSpecThreshold ${FV_SLOW_SPEC_THRESH} \
-               -ginkgo.focus="${GINKGO_FOCUS}" \
-               ${GINKGO_ARGS}; \
-  ) &
-  pids[${batch}]=$!
+  echo "Running FV batch ${batch}"
+  ./fv.test -ginkgo.parallel.node ${batch} \
+            -ginkgo.parallel.total ${FV_NUM_BATCHES} \
+            -ginkgo.seed 1 \
+            -ginkgo.randomizeAllSpecs=true \
+            -ginkgo.slowSpecThreshold ${FV_SLOW_SPEC_THRESH} \
+            -ginkgo.focus="${GINKGO_FOCUS}" \
+            ${GINKGO_ARGS}; \
+  result=$?
+  echo "Result: $result"
+  if [ $result -ne 0 ]; then
+      echo "Batch $result failed with rc $result"
+      exit $result
+  fi
 done
 
-for batch in ${FV_BATCHES_TO_RUN}; do
-  echo "Waiting on batch $batch; PID=${pids[$batch]}"
-  wait ${pids[$batch]}
-  echo "Result: $?"
-done
