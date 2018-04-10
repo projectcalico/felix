@@ -34,7 +34,6 @@ type TopologyOptions struct {
 	EnableIPv6            bool
 	ExtraEnvVars          map[string]string
 	ExtraVolumes          map[string]string
-	AlphaFeaturesToEnable string
 }
 
 func DefaultTopologyOptions() TopologyOptions {
@@ -70,7 +69,7 @@ func StartNNodeEtcdTopology(n int, opts TopologyOptions) (felixes []*Felix, etcd
 
 	felixes, client = StartNNodeTopology(n, opts, eds)
 
-	client = utils.GetEtcdClient(eds.etcdContainer.IP, opts.AlphaFeaturesToEnable)
+	client = utils.GetEtcdClient(eds.etcdContainer.IP)
 
 	return felixes, eds.etcdContainer, client
 }
