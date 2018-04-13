@@ -1,5 +1,5 @@
-hash: 1c56a150fe70632c3f836f4fcebaabc0a9ab54dd2ed16a47fd1c35ab0276776f
-updated: 2018-03-29T19:02:29.041099798Z
+hash: 9c4d5d9828dba75f85cf0761e09abe7d4133d62366a078f9c3e753b0410fb6c7
+updated: 2018-04-12T15:03:51.810884+02:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -51,7 +51,7 @@ imports:
 - name: github.com/ghodss/yaml
   version: 0ca9ea5df5451ffdf184b4428c902747c2c11cd7
 - name: github.com/go-ini/ini
-  version: 6333e38ac20b8949a8dd68baa3650f4dee8f39f0
+  version: 5e9692864e22d02ac79e2fa499cffb00520b4fea
 - name: github.com/go-openapi/jsonpointer
   version: 46af16f9f7b149af66e5d1bd010e3574dc06de98
 - name: github.com/go-openapi/jsonreference
@@ -205,7 +205,7 @@ imports:
 - name: github.com/projectcalico/go-yaml-wrapper
   version: 598e54215bee41a19677faa4f0c32acd2a87eb56
 - name: github.com/projectcalico/libcalico-go
-  version: 88291609bbefd0fe22982a7a78ec51d63583a651
+  version: 65d364d12c37bdb63e3660df5387826ed4068e40
   subpackages:
   - lib
   - lib/apiconfig

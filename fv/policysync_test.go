@@ -34,7 +34,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/projectcalico/felix/binder"
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/libcalico-go/lib/backend/k8s/conversion"
 	"github.com/projectcalico/libcalico-go/lib/options"
 
@@ -77,7 +76,6 @@ var _ = Context("policy sync API tests", func() {
 		// options.ExtraEnvVars["FELIX_DebugDisableLogDropping"] = "true"
 		// options.FelixLogSeverity = "debug"
 		options.ExtraVolumes[tempDir] = "/var/run/calico"
-		options.AlphaFeaturesToEnable = apiconfig.AlphaFeatureSA + "," + apiconfig.AlphaFeatureHTTP
 		felix, etcd, calicoClient = infrastructure.StartSingleNodeEtcdTopology(options)
 
 		// Install a default profile that allows workloads with this profile to talk to each

@@ -157,8 +157,10 @@ type Config struct {
 
 	DisableConntrackInvalidCheck bool `config:"bool;false"`
 
-	HealthEnabled                   bool `config:"bool;false"`
-	HealthPort                      int  `config:"int(0,65535);9099"`
+	HealthEnabled                   bool   `config:"bool;false"`
+	HealthHost                      string `config:"string;"`
+	HealthPort                      int    `config:"int(0,65535);9099"`
+
 	PrometheusMetricsEnabled        bool `config:"bool;false"`
 	PrometheusMetricsPort           int  `config:"int(0,65535);9091"`
 	PrometheusGoMetricsEnabled      bool `config:"bool;true"`
