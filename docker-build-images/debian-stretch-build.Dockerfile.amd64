@@ -1,0 +1,8 @@
+FROM debian:stretch
+MAINTAINER Shaun Crampton <shaun@tigera.io>
+ENV STREAM stretch
+
+ADD install-debian-build-deps install-debian-build-deps
+RUN ./install-debian-build-deps
+
+WORKDIR /code

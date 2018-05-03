@@ -87,7 +87,7 @@ EOF
 		rm debian/changelog.prev
 	    fi
 
-	    for series in trusty xenial; do
+	    for series in trusty xenial stretch; do
 		${DOCKER_RUN_RM} -e DEB_VERSION=${debver}~${series} \
 				 calico-build/${series} debian/build-debs
 	    done

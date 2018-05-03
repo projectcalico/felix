@@ -21,7 +21,8 @@
 # | calico-build/centos7 |                                           v
 # | calico-build/xenial  |                                 +------------------+
 # | calico-build/trusty  |                                 | bin/calico-felix |
-# +----------------------+                                 +------------------+
+# | calico-build/stretch |                                 +------------------+
+# +----------------------+                                        /   /
 #                     \                                          /   /
 #                      \             .--------------------------'   /
 #                       \           /                              /
@@ -32,12 +33,13 @@
 #                           |                         /
 #                           |                   docker build
 #                           v                         |
-#            +----------------------------+           |
-#            |  RPM packages for Centos7  |           |
-#            |  RPM packages for Centos6  |           v
-#            | Debian packages for Xenial |    +--------------+
-#            | Debian packages for Trusty |    | calico/felix |
-#            +----------------------------+    +--------------+
+#            +-----------------------------+          |
+#            |  RPM packages for Centos7   |          |
+#            |  RPM packages for Centos6   |          v
+#            | Debian packages for Xenial  |    +--------------+
+#            | Debian packages for Trusty  |    | calico/felix |
+#            | Debian packages for Stretch |    +--------------+
+#            +-----------------------------+
 #
 #
 #
@@ -212,6 +214,11 @@ calico-build/trusty:
 calico-build/xenial:
 	cd docker-build-images && docker build -f ubuntu-xenial-build.Dockerfile.$(ARCH) -t calico-build/xenial .
 
+# Build a docker image used for building debs for stretch.
+.PHONY: calico-build/stretch
+calico-build/stretch:
+	cd docker-build-images && docker build -f debian-stretch-build.Dockerfile.$(ARCH) -t calico-build/stretch .
+
 # Construct a docker image for building Centos 7 RPMs.
 .PHONY: calico-build/centos7
 calico-build/centos7:
@@ -341,6 +348,7 @@ ifeq ($(GIT_COMMIT),<unknown>)
 endif
 	$(MAKE) calico-build/trusty
 	$(MAKE) calico-build/xenial
+	$(MAKE) calico-build/stretch
 	utils/make-packages.sh deb
 
 # Build RPMs.
