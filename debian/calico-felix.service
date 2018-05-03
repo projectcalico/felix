@@ -3,6 +3,7 @@ Description=Calico Felix agent
 After=syslog.target network.target
 
 [Service]
+EnvironmentFile=-/etc/default/%p
 User=root
 ExecStartPre=/bin/mkdir -p /var/run/calico
 ExecStart=/usr/bin/calico-felix
