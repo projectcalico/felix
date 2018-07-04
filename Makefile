@@ -229,9 +229,31 @@ update-vendor glide.lock:
 .PHONY: vendor
 vendor vendor/.up-to-date: glide.lock
 	if ! $(VENDOR_REMADE); then \
+	  if [ ! -z "$$SEMAPHORE_CACHE_DIR" ]; then \
+	    cache_tgz="$$SEMAPHORE_CACHE_DIR/vendor-$$(sha256sum  glide.lock  | cut -c1-64).tgz" ; \
+	    if [ -e "$$cache_tgz" ]; then \
+	      echo "Running in Semaphore, using cached vendor dir..."; \
+	      rm -rf ./vendor; \
+	      tar -xzf "$$cache_tgz" && \
+	      touch vendor/.up-to-date && \
+	      exit 0; \
+	    fi; \
+	  fi && \
 	  mkdir -p $$HOME/.glide && \
 	  $(DOCKER_GO_BUILD) glide install --strip-vendor && \
-	  touch vendor/.up-to-date; \
+	  touch vendor/.up-to-date && \
+	  if [ ! -z "$$SEMAPHORE_CACHE_DIR" ]; then \
+	    echo "Running in Semaphore, caching vendor dir..."; \
+	    rm -rf "*.tmp"; \
+	    while [ "$$(find $$SEMAPHORE_CACHE_DIR | grep vendor- | wc -l)" -gt "4" ]; do \
+	      oldest="$$SEMAPHORE_CACHE_DIR/$$(ls -t "$$SEMAPHORE_CACHE_DIR" | grep vendor- | tail -1)"; \
+	      echo "Removing oldest cached vendor: $$oldest"; \
+	      rm -rf $$oldest; \
+	    done; \
+	    tar -czf "$$cache_tgz.tmp" vendor && \
+	    sync && \
+	    mv "$$cache_tgz.tmp" "$$cache_tgz"; \
+	  fi; \
 	fi
 
 bin/calico-felix: bin/calico-felix-$(ARCH)
