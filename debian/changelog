@@ -4,7 +4,7 @@ felix (2.6.5~__STREAM__) __STREAM__; urgency=low
     [Changes recorded in 2.6.5 tag]
     - Change to log to stdout by default.
 
- -- Neil Jerram <neil@tigera.io>  Fri, 19 Jan 2018 16:55:30 +0000
+ -- Neil Jerram <neil@tigera.io>  Fri, 10 Aug 2018 15:29:55 +0100
 
 felix (2.6.4~__STREAM__) __STREAM__; urgency=low
 

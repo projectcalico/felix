@@ -142,6 +142,11 @@ calico-build/trusty:
 calico-build/xenial:
 	cd docker-build-images && docker build -f ubuntu-xenial-build.Dockerfile$(ARCHTAG) -t calico-build/xenial .
 
+# Build a docker image used for building debs for bionic.
+.PHONY: calico-build/bionic
+calico-build/bionic:
+	cd docker-build-images && docker build -f ubuntu-bionic-build.Dockerfile.$(ARCH) -t calico-build/bionic .
+
 # Construct a docker image for building Centos 7 RPMs.
 .PHONY: calico-build/centos7
 calico-build/centos7:
