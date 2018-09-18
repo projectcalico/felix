@@ -17,7 +17,7 @@ package infrastructure
 import (
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/fv/containers"
+	"github.com/projectcalico/dockerrun/pkg/containers"
 	"github.com/projectcalico/felix/fv/utils"
 )
 

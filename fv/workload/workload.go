@@ -37,7 +37,7 @@ import (
 
 	"github.com/projectcalico/libcalico-go/lib/set"
 
-	"github.com/projectcalico/felix/fv/containers"
+	"github.com/projectcalico/dockerrun/pkg/containers"
 	"github.com/projectcalico/felix/fv/infrastructure"
 	"github.com/projectcalico/felix/fv/utils"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"

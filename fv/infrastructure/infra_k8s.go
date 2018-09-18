@@ -32,7 +32,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/projectcalico/felix/fv/containers"
+	"github.com/projectcalico/dockerrun/pkg/containers"
 	"github.com/projectcalico/felix/fv/utils"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"

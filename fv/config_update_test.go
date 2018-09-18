@@ -26,7 +26,7 @@ import (
 
 	"errors"
 
-	"github.com/projectcalico/felix/fv/containers"
+	"github.com/projectcalico/dockerrun/pkg/containers"
 	"github.com/projectcalico/felix/fv/infrastructure"
 	"github.com/projectcalico/felix/fv/metrics"
 	"github.com/projectcalico/felix/fv/workload"
