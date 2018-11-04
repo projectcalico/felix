@@ -1,5 +1,5 @@
 hash: 908101f631c3a18cdc47d9736ae9c0a0f867dc96177af210966886e108522be7
-updated: 2018-10-17T10:25:42.511523121Z
+updated: 2018-11-04T12:08:28.51143-08:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -112,7 +112,7 @@ imports:
   - tracer/wire
   - writer
 - name: github.com/jbenet/go-reuseport
-  version: dd0c37d7767bc38280bd9813145b65f8bd560629
+  version: 8cfd5f2973c8e2476813120b9a516d9a82eb7c7a
 - name: github.com/json-iterator/go
   version: f2b4162afba35581b6d4a50d3b8f34e33c144682
 - name: github.com/kardianos/osext
@@ -120,7 +120,7 @@ imports:
 - name: github.com/kelseyhightower/envconfig
   version: dd1402a4d99de9ac2f396cd6fcb957bc2c695ec1
 - name: github.com/libp2p/go-reuseport
-  version: dd0c37d7767bc38280bd9813145b65f8bd560629
+  version: 8cfd5f2973c8e2476813120b9a516d9a82eb7c7a
   subpackages:
   - poll
   - singlepoll
@@ -288,7 +288,7 @@ imports:
 - name: github.com/whyrusleeping/go-logging
   version: 0457bb6b88fc1973573aaf6b5145d8d3ae972390
 - name: golang.org/x/crypto
-  version: 0c41d7ab0a0ee717d4590a44bcb987dfd9e183eb
+  version: 49796115aa4b964c318aad4f3084fdb41e9aa067
   subpackages:
   - ssh/terminal
 - name: golang.org/x/net
@@ -343,7 +343,7 @@ imports:
   subpackages:
   - rate
 - name: google.golang.org/appengine
-  version: ae0ab99deb4dc413a2b4bd6c8bdd0eb67f1e4d06
+  version: 4a4468ece617fc8205e99368fa2200e9d1fad421
   subpackages:
   - internal
   - internal/app_identity
@@ -355,38 +355,29 @@ imports:
   - internal/urlfetch
   - urlfetch
 - name: google.golang.org/genproto
-  version: 94acd270e44e65579b9ee3cdab25034d33fed608
+  version: 09f6ed296fc66555a25fe4ce95173148778dfa85
   subpackages:
   - googleapis/rpc/status
 - name: google.golang.org/grpc
   version: 5b3c4e850e90a4cf6a20ebd46c8b32a0a3afcb9e
   subpackages:
   - balancer
-  - balancer/base
-  - balancer/roundrobin
   - codes
   - connectivity
   - credentials
-  - encoding
-  - encoding/proto
+  - grpclb/grpc_lb_v1/messages
   - grpclog
   - health/grpc_health_v1
   - internal
-  - internal/backoff
-  - internal/channelz
-  - internal/envconfig
-  - internal/grpcrand
-  - internal/transport
   - keepalive
   - metadata
   - naming
   - peer
   - resolver
-  - resolver/dns
-  - resolver/passthrough
   - stats
   - status
   - tap
+  - transport
 - name: gopkg.in/fsnotify/fsnotify.v1
   version: c2828203cd70a50dcccfb2761f8b1f8ceef9a8e9
 - name: gopkg.in/go-playground/validator.v8
