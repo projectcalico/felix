@@ -23,11 +23,8 @@ import (
 	"time"
 
 	"github.com/containernetworking/cni/pkg/ns"
-	"github.com/docopt/docopt-go"
 	reuse "github.com/jbenet/go-reuseport"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/satori/go.uuid"
 
 	"github.com/projectcalico/felix/fv/utils"
 )
