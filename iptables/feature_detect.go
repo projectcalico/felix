@@ -19,7 +19,6 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/hashicorp/go-version"
 	log "github.com/sirupsen/logrus"
 )
 
