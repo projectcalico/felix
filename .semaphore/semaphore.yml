@@ -36,11 +36,32 @@ blocks:
           - make static-checks
       - name: FV 1
         commands:
-          - make fv FV_BATCHES_TO_RUN="1" FV_NUM_BATCHES=3
+          - make fv FV_BATCHES_TO_RUN="1" FV_NUM_BATCHES=10
       - name: FV 2
         commands:
-          - make fv FV_BATCHES_TO_RUN="2" FV_NUM_BATCHES=3
+          - make fv FV_BATCHES_TO_RUN="2" FV_NUM_BATCHES=10
       - name: FV 3
         commands:
-          - make fv FV_BATCHES_TO_RUN="3" FV_NUM_BATCHES=3
+          - make fv FV_BATCHES_TO_RUN="3" FV_NUM_BATCHES=10
+      - name: FV 4
+        commands:
+          - make fv FV_BATCHES_TO_RUN="4" FV_NUM_BATCHES=10
+      - name: FV 5
+        commands:
+          - make fv FV_BATCHES_TO_RUN="5" FV_NUM_BATCHES=10
+      - name: FV 6
+        commands:
+          - make fv FV_BATCHES_TO_RUN="6" FV_NUM_BATCHES=10
+      - name: FV 7
+        commands:
+          - make fv FV_BATCHES_TO_RUN="7" FV_NUM_BATCHES=10
+      - name: FV 8
+        commands:
+          - make fv FV_BATCHES_TO_RUN="8" FV_NUM_BATCHES=10
+      - name: FV 9
+        commands:
+          - make fv FV_BATCHES_TO_RUN="9" FV_NUM_BATCHES=10
+      - name: FV 10
+        commands:
+          - make fv FV_BATCHES_TO_RUN="10" FV_NUM_BATCHES=10
         
