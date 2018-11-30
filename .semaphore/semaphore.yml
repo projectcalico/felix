@@ -1,0 +1,46 @@
+version: v1.0
+name: Felix
+agent:
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu1804
+
+blocks:
+  - name: "Build"
+    task:
+      jobs:
+      - name: Build
+        commands:
+          - checkout
+          - if cache has_key vendor-$(checksum glide.lock); then cache restore vendor-$(checksum glide.lock); touch vendor/.up-to-date; fi
+          - cache has_key vendor-$(checksum glide.lock) || retry -t 5 make vendor
+          - cache has_key vendor-$(checksum glide.lock) || cache store vendor-$(checksum glide.lock) vendor
+          - make image-all
+          - cache store bin-${SEMAPHORE_GIT_SHA} bin
+
+  - name: "Tests"
+    task:
+      prologue:
+        commands:
+          - checkout
+          - cache restore vendor-$(checksum glide.lock)
+          - touch vendor/.up-to-date
+          - cache restore bin-${SEMAPHORE_GIT_SHA}
+          - touch bin/*
+      jobs:
+      - name: UT
+        commands:
+          - make ut
+      - name: Static checks
+        commands:
+          - make static-checks
+      - name: FV 1
+        commands:
+          - make fv FV_BATCHES_TO_RUN="1" FV_NUM_BATCHES=3
+      - name: FV 2
+        commands:
+          - make fv FV_BATCHES_TO_RUN="2" FV_NUM_BATCHES=3
+      - name: FV 3
+        commands:
+          - make fv FV_BATCHES_TO_RUN="3" FV_NUM_BATCHES=3
+        
