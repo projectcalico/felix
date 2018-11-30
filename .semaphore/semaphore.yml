@@ -12,11 +12,13 @@ blocks:
       - name: Build
         commands:
           - checkout
+          - cache restore go-pkg-cache
           - if cache has_key vendor-$(checksum glide.lock); then cache restore vendor-$(checksum glide.lock); touch vendor/.up-to-date; fi
           - cache has_key vendor-$(checksum glide.lock) || retry -t 5 make vendor
           - cache has_key vendor-$(checksum glide.lock) || cache store vendor-$(checksum glide.lock) vendor
-          - make image-all
+          - make image-all fv/fv.test bin/test-workload bin/test-connection bin/calico-felix
           - cache store bin-${SEMAPHORE_GIT_SHA} bin
+          - cache store go-pkg-cache .go-pkg-cache
 
   - name: "Tests"
     task:
