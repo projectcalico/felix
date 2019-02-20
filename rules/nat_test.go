@@ -16,6 +16,7 @@ package rules_test
 
 import (
 	. "github.com/projectcalico/felix/rules"
+	"github.com/projectcalico/libcalico-go/lib/numorstring"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -50,6 +51,55 @@ var _ = Describe("NAT", func() {
 					Match: Match().
 						SourceIPSet("cali4-masq-ipam-pools").
 						NotDestIPSet("cali4-all-ipam-pools"),
+				},
+			},
+		}))
+	})
+	It("should render rules when active with explicit port range", func() {
+
+		//copy struct
+		localConfig := rrConfigNormal
+		localConfig.NATPortRange, _ = numorstring.PortFromRange(99, 100)
+		localConfig.IptablesNATOutgoingInterfaceFilter = "cali-123"
+		renderer = NewRenderer(localConfig)
+
+		Expect(renderer.NATOutgoingChain(true, 4)).To(Equal(&Chain{
+			Name: "cali-nat-outgoing",
+			Rules: []Rule{
+				{
+					Action: MasqAction{ToPorts: "99-100"},
+					Match: Match().
+						SourceIPSet("cali40masq-ipam-pools").
+						NotDestIPSet("cali40all-ipam-pools").Protocol("tcp").
+						OutInterface("cali-123"),
+				},
+				{
+					Action: ReturnAction{},
+					Match: Match().
+						SourceIPSet("cali40masq-ipam-pools").
+						NotDestIPSet("cali40all-ipam-pools").Protocol("tcp").
+						OutInterface("cali-123"),
+				},
+				{
+					Action: MasqAction{ToPorts: "99-100"},
+					Match: Match().
+						SourceIPSet("cali40masq-ipam-pools").
+						NotDestIPSet("cali40all-ipam-pools").Protocol("udp").
+						OutInterface("cali-123"),
+				},
+				{
+					Action: ReturnAction{},
+					Match: Match().
+						SourceIPSet("cali40masq-ipam-pools").
+						NotDestIPSet("cali40all-ipam-pools").Protocol("udp").
+						OutInterface("cali-123"),
+				},
+				{
+					Action: MasqAction{},
+					Match: Match().
+						SourceIPSet("cali40masq-ipam-pools").
+						NotDestIPSet("cali40all-ipam-pools").
+						OutInterface("cali-123"),
 				},
 			},
 		}))

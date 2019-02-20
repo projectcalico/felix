@@ -1,3 +1,35 @@
+felix (3.0.8~__STREAM__) __STREAM__; urgency=low
+
+  * Felix 3.0.8 (from Git commit 1f407f8).
+    [Changes recorded in 3.0.8 tag]
+    - Allow hep-forwarded traffic by default
+    - Configure model FV hosts to drop forwarded traffic by default
+    - Default-deny hep-forwarded traffic when there are applicable policies
+    - Update the URL of alpine glibc signing key
+    - Update libcalico and typha
+    [Changes recorded in 3.0.7 tag]
+    - Update libcalico-go to release-v3.0
+    [Changes recorded in 3.0.6 tag]
+    - Update libcalico-go to release-v3.0
+    [Changes recorded in 3.0.5 tag]
+    - Update libcalico-go to release-v3.0
+    [Changes recorded in 3.0.4 tag]
+    - Pin logrus to v1.0.4
+    - Exclude Windows tests from linter
+    - Added support for s390x
+    - Whitelist failsafe port response traffic in the raw table only
+    - Update libcalico-go to latest release-v3.0
+    [Changes recorded in 3.0.3 tag]
+    - Backport: Add FV test that silently cuts the etcd connection.
+    - Update libcalico-go to release-v3.0
+    - Fix mismatched type in test
+    [Changes recorded in 3.0.2 tag]
+    - Update libcalico-go to a06c8bdc578a0d64fd12fbb5a70bcc8fad53e501
+    [Changes recorded in 3.0.1 tag]
+    - Report ready while waiting for the ready flag. #1677
+
+ -- Neil Jerram <neil@tigera.io>  Mon, 25 Feb 2019 09:37:40 +0000
+
 felix (3.0.0~__STREAM__) __STREAM__; urgency=low
 
   * Felix 3.0.0 (from Git commit 0fc6d7f).

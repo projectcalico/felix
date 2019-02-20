@@ -28,6 +28,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/projectcalico/libcalico-go/lib/apis/v3"
+	"github.com/projectcalico/libcalico-go/lib/numorstring"
 )
 
 var _ = Describe("FelixConfig vs ConfigParams parity", func() {
@@ -308,6 +309,21 @@ var _ = DescribeTable("Config parsing",
 			{Protocol: "tcp", Port: 6667},
 		},
 	),
+	Entry("KubeNodePortRanges empty", "KubeNodePortRanges", "",
+		[]numorstring.Port{
+			{30000, 32767, ""},
+		},
+	),
+	Entry("KubeNodePortRanges range", "KubeNodePortRanges", "30001:30002,30030:30040,30500:30600",
+		[]numorstring.Port{
+			{30001, 30002, ""},
+			{30030, 30040, ""},
+			{30500, 30600, ""},
+		},
+	),
+
+	Entry("IptablesNATOutgoingInterfaceFilter", "IptablesNATOutgoingInterfaceFilter", "cali-123", "cali-123"),
+	Entry("IptablesNATOutgoingInterfaceFilter", "IptablesNATOutgoingInterfaceFilter", "cali@123", "", false),
 )
 
 var _ = DescribeTable("OpenStack heuristic tests",
