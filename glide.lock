@@ -1,5 +1,5 @@
-hash: 1390bfb1687b63edec6409066d26ef87fc43c567c232b0672b6660d1b5de3006
-updated: 2019-02-19T17:28:28.414595684Z
+hash: 9bb2dfedb5f5f0a42c56913c0ad13fbe8dc939439be9f2b165e9b5b7a62f363a
+updated: 2019-02-22T11:39:25.054152751-08:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -14,7 +14,7 @@ imports:
   - autorest/azure
   - autorest/date
 - name: github.com/beorn7/perks
-  version: 3a771d992973f24aa725d07868b467d1ddfceafb
+  version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
   subpackages:
   - quantile
 - name: github.com/containernetworking/cni
@@ -86,10 +86,6 @@ imports:
   version: 787624de3eb7bd915c329cba748687a3b22666a6
   subpackages:
   - diskcache
-- name: github.com/gxed/eventfd
-  version: 80a92cca79a8041496ccc9dd773fcb52a57ec6f9
-- name: github.com/gxed/GoEndian
-  version: 0f5c6873267e5abf306ffcdfcfa4bf77517ef4a7
 - name: github.com/hashicorp/go-version
   version: d40cf49b3a77bba84a7afdbd7f1dc295d114efb1
 - name: github.com/hashicorp/golang-lru
@@ -107,31 +103,14 @@ imports:
   version: 6633656539c1639d9d78127b7d47c622b5d7b6dc
 - name: github.com/ipfs/go-log
   version: 5dc2060baaf8db344f31dafd852340b93811d03f
-  subpackages:
-  - tracer
-  - tracer/wire
-  - writer
 - name: github.com/jbenet/go-reuseport
-  version: 8cfd5f2973c8e2476813120b9a516d9a82eb7c7a
+  version: 6a75ffd916e5e70a5231da13d63ee5bba1109742
 - name: github.com/json-iterator/go
   version: f2b4162afba35581b6d4a50d3b8f34e33c144682
 - name: github.com/kardianos/osext
   version: ae77be60afb1dcacde03767a8c37337fad28ac14
 - name: github.com/kelseyhightower/envconfig
   version: dd1402a4d99de9ac2f396cd6fcb957bc2c695ec1
-- name: github.com/libp2p/go-reuseport
-  version: 8cfd5f2973c8e2476813120b9a516d9a82eb7c7a
-  subpackages:
-  - poll
-  - singlepoll
-- name: github.com/libp2p/go-sockaddr
-  version: a7494d4eefeb607c8bc491cf8850a6e8dbd41cab
-  subpackages:
-  - net
-- name: github.com/mattn/go-colorable
-  version: efa589957cd060542a26d2dd7832fd6a6c6c3ade
-- name: github.com/mattn/go-isatty
-  version: 3fb116b820352b7f0c281308a4d6250c22d94e27
 - name: github.com/matttproud/golang_protobuf_extensions
   version: c12348ce28de40eed0136aa2b644d0ee0650e56c
   subpackages:
@@ -192,15 +171,12 @@ imports:
   - matchers/support/goraph/node
   - matchers/support/goraph/util
   - types
-- name: github.com/opentracing/opentracing-go
-  version: be550b025b433cdfa2f11efb962afa2ea3c4d967
-  subpackages:
-  - ext
-  - log
 - name: github.com/pborman/uuid
   version: ca53cad383cad2479bbba7f7a1a05797ec1386e4
 - name: github.com/peterbourgon/diskv
   version: 5f041e8faa004a95c88a202771f4cc3e991971e6
+- name: github.com/pkg/errors
+  version: 856c240a51a2bf8fb8269ea7f3f9b046aadde36e
 - name: github.com/projectcalico/go-json
   version: 6219dc7339ba20ee4c57df0a8baac62317d19cb1
   subpackages:
@@ -210,7 +186,7 @@ imports:
 - name: github.com/projectcalico/go-yaml-wrapper
   version: 598e54215bee41a19677faa4f0c32acd2a87eb56
 - name: github.com/projectcalico/libcalico-go
-  version: 72554c43e943469fc7393b558ae76df9bac5b67e
+  version: 93239b5394ab0f1db0bac35a5bb1fe53c2e3fbb2
   subpackages:
   - lib/apiconfig
   - lib/apis/v1
@@ -258,7 +234,7 @@ imports:
   - pkg/syncproto
   - pkg/tlsutils
 - name: github.com/prometheus/client_golang
-  version: 1cafe34db7fdec6022e17e00e1c1ea501022f3e4
+  version: 773f5027234d0b08adf766be34f55df2f312abf7
   subpackages:
   - prometheus
   - prometheus/internal
@@ -290,8 +266,6 @@ imports:
   - nl
 - name: github.com/vishvananda/netns
   version: 8ba1072b58e0c2a240eb5f6120165c7776c3e7b8
-- name: github.com/whyrusleeping/go-logging
-  version: 0457bb6b88fc1973573aaf6b5145d8d3ae972390
 - name: golang.org/x/crypto
   version: 49796115aa4b964c318aad4f3084fdb41e9aa067
   subpackages:
