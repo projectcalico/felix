@@ -24,7 +24,6 @@ import (
 
 	"github.com/containernetworking/cni/pkg/ns"
 	"github.com/docopt/docopt-go"
-	reuse "github.com/jbenet/go-reuseport"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/satori/go.uuid"
@@ -101,9 +100,7 @@ func tryConnect(ipAddress, port string, sourcePort string, protocol string) erro
 	uid := uuid.NewV4().String()
 	testMessage := "hello," + uid
 
-	// The reuse library implements a version of net.Dialer that can reuse UDP/TCP ports, which we
-	// need in order to make connection retries work.
-	var d reuse.Dialer
+	var d net.Dialer
 	var localAddr string
 	var remoteAddr string
 	if strings.Contains(ipAddress, ":") {
@@ -115,7 +112,7 @@ func tryConnect(ipAddress, port string, sourcePort string, protocol string) erro
 	}
 	if protocol == "udp" {
 		log.Infof("Connecting from %v to %v", localAddr, remoteAddr)
-		d.D.LocalAddr, _ = net.ResolveUDPAddr("udp", localAddr)
+		d.LocalAddr, _ = net.ResolveUDPAddr("udp", localAddr)
 		conn, err := d.Dial("udp", remoteAddr)
 		if err != nil {
 			panic(err)
@@ -132,7 +129,7 @@ func tryConnect(ipAddress, port string, sourcePort string, protocol string) erro
 			panic(errors.New("Unexpected reply: " + reply))
 		}
 	} else {
-		d.D.LocalAddr, err = net.ResolveTCPAddr("tcp", localAddr)
+		d.LocalAddr, err = net.ResolveTCPAddr("tcp", localAddr)
 		if err != nil {
 			return err
 		}
