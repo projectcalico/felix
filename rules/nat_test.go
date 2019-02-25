@@ -59,7 +59,6 @@ var _ = Describe("NAT", func() {
 
 		//copy struct
 		localConfig := rrConfigNormal
-		localConfig.NATPortRange, _ = numorstring.PortFromRange(99, 100)
 		localConfig.IptablesNATOutgoingInterfaceFilter = "cali-123"
 		renderer = NewRenderer(localConfig)
 
@@ -67,39 +66,11 @@ var _ = Describe("NAT", func() {
 			Name: "cali-nat-outgoing",
 			Rules: []Rule{
 				{
-					Action: MasqAction{ToPorts: "99-100"},
-					Match: Match().
-						SourceIPSet("cali40masq-ipam-pools").
-						NotDestIPSet("cali40all-ipam-pools").Protocol("tcp").
-						OutInterface("cali-123"),
-				},
-				{
-					Action: ReturnAction{},
-					Match: Match().
-						SourceIPSet("cali40masq-ipam-pools").
-						NotDestIPSet("cali40all-ipam-pools").Protocol("tcp").
-						OutInterface("cali-123"),
-				},
-				{
-					Action: MasqAction{ToPorts: "99-100"},
-					Match: Match().
-						SourceIPSet("cali40masq-ipam-pools").
-						NotDestIPSet("cali40all-ipam-pools").Protocol("udp").
-						OutInterface("cali-123"),
-				},
-				{
-					Action: ReturnAction{},
-					Match: Match().
-						SourceIPSet("cali40masq-ipam-pools").
-						NotDestIPSet("cali40all-ipam-pools").Protocol("udp").
-						OutInterface("cali-123"),
-				},
-				{
 					Action: MasqAction{},
 					Match: Match().
-						SourceIPSet("cali40masq-ipam-pools").
-						NotDestIPSet("cali40all-ipam-pools").
-						OutInterface("cali-123"),
+					SourceIPSet("cali40masq-ipam-pools").
+					NotDestIPSet("cali40all-ipam-pools").
+					OutInterface("cali-123"),
 				},
 			},
 		}))
