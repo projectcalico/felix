@@ -16,7 +16,6 @@ package rules_test
 
 import (
 	. "github.com/projectcalico/felix/rules"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
