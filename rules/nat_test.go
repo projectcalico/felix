@@ -67,9 +67,9 @@ var _ = Describe("NAT", func() {
 				{
 					Action: MasqAction{},
 					Match: Match().
-					SourceIPSet("cali40masq-ipam-pools").
-					NotDestIPSet("cali40all-ipam-pools").
-					OutInterface("cali-123"),
+						SourceIPSet("cali40masq-ipam-pools").
+						NotDestIPSet("cali40all-ipam-pools").
+						OutInterface("cali-123"),
 				},
 			},
 		}))
