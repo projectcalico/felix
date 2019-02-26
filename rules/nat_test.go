@@ -54,7 +54,7 @@ var _ = Describe("NAT", func() {
 			},
 		}))
 	})
-	It("should render rules when active with explicit port range", func() {
+	It("should render rules when active with out interface", func() {
 
 		//copy struct
 		localConfig := rrConfigNormal
