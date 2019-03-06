@@ -23,6 +23,9 @@ import:
   subpackages:
   - proto
 - package: github.com/jbenet/go-reuseport
+  version: 8cfd5f2973c8e2476813120b9a516d9a82eb7c7a
+- package: github.com/libp2p/go-reuseport
+  version: 8cfd5f2973c8e2476813120b9a516d9a82eb7c7a
 # go-reuseport pulls in go-log without a pin and master is now incompatible with the
 # version of gogo/protobuf that we are using.  Pin to most recent working master revision.
 - package: github.com/ipfs/go-log
@@ -63,7 +66,7 @@ import:
   - lib/set
   - lib/validator/v1
 - package: github.com/projectcalico/typha
-  version: 7ffa7ba87c09cc26c0c7defbdc05c055b397decf
+  version: 64e26a5e288b6640c60ae298b6bb4caccb4d78ac
   subpackages:
   - pkg/syncclient
   - pkg/tlsutils
