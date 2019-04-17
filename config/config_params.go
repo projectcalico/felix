@@ -229,6 +229,7 @@ type Config struct {
 	GenericXDPEnabled bool `config:"bool;false"`
 
 	SockmapCgroupv2Subdir string `config:"string;;local"`
+	NATOutgoingAddress    net.IP `config:"ipv4;"`
 }
 
 type ProtoPort struct {
