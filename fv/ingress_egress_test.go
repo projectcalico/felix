@@ -44,19 +44,7 @@ var _ = Context("with initialized Felix, etcd datastore, 3 workloads", func() {
 
 	BeforeEach(func() {
 		felix, etcd, client = infrastructure.StartSingleNodeEtcdTopology(infrastructure.DefaultTopologyOptions())
-
-		// Install a default profile that allows workloads with this profile to talk to each
-		// other, in the absence of any Policy.
-		defaultProfile := api.NewProfile()
-		defaultProfile.Name = "default"
-		defaultProfile.Spec.LabelsToApply = map[string]string{"default": ""}
-		defaultProfile.Spec.Egress = []api.Rule{{Action: api.Allow}}
-		defaultProfile.Spec.Ingress = []api.Rule{{
-			Action: api.Allow,
-			Source: api.EntityRule{Selector: "default == ''"},
-		}}
-		_, err := client.Profiles().Create(utils.Ctx, defaultProfile, utils.NoOptions)
-		Expect(err).NotTo(HaveOccurred())
+		infrastructure.CreateDefaultProfile(client, "default", map[string]string{"default": ""}, "default == ''")
 
 		// Create three workloads, using that profile.
 		for ii := range w {
@@ -235,19 +223,7 @@ var _ = Context("with Typha and Felix-Typha TLS", func() {
 		options.WithTypha = true
 		options.WithFelixTyphaTLS = true
 		felix, etcd, client = infrastructure.StartSingleNodeEtcdTopology(options)
-
-		// Install a default profile that allows workloads with this profile to talk to each
-		// other, in the absence of any Policy.
-		defaultProfile := api.NewProfile()
-		defaultProfile.Name = "default"
-		defaultProfile.Spec.LabelsToApply = map[string]string{"default": ""}
-		defaultProfile.Spec.Egress = []api.Rule{{Action: api.Allow}}
-		defaultProfile.Spec.Ingress = []api.Rule{{
-			Action: api.Allow,
-			Source: api.EntityRule{Selector: "default == ''"},
-		}}
-		_, err := client.Profiles().Create(utils.Ctx, defaultProfile, utils.NoOptions)
-		Expect(err).NotTo(HaveOccurred())
+		infrastructure.CreateDefaultProfile(client, "default", map[string]string{"default": ""}, "default == ''")
 
 		// Create three workloads, using that profile.
 		for ii := range w {

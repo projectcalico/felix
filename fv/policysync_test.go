@@ -77,19 +77,7 @@ var _ = Context("policy sync API tests", func() {
 		// options.FelixLogSeverity = "debug"
 		options.ExtraVolumes[tempDir] = "/var/run/calico"
 		felix, etcd, calicoClient = infrastructure.StartSingleNodeEtcdTopology(options)
-
-		// Install a default profile that allows workloads with this profile to talk to each
-		// other, in the absence of any Policy.
-		defaultProfile := api.NewProfile()
-		defaultProfile.Name = "default"
-		defaultProfile.Spec.LabelsToApply = map[string]string{"default": ""}
-		defaultProfile.Spec.Egress = []api.Rule{{Action: api.Allow}}
-		defaultProfile.Spec.Ingress = []api.Rule{{
-			Action: api.Allow,
-			Source: api.EntityRule{Selector: "default == ''"},
-		}}
-		_, err = calicoClient.Profiles().Create(utils.Ctx, defaultProfile, utils.NoOptions)
-		Expect(err).NotTo(HaveOccurred())
+		infrastructure.CreateDefaultProfile(calicoClient, "default", map[string]string{"default": ""}, "default == ''")
 
 		// Create three workloads, using that profile.
 		for ii := range w {
