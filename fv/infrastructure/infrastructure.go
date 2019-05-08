@@ -79,12 +79,17 @@ type DatastoreInfra interface {
 func CreateDefaultProfile(c client.Interface, name string, labels map[string]string, entityRuleSelector string) {
 	d := api.NewProfile()
 	d.Name = name
-	d.Spec.LabelsToApply = labels
+	if labels != nil {
+		d.Spec.LabelsToApply = labels
+	}
 	d.Spec.Egress = []api.Rule{{Action: api.Allow}}
-	d.Spec.Ingress = []api.Rule{{
-		Action: api.Allow,
-		Source: api.EntityRule{Selector: entityRuleSelector},
-	}}
+
+	if len(entityRuleSelector) > 0 {
+		d.Spec.Ingress = []api.Rule{{
+			Action: api.Allow,
+			Source: api.EntityRule{Selector: entityRuleSelector},
+		}}
+	}
 	_, err := c.Profiles().Create(utils.Ctx, d, utils.NoOptions)
 	Expect(err).NotTo(HaveOccurred())
 }

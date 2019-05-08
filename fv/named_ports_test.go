@@ -993,7 +993,7 @@ var _ = Describe("tests with mixed TCP/UDP", func() {
 
 	BeforeEach(func() {
 		felix, etcd, client = infrastructure.StartSingleNodeEtcdTopology(infrastructure.DefaultTopologyOptions())
-		infrastructure.CreateDefaultProfile(client, "open", map[string]string{"default": ""}, "")
+		infrastructure.CreateDefaultProfile(client, "open", nil, "")
 
 		createTarget := func(ip, protocol string) *workload.Workload {
 			// Create target workloads.
