@@ -199,6 +199,7 @@ type Config struct {
 
 	KubeNodePortRanges []numorstring.Port `config:"portrange-list;30000:32767"`
 	NATPortRange       numorstring.Port   `config:"portrange;"`
+	NATOutgoingAddress net.IP             `config:"ipv4;"`
 
 	UsageReportingEnabled          bool          `config:"bool;true"`
 	UsageReportingInitialDelaySecs time.Duration `config:"seconds;300"`
@@ -229,7 +230,6 @@ type Config struct {
 	GenericXDPEnabled bool `config:"bool;false"`
 
 	SockmapCgroupv2Subdir string `config:"string;;local"`
-	NATOutgoingAddress    net.IP `config:"ipv4;"`
 }
 
 type ProtoPort struct {
