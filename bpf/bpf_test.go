@@ -33,8 +33,8 @@ import (
 
 const (
 	// tags of the XDP program, need to be changed if the XDP program changes
-	realTag = "d3b98a39bdd3181e" // as shown by running bpftool prog show
-	mockTag = "fcaaae5bb109d90c" // sha-1 of the ELF object truncated to 16 characters
+	realTag = "b9f0924afa5cb3fe" // as shown by running bpftool prog show
+	mockTag = "b9984a4a5af84b1d" // sha-1 of the ELF object truncated to 16 characters
 )
 
 var (

@@ -48,7 +48,7 @@ int calico_sk_msg(struct sk_msg_md *msg)
 		key.envoy_side = 1;
 	}
 
-	err = msg_redirect_hash(msg, &calico_sock_map, &key, flags);
+	err = bpf_msg_redirect_hash(msg, &calico_sock_map, &key, flags);
 
 	// If the packet couldn't be redirected, pass it to the rest of the
 	// stack.

@@ -1,54 +1,39 @@
-// from kernel headers
-#include <asm/byteorder.h>
+#ifndef _BPF_H
+#define _BPF_H 1
+#include <linux/bpf.h>
 #include <stdint.h>
 #include <endian.h>
 
-#ifndef __section
-# define __section(NAME)                  \
-   __attribute__((section(NAME), used))
+#ifndef __always_inline
+#define __always_inline __attribute__((always_inline))
 #endif
 
-#ifndef __inline
-# define __inline                         \
-   inline __attribute__((always_inline))
+#define __section(s) __attribute__((section(s)))
+
+#define bpf_htons(x) htobe16(x)
+
+#define bpf_htonl(x) htobe32(x)
+
+#define bpf_ntohs(x) be16toh(x)
+
+#define bpf_ntohl(x) be32toh(x)
+
+struct bpf_elf_map;
+
+struct sk_buff;
+
+struct bpf_sock_ops;
+
+struct sk_msg_md;
+
+static void *(*bpf_map_lookup_elem) (struct bpf_elf_map *map, const void *key) = (void *) BPF_FUNC_map_lookup_elem;
+
+static int (*bpf_map_update_elem) (struct bpf_elf_map *map, const void *key, const void *value, __u64 flags) = (void *) BPF_FUNC_map_update_elem;
+
+static int (*bpf_skb_load_bytes) (const struct sk_buff *skb, __u32 offset, void *to, __u32 len) = (void *) BPF_FUNC_skb_load_bytes;
+
+static int (*bpf_sock_hash_update) (struct bpf_sock_ops *skops, struct bpf_elf_map *map, void *key, __u64 flags) = (void *) BPF_FUNC_sock_hash_update;
+
+static int (*bpf_msg_redirect_hash) (struct sk_msg_md *msg, struct bpf_elf_map *map, void *key, __u64 flags) = (void *) BPF_FUNC_msg_redirect_hash;
+
 #endif
-
-#ifndef BPF_FUNC
-# define BPF_FUNC(NAME, ...)              \
-   (*NAME)(__VA_ARGS__) = (void *)BPF_FUNC_##NAME
-#endif
-
-#if __BYTE_ORDER == __LITTLE_ENDIAN
-# define __bpf_ntohs(x)		__builtin_bswap16(x)
-# define __bpf_htons(x)		__builtin_bswap16(x)
-# define __bpf_ntohl(x)		__builtin_bswap32(x)
-# define __bpf_htonl(x)		__builtin_bswap32(x)
-#elif __BYTE_ORDER == __BIG_ENDIAN
-# define __bpf_ntohs(x)		(x)
-# define __bpf_htons(x)		(x)
-# define __bpf_ntohl(x)		(x)
-# define __bpf_htonl(x)		(x)
-#else
-# error "Fix your __BYTE_ORDER?!"
-#endif
-
-#define bpf_htons(x)				\
-	(__builtin_constant_p(x) ?		\
-	 __constant_htons(x) : __bpf_htons(x))
-#define bpf_ntohs(x)				\
-	(__builtin_constant_p(x) ?		\
-	 __constant_ntohs(x) : __bpf_ntohs(x))
-
-#define bpf_htonl(x)				\
-	(__builtin_constant_p(x) ?		\
-	 __constant_htonl(x) : __bpf_htonl(x))
-#define bpf_ntohl(x)				\
-	(__builtin_constant_p(x) ?		\
-	 __constant_ntohl(x) : __bpf_ntohl(x))
-
-static void *BPF_FUNC(map_lookup_elem, void *map, const void *key);
-static int BPF_FUNC(skb_load_bytes, void *ctx, int off, void *to, int len);
-static int BPF_FUNC(map_update_elem, void *map, const void *key,
-		    const void *value, uint32_t flags);
-static int BPF_FUNC(sock_hash_update, struct bpf_sock_ops *skops, void *map, void *key, uint64_t flags);
-static int BPF_FUNC(msg_redirect_hash, struct sk_msg_md *md, void *map, void *key, uint64_t flags);

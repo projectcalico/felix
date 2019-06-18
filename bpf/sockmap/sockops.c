@@ -28,7 +28,7 @@ static inline struct endpoint_info *lookup_endpoint(uint32_t ip)
 	__builtin_memcpy(key.lpm.data, &ip, sizeof(key.addr));
 	key.lpm.prefixlen = 32;
 
-	return map_lookup_elem(&endpoints, &key);
+	return bpf_map_lookup_elem(&endpoints, &key);
 }
 
 static inline int has_endpoint(uint32_t ip)
@@ -36,7 +36,7 @@ static inline int has_endpoint(uint32_t ip)
 	return lookup_endpoint(ip) != NULL;
 }
 
-static inline void bpf_sock_ops_ipv4(struct bpf_sock_ops *skops)
+static inline void sockops_established(struct bpf_sock_ops *skops)
 {
 	struct sock_key key = {};
 	__u32 sip4, dip4, sport, dport;
@@ -85,24 +85,16 @@ static inline void bpf_sock_ops_ipv4(struct bpf_sock_ops *skops)
 		key.envoy_side = 0;
 	}
 
-	sock_hash_update(skops, &calico_sock_map, &key, BPF_ANY);
+	bpf_sock_hash_update(skops, &calico_sock_map, &key, BPF_ANY);
 }
 
 __section("sockops")
 int calico_sockops(struct bpf_sock_ops *skops)
 {
-	__u32 family, op;
-
-	family = skops->family;
-	op = skops->op;
-
-	switch (op) {
-	case BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB:
-	case BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB:
-			bpf_sock_ops_ipv4(skops);
-		break;
-	default:
-		break;
+	if (skops->family == AF_INET &&
+	    (skops->op == BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB ||
+	     skops->op == BPF_SOCK_OPS_PASSIVE_ESTABLISHED_CB)) {
+		sockops_established(skops);
 	}
 
 	return 0;
