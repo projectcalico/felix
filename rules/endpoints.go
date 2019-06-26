@@ -308,7 +308,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		},
 	})
 
-	if dropEncap && chainType == chainTypeNormal {
+	if dropEncap {
 		rules = append(rules, Rule{
 			Match: Match().ProtocolNum(ProtoUDP).
 				DestPorts(uint16(r.Config.VXLANPort)).
