@@ -204,9 +204,8 @@ var _ = infrastructure.DatastoreDescribe("VXLAN topology before adding host IPs 
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			// Create a deny-all policy which applies to our host endpoints.
 			policy := api.NewGlobalNetworkPolicy()
-			policy.Name = "deny-between-hosts"
+			policy.Name = "allow-all-prednat"
 			order := float64(20)
 			policy.Spec.Order = &order
 			policy.Spec.PreDNAT = true
