@@ -138,8 +138,8 @@ func chainsForIfaces(ifaceMetadata []string,
 	const (
 		ProtoUDP  = 17
 		ProtoIPIP = 4
-		VXLANPort = 0
-		VXLANVNI  = 0
+		VXLANPort = 4789
+		VXLANVNI  = 4096
 	)
 
 	log.WithFields(log.Fields{
@@ -257,8 +257,9 @@ func chainsForIfaces(ifaceMetadata []string,
 			Match:  iptables.Match(),
 			Action: iptables.ClearMarkAction{Mark: 8},
 		})
-		outRules = append(outRules, dropEncapRules...)
-
+		if !host {
+			outRules = append(outRules, dropEncapRules...)
+		}
 		if egress && polName != "" && tableKind == ifaceKind {
 			outRules = append(outRules, iptables.Rule{
 				Match:   iptables.Match(),
@@ -337,8 +338,6 @@ func chainsForIfaces(ifaceMetadata []string,
 			Match:  iptables.Match(),
 			Action: iptables.ClearMarkAction{Mark: 8},
 		})
-		inRules = append(inRules, dropEncapRules...)
-
 		if ingress && polName != "" && tableKind == ifaceKind {
 			inRules = append(inRules, iptables.Rule{
 				Match:   iptables.Match(),
@@ -632,6 +631,8 @@ func endpointManagerTests(ipVersion uint8) func() {
 				IptablesMarkNonCaliEndpoint: 0x0100,
 				KubeIPVSSupportEnabled:      true,
 				WorkloadIfacePrefixes:       []string{"cali", "tap"},
+				VXLANPort:                   4789,
+				VXLANVNI:                    4096,
 			}
 			eth0Addrs = set.New()
 			eth0Addrs.Add(ipv4)
