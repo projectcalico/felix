@@ -30,8 +30,8 @@ var _ = Describe("Endpoints", func() {
 	const (
 		ProtoUDP  = 17
 		ProtoIPIP = 4
-		VXLANPort = 0
-		VXLANVNI  = 0
+		VXLANPort = 4789
+		VXLANVNI  = 4096
 	)
 
 	for _, trueOrFalse := range []bool{true, false} {
@@ -49,6 +49,8 @@ var _ = Describe("Endpoints", func() {
 			IptablesMarkNonCaliEndpoint: 0x0100,
 			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
 			IptablesMangleAllowAction:   "RETURN",
+			VXLANPort:                   4789,
+			VXLANVNI:                    4096,
 		}
 
 		var rrConfigConntrackDisabledReturnAction = Config{
@@ -65,6 +67,8 @@ var _ = Describe("Endpoints", func() {
 			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
 			DisableConntrackInvalid:     true,
 			IptablesFilterAllowAction:   "RETURN",
+			VXLANPort:                   4789,
+			VXLANVNI:                    4096,
 		}
 
 		var renderer RuleRenderer
@@ -107,8 +111,6 @@ var _ = Describe("Endpoints", func() {
 								Action: DropAction{}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 							{Action: DropAction{},
 								Comment: "Drop if no profiles matched"},
 						},
@@ -188,8 +190,6 @@ var _ = Describe("Endpoints", func() {
 								Action: DropAction{}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Comment: "Start of policies",
 								Action: ClearMarkAction{Mark: 0x10}},
@@ -290,8 +290,6 @@ var _ = Describe("Endpoints", func() {
 							{Action: JumpAction{Target: "cali-failsafe-out"}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Comment: "Start of policies",
 								Action: ClearMarkAction{Mark: 0x10}},
@@ -335,8 +333,6 @@ var _ = Describe("Endpoints", func() {
 							{Action: JumpAction{Target: "cali-failsafe-in"}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Comment: "Start of policies",
 								Action: ClearMarkAction{Mark: 0x10}},
@@ -377,8 +373,6 @@ var _ = Describe("Endpoints", func() {
 								Action: DropAction{}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Comment: "Start of policies",
 								Action: ClearMarkAction{Mark: 0x10}},
@@ -407,8 +401,6 @@ var _ = Describe("Endpoints", func() {
 								Action: DropAction{}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Comment: "Start of policies",
 								Action: ClearMarkAction{Mark: 0x10}},
@@ -445,8 +437,6 @@ var _ = Describe("Endpoints", func() {
 							{Action: JumpAction{Target: "cali-failsafe-out"}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Comment: "Start of policies",
 								Action: ClearMarkAction{Mark: 0x10}},
@@ -469,8 +459,6 @@ var _ = Describe("Endpoints", func() {
 							{Action: JumpAction{Target: "cali-failsafe-in"}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Comment: "Start of policies",
 								Action: ClearMarkAction{Mark: 0x10}},
@@ -509,8 +497,6 @@ var _ = Describe("Endpoints", func() {
 							{Action: JumpAction{Target: "cali-failsafe-in"}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Comment: "Start of policies",
 								Action: ClearMarkAction{Mark: 0x10}},
@@ -553,8 +539,6 @@ var _ = Describe("Endpoints", func() {
 								Action: ReturnAction{}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Action: DropAction{},
 								Comment: "Drop if no profiles matched"},
@@ -602,8 +586,6 @@ var _ = Describe("Endpoints", func() {
 							{Action: JumpAction{Target: "cali-failsafe-in"}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							dropVXLANRule,
-							dropIPIPRule,
 
 							{Comment: "Start of policies",
 								Action: ClearMarkAction{Mark: 0x10}},
