@@ -138,8 +138,6 @@ func chainsForIfaces(ifaceMetadata []string,
 	const (
 		ProtoUDP  = 17
 		ProtoIPIP = 4
-		VXLANPort = 4789
-		VXLANVNI  = 4096
 	)
 
 	log.WithFields(log.Fields{
@@ -611,8 +609,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 				IptablesMarkNonCaliEndpoint: 0x0100,
 				KubeIPVSSupportEnabled:      true,
 				WorkloadIfacePrefixes:       []string{"cali", "tap"},
-				VXLANPort:                   4789,
-				VXLANVNI:                    4096,
 			}
 			eth0Addrs = set.New()
 			eth0Addrs.Add(ipv4)

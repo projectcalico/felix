@@ -30,8 +30,6 @@ var _ = Describe("Endpoints", func() {
 	const (
 		ProtoUDP  = 17
 		ProtoIPIP = 4
-		VXLANPort = 4789
-		VXLANVNI  = 4096
 	)
 
 	for _, trueOrFalse := range []bool{true, false} {
@@ -49,8 +47,6 @@ var _ = Describe("Endpoints", func() {
 			IptablesMarkNonCaliEndpoint: 0x0100,
 			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
 			IptablesMangleAllowAction:   "RETURN",
-			VXLANPort:                   4789,
-			VXLANVNI:                    4096,
 		}
 
 		var rrConfigConntrackDisabledReturnAction = Config{
@@ -67,8 +63,6 @@ var _ = Describe("Endpoints", func() {
 			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
 			DisableConntrackInvalid:     true,
 			IptablesFilterAllowAction:   "RETURN",
-			VXLANPort:                   4789,
-			VXLANVNI:                    4096,
 		}
 
 		var renderer RuleRenderer
