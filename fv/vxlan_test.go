@@ -43,8 +43,8 @@ var _ = infrastructure.DatastoreDescribe("VXLAN topology before adding host IPs 
 		infra   infrastructure.DatastoreInfra
 		felixes []*infrastructure.Felix
 		client  client.Interface
-		w       [2]*workload.Workload
-		hostW   [2]*workload.Workload
+		w       [3]*workload.Workload
+		hostW   [3]*workload.Workload
 		cc      *workload.ConnectivityChecker
 	)
 
@@ -53,7 +53,7 @@ var _ = infrastructure.DatastoreDescribe("VXLAN topology before adding host IPs 
 		topologyOptions := infrastructure.DefaultTopologyOptions()
 		topologyOptions.VXLANEnabled = true
 		topologyOptions.IPIPEnabled = false
-		felixes, client = infrastructure.StartNNodeTopology(2, topologyOptions, infra)
+		felixes, client = infrastructure.StartNNodeTopology(3, topologyOptions, infra)
 
 		// Install a default profile that allows all ingress and egress, in the absence of any Policy.
 		infra.AddDefaultAllow()
