@@ -40,7 +40,7 @@ func newMockDataplane(table string, chains map[string][]string, dataplaneMode st
 		FlushedChains: set.New(),
 		ChainMods:     set.New(),
 		DeletedChains: set.New(),
-		Version:       "iptables v1.5.9\n",
+		Version:       "iptables v1.8.2\n",
 		KernelVersion: "Linux version 4.15.0-34-generic (buildd@lgw01-amd64-037) (gcc version 5.4.0 20160609 " +
 			"(Ubuntu 5.4.0-6ubuntu1~16.04.10)) #37~16.04.1-Ubuntu SMP Tue Aug 28 10:44:06 UTC 2018",
 		NftablesMode: dataplaneMode == "nft",
@@ -101,7 +101,7 @@ func (d *mockDataplane) newCmd(name string, arg ...string) CmdIface {
 	var cmd CmdIface
 	d.CmdNames = append(d.CmdNames, name)
 
-	if d.NftablesMode && name != "iptables" {
+	if d.NftablesMode {
 		Expect(name).To(ContainSubstring("-nft"))
 	}
 
@@ -109,7 +109,7 @@ func (d *mockDataplane) newCmd(name string, arg ...string) CmdIface {
 	case "iptables-restore", "ip6tables-restore",
 		"iptables-legacy-restore", "ip6tables-legacy-restore",
 		"iptables-nft-restore", "ip6tables-nft-restore":
-		Expect(arg).To(Equal([]string{"--noflush", "--verbose"}))
+		Expect(arg).To(Equal([]string{"--noflush", "--verbose", "--wait", "10", "--wait-interval", "1000"}))
 		cmd = &restoreCmd{
 			Dataplane: d,
 		}
@@ -120,10 +120,11 @@ func (d *mockDataplane) newCmd(name string, arg ...string) CmdIface {
 		cmd = &saveCmd{
 			Dataplane: d,
 		}
-	case "iptables":
+	case "iptables", "iptables-nft", "iptables-legacy":
 		Expect(arg).To(Equal([]string{"--version"}))
 		cmd = &versionCmd{
 			Dataplane: d,
+			Nftables:  strings.Contains(name, "nft"),
 		}
 	default:
 		Fail(fmt.Sprintf("Unexpected command %v", name))
@@ -470,6 +471,7 @@ func (d *saveCmd) Run() error {
 
 type versionCmd struct {
 	Dataplane *mockDataplane
+	Nftables  bool
 }
 
 func (d *versionCmd) String() string {
@@ -510,6 +512,10 @@ func (d *versionCmd) Output() ([]byte, error) {
 	if d.Dataplane.FailNextVersion {
 		d.Dataplane.FailNextVersion = false
 		return nil, errors.New("Simulated failure")
+	}
+
+	if d.Nftables {
+		return []byte(strings.Replace(d.Dataplane.Version, "\n", " (nf_tables)", 1)), nil
 	}
 
 	return []byte(d.Dataplane.Version), nil

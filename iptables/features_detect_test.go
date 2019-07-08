@@ -102,12 +102,42 @@ func TestFeatureDetection(t *testing.T) {
 				MASQFullyRandom:     false,
 			},
 		},
+		{
+			"iptables v1.8.2 (legacy)",
+			"error",
+			Features{
+				RestoreSupportsLock: true,
+				SNATFullyRandom:     false,
+				MASQFullyRandom:     false,
+			},
+		},
+		{
+			"iptables v1.8.2 (nf_tables)",
+			"error",
+			Features{
+				RestoreSupportsLock:          true,
+				SNATFullyRandom:              false,
+				MASQFullyRandom:              false,
+				IptablesRestoreHasReplaceBug: true,
+			},
+		},
+		{
+			"iptables v1.8.2 (legacy)",
+			"error",
+			Features{
+				RestoreSupportsLock:          true,
+				SNATFullyRandom:              false,
+				MASQFullyRandom:              false,
+				IptablesRestoreHasReplaceBug: false,
+			},
+		},
 	} {
 		tst := tst
 		t.Run("iptables version "+tst.iptablesVersion+" kernel "+tst.kernelVersion, func(t *testing.T) {
 			RegisterTestingT(t)
 			dataplane := newMockDataplane("filter", map[string][]string{}, "legacy")
-			featureDetector := NewFeatureDetector()
+			featureDetector := NewFeatureDetector("nft")
+			featureDetector.LookPath = lookPathAll
 			featureDetector.NewCmd = dataplane.newCmd
 			featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 

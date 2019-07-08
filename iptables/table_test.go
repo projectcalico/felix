@@ -43,7 +43,8 @@ var _ = Describe("Table with an empty dataplane (legacy)", func() {
 			"OUTPUT":  {},
 		}, "legacy")
 		iptLock := &mockMutex{}
-		featureDetector := NewFeatureDetector()
+		featureDetector := NewFeatureDetector("legacy")
+		featureDetector.LookPath = lookPathAll
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table := NewTable(
@@ -57,8 +58,6 @@ var _ = Describe("Table with an empty dataplane (legacy)", func() {
 				NewCmdOverride:        dataplane.newCmd,
 				SleepOverride:         dataplane.sleep,
 				NowOverride:           dataplane.now,
-				BackendMode:           "legacy",
-				LookPathOverride:      lookPathAll,
 			},
 		)
 
@@ -66,7 +65,7 @@ var _ = Describe("Table with an empty dataplane (legacy)", func() {
 			{Action: DropAction{}},
 		})
 		table.Apply()
-		Expect(dataplane.CmdNames).To(ConsistOf("iptables", "iptables-legacy-save", "iptables-legacy-restore"))
+		Expect(dataplane.CmdNames).To(ConsistOf("iptables-legacy", "iptables-legacy-save", "iptables-legacy-restore"))
 	})
 })
 
@@ -82,7 +81,8 @@ func describeEmptyDataplaneTests(dataplaneMode string) {
 			"OUTPUT":  {},
 		}, dataplaneMode)
 		iptLock = &mockMutex{}
-		featureDetector = NewFeatureDetector()
+		featureDetector := NewFeatureDetector(dataplaneMode)
+		featureDetector.LookPath = lookPathNoLegacy
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table = NewTable(
@@ -96,8 +96,6 @@ func describeEmptyDataplaneTests(dataplaneMode string) {
 				NewCmdOverride:        dataplane.newCmd,
 				SleepOverride:         dataplane.sleep,
 				NowOverride:           dataplane.now,
-				BackendMode:           dataplaneMode,
-				LookPathOverride:      lookPathNoLegacy,
 			},
 		)
 	})
@@ -108,7 +106,7 @@ func describeEmptyDataplaneTests(dataplaneMode string) {
 		// Should only load, since there's nothing to so.
 		if dataplaneMode == "nft" {
 			Expect(dataplane.CmdNames).To(Equal([]string{
-				"iptables",
+				"iptables-nft",
 				"iptables-nft-save",
 			}))
 		} else {
@@ -136,7 +134,7 @@ func describeEmptyDataplaneTests(dataplaneMode string) {
 		table.Apply()
 		if dataplaneMode == "nft" {
 			Expect(dataplane.CmdNames).To(Equal([]string{
-				"iptables",
+				"iptables-nft",
 				"iptables-nft-save",
 				"iptables-nft-restore",
 			}))
@@ -170,8 +168,6 @@ func describeEmptyDataplaneTests(dataplaneMode string) {
 					NewCmdOverride:        dataplane.newCmd,
 					SleepOverride:         dataplane.sleep,
 					InsertMode:            "unknown",
-					BackendMode:           dataplaneMode,
-					LookPathOverride:      lookPathAll,
 				},
 			)
 		}).To(Panic())
@@ -210,7 +206,7 @@ func describeEmptyDataplaneTests(dataplaneMode string) {
 			}))
 			// Should do a save but then figure out that there's nothing to do
 			if dataplaneMode == "nft" {
-				Expect(dataplane.CmdNames).To(ConsistOf("iptables", "iptables-nft-save"))
+				Expect(dataplane.CmdNames).To(ConsistOf("iptables-nft", "iptables-nft-save"))
 			} else {
 				Expect(dataplane.CmdNames).To(ConsistOf("iptables", "iptables-save"))
 			}
@@ -379,7 +375,7 @@ func describeEmptyDataplaneTests(dataplaneMode string) {
 				table.Apply()
 				// Should do a save but then figure out that there's nothing to do
 				if dataplaneMode == "nft" {
-					Expect(dataplane.CmdNames).To(ConsistOf("iptables", "iptables-nft-save"))
+					Expect(dataplane.CmdNames).To(ConsistOf("iptables-nft", "iptables-nft-save"))
 				} else {
 					Expect(dataplane.CmdNames).To(ConsistOf("iptables", "iptables-save"))
 				}
@@ -513,13 +509,12 @@ func describePostUpdateCheckTests(enableRefresh bool, dataplaneMode string) {
 			NewCmdOverride:        dataplane.newCmd,
 			SleepOverride:         dataplane.sleep,
 			NowOverride:           dataplane.now,
-			BackendMode:           dataplaneMode,
-			LookPathOverride:      lookPathNoLegacy,
 		}
 		if enableRefresh {
 			options.RefreshInterval = 30 * time.Second
 		}
-		featureDetector := NewFeatureDetector()
+		featureDetector := NewFeatureDetector(dataplaneMode)
+		featureDetector.LookPath = lookPathNoLegacy
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table = NewTable(
@@ -545,7 +540,7 @@ func describePostUpdateCheckTests(enableRefresh bool, dataplaneMode string) {
 	}
 	assertRecheck := func() {
 		if dataplaneMode == "nft" {
-			Expect(dataplane.CmdNames).To(ConsistOf("iptables", "iptables-nft-save"))
+			Expect(dataplane.CmdNames).To(ConsistOf("iptables-nft", "iptables-nft-save"))
 		} else {
 			Expect(dataplane.CmdNames).To(ConsistOf("iptables", "iptables-save"))
 		}
@@ -722,7 +717,8 @@ func describeDirtyDataplaneTests(appendMode bool, dataplaneMode string) {
 		if appendMode {
 			insertMode = "append"
 		}
-		featureDetector := NewFeatureDetector()
+		featureDetector := NewFeatureDetector(dataplaneMode)
+		featureDetector.LookPath = lookPathNoLegacy
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table = NewTable(
@@ -737,8 +733,6 @@ func describeDirtyDataplaneTests(appendMode bool, dataplaneMode string) {
 				NewCmdOverride:           dataplane.newCmd,
 				SleepOverride:            dataplane.sleep,
 				InsertMode:               insertMode,
-				BackendMode:              dataplaneMode,
-				LookPathOverride:         lookPathNoLegacy,
 			},
 		)
 	})
@@ -1119,7 +1113,8 @@ func describeInsertAndNonCalicoChainTests(dataplaneMode string) {
 			"non-calico": {"-m comment \"foo\""},
 		}, dataplaneMode)
 		iptLock = &mockMutex{}
-		featureDetector := NewFeatureDetector()
+		featureDetector := NewFeatureDetector(dataplaneMode)
+		featureDetector.LookPath = lookPathNoLegacy
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table = NewTable(
@@ -1133,8 +1128,6 @@ func describeInsertAndNonCalicoChainTests(dataplaneMode string) {
 				NewCmdOverride:        dataplane.newCmd,
 				SleepOverride:         dataplane.sleep,
 				NowOverride:           dataplane.now,
-				BackendMode:           dataplaneMode,
-				LookPathOverride:      lookPathNoLegacy,
 			},
 		)
 		table.SetRuleInsertions("FORWARD", []Rule{

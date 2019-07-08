@@ -69,7 +69,7 @@ var _ = Describe("Hash extraction tests", func() {
 	var table *Table
 
 	BeforeEach(func() {
-		fd := NewFeatureDetector()
+		fd := NewFeatureDetector("legacy")
 		fd.GetKernelVersionReader = func() (io.Reader, error) {
 			return nil, errors.New("not implemented")
 		}
@@ -85,10 +85,6 @@ var _ = Describe("Hash extraction tests", func() {
 			TableOptions{
 				HistoricChainPrefixes:    []string{"felix-", "cali"},
 				ExtraCleanupRegexPattern: "an-old-rule",
-				BackendMode:              "legacy",
-				LookPathOverride: func(file string) (s string, e error) {
-					return s, nil
-				},
 			},
 		)
 	})

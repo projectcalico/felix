@@ -16,10 +16,12 @@ package iptables
 
 import (
 	"io"
+	"os/exec"
 	"regexp"
+	"strings"
 	"sync"
 
-	version "github.com/hashicorp/go-version"
+	"github.com/hashicorp/go-version"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/felix/versionparse"
@@ -36,6 +38,8 @@ var (
 	v1Dot6Dot0 = versionparse.MustParseVersion("1.6.0")
 	// v1Dot6Dot2 added --random-fully to MASQUERADE and the xtables lock to iptables-restore.
 	v1Dot6Dot2 = versionparse.MustParseVersion("1.6.2")
+	// v1Dot8Dot2 and earlier has a bug with -R in nftables mode.
+	v1Dot8Dot2 = versionparse.MustParseVersion("1.8.2")
 
 	// Linux kernel versions:
 	// v3Dot10Dot0 is the oldest version we support at time of writing.
@@ -52,6 +56,9 @@ type Features struct {
 	// RestoreSupportsLock is true if the iptables-restore command supports taking the xtables lock and the
 	// associated -w and -W arguments.
 	RestoreSupportsLock bool
+	// IptablesRestoreHasReplaceBug is true if iptables-restore mishandles the replace ("-R") command.
+	// When in nftables mode, v1.8.2 and before end up replacing the wrong rule.
+	IptablesRestoreHasReplaceBug bool
 }
 
 type FeatureDetector struct {
@@ -61,13 +68,17 @@ type FeatureDetector struct {
 	// Path to file with kernel version
 	GetKernelVersionReader func() (io.Reader, error)
 	// Factory for making commands, used by UTs to shim exec.Command().
-	NewCmd cmdFactory
+	NewCmd      cmdFactory
+	LookPath    func(file string) (string, error)
+	backendMode string
 }
 
-func NewFeatureDetector() *FeatureDetector {
+func NewFeatureDetector(iptablesBackend string) *FeatureDetector {
 	return &FeatureDetector{
 		GetKernelVersionReader: versionparse.GetKernelVersionReader,
 		NewCmd:                 newRealCmd,
+		LookPath:               exec.LookPath,
+		backendMode:            iptablesBackend,
 	}
 }
 
@@ -92,14 +103,15 @@ func (d *FeatureDetector) RefreshFeatures() {
 func (d *FeatureDetector) refreshFeaturesLockHeld() {
 	// Get the versions.  If we fail to detect a version for some reason, we use a safe default.
 	log.Debug("Refreshing detected iptables features")
-	iptV := d.getIptablesVersion()
+	iptV, iptMode := d.getIptablesVersion()
 	kerV := d.getKernelVersion()
 
 	// Calculate the features.
 	features := Features{
-		SNATFullyRandom:     iptV.Compare(v1Dot6Dot0) >= 0 && kerV.Compare(v3Dot14Dot0) >= 0,
-		MASQFullyRandom:     iptV.Compare(v1Dot6Dot2) >= 0 && kerV.Compare(v3Dot14Dot0) >= 0,
-		RestoreSupportsLock: iptV.Compare(v1Dot6Dot2) >= 0,
+		SNATFullyRandom:              iptV.Compare(v1Dot6Dot0) >= 0 && kerV.Compare(v3Dot14Dot0) >= 0,
+		MASQFullyRandom:              iptV.Compare(v1Dot6Dot2) >= 0 && kerV.Compare(v3Dot14Dot0) >= 0,
+		RestoreSupportsLock:          iptV.Compare(v1Dot6Dot2) >= 0,
+		IptablesRestoreHasReplaceBug: iptMode == "nft" && iptV.Compare(v1Dot8Dot2) <= 0,
 	}
 
 	if d.featureCache == nil || *d.featureCache != features {
@@ -112,12 +124,12 @@ func (d *FeatureDetector) refreshFeaturesLockHeld() {
 	}
 }
 
-func (d *FeatureDetector) getIptablesVersion() *version.Version {
-	cmd := d.NewCmd("iptables", "--version")
+func (d *FeatureDetector) getIptablesVersion() (*version.Version, string) {
+	cmd := d.NewCmd(d.FindBestBinary(4, ""), "--version")
 	out, err := cmd.Output()
 	if err != nil {
 		log.WithError(err).Warn("Failed to get iptables version, assuming old version with no optional features")
-		return v1Dot4Dot7
+		return v1Dot4Dot7, "legacy"
 	}
 	s := string(out)
 	log.WithField("rawVersion", s).Debug("Ran iptables --version")
@@ -125,16 +137,26 @@ func (d *FeatureDetector) getIptablesVersion() *version.Version {
 	if len(matches) == 0 {
 		log.WithField("rawVersion", s).Warn(
 			"Failed to parse iptables version, assuming old version with no optional features")
-		return v1Dot4Dot7
+		return v1Dot4Dot7, "legacy"
 	}
 	parsedVersion, err := version.NewVersion(matches[1])
 	if err != nil {
 		log.WithField("rawVersion", s).WithError(err).Warn(
 			"Failed to parse iptables version, assuming old version with no optional features")
-		return v1Dot4Dot7
+		return v1Dot4Dot7, "legacy"
 	}
-	log.WithField("version", parsedVersion).Debug("Parsed iptables version")
-	return parsedVersion
+
+	mode := "legacy"
+	if strings.Contains(s, "nf_tables") {
+		mode = "nft"
+	}
+
+	log.WithFields(log.Fields{
+		"version": parsedVersion,
+		"mode":    mode,
+	}).Debug("Parsed iptables version")
+
+	return parsedVersion, mode
 }
 
 func (d *FeatureDetector) getKernelVersion() *version.Version {
@@ -149,4 +171,44 @@ func (d *FeatureDetector) getKernelVersion() *version.Version {
 		return v3Dot10Dot0
 	}
 	return kernVersion
+}
+
+// FindBestBinary tries to find an iptables binary for the configured variant (legacy/nftables mode) and returns the
+// name of the binary.  Falls back on iptables/iptables-restore/iptables-save if the specific variant isn't available.
+// Panics if no binary can be found.
+func (d *FeatureDetector) FindBestBinary(ipVersion uint8, saveOrRestore string) string {
+	verInfix := ""
+
+	if ipVersion == 6 {
+		verInfix = "6"
+	}
+
+	candidates := []string{
+		"ip" + verInfix + "tables-" + d.backendMode,
+		"ip" + verInfix + "tables",
+	}
+
+	if saveOrRestore != "" {
+		for i := range candidates {
+			candidates[i] += "-" + saveOrRestore
+		}
+	}
+
+	logCxt := log.WithFields(log.Fields{
+		"ipVersion":     ipVersion,
+		"backendMode":   d.backendMode,
+		"saveOrRestore": saveOrRestore,
+		"candidates":    candidates,
+	})
+
+	for _, candidate := range candidates {
+		_, err := d.LookPath(candidate)
+		if err == nil {
+			logCxt.WithField("command", candidate).Info("Looked up iptables command")
+			return candidate
+		}
+	}
+
+	logCxt.Panic("Failed to find iptables command")
+	return ""
 }

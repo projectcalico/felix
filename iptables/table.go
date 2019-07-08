@@ -216,7 +216,6 @@ type Table struct {
 	oldInsertRegexp *regexp.Regexp
 
 	// nftablesMode should be set to true if iptables is using the nftables backend.
-	nftablesMode       bool
 	iptablesRestoreCmd string
 	iptablesSaveCmd    string
 
@@ -255,14 +254,11 @@ type Table struct {
 	// Shims for time.XXX functions:
 	timeSleep func(d time.Duration)
 	timeNow   func() time.Time
-	// lookPath is a shim for exec.LookPath.
-	lookPath func(file string) (string, error)
 }
 
 type TableOptions struct {
 	HistoricChainPrefixes    []string
 	ExtraCleanupRegexPattern string
-	BackendMode              string
 	InsertMode               string
 	RefreshInterval          time.Duration
 	PostWriteInterval        time.Duration
@@ -278,8 +274,6 @@ type TableOptions struct {
 	SleepOverride func(d time.Duration)
 	// NowOverride for tests, if non-nil, replacement for time.Now()
 	NowOverride func() time.Time
-	// LookPathOverride for tests, if non-nil, replacement for exec.LookPath()
-	LookPathOverride func(file string) (string, error)
 }
 
 func NewTable(
@@ -348,11 +342,11 @@ func NewTable(
 	if options.NowOverride != nil {
 		now = options.NowOverride
 	}
-	lookPath := exec.LookPath
-	if options.LookPathOverride != nil {
-		lookPath = options.LookPathOverride
-	}
 
+	lockProbeInterval := options.LockProbeInterval
+	if lockProbeInterval <= 0 {
+		lockProbeInterval = time.Millisecond
+	}
 	table := &Table{
 		Name:                   name,
 		IPVersion:              ipVersion,
@@ -385,12 +379,11 @@ func NewTable(
 		calicoXtablesLock: iptablesWriteLock,
 
 		lockTimeout:       options.LockTimeout,
-		lockProbeInterval: options.LockProbeInterval,
+		lockProbeInterval: lockProbeInterval,
 
 		newCmd:    newCmd,
 		timeSleep: sleep,
 		timeNow:   now,
-		lookPath:  lookPath,
 
 		gaugeNumChains:        gaugeNumChains.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
 		gaugeNumRules:         gaugeNumRules.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
@@ -398,51 +391,10 @@ func NewTable(
 	}
 	table.restoreInputBuffer.NumLinesWritten = table.countNumLinesExecuted
 
-	iptablesVariant := strings.ToLower(options.BackendMode)
-	if iptablesVariant == "" {
-		iptablesVariant = "legacy"
-	}
-	if iptablesVariant == "nft" {
-		log.Info("Enabling iptables-in-nftables-mode workarounds.")
-		table.nftablesMode = true
-	}
-
-	table.iptablesRestoreCmd = table.findBestBinary(ipVersion, iptablesVariant, "restore")
-	table.iptablesSaveCmd = table.findBestBinary(ipVersion, iptablesVariant, "save")
+	table.iptablesRestoreCmd = detector.FindBestBinary(ipVersion, "restore")
+	table.iptablesSaveCmd = detector.FindBestBinary(ipVersion, "save")
 
 	return table
-}
-
-// findBestBinary tries to find an iptables binary for the specific variant (legacy/nftables mode) and returns the name
-// of the binary.  Falls back on iptables-restore/iptables-save if the specific variant isn't available.
-// Panics if no binary can be found.
-func (t *Table) findBestBinary(ipVersion uint8, backendMode, saveOrRestore string) string {
-	verInfix := ""
-	if ipVersion == 6 {
-		verInfix = "6"
-	}
-	candidates := []string{
-		"ip" + verInfix + "tables-" + backendMode + "-" + saveOrRestore,
-		"ip" + verInfix + "tables-" + saveOrRestore,
-	}
-
-	logCxt := log.WithFields(log.Fields{
-		"ipVersion":     ipVersion,
-		"backendMode":   backendMode,
-		"saveOrRestore": saveOrRestore,
-		"candidates":    candidates,
-	})
-
-	for _, candidate := range candidates {
-		_, err := t.lookPath(candidate)
-		if err == nil {
-			logCxt.WithField("command", candidate).Info("Looked up iptables command")
-			return candidate
-		}
-	}
-
-	logCxt.Panic("Failed to find iptables command")
-	return ""
 }
 
 func (t *Table) SetRuleInsertions(chainName string, rules []Rule) {
@@ -905,7 +857,7 @@ func (t *Table) applyUpdates() error {
 	t.dirtyChains.Iter(func(item interface{}) error {
 		chainName := item.(string)
 		chainNeedsToBeFlushed := false
-		if t.nftablesMode {
+		if features.IptablesRestoreHasReplaceBug {
 			// iptables-nft-restore <v1.8.3 has a bug (https://bugzilla.netfilter.org/show_bug.cgi?id=1348)
 			// where only the first replace command sets the rule index.  Work around that by refreshing the
 			// whole chain using a flush.
@@ -943,7 +895,7 @@ func (t *Table) applyUpdates() error {
 			// Chain update or creation.  Scan the chain against its previous hashes
 			// and replace/append/delete as appropriate.
 			var previousHashes []string
-			if t.nftablesMode {
+			if features.IptablesRestoreHasReplaceBug {
 				// Due to a bug in iptables nft mode, force a whole-chain rewrite.  (See above.)
 				previousHashes = nil
 			} else {
@@ -1028,25 +980,6 @@ func (t *Table) applyUpdates() error {
 
 		return nil // Delay clearing the set until we've programmed iptables.
 	})
-
-	if t.nftablesMode {
-		// The nftables version of iptables-restore requires that chains are unreferenced at the start of the
-		// transaction before they can be deleted (i.e. it doesn't seem to update the reference calculation as
-		// rules are deleted).  Close the current transaction and open a new one for the deletions in order to
-		// refresh its state.  The buffer will discard a no-op transaction so we don't need to check.
-		t.logCxt.Debug("In nftables mode, restarting transaction between updates and deletions.")
-		buf.EndTransaction()
-		buf.StartTransaction(t.Name)
-
-		t.dirtyChains.Iter(func(item interface{}) error {
-			chainName := item.(string)
-			if _, ok := t.chainNameToChain[chainName]; !ok {
-				// Chain deletion
-				buf.WriteForwardReference(chainName)
-			}
-			return nil // Delay clearing the set until we've programmed iptables.
-		})
-	}
 
 	// Do deletions at the end.  This ensures that we don't try to delete any chains that
 	// are still referenced (because we'll have removed the references in the modify pass
