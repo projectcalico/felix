@@ -15,6 +15,7 @@
 package config_test
 
 import (
+	"github.com/projectcalico/felix/testutils"
 	"regexp"
 
 	. "github.com/projectcalico/felix/config"
@@ -424,6 +425,30 @@ var _ = Describe("DatastoreConfig tests", func() {
 		})
 		It("should leave node polling enabled", func() {
 			Expect(c.DatastoreConfig().Spec.K8sDisableNodePoll).To(BeTrue())
+		})
+	})
+	Describe("with DatastoreType set to etcd, felix configuration doesn't set DatastoreType but sets etcd configuration", func() {
+		BeforeEach(func() {
+			c = New()
+
+			c.UpdateFrom(map[string]string{
+				"EtcdEndpoints": "http://localhost:1234",
+				"EtcdKeyFile": testutils.TestDataFile("etcdkeyfile.key"),
+				"EtcdCertFile": testutils.TestDataFile("etcdcertfile.cert"),
+				"EtcdCaFile": testutils.TestDataFile("etcdcacertfile.cert"),
+			}, ConfigFile)
+
+			if c.Err != nil {
+				Fail(c.Err.Error())
+			}
+
+			c.DatastoreType = "etcdv3"
+		})
+		It("should set the EtcdKeyFile in the spec", func() {
+			Expect(c.DatastoreConfig().Spec.EtcdEndpoints).To(Equal("http://localhost:1234/"))
+			Expect(c.DatastoreConfig().Spec.EtcdKeyFile).To(Equal(testutils.TestDataFile("etcdkeyfile.key")))
+			Expect(c.DatastoreConfig().Spec.EtcdCertFile).To(Equal(testutils.TestDataFile("etcdcertfile.cert")))
+			Expect(c.DatastoreConfig().Spec.EtcdCACertFile).To(Equal(testutils.TestDataFile("etcdcacertfile.cert")))
 		})
 	})
 })

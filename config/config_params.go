@@ -402,7 +402,7 @@ func (config *Config) DatastoreConfig() apiconfig.CalicoAPIConfig {
 
 	// Now allow FELIX_XXXYYY variables or XxxYyy config file settings to override that, in the
 	// etcd case.
-	if config.setByConfigFileOrEnvironment("DatastoreType") && config.DatastoreType == "etcdv3" {
+	if config.DatastoreType == "etcdv3" {
 		cfg.Spec.DatastoreType = apiconfig.EtcdV3
 		// Endpoints.
 		if config.setByConfigFileOrEnvironment("EtcdEndpoints") && len(config.EtcdEndpoints) > 0 {
