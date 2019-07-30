@@ -221,6 +221,9 @@ endif
 LOCAL_USER_ID:=$(shell id -u)
 LOCAL_GROUP_ID:=$(shell id -g)
 
+EXTRA_DOCKER_ARGS       := -e GO111MODULE=on
+GINKGO_ARGS             := -mod=vendor
+
 # Allow libcalico-go and the ssh auth sock to be mapped into the build container.
 ifdef LIBCALICOGO_PATH
   EXTRA_DOCKER_ARGS += -v $(LIBCALICOGO_PATH):/go/src/github.com/projectcalico/libcalico-go:ro
@@ -233,15 +236,15 @@ DOCKER_RUN := mkdir -p .go-pkg-cache && \
                               --net=host \
                               $(EXTRA_DOCKER_ARGS) \
                               -e LOCAL_USER_ID=$(LOCAL_USER_ID) \
-                              -e GOCACHE=/gocache \
-                              -v $(HOME)/.glide:/home/user/.glide:rw \
+                              -e GOCACHE=/go-cache \
                               -v $(CURDIR):/go/src/$(PACKAGE_NAME):rw \
-                              -v $(CURDIR)/.go-pkg-cache:/gocache:rw \
+                              -v $(CURDIR)/.go-pkg-cache:/go-cache:rw \
                               -w /go/src/$(PACKAGE_NAME) \
                               -e GOARCH=$(ARCH)
 
 .PHONY: clean
 clean:
+	-chmod -R +w .go-pkg-cache
 	rm -rf bin \
 	       docker-image/bin \
 	       dist \
@@ -249,10 +252,8 @@ clean:
 	       fv/fv.test \
 	       $(GENERATED_FILES) \
 	       go/docs/calc.pdf \
-	       .glide \
 	       vendor \
 	       .go-pkg-cache \
-	       check-licenses/dependency-licenses.txt \
 	       release-notes-*
 	find . -name "junit.xml" -type f -delete
 	find . -name "*.coverprofile" -type f -delete
@@ -268,27 +269,19 @@ build-all: $(addprefix sub-build-,$(VALIDARCHES))
 sub-build-%:
 	$(MAKE) build ARCH=$*
 
-# Update the vendored dependencies with the latest upstream versions matching
-# our glide.yaml.  If there area any changes, this updates glide.lock
-# as a side effect.  Unless you're adding/updating a dependency, you probably
-# want to use the vendor target to install the versions from glide.lock.
 VENDOR_REMADE := false
 .PHONY: update-vendor
-update-vendor glide.lock:
-	mkdir -p $$HOME/.glide
-	$(DOCKER_RUN) $(CALICO_BUILD) glide up --strip-vendor
+update-vendor:
+	$(DOCKER_RUN) $(CALICO_BUILD) go mod vendor
 	touch vendor/.up-to-date
-	# Optimization: since glide up does the job of glide install, flag to the
-	# vendor target that it doesn't need to do anything.
 	$(eval VENDOR_REMADE := true)
 
 # vendor is a shortcut for force rebuilding the go vendor directory.
 .PHONY: vendor
 vendor: vendor/.up-to-date
-vendor/.up-to-date: glide.lock
+vendor/.up-to-date: go.mod go.sum
 	if ! $(VENDOR_REMADE); then \
-	  mkdir -p $$HOME/.glide && \
-	  $(DOCKER_RUN) $(CALICO_BUILD) glide install --strip-vendor && \
+	  $(DOCKER_RUN) $(CALICO_BUILD) go mod vendor && \
 	  touch vendor/.up-to-date; \
 	fi
 
@@ -297,7 +290,6 @@ TYPHA_BRANCH?=$(shell git rev-parse --abbrev-ref HEAD)
 TYPHA_REPO?=github.com/projectcalico/typha
 TYPHA_VERSION?=$(shell git ls-remote git@github.com:projectcalico/typha $(TYPHA_BRANCH) 2>/dev/null | cut -f 1)
 
-## Update typha pin in glide.yaml
 update-typha:
 	    $(DOCKER_RUN) $(CALICO_BUILD) sh -c '\
         echo "Updating typha to $(TYPHA_VERSION) from $(TYPHA_REPO)"; \
@@ -583,28 +575,14 @@ calico-build/centos6:
 ###############################################################################
 .PHONY: static-checks
 static-checks:
-	$(MAKE) check-typha-pins go-meta-linter check-licenses
+	$(MAKE) check-typha-pins golangci-lint
 
-bin/check-licenses: $(SRC_FILES)
-	$(DOCKER_RUN) $(LOCAL_BUILD_MOUNTS) $(CALICO_BUILD) go build -v -i -o $@ "$(PACKAGE_NAME)/check-licenses"
+# TODO: re-enable these linters !
+LINT_ARGS := --disable staticcheck,ineffassign,gosimple,govet,deadcode,errcheck,unused,varcheck,structcheck
 
-.PHONY: check-licenses
-check-licenses: check-licenses/dependency-licenses.txt bin/check-licenses
-	@echo Checking dependency licenses
-	$(DOCKER_RUN) $(CALICO_BUILD) bin/check-licenses
-
-check-licenses/dependency-licenses.txt: vendor/.up-to-date
-	$(DOCKER_RUN) $(CALICO_BUILD) sh -c 'licenses ./cmd/calico-felix > check-licenses/dependency-licenses.txt'
-
-.PHONY: go-meta-linter
-go-meta-linter: vendor/.up-to-date $(GENERATED_FILES)
-	# Run staticcheck stand-alone since gometalinter runs concurrent copies, which
-	# uses a lot of RAM.
-	$(DOCKER_RUN) $(CALICO_BUILD) sh -c 'glide nv | xargs -n 3 staticcheck'
-	$(DOCKER_RUN) $(CALICO_BUILD) gometalinter --deadline=300s \
-	                                --disable-all \
-	                                --enable=goimports \
-	                                --vendor ./...
+.PHONY: golangci-lint
+golangci-lint: vendor/.up-to-date $(GENERATED_FILES)
+	$(DOCKER_RUN) $(CALICO_BUILD) golangci-lint run --deadline 5m $(LINT_ARGS)
 
 .PHONY: check-packr
 check-packr: bpf/packrd/packed-packr.go
@@ -613,12 +591,11 @@ check-packr: bpf/packrd/packed-packr.go
 		false; \
 	fi
 
-# Run go fmt on all our go files.
+SOURCE_DIRS := "./bpf/ ./buildinfo/ ./calc/ ./check-licenses/ ./cmd/ ./config/ ./conntrack/ ./daemon/ ./dataplane/ ./dispatcher/ ./fv/ ./hashutils/ ./ifacemonitor/ ./ip/ ./ipsets/ ./iptables/ ./jitter/ ./k8sfv/ ./labelindex/ ./logutils/ ./markbits/ ./multidict/ ./policysync/ ./proto/ ./routetable/ ./rules/ ./statusrep/ ./stringutils/ ./testutils/ ./throttle/ ./usagerep/ ./versionparse/"
+
 .PHONY: go-fmt goimports fix
 fix go-fmt goimports:
-	$(DOCKER_RUN) $(CALICO_BUILD) sh -c 'glide nv -x | \
-	      grep -v -e "^\\.$$" | \
-	      xargs goimports -w -local github.com/projectcalico/'
+	$(DOCKER_RUN) $(CALICO_BUILD) sh -c 'echo $(SOURCE_DIRS) | xargs goimports -w -local github.com/projectcalico/'
 
 .PHONY: check-typha-pins
 check-typha-pins: vendor/.up-to-date
@@ -991,7 +968,6 @@ docs/calc.pdf: docs/calc.dot
 # Install or update the tools used by the build
 .PHONY: update-tools
 update-tools:
-	go get -u github.com/Masterminds/glide
 	go get -u github.com/onsi/ginkgo/ginkgo
 	go get -u github.com/gobuffalo/packr/v2/packr2
 
@@ -1040,8 +1016,7 @@ help:
 	@echo "Maintenance:"
 	@echo
 	@echo "  make update-vendor  Update the vendor directory with new "
-	@echo "                      versions of upstream packages.  Record results"
-	@echo "                      in glide.lock."
+	@echo "                      versions of upstream packages."
 	@echo "  make go-fmt        Format our go code."
 	@echo "  make clean         Remove binary files."
 	@echo "-----------------------------------------"
