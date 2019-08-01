@@ -1,5 +1,5 @@
-hash: 31ba7e5ad8a52e3e11f75208a304ec9a3f99ca94f712025c14425a0b0eaaad2b
-updated: 2019-07-30T21:05:21.446072852Z
+hash: 959681ffb6428334d9a3ceed0142ce43603432c01c7b9a9f3a579bb4ba17ebbe
+updated: 2019-08-01T16:13:03.670931878+01:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -14,7 +14,7 @@ imports:
   - autorest/azure
   - autorest/date
 - name: github.com/beorn7/perks
-  version: 3ac7bf7a47d159a033b107610db8a1b6575507a4
+  version: 4b2b341e8d7715fae06375aa633dbb6e91b3fb46
   subpackages:
   - quantile
 - name: github.com/containernetworking/cni
@@ -46,9 +46,9 @@ imports:
 - name: github.com/ghodss/yaml
   version: 73d445a93680fa1a78ae23a5839bad48f32ba1ee
 - name: github.com/go-ini/ini
-  version: 8659100d2d9ecf3760a41838b1886db49426d001
+  version: 3be5ad479f69d4e08d7fe25edf79bf3346bd658e
 - name: github.com/go-playground/locales
-  version: f63010822830b6fe52288ee52d5a1151088ce039
+  version: 630ebbb602847eba93e75ae38bbc7bb7abcf1ff3
   subpackages:
   - currency
 - name: github.com/go-playground/universal-translator
@@ -108,7 +108,7 @@ imports:
   subpackages:
   - simplelru
 - name: github.com/hpcloud/tail
-  version: a1dbeea552b7c8df4b542c66073e393de198a800
+  version: a30252cb686a21eb2d0b98132633053ec2f7f1e5
   subpackages:
   - ratelimiter
   - util
@@ -127,7 +127,7 @@ imports:
 - name: github.com/kardianos/osext
   version: 2bc1f35cddc0cc527b4bc3dce8578fc2a6c11384
 - name: github.com/kelseyhightower/envconfig
-  version: dd1402a4d99de9ac2f396cd6fcb957bc2c695ec1
+  version: 0b417c4ec4a8a82eecc22a1459a504aa55163d61
 - name: github.com/leodido/go-urn
   version: a67a23e1c1af3c66528573bb86a87246477277c1
 - name: github.com/libp2p/go-reuseport
@@ -140,9 +140,9 @@ imports:
   subpackages:
   - net
 - name: github.com/mattn/go-colorable
-  version: c52ace132bf44798a21f16fdafaaafbf329519e2
+  version: 8029fb3788e5a4a9c00e415f586a6d033f5d38b3
 - name: github.com/mattn/go-isatty
-  version: da60ac76bf7019a8b005f8dd1ad9d1a0e6434155
+  version: 1311e847b0cb909da63b5fecfb5370aa66236465
 - name: github.com/matttproud/golang_protobuf_extensions
   version: c12348ce28de40eed0136aa2b644d0ee0650e56c
   subpackages:
@@ -193,7 +193,7 @@ imports:
   - matchers/support/goraph/util
   - types
 - name: github.com/opentracing/opentracing-go
-  version: 135aa78c6f95b4a199daf2f0470d231136cbbd0c
+  version: 659c90643e714681897ec2521c60567dd21da733
   subpackages:
   - ext
   - log
@@ -210,7 +210,7 @@ imports:
 - name: github.com/projectcalico/go-yaml-wrapper
   version: 598e54215bee41a19677faa4f0c32acd2a87eb56
 - name: github.com/projectcalico/libcalico-go
-  version: 241d8b0486a3c732e938cfe6a7937e65e1bad319
+  version: 68e175bba1ebf524e54a4d0034119e4cf146bffb
   subpackages:
   - lib/apiconfig
   - lib/apis/v1
@@ -252,7 +252,7 @@ imports:
   subpackages:
   - binder
 - name: github.com/projectcalico/typha
-  version: 03ab421f4fdb78a9a8861a60dcba2593680c7544
+  version: adca5c7b84f5b9a84fd868073e6f6c71c45d29ec
   subpackages:
   - pkg/syncclient
   - pkg/syncproto
@@ -265,11 +265,11 @@ imports:
   - prometheus/promhttp
   - prometheus/push
 - name: github.com/prometheus/client_model
-  version: fa8ad6fec33561be4280a8f0514318c79d7f6cb6
+  version: 5c3871d89910bfb32f5fcab2aa4b9ec68e65a99f
   subpackages:
   - go
 - name: github.com/prometheus/common
-  version: cfeb6f9992ffa54aaa4f2170ade4067ee478b250
+  version: 4724e9255275ce38f7179b2478abeae4e28c904f
   subpackages:
   - expfmt
   - internal/bitbucket.org/ww/goautoneg
@@ -369,8 +369,11 @@ imports:
 - name: google.golang.org/grpc
   version: 5b3c4e850e90a4cf6a20ebd46c8b32a0a3afcb9e
   subpackages:
+  - balancer
   - codes
+  - connectivity
   - credentials
+  - grpclb/grpc_lb_v1/messages
   - grpclog
   - health/grpc_health_v1
   - internal
@@ -378,14 +381,15 @@ imports:
   - metadata
   - naming
   - peer
+  - resolver
   - stats
   - status
   - tap
   - transport
-- name: gopkg.in/fsnotify/fsnotify.v1
-  version: c2828203cd70a50dcccfb2761f8b1f8ceef9a8e9
+- name: gopkg.in/fsnotify.v1
+  version: 7be54206639f256967dd82fa767397ba5f8f48f5
 - name: gopkg.in/go-playground/validator.v9
-  version: b199fa0642d29caca62b6a99d65cc981ba5edc3b
+  version: 884d31b8cad6a1ec877f2400d555924cea03bbea
 - name: gopkg.in/inf.v0
   version: 3887ee99ecf07df5b447e9b00d9c0b2adaa9f3e4
 - name: gopkg.in/tomb.v1
