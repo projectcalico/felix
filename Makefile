@@ -286,7 +286,7 @@ TYPHA_OLDVER?=$(shell go list -m -f "{{.Version}}" github.com/projectcalico/typh
 ## Update typha pin in go.mod
 update-typha:
 	$(DOCKER_RUN) $(CALICO_BUILD) sh -c '\
-	if [ $(TYPHA_VERSION) != $(TYPHA_OLDVER) ]; then \
+	if [[ ! -z "$(TYPHA_VERSION)" ]] && [[ "$(TYPHA_VERSION)" != "$(TYPHA_OLDVER)" ]]; then \
 		echo "Updating typha version $(TYPHA_OLDVER) to $(TYPHA_VERSION) from $(TYPHA_REPO)"; \
 		go mod edit -droprequire github.com/projectcalico/typha; \
 		go get $(TYPHA_REPO)@$(TYPHA_VERSION); \
@@ -296,7 +296,7 @@ git-status:
 	git status --porcelain
 
 git-commit:
-	git commit -m "Semaphore Automatic Update" --author "Semaphore Automatic Update <marvin@tigera.io>" go.mod go.sum
+	git diff-index --quiet HEAD || git commit -m "Semaphore Automatic Update" --author "Semaphore Automatic Update <marvin@tigera.io>" go.mod go.sum
 
 git-push:
 	git push
