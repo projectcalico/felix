@@ -232,7 +232,12 @@ ifdef SSH_AUTH_SOCK
 endif
 
 ifdef GOPATH
-	EXTRA_DOCKER_ARGS += -v $(GOPATH)/pkg/mod:/go/pkg/mod:rw
+ifneq ($(GOPATH),)
+ifndef CIRCLECI
+	LOCAL_GOPATH = $(shell echo $(GOPATH) | cut -d':' -f1)
+	EXTRA_DOCKER_ARGS += -v $(LOCAL_GOPATH)/pkg/mod:/go/pkg/mod:rw
+endif
+endif
 endif
 
 DOCKER_RUN := mkdir -p .go-pkg-cache && \
@@ -286,6 +291,17 @@ update-typha:
 		go mod edit -droprequire github.com/projectcalico/typha; \
 		go get $(TYPHA_REPO)@$(TYPHA_VERSION); \
 	fi'
+
+git-status:
+	git status --porcelain
+
+git-commit:
+	git commit -m "Semaphore Automatic Update" --author "Semaphore Automatic Update <marvin@tigera.io>" go.mod go.sum
+
+git-push:
+	git push
+
+commit-pin-updates: update-typha git-status ci git-commit git-push
 
 bin/calico-felix: bin/calico-felix-$(ARCH)
 	ln -f bin/calico-felix-$(ARCH) bin/calico-felix
