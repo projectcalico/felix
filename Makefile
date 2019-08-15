@@ -231,12 +231,15 @@ ifdef SSH_AUTH_SOCK
   EXTRA_DOCKER_ARGS += -v $(SSH_AUTH_SOCK):/ssh-agent --env SSH_AUTH_SOCK=/ssh-agent
 endif
 
-ifdef GOPATH
+# Volume-mount gopath into the build container if it's explicitly set for persistent caching.
 ifneq ($(GOPATH),)
+# CircleCI's gopath is readonly and readonly gopaths are incompatible with go modules so don't
+# volume mount the cache in that environment
 ifndef CIRCLECI
+	# If the environment is using multiple comma-separated directories for gopath, use the first one, as that
+	# is the default one used by go modules.
 	LOCAL_GOPATH = $(shell echo $(GOPATH) | cut -d':' -f1)
 	EXTRA_DOCKER_ARGS += -v $(LOCAL_GOPATH)/pkg/mod:/go/pkg/mod:rw
-endif
 endif
 endif
 
