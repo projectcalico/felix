@@ -284,7 +284,7 @@ sub-build-%:
 TYPHA_BRANCH?=$(shell git rev-parse --abbrev-ref HEAD)
 TYPHA_REPO?=github.com/projectcalico/typha
 TYPHA_VERSION?=$(shell git ls-remote git@github.com:projectcalico/typha $(TYPHA_BRANCH) 2>/dev/null | cut -f 1)
-TYPHA_OLDVER?=$(shell go list -m -f "{{.Version}}" github.com/projectcalico/typha)
+TYPHA_OLDVER?=$(shell $(DOCKER_RUN) $(CALICO_BUILD) go list -m -f "{{.Version}}" github.com/projectcalico/typha)
 
 ## Update typha pin in go.mod
 update-typha:
@@ -533,8 +533,8 @@ check-packr: bpf/packrd/packed-packr.go
 fix go-fmt goimports:
 	$(DOCKER_RUN) $(CALICO_BUILD) sh -c 'find . -iname "*.go" ! -wholename "./vendor/*" | xargs goimports -w -local github.com/projectcalico/'
 
-LIBCALICO_FELIX?=$(shell go list -m -f "{{.Version}}" github.com/projectcalico/libcalico-go)
-TYPHA_GOMOD?=$(shell go list -m -f "{{.GoMod}}" github.com/projectcalico/typha)
+LIBCALICO_FELIX?=$(shell $(DOCKER_RUN) $(CALICO_BUILD) go list -m -f "{{.Version}}" github.com/projectcalico/libcalico-go)
+TYPHA_GOMOD?=$(shell $(DOCKER_RUN) $(CALICO_BUILD) go list -m -f "{{.GoMod}}" github.com/projectcalico/typha)
 ifneq ($(TYPHA_GOMOD),)
 	LIBCALICO_TYPHA?=$(shell grep libcalico-go $(TYPHA_GOMOD) | cut -d' ' -f2)
 endif
@@ -881,7 +881,7 @@ ut-watch: $(SRC_FILES)
 # Launch a browser with Go coverage stats for the whole project.
 .PHONY: cover-browser
 cover-browser: combined.coverprofile
-	go tool cover -html="combined.coverprofile"
+	$(DOCKER_RUN) $(CALICO_BUILD) go tool cover -html="combined.coverprofile"
 
 .PHONY: cover-report
 cover-report: combined.coverprofile
@@ -915,8 +915,8 @@ docs/calc.pdf: docs/calc.dot
 # Install or update the tools used by the build
 .PHONY: update-tools
 update-tools:
-	go get -u github.com/onsi/ginkgo/ginkgo
-	go get -u github.com/gobuffalo/packr/v2/packr2
+	$(DOCKER_RUN) $(CALICO_BUILD) go get -u github.com/onsi/ginkgo/ginkgo
+	$(DOCKER_RUN) $(CALICO_BUILD) go get -u github.com/gobuffalo/packr/v2/packr2
 
 help:
 	@echo "Felix Makefile"
