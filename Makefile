@@ -535,10 +535,7 @@ fix go-fmt goimports:
 	$(DOCKER_RUN) $(CALICO_BUILD) sh -c 'find . -iname "*.go" ! -wholename "./vendor/*" | xargs goimports -w -local github.com/projectcalico/'
 
 LIBCALICO_FELIX?=$(shell $(DOCKER_RUN) $(CALICO_BUILD) go list -m -f "{{.Version}}" github.com/projectcalico/libcalico-go)
-TYPHA_GOMOD?=$(shell $(DOCKER_RUN) $(CALICO_BUILD) go list -m -f "{{.GoMod}}" github.com/projectcalico/typha)
-ifneq ($(TYPHA_GOMOD),)
-	LIBCALICO_TYPHA?=$(shell grep libcalico-go $(TYPHA_GOMOD) | cut -d' ' -f2)
-endif
+LIBCALICO_TYPHA?=$(shell $(DOCKER_RUN) $(CALICO_BUILD) grep libcalico-go `go list -m -f "{{.GoMod}}" github.com/projectcalico/typha` | cut -d' ' -f2)
 
 .PHONY: check-typha-pins
 check-typha-pins:
