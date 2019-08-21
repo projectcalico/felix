@@ -289,6 +289,7 @@ TYPHA_OLDVER?=$(shell $(DOCKER_RUN) $(CALICO_BUILD) go list -m -f "{{.Version}}"
 ## Update typha pin in go.mod
 update-typha:
 	$(DOCKER_RUN) $(CALICO_BUILD) sh -c '\
+	go mod download; \
 	if [[ ! -z "$(TYPHA_VERSION)" ]] && [[ "$(TYPHA_VERSION)" != "$(TYPHA_OLDVER)" ]]; then \
 		echo "Updating typha version $(TYPHA_OLDVER) to $(TYPHA_VERSION) from $(TYPHA_REPO)"; \
 		go mod edit -droprequire github.com/projectcalico/typha; \
