@@ -712,7 +712,7 @@ func (b *MockBPFLib) NewSockmap() (string, error) {
 
 func (b *MockBPFLib) UpdateSockmapEndpoints(ip net.IP, mask int) error {
 	if b.SockmapEndpointsMap == nil {
-		return errors.New("sockmap endpooints not found")
+		return errors.New("sockmap endpoints not found")
 	}
 
 	l := len(ip)
@@ -727,7 +727,7 @@ func (b *MockBPFLib) UpdateSockmapEndpoints(ip net.IP, mask int) error {
 
 func (b *MockBPFLib) DumpSockmapEndpointsMap(family IPFamily) ([]CIDRMapKey, error) {
 	if b.SockmapEndpointsMap == nil {
-		return nil, errors.New("sockmap endpooints not found")
+		return nil, errors.New("sockmap endpoints not found")
 	}
 
 	var ret []CIDRMapKey
@@ -746,7 +746,7 @@ func (b *MockBPFLib) DumpSockmapEndpointsMap(family IPFamily) ([]CIDRMapKey, err
 
 func (b *MockBPFLib) LookupSockmapEndpointsMap(ip net.IP, mask int) (bool, error) {
 	if b.SockmapEndpointsMap == nil {
-		return false, errors.New("sockmap endpooints not found")
+		return false, errors.New("sockmap endpoints not found")
 	}
 
 	l := len(ip)
@@ -765,7 +765,7 @@ func (b *MockBPFLib) LookupSockmapEndpointsMap(ip net.IP, mask int) (bool, error
 
 func (b *MockBPFLib) RemoveItemSockmapEndpointsMap(ip net.IP, mask int) error {
 	if b.SockmapEndpointsMap == nil {
-		return errors.New("sockmap endpooints not found")
+		return errors.New("sockmap endpoints not found")
 	}
 
 	l := len(ip)
@@ -779,7 +779,7 @@ func (b *MockBPFLib) RemoveItemSockmapEndpointsMap(ip net.IP, mask int) error {
 
 func (b *MockBPFLib) RemoveSockmapEndpointsMap() error {
 	if b.SockmapEndpointsMap == nil {
-		return errors.New("sockmap endpooints not found")
+		return errors.New("sockmap endpoints not found")
 	}
 
 	b.SockmapEndpointsMap = nil
