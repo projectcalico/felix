@@ -354,13 +354,10 @@ type BPFDataplane interface {
 	RemoveXDP(ifName string, mode XDPMode) error
 	UpdateCIDRMap(ifName string, family IPFamily, ip net.IP, mask int, refCount uint32) error
 	UpdateFailsafeMap(proto uint8, port uint16) error
-	loadXDPRaw(objPath, ifName string, mode XDPMode, mapArgs []string) error
 	GetBPFCalicoDir() string
 	AttachToSockmap() error
 	DetachFromSockmap(mode FindObjectMode) error
 	RemoveSockmap(mode FindObjectMode) error
-	loadBPF(objPath, progPath, progType string, mapArgs []string) error
-	LoadSockops(objPath string) error
 	LoadSockopsWithBytes(objBytes []byte) error
 	LoadSockopsAuto() error
 	RemoveSockops() error
@@ -530,24 +527,6 @@ type progInfo struct {
 	Tag    string `json:"tag"`
 	MapIds []int  `json:"map_ids"`
 	Err    string `json:"error"`
-}
-
-type ifaceXdpProg struct {
-	Id  int    `json:"id"`
-	Tag string `json:"tag"`
-}
-
-type ifaceXdp struct {
-	Mode int          `json:"mode"`
-	Prog ifaceXdpProg `json:"prog"`
-}
-
-type ifaceInfo []struct {
-	IfIndex  int      `json:"ifindex"`
-	IfName   string   `json:"ifname"`
-	Link     string   `json:"link"` // other side of the veth pair
-	LinkType string   `json:"link_type"`
-	Xdp      ifaceXdp `json:"xdp"`
 }
 
 type cgroupProgEntry struct {
@@ -1800,8 +1779,6 @@ func clearSockmap(mapArgs []string) error {
 			return fmt.Errorf("failed to delete item (%v) from map (%v): %s\n%s", e.NextKey, mapArgs, err, output)
 		}
 	}
-
-	return nil
 }
 
 func (b *BPFLib) RemoveSockmap(mode FindObjectMode) error {

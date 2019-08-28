@@ -171,10 +171,19 @@ func main() {
 					return
 				}
 				err = utils.RunCommand("ip", "-6", "route", "add", "default", "via", hostIPv6Addr.String(), "dev", "eth0")
+				if err != nil {
+					return
+				}
 
 				// Output the routing table to the log for diagnostic purposes.
-				utils.RunCommand("ip", "-6", "route")
-				utils.RunCommand("ip", "-6", "addr")
+				err = utils.RunCommand("ip", "-6", "route")
+				if err != nil {
+					return
+				}
+				err = utils.RunCommand("ip", "-6", "addr")
+				if err != nil {
+					return
+				}
 			} else {
 				err = utils.RunCommand("ip", "addr", "add", ipAddress+"/32", "dev", "eth0")
 				if err != nil {
@@ -185,10 +194,19 @@ func main() {
 					return
 				}
 				err = utils.RunCommand("ip", "route", "add", "default", "via", "169.254.169.254", "dev", "eth0")
+				if err != nil {
+					return
+				}
 
 				// Output the routing table to the log for diagnostic purposes.
-				utils.RunCommand("ip", "route")
-				utils.RunCommand("ip", "addr")
+				err = utils.RunCommand("ip", "route")
+				if err != nil {
+					return
+				}
+				err = utils.RunCommand("ip", "addr")
+				if err != nil {
+					return
+				}
 			}
 			return
 		})
@@ -257,7 +275,10 @@ func main() {
 				}
 				data := buf[:size]
 				log.WithField("data", data).Info("Read data from connection")
-				conn.Write(data)
+				_, err = conn.Write(data)
+				if err != nil {
+					log.WithField("data", data).Error("failed to write data while handling connection")
+				}
 			}
 		}
 
@@ -309,8 +330,6 @@ func main() {
 		for {
 			time.Sleep(10 * time.Second)
 		}
-
-		return nil
 	})
 	panicIfError(err)
 }
@@ -319,7 +338,6 @@ func panicIfError(err error) {
 	if err != nil {
 		panic(err)
 	}
-	return
 }
 
 // writeProcSys takes the sysctl path and a string value to set i.e. "0" or "1" and sets the sysctl.

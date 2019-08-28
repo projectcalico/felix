@@ -182,14 +182,14 @@ var _ = Describe("Processor", func() {
 					updateServiceAccount("t23", "t2")
 					Eventually(output[0]).Should(Receive(&proto.ToDataplane{
 						Payload: &proto.ToDataplane_ServiceAccountUpdate{
-							&proto.ServiceAccountUpdate{
+							ServiceAccountUpdate: &proto.ServiceAccountUpdate{
 								Id: &proto.ServiceAccountID{Name: "t23", Namespace: "t2"},
 							},
 						},
 					}))
 					Eventually(output[1]).Should(Receive(&proto.ToDataplane{
 						Payload: &proto.ToDataplane_ServiceAccountUpdate{
-							&proto.ServiceAccountUpdate{
+							ServiceAccountUpdate: &proto.ServiceAccountUpdate{
 								Id: &proto.ServiceAccountID{Name: "t23", Namespace: "t2"},
 							},
 						},
@@ -200,14 +200,14 @@ var _ = Describe("Processor", func() {
 					removeServiceAccount("t23", "t2")
 					Eventually(output[0]).Should(Receive(&proto.ToDataplane{
 						Payload: &proto.ToDataplane_ServiceAccountRemove{
-							&proto.ServiceAccountRemove{
+							ServiceAccountRemove: &proto.ServiceAccountRemove{
 								Id: &proto.ServiceAccountID{Name: "t23", Namespace: "t2"},
 							},
 						},
 					}))
 					Eventually(output[1]).Should(Receive(&proto.ToDataplane{
 						Payload: &proto.ToDataplane_ServiceAccountRemove{
-							&proto.ServiceAccountRemove{
+							ServiceAccountRemove: &proto.ServiceAccountRemove{
 								Id: &proto.ServiceAccountID{Name: "t23", Namespace: "t2"},
 							},
 						},
@@ -290,12 +290,12 @@ var _ = Describe("Processor", func() {
 					updateNamespace("t23")
 					Eventually(output[0]).Should(Receive(&proto.ToDataplane{
 						Payload: &proto.ToDataplane_NamespaceUpdate{
-							&proto.NamespaceUpdate{Id: &proto.NamespaceID{Name: "t23"}},
+							NamespaceUpdate: &proto.NamespaceUpdate{Id: &proto.NamespaceID{Name: "t23"}},
 						},
 					}))
 					Eventually(output[1]).Should(Receive(&proto.ToDataplane{
 						Payload: &proto.ToDataplane_NamespaceUpdate{
-							&proto.NamespaceUpdate{Id: &proto.NamespaceID{Name: "t23"}},
+							NamespaceUpdate: &proto.NamespaceUpdate{Id: &proto.NamespaceID{Name: "t23"}},
 						},
 					}))
 				})
@@ -304,12 +304,12 @@ var _ = Describe("Processor", func() {
 					removeNamespace("t23")
 					Eventually(output[0]).Should(Receive(&proto.ToDataplane{
 						Payload: &proto.ToDataplane_NamespaceRemove{
-							&proto.NamespaceRemove{Id: &proto.NamespaceID{Name: "t23"}},
+							NamespaceRemove: &proto.NamespaceRemove{Id: &proto.NamespaceID{Name: "t23"}},
 						},
 					}))
 					Eventually(output[1]).Should(Receive(&proto.ToDataplane{
 						Payload: &proto.ToDataplane_NamespaceRemove{
-							&proto.NamespaceRemove{Id: &proto.NamespaceID{Name: "t23"}},
+							NamespaceRemove: &proto.NamespaceRemove{Id: &proto.NamespaceID{Name: "t23"}},
 						},
 					}))
 				})
@@ -397,7 +397,7 @@ var _ = Describe("Processor", func() {
 					msg := updateIpSet(IPSetName, 2)
 					updates <- msg
 					g := <-refdOutput
-					Expect(g).To(Equal(proto.ToDataplane{Payload: &proto.ToDataplane_IpsetUpdate{msg}}))
+					Expect(g).To(Equal(proto.ToDataplane{Payload: &proto.ToDataplane_IpsetUpdate{IpsetUpdate: msg}}))
 
 					assertInactiveNoUpdate()
 					close(done)
@@ -412,7 +412,7 @@ var _ = Describe("Processor", func() {
 					updates <- msg2
 					g := <-refdOutput
 					Expect(g).To(Equal(proto.ToDataplane{
-						Payload: &proto.ToDataplane_IpsetDeltaUpdate{msg2}}))
+						Payload: &proto.ToDataplane_IpsetDeltaUpdate{IpsetDeltaUpdate: msg2}}))
 
 					msg2 = deltaUpdateIpSet(IPSetName, 2, 0)
 					updates <- msg2
@@ -1143,7 +1143,7 @@ var _ = Describe("Processor", func() {
 					// Leave
 					leave(jm)
 
-					output, jm = join("test", 2)
+					output, _ = join("test", 2)
 					g = <-output
 					Expect(&g).To(HavePayload(proUpdate))
 					g = <-output
@@ -1169,7 +1169,7 @@ var _ = Describe("Processor", func() {
 					}
 					updates <- wepUpd2
 
-					output, jm = join("test", 2)
+					output, _ = join("test", 2)
 					g = <-output
 					Expect(&g).To(HavePayload(wepUpd2))
 
@@ -1223,7 +1223,7 @@ var _ = Describe("Processor", func() {
 					// Leave
 					leave(jm)
 
-					output, jm = join("test", 2)
+					output, _ = join("test", 2)
 					g = <-output
 					Expect(&g).To(HavePayload(polUpd))
 					g = <-output
@@ -1248,7 +1248,7 @@ var _ = Describe("Processor", func() {
 					}
 					updates <- wepUpd2
 
-					output, jm = join("test", 2)
+					output, _ = join("test", 2)
 					g = <-output
 					Expect(&g).To(HavePayload(wepUpd2))
 

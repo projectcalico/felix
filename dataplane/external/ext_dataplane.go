@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"sync"
 
 	pb "github.com/gogo/protobuf/proto"
 	log "github.com/sirupsen/logrus"
@@ -33,6 +34,9 @@ import (
 // StartExtDataplaneDriver starts the given driver as a child process and returns a
 // connection to it along with the command itself so that it may be monitored.
 func StartExtDataplaneDriver(driverFilename string) (*extDataplaneConn, *exec.Cmd) {
+	var wg sync.WaitGroup
+	var errStdout, errStderr error
+
 	// Create a pair of pipes, one for sending messages to the dataplane
 	// driver, the other for receiving.
 	toDriverR, toDriverW, err := os.Pipe()
@@ -53,8 +57,17 @@ func StartExtDataplaneDriver(driverFilename string) (*extDataplaneConn, *exec.Cm
 	if err != nil {
 		log.WithError(err).Fatal("Failed to create pipe for dataplane driver")
 	}
-	go io.Copy(os.Stdout, driverOut)
-	go io.Copy(os.Stderr, driverErr)
+
+	wg.Add(2)
+	go func() {
+		_, errStdout = io.Copy(os.Stdout, driverOut)
+		wg.Done()
+	}()
+	go func() {
+		_, errStderr = io.Copy(os.Stderr, driverErr)
+		wg.Done()
+	}()
+
 	cmd.ExtraFiles = []*os.File{toDriverR, fromDriverW}
 	if err := cmd.Start(); err != nil {
 		log.WithError(err).Fatal("Failed to start dataplane driver")
@@ -63,17 +76,26 @@ func StartExtDataplaneDriver(driverFilename string) (*extDataplaneConn, *exec.Cm
 	// Now the sub-process is running, close our copy of the file handles
 	// for the child's end of the pipes.
 	if err := toDriverR.Close(); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		log.WithError(err).Fatal("Failed to close parent's copy of pipe")
 	}
 	if err := fromDriverW.Close(); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 		log.WithError(err).Fatal("Failed to close parent's copy of pipe")
 	}
 	dataplaneConnection := &extDataplaneConn{
 		toDataplane:   toDriverW,
 		fromDataplane: fromDriverR,
 	}
+
+	wg.Wait()
+	if errStdout != nil {
+		log.WithError(errStdout).Fatal("Failed to copy from stdout to driver out")
+	}
+	if errStderr != nil {
+		log.WithError(errStderr).Fatal("Failed to copy from stderr to driver err")
+	}
+
 	return dataplaneConnection, cmd
 }
 
@@ -132,47 +154,47 @@ func (fc *extDataplaneConn) SendMessage(msg interface{}) error {
 	fc.nextSeqNumber += 1
 	switch msg := msg.(type) {
 	case *proto.ConfigUpdate:
-		envelope.Payload = &proto.ToDataplane_ConfigUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_ConfigUpdate{ConfigUpdate: msg}
 	case *proto.InSync:
-		envelope.Payload = &proto.ToDataplane_InSync{msg}
+		envelope.Payload = &proto.ToDataplane_InSync{InSync: msg}
 	case *proto.IPSetUpdate:
-		envelope.Payload = &proto.ToDataplane_IpsetUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_IpsetUpdate{IpsetUpdate: msg}
 	case *proto.IPSetDeltaUpdate:
-		envelope.Payload = &proto.ToDataplane_IpsetDeltaUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_IpsetDeltaUpdate{IpsetDeltaUpdate: msg}
 	case *proto.IPSetRemove:
-		envelope.Payload = &proto.ToDataplane_IpsetRemove{msg}
+		envelope.Payload = &proto.ToDataplane_IpsetRemove{IpsetRemove: msg}
 	case *proto.ActivePolicyUpdate:
-		envelope.Payload = &proto.ToDataplane_ActivePolicyUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_ActivePolicyUpdate{ActivePolicyUpdate: msg}
 	case *proto.ActivePolicyRemove:
-		envelope.Payload = &proto.ToDataplane_ActivePolicyRemove{msg}
+		envelope.Payload = &proto.ToDataplane_ActivePolicyRemove{ActivePolicyRemove: msg}
 	case *proto.ActiveProfileUpdate:
-		envelope.Payload = &proto.ToDataplane_ActiveProfileUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_ActiveProfileUpdate{ActiveProfileUpdate: msg}
 	case *proto.ActiveProfileRemove:
-		envelope.Payload = &proto.ToDataplane_ActiveProfileRemove{msg}
+		envelope.Payload = &proto.ToDataplane_ActiveProfileRemove{ActiveProfileRemove: msg}
 	case *proto.HostEndpointUpdate:
-		envelope.Payload = &proto.ToDataplane_HostEndpointUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_HostEndpointUpdate{HostEndpointUpdate: msg}
 	case *proto.HostEndpointRemove:
-		envelope.Payload = &proto.ToDataplane_HostEndpointRemove{msg}
+		envelope.Payload = &proto.ToDataplane_HostEndpointRemove{HostEndpointRemove: msg}
 	case *proto.WorkloadEndpointUpdate:
-		envelope.Payload = &proto.ToDataplane_WorkloadEndpointUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_WorkloadEndpointUpdate{WorkloadEndpointUpdate: msg}
 	case *proto.WorkloadEndpointRemove:
-		envelope.Payload = &proto.ToDataplane_WorkloadEndpointRemove{msg}
+		envelope.Payload = &proto.ToDataplane_WorkloadEndpointRemove{WorkloadEndpointRemove: msg}
 	case *proto.HostMetadataUpdate:
-		envelope.Payload = &proto.ToDataplane_HostMetadataUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_HostMetadataUpdate{HostMetadataUpdate: msg}
 	case *proto.HostMetadataRemove:
-		envelope.Payload = &proto.ToDataplane_HostMetadataRemove{msg}
+		envelope.Payload = &proto.ToDataplane_HostMetadataRemove{HostMetadataRemove: msg}
 	case *proto.IPAMPoolUpdate:
-		envelope.Payload = &proto.ToDataplane_IpamPoolUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_IpamPoolUpdate{IpamPoolUpdate: msg}
 	case *proto.IPAMPoolRemove:
-		envelope.Payload = &proto.ToDataplane_IpamPoolRemove{msg}
+		envelope.Payload = &proto.ToDataplane_IpamPoolRemove{IpamPoolRemove: msg}
 	case *proto.ServiceAccountUpdate:
-		envelope.Payload = &proto.ToDataplane_ServiceAccountUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_ServiceAccountUpdate{ServiceAccountUpdate: msg}
 	case *proto.ServiceAccountRemove:
-		envelope.Payload = &proto.ToDataplane_ServiceAccountRemove{msg}
+		envelope.Payload = &proto.ToDataplane_ServiceAccountRemove{ServiceAccountRemove: msg}
 	case *proto.NamespaceUpdate:
-		envelope.Payload = &proto.ToDataplane_NamespaceUpdate{msg}
+		envelope.Payload = &proto.ToDataplane_NamespaceUpdate{NamespaceUpdate: msg}
 	case *proto.NamespaceRemove:
-		envelope.Payload = &proto.ToDataplane_NamespaceRemove{msg}
+		envelope.Payload = &proto.ToDataplane_NamespaceRemove{NamespaceRemove: msg}
 	default:
 		log.WithField("msg", msg).Panic("Unknown message type")
 	}

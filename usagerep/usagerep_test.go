@@ -52,7 +52,8 @@ var _ = Describe("UsageReporter with mocked URL and short interval", func() {
 		httpHandler = &requestRecorder{}
 		go func() {
 			defer GinkgoRecover()
-			http.Serve(tcpListener, httpHandler)
+			// TODO: Investigate why this call sometimes returns an error.
+			_ = http.Serve(tcpListener, httpHandler)
 		}()
 
 		// Channels to send data to the UsageReporter.
@@ -209,16 +210,15 @@ func (h *requestRecorder) ServeHTTP(resp http.ResponseWriter, req *http.Request)
 	defer h.lock.Unlock()
 	h.requestsReceived = append(h.requestsReceived, req.RequestURI)
 
-	resp.Write([]byte(`{"usage_warning": "Warning!"}`))
+	_, err := resp.Write([]byte(`{"usage_warning": "Warning!"}`))
+	Expect(err).NotTo(HaveOccurred())
 }
 
 func (h *requestRecorder) GetRequestURIs() []string {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 	var result []string
-	for _, r := range h.requestsReceived {
-		result = append(result, r)
-	}
+	result = append(result, h.requestsReceived...)
 	return result
 }
 
