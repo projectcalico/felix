@@ -410,14 +410,13 @@ configRetry:
 			}
 		}
 
-		supportsNodeResources, err := typhaConnection.SupportsNodeResourceUpdates(10 * time.Second)
+		supportsNodeResourceUpdates, err := typhaConnection.SupportsNodeResourceUpdates(10 * time.Second)
 		if err != nil {
 			log.WithError(err).Error("Did not get hello message from Typha in time, assuming it does not support node resource updates")
+			return
 		}
-		if supportsNodeResources {
-			log.Info("Using node resource updates with Typha that supports it")
-			configParams.SetUseNodeResourceUpdates(true)
-		}
+		log.Debugf("Typha supports node resource updates: %v", supportsNodeResourceUpdates)
+		configParams.SetUseNodeResourceUpdates(supportsNodeResourceUpdates)
 
 		go func() {
 			typhaConnection.Finished.Wait()
