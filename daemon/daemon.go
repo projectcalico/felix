@@ -378,7 +378,7 @@ configRetry:
 		syncer = felixsyncer.New(backendClient, datastoreConfig.Spec, syncerToValidator)
 
 		log.Info("using resource updates where applicable")
-		configParams.SetUseResourceUpdates(true)
+		configParams.SetUseNodeResourceUpdates(true)
 	}
 	log.WithField("syncer", syncer).Info("Created Syncer")
 
@@ -416,7 +416,7 @@ configRetry:
 		}
 		if supportsNodeResources {
 			log.Info("Using node resource updates with Typha that supports it")
-			configParams.SetUseResourceUpdates(true)
+			configParams.SetUseNodeResourceUpdates(true)
 		}
 
 		go func() {
