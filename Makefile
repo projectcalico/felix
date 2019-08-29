@@ -793,6 +793,10 @@ endif
 
 ## Verifies the release artifacts produces by `make release-build` are correct.
 release-verify: release-prereqs
+	# go.sum can sometimes be updated as part of the build. However, we don't care about those changes when verifying 
+	# a release, so ignore them here.
+	git checkout go.sum
+
 	# Check the reported version is correct for each release artifact.
 	for img in $(BUILD_IMAGE):$(VERSION)-$(ARCH) quay.io/$(BUILD_IMAGE):$(VERSION)-$(ARCH); do \
 	  if docker run $$img calico-felix --version | grep -q '$(VERSION)$$'; \
