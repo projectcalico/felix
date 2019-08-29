@@ -409,6 +409,16 @@ configRetry:
 				healthAggregator.Report(healthName, &health.HealthReport{Live: true, Ready: true})
 			}
 		}
+
+		supportsNodeResources, err := typhaConnection.SupportsNodeResourceUpdates(10 * time.Second)
+		if err != nil {
+			log.WithError(err).Error("Did not get hello message from Typha in time, assuming it does not support node resource updates")
+		}
+		if supportsNodeResources {
+			log.Info("Using node resource updates with Typha that supports it")
+			configParams.SetUseResourceUpdates(true)
+		}
+
 		go func() {
 			typhaConnection.Finished.Wait()
 			failureReportChan <- "Connection to Typha failed"
