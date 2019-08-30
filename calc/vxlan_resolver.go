@@ -70,10 +70,10 @@ type VXLANResolver struct {
 	nodeNameToVXLANMac        map[string]string
 	blockToRoutes             map[string]set.Set
 	vxlanPools                map[string]model.IPPool
-	useResourceUpdates        bool
+	useNodeResourceUpdates    bool
 }
 
-func NewVXLANResolver(hostname string, callbacks PipelineCallbacks, useResourceUpdates bool) *VXLANResolver {
+func NewVXLANResolver(hostname string, callbacks PipelineCallbacks, useNodeResourceUpdates bool) *VXLANResolver {
 	return &VXLANResolver{
 		hostname:                  hostname,
 		callbacks:                 callbacks,
@@ -83,12 +83,12 @@ func NewVXLANResolver(hostname string, callbacks PipelineCallbacks, useResourceU
 		nodeNameToVXLANMac:        map[string]string{},
 		blockToRoutes:             map[string]set.Set{},
 		vxlanPools:                map[string]model.IPPool{},
-		useResourceUpdates:        useResourceUpdates,
+		useNodeResourceUpdates:    useNodeResourceUpdates,
 	}
 }
 
 func (c *VXLANResolver) RegisterWith(allUpdDispatcher *dispatcher.Dispatcher) {
-	if c.useResourceUpdates {
+	if c.useNodeResourceUpdates {
 		allUpdDispatcher.Register(model.ResourceKey{}, c.OnResourceUpdate)
 	} else {
 		allUpdDispatcher.Register(model.HostIPKey{}, c.OnHostIPUpdate)
@@ -379,21 +379,29 @@ func (c *VXLANResolver) OnPoolUpdate(update api.Update) (_ bool) {
 		// This is an add/update of a pool with VXLAN enabled.
 		logrus.WithField("pool", k.CIDR).Info("Update of VXLAN-enabled IP pool.")
 		if curr, ok := c.vxlanPools[k.String()]; ok {
-			// We already know about this IP pool. Check to see if the CIDR has changed.
+			// We already know about the IP pool. Check to see if any fields have changed.
+			vxlanModeChanged := curr.VXLANMode != update.Value.(*model.IPPool).VXLANMode
+			// Check to see if the CIDR has changed.
 			// While this isn't possible directly in the user-facing API, it's possible that
 			// we see a delete/recreate as an update over the Syncer in rare cases.
-			if curr.CIDR.String() == update.Value.(*model.IPPool).CIDR.String() {
+			cidrChanged := curr.CIDR.String() != update.Value.(*model.IPPool).CIDR.String()
+
+			if !cidrChanged && !vxlanModeChanged {
+				// No change - we can ignore this update.
 				return
 			}
+			fields := logrus.Fields{"cidrChanged": cidrChanged, "modeChanged": vxlanModeChanged, "pool": k.CIDR}
+			logrus.WithFields(fields).Info("IP pool has changed")
 
-			// If the CIDR has changed, treat this as a delete followed by a re-create
+			// The pool has changed, treat this as a delete followed by a re-create
 			// with the new CIDR. Iterate through sent routes and withdraw any within
-			// the old CIDR.
+			// the old pool's CIDR. We'll kick the pending set below to trigger any updates.
 			delete(c.vxlanPools, k.String())
 			sentSet.Iter(func(item interface{}) error {
 				r := item.(vxlanRoute)
-				if !c.containsRoute(curr, r) {
+				if c.containsRoute(curr, r) {
 					c.withdrawRoute(r)
+					pendingSet.Add(r)
 				}
 				return nil
 			})
@@ -547,7 +555,7 @@ func (c *VXLANResolver) routeTypeForRoute(r vxlanRoute) (proto.RouteType, error)
 		logCxt.WithField("pool", pool).Debug("pool has VXLAN CrossSubnet mode enabled")
 		// if we're not using resource updates we'll never get the CIDR block need to check if the route's node's subnet
 		// overlaps with this node's subnet
-		if !c.useResourceUpdates {
+		if !c.useNodeResourceUpdates {
 			logCxt.WithField("pool", pool).Warning(
 				"CrossSubnet mode detected on pool but resource updates aren't being used. Defaulting to RouteType_VXLAN")
 			return proto.RouteType_VXLAN, nil
