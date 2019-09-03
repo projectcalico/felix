@@ -22,7 +22,6 @@ import (
 	"os"
 	"path"
 	"reflect"
-	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -1398,12 +1397,13 @@ func makeIPAndPort(i int) string {
 func getDialOptions() []grpc.DialOption {
 	return []grpc.DialOption{
 		grpc.WithInsecure(),
-		grpc.WithDialer(getDialer("unix"))}
+		grpc.WithContextDialer(getDialer("unix"))}
 }
 
-func getDialer(proto string) func(string, time.Duration) (net.Conn, error) {
-	return func(target string, timeout time.Duration) (net.Conn, error) {
-		return net.DialTimeout(proto, target, timeout)
+func getDialer(proto string) func(context.Context, string) (net.Conn, error) {
+	d := &net.Dialer{}
+	return func(ctx context.Context, target string) (net.Conn, error) {
+		return d.DialContext(ctx, proto, target)
 	}
 }
 
