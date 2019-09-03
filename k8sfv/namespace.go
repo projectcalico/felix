@@ -121,6 +121,6 @@ func createNetworkPolicy(clientset *kubernetes.Clientset, namespace string) {
 	}
 	_, err := clientset.NetworkingV1().NetworkPolicies("").Create(&np)
 	if err != nil {
-		panic(err)
+		log.WithField("name", namespace).WithErr(err).Error("failed to create namespace for network policy")
 	}
 }
