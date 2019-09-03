@@ -22,7 +22,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"sync"
 
 	pb "github.com/gogo/protobuf/proto"
 	log "github.com/sirupsen/logrus"
@@ -34,9 +33,6 @@ import (
 // StartExtDataplaneDriver starts the given driver as a child process and returns a
 // connection to it along with the command itself so that it may be monitored.
 func StartExtDataplaneDriver(driverFilename string) (*extDataplaneConn, *exec.Cmd) {
-	var wg sync.WaitGroup
-	var errStdout, errStderr error
-
 	// Create a pair of pipes, one for sending messages to the dataplane
 	// driver, the other for receiving.
 	toDriverR, toDriverW, err := os.Pipe()
@@ -58,14 +54,11 @@ func StartExtDataplaneDriver(driverFilename string) (*extDataplaneConn, *exec.Cm
 		log.WithError(err).Fatal("Failed to create pipe for dataplane driver")
 	}
 
-	wg.Add(2)
 	go func() {
-		_, errStdout = io.Copy(os.Stdout, driverOut)
-		wg.Done()
+		_, _ = io.Copy(os.Stdout, driverOut)
 	}()
 	go func() {
-		_, errStderr = io.Copy(os.Stderr, driverErr)
-		wg.Done()
+		_, _ = io.Copy(os.Stderr, driverErr)
 	}()
 
 	cmd.ExtraFiles = []*os.File{toDriverR, fromDriverW}
@@ -86,14 +79,6 @@ func StartExtDataplaneDriver(driverFilename string) (*extDataplaneConn, *exec.Cm
 	dataplaneConnection := &extDataplaneConn{
 		toDataplane:   toDriverW,
 		fromDataplane: fromDriverR,
-	}
-
-	wg.Wait()
-	if errStdout != nil {
-		log.WithError(errStdout).Fatal("Failed to copy from stdout to driver out")
-	}
-	if errStderr != nil {
-		log.WithError(errStderr).Fatal("Failed to copy from stderr to driver err")
 	}
 
 	return dataplaneConnection, cmd

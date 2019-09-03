@@ -85,7 +85,10 @@ func rotateLabels(clientset *kubernetes.Clientset, nsPrefix string) error {
 					panic(err)
 				}
 				ns_in.ObjectMeta.Labels["maturity"] = changeTo[ii]
-				ns_out, _ := clientset.CoreV1().Namespaces().Update(ns_in)
+				ns_out, err := clientset.CoreV1().Namespaces().Update(ns_in)
+				if err != nil {
+					log.WithField("ns_in", ns_in).Error("failed to update namespace")
+				}
 				log.WithField("ns_out", ns_out).Debug("Updated namespace")
 			}
 		}

@@ -695,7 +695,7 @@ func (c *VXLANResolver) vtepMACForHost(nodename string) string {
 	hasher := sha1.New()
 	_, err := hasher.Write([]byte(nodename))
 	if err != nil {
-		logrus.WithField("node", nodename).Debug("Failed to write hash for node")
+		logrus.WithError(err).WithField("node", nodename).Panic("Failed to write hash for node")
 	}
 	sha := hasher.Sum(nil)
 	hw := gonet.HardwareAddr(append([]byte("f"), sha[0:5]...))

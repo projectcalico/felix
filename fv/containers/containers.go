@@ -409,7 +409,7 @@ func (c *Container) EnsureBinary(name string) {
 	if !c.binaries.Contains(name) {
 		err := utils.Command("docker", "cp", "../bin/"+name, c.Name+":/"+name).Run()
 		if err != nil {
-			log.WithField("name", name).Info("Failed to run 'docker cp' command")
+			log.WithField("name", name).Error("Failed to run 'docker cp' command")
 		}
 		c.binaries.Add(name)
 	}

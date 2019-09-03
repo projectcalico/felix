@@ -17,6 +17,8 @@ package hashutils
 import (
 	"crypto/sha256"
 	"encoding/base64"
+
+	log "github.com/sirupsen/logrus"
 )
 
 const shortenedPrefix = "_"
@@ -35,7 +37,7 @@ func GetLengthLimitedID(fixedPrefix, suffix string, maxLength int) string {
 		hasher := sha256.New()
 		_, err := hasher.Write([]byte(suffix))
 		if err != nil {
-			return ""
+			log.Panic("failed to write hash suffix")
 		}
 		hash := base64.RawURLEncoding.EncodeToString(hasher.Sum(nil))
 		charsLeftForHash := maxLength - 1 - prefixLen
