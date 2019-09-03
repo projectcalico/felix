@@ -134,7 +134,7 @@ func (c *Chain) RuleHashes(features *Features) []string {
 				"position":     ii,
 				"chain":        c.Name,
 				"hash":         hashes[ii],
-			}).Panic("Hashed rule")
+			}).Debug("Hashed rule")
 		}
 	}
 	return hashes
