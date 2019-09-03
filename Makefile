@@ -522,7 +522,7 @@ static-checks:
 
 .PHONY: golangci-lint
 golangci-lint: $(GENERATED_FILES)
-	$(DOCKER_RUN) $(CALICO_BUILD) golangci-lint run --max-issues-per-linter 0 --max-same-issues 0
+	$(DOCKER_RUN) $(CALICO_BUILD) golangci-lint run --deadline 5m --max-issues-per-linter 0 --max-same-issues 0 --disable govet
 
 .PHONY: check-packr
 check-packr: bpf/packrd/packed-packr.go
