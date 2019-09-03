@@ -522,7 +522,6 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	}
 
 	dp.allIptablesTables = append(dp.allIptablesTables, dp.iptablesMangleTables...)
-	dp.allIptablesTables = append(dp.allIptablesTables, dp.iptablesMangleTables...)
 	dp.allIptablesTables = append(dp.allIptablesTables, dp.iptablesNATTables...)
 	dp.allIptablesTables = append(dp.allIptablesTables, dp.iptablesFilterTables...)
 	dp.allIptablesTables = append(dp.allIptablesTables, dp.iptablesRawTables...)
