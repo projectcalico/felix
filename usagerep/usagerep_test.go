@@ -20,6 +20,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	log "github.com/sirupsen/logrus"
 
 	"context"
 	"fmt"
@@ -53,7 +54,10 @@ var _ = Describe("UsageReporter with mocked URL and short interval", func() {
 		go func() {
 			defer GinkgoRecover()
 			// TODO: Investigate why this call sometimes returns an error.
-			_ = http.Serve(tcpListener, httpHandler)
+			err = http.Serve(tcpListener, httpHandler)
+			if err != nil {
+				log.WithError(err).Error("Failed to start HTTP server.")
+			}
 		}()
 
 		// Channels to send data to the UsageReporter.

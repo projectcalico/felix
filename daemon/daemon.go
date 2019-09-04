@@ -231,10 +231,14 @@ configRetry:
 			_, err = configParams.UpdateFrom(globalConfig, config.DatastoreGlobal)
 			if err != nil {
 				log.WithError(err).Error("Failed update global config from datastore")
+				time.Sleep(1 * time.Second)
+				continue configRetry
 			}
 			_, err = configParams.UpdateFrom(hostConfig, config.DatastorePerHost)
 			if err != nil {
 				log.WithError(err).Error("Failed update host config from datastore")
+				time.Sleep(1 * time.Second)
+				continue configRetry
 			}
 			break
 		}

@@ -167,8 +167,8 @@ func initialize(k8sServerEndpoint string) (clientset *kubernetes.Clientset) {
 			return
 		}
 
-		ctx, cancelfun := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancelfun()
+		ctx, cancelFunc := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelFunc()
 		err = calicoClient.EnsureInitialized(
 			ctx,
 			"v3.0.0-test",

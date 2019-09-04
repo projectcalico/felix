@@ -24,6 +24,7 @@ import (
 	"strconv"
 
 	"github.com/projectcalico/felix/labelindex"
+	log "github.com/sirupsen/logrus"
 )
 
 var id = 0
@@ -574,7 +575,7 @@ func GetMockXDPTag(bytes []byte) string {
 	h := sha1.New()
 	_, err := h.Write(bytes)
 	if err != nil {
-		return ""
+		log.WithError(err).Panic("failed to write rule hash")
 	}
 	checksum := hex.EncodeToString(h.Sum(nil))
 

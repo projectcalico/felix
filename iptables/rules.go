@@ -96,7 +96,7 @@ func (c *Chain) RuleHashes(features *Features) []string {
 	if err != nil {
 		log.WithFields(log.Fields{
 			"chain": c.Name,
-		}).Panic("failed to write hash")
+		}).WithError(err).Panic("Failed to write suffix to hash.")
 		return nil
 	}
 
@@ -111,7 +111,7 @@ func (c *Chain) RuleHashes(features *Features) []string {
 				"action":   rule.Action,
 				"position": ii,
 				"chain":    c.Name,
-			}).Panic("failed to write hash")
+			}).WithError(err).Panic("Failed to write suffix to hash.")
 		}
 		ruleForHashing := rule.RenderAppend(c.Name, "HASH", features)
 		_, err = s.Write([]byte(ruleForHashing))
@@ -121,7 +121,7 @@ func (c *Chain) RuleHashes(features *Features) []string {
 				"action":       rule.Action,
 				"position":     ii,
 				"chain":        c.Name,
-			}).Panic("failed to write rule for hashing")
+			}).WithError(err).Panic("Failed to write rule for hashing.")
 		}
 		hash = s.Sum(hash[0:0])
 		// Encode the hash using a compact character set.  We use the URL-safe base64
