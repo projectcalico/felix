@@ -522,7 +522,7 @@ static-checks:
 
 # gosimple uses too much memory for Semaphore
 ifneq ($(CI),)
-LINT_ARGS := --disable gosimple
+LINT_ARGS := --disable govet
 endif
 
 .PHONY: golangci-lint
