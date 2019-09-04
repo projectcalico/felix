@@ -616,6 +616,12 @@ func (b *MockBPFLib) LoadSockops(objPath string) error {
 	return nil
 }
 
+func (b *MockBPFLib) loadBPF(objPath, progPath, progType string, mapArgs []string) error {
+	// this is just a refactoring with no real functionality for the mock BPF
+	// library, just succeed
+	return nil
+}
+
 func (b *MockBPFLib) LoadSockopsWithBytes(objBytes []byte) error {
 	f, err := writeBPFBytes(objBytes)
 	if err != nil {
