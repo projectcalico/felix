@@ -201,11 +201,11 @@ func (d *MockDataplane) Config() map[string]string {
 	if d.config == nil {
 		return nil
 	}
-	local_copy := map[string]string{}
+	localCopy := map[string]string{}
 	for k, v := range d.config {
-		local_copy[k] = v
+		localCopy[k] = v
 	}
-	return local_copy
+	return localCopy
 }
 
 func NewMockDataplane() *MockDataplane {

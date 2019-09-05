@@ -172,7 +172,7 @@ func main() {
 				}
 				err = utils.RunCommand("ip", "-6", "route", "add", "default", "via", hostIPv6Addr.String(), "dev", "eth0")
 				if err != nil {
-					return
+					log.WithField("hostIP", hostIPv6Addr.String()).WithError(err).Info("Failed to add IPv6 route to eth0.")
 				}
 
 				// Output the routing table to the log for diagnostic purposes.
