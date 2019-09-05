@@ -155,56 +155,66 @@ func main() {
 				// Without these sysctls enabled, interfaces will come up but they won't get a link local IPv6 address,
 				// which is required to add the default IPv6 route.
 				if err = writeProcSys("/proc/sys/net/ipv6/conf/all/disable_ipv6", "0"); err != nil {
+					log.WithError(err).Error("Failed to disable IPV6.")
 					return
 				}
 
 				if err = writeProcSys("/proc/sys/net/ipv6/conf/default/disable_ipv6", "0"); err != nil {
+					log.WithError(err).Error("Failed to disable IPV6 by default.")
 					return
 				}
 
 				if err = writeProcSys("/proc/sys/net/ipv6/conf/lo/disable_ipv6", "0"); err != nil {
+					log.WithError(err).Error("Failed to disable IPV6 on the loopback interface.")
 					return
 				}
 
 				err = utils.RunCommand("ip", "-6", "addr", "add", ipAddress+"/128", "dev", "eth0")
 				if err != nil {
+					log.WithField("ipAddress", ipAddress+"/128").WithError(err).Error("Failed to add IPv6 addr to eth0.")
 					return
 				}
 				err = utils.RunCommand("ip", "-6", "route", "add", "default", "via", hostIPv6Addr.String(), "dev", "eth0")
 				if err != nil {
 					log.WithField("hostIP", hostIPv6Addr.String()).WithError(err).Info("Failed to add IPv6 route to eth0.")
+					return
 				}
 
 				// Output the routing table to the log for diagnostic purposes.
 				err = utils.RunCommand("ip", "-6", "route")
 				if err != nil {
-					return
+					log.WithError(err).Info("Failed to output IPv6 routes.")
 				}
 				err = utils.RunCommand("ip", "-6", "addr")
 				if err != nil {
-					return
+					log.WithError(err).Info("Failed to output IPv6 addresses.")
 				}
 			} else {
 				err = utils.RunCommand("ip", "addr", "add", ipAddress+"/32", "dev", "eth0")
 				if err != nil {
+					log.WithField("ipAddress", ipAddress+"/32").WithError(err).Error("Failed to add IPv4 addr to eth0.")
 					return
 				}
 				err = utils.RunCommand("ip", "route", "add", "169.254.169.254/32", "dev", "eth0")
 				if err != nil {
+					log.WithField("hostIP", hostIPv6Addr.String()).WithError(err).Info("Failed to add IPv4 route to eth0.")
 					return
 				}
 				err = utils.RunCommand("ip", "route", "add", "default", "via", "169.254.169.254", "dev", "eth0")
 				if err != nil {
+					log.WithField("hostIP", hostIPv6Addr.String()).WithError(err).Info("Failed to add default route to eth0.")
 					return
 				}
 
 				// Output the routing table to the log for diagnostic purposes.
 				err = utils.RunCommand("ip", "route")
 				if err != nil {
+					log.WithError(err).Info("Failed to output IPv4 routes.")
 					return
 				}
 				err = utils.RunCommand("ip", "addr")
 				if err != nil {
+					log.WithError(err).Info("Failed to output IPv4 addresses.")
 					return
 				}
 			}
