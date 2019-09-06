@@ -155,17 +155,17 @@ func main() {
 				// Without these sysctls enabled, interfaces will come up but they won't get a link local IPv6 address,
 				// which is required to add the default IPv6 route.
 				if err = writeProcSys("/proc/sys/net/ipv6/conf/all/disable_ipv6", "0"); err != nil {
-					log.WithError(err).Error("Failed to disable IPV6.")
+					log.WithError(err).Error("Failed to enable IPv6.")
 					return
 				}
 
 				if err = writeProcSys("/proc/sys/net/ipv6/conf/default/disable_ipv6", "0"); err != nil {
-					log.WithError(err).Error("Failed to disable IPV6 by default.")
+					log.WithError(err).Error("Failed to enable IPv6 by default.")
 					return
 				}
 
 				if err = writeProcSys("/proc/sys/net/ipv6/conf/lo/disable_ipv6", "0"); err != nil {
-					log.WithError(err).Error("Failed to disable IPV6 on the loopback interface.")
+					log.WithError(err).Error("Failed to enable IPv6 on the loopback interface.")
 					return
 				}
 
