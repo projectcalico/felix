@@ -208,10 +208,7 @@ endif
 LOCAL_USER_ID:=$(shell id -u)
 LOCAL_GROUP_ID:=$(shell id -g)
 
-# Allow libcalico-go and the ssh auth sock to be mapped into the build container.
-ifdef LIBCALICOGO_PATH
-	EXTRA_DOCKER_ARGS += -v $(LIBCALICOGO_PATH):/go/src/github.com/projectcalico/libcalico-go:ro
-endif
+# Allow the ssh auth sock to be mapped into the build container.
 ifdef SSH_AUTH_SOCK
 	EXTRA_DOCKER_ARGS += -v $(SSH_AUTH_SOCK):/ssh-agent --env SSH_AUTH_SOCK=/ssh-agent
 endif
