@@ -223,6 +223,8 @@ var _ = DescribeTable("Config parsing",
 		"RETURN", "RETURN"),
 	Entry("IptablesMangleAllowAction", "IptablesMangleAllowAction",
 		"RETURN", "RETURN"),
+	Entry("IptablesNotPassedAction", "IptablesNotPassedAction",
+		"DROP", "DROP"),
 
 	Entry("LogFilePath", "LogFilePath", "/tmp/felix.log", "/tmp/felix.log"),
 

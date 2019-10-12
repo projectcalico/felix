@@ -199,6 +199,7 @@ type DefaultRuleRenderer struct {
 	inputAcceptActions []iptables.Action
 	filterAllowAction  iptables.Action
 	mangleAllowAction  iptables.Action
+	notPassedAction    iptables.Action
 }
 
 func (r *DefaultRuleRenderer) ipSetConfig(ipVersion uint8) *ipsets.IPVersionConfig {
@@ -249,6 +250,7 @@ type Config struct {
 	EndpointToHostAction      string
 	IptablesFilterAllowAction string
 	IptablesMangleAllowAction string
+	IptablesNotPassedAction   string
 
 	FailsafeInboundHostPorts  []config.ProtoPort
 	FailsafeOutboundHostPorts []config.ProtoPort
@@ -309,7 +311,7 @@ func NewRenderer(config Config) RuleRenderer {
 	}
 
 	// What should we do with packets that are accepted in the forwarding chain
-	var filterAllowAction, mangleAllowAction iptables.Action
+	var filterAllowAction, mangleAllowAction, notPassedAction iptables.Action
 	switch config.IptablesFilterAllowAction {
 	case "RETURN":
 		log.Info("filter table allowed packets will be returned to FORWARD chain.")
@@ -326,11 +328,20 @@ func NewRenderer(config Config) RuleRenderer {
 		log.Info("mangle table allowed packets will be accepted immediately.")
 		mangleAllowAction = iptables.AcceptAction{}
 	}
+	switch config.IptablesNotPassedAction {
+	case "REJECT":
+		log.Info("packets that are not passed by any policy or profile will be rejected.")
+		notPassedAction = iptables.RejectAction{}
+	default:
+		log.Info("packets that are not passed by any policy or profile will be dropped.")
+		notPassedAction = iptables.DropAction{}
+	}
 
 	return &DefaultRuleRenderer{
 		Config:             config,
 		inputAcceptActions: inputAcceptActions,
 		filterAllowAction:  filterAllowAction,
 		mangleAllowAction:  mangleAllowAction,
+		notPassedAction:    notPassedAction,
 	}
 }

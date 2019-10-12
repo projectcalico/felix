@@ -15,6 +15,8 @@
 package rules
 
 import (
+	"fmt"
+
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/felix/hashutils"
@@ -363,15 +365,15 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		}
 
 		if chainType == chainTypeNormal || chainType == chainTypeForward {
-			// When rendering normal and forward rules, if no policy marked the packet as "pass", drop the
+			// When rendering normal and forward rules, if no policy marked the packet as "pass", drop or reject the
 			// packet.
 			//
 			// For untracked and pre-DNAT rules, we don't do that because there may be
 			// normal rules still to be applied to the packet in the filter table.
 			rules = append(rules, Rule{
 				Match:   Match().MarkClear(r.IptablesMarkPass),
-				Action:  DropAction{},
-				Comment: "Drop if no policies passed packet",
+				Action:  r.notPassedAction,
+				Comment: fmt.Sprintf("%s if no policies passed packet", r.notPassedAction),
 			})
 		}
 
@@ -410,8 +412,8 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		// still to be applied to the packet in the filter table.
 		rules = append(rules, Rule{
 			Match:   Match(),
-			Action:  DropAction{},
-			Comment: "Drop if no profiles matched",
+			Action:  r.notPassedAction,
+			Comment: fmt.Sprintf("%s if no profiles matched", r.notPassedAction),
 		})
 	}
 
