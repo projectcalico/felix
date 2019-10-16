@@ -464,6 +464,7 @@ func (m *endpointManager) resolveWorkloadEndpoints() {
 		} else {
 			logCxt.Info("Workload removed, deleting its chains.")
 			m.filterTable.RemoveChains(m.activeWlIDToChains[id])
+			delete(m.activeWlIDToChains, id)
 			if oldWorkload != nil {
 				// Remove any routes from the routing table.  The RouteTable will
 				// remove any conntrack entries as a side-effect.
