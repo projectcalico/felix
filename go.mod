@@ -1,6 +1,6 @@
 module github.com/projectcalico/felix
 
-go 1.12
+go 1.13
 
 require (
 	github.com/containernetworking/cni v0.5.2
@@ -47,4 +47,4 @@ require (
 	k8s.io/client-go v12.0.0+incompatible
 )
 
-replace github.com/sirupsen/logrus => github.com/projectcalico/logrus v0.0.0-20180627202928-fc9bbf2f57995271c5cd6911ede7a2ebc5ea7c6f
+replace github.com/sirupsen/logrus => github.com/projectcalico/logrus v1.0.4-calico
