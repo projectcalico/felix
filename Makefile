@@ -40,109 +40,19 @@
 #	   +--------------+
 #
 ###############################################################################
-# Shortcut targets
-default: build
 
-## Build binary for current platform
-all: build
-
-## Run the tests for the current platform/architecture
-test: ut fv
-
-###############################################################################
-# Both native and cross architecture builds are supported.
-# The target architecture is select by setting the ARCH variable.
-# When ARCH is undefined it is set to the detected host architecture.
-# When ARCH differs from the host architecture a crossbuild will be performed.
-ARCHES=$(patsubst docker-image/Dockerfile.%,%,$(wildcard docker-image/Dockerfile.*))
-
-# BUILDARCH is the host architecture
-# ARCH is the target architecture
-# we need to keep track of them separately
-BUILDARCH ?= $(shell uname -m)
-BUILDOS ?= $(shell uname -s | tr A-Z a-z)
-
-# canonicalized names for host architecture
-ifeq ($(BUILDARCH),aarch64)
-	BUILDARCH=arm64
-endif
-ifeq ($(BUILDARCH),x86_64)
-	BUILDARCH=amd64
-endif
-
-# unless otherwise set, I am building for my own architecture, i.e. not cross-compiling
-ARCH ?= $(BUILDARCH)
-
-# canonicalized names for target architecture
-ifeq ($(ARCH),aarch64)
-	override ARCH=arm64
-endif
-ifeq ($(ARCH),x86_64)
-	override ARCH=amd64
-endif
-
-# we want to be able to run the same recipe on multiple targets keyed on the image name
-# to do that, we would use the entire image name, e.g. calico/node:abcdefg, as the stem, or '%', in the target
-# however, make does **not** allow the usage of invalid filename characters - like / and : - in a stem, and thus errors out
-# to get around that, we "escape" those characters by converting all : to --- and all / to ___ , so that we can use them
-# in the target, we then unescape them back
-escapefs = $(subst :,---,$(subst /,___,$(1)))
-unescapefs = $(subst ---,:,$(subst ___,/,$(1)))
-
-# these macros create a list of valid architectures for pushing manifests
-space :=
-space +=
-comma := ,
-prefix_linux = $(addprefix linux/,$(strip $1))
-join_platforms = $(subst $(space),$(comma),$(call prefix_linux,$(strip $1)))
-
-# Targets used when cross building.
-.PHONY: native register
-native:
-ifneq ($(BUILDARCH),$(ARCH))
-	@echo "Target $(MAKECMDGOALS)" is not supported when cross building! && false
-endif
-
-# Enable binfmt adding support for miscellaneous binary formats.
-# This is only needed when running non-native binaries.
-register:
-ifneq ($(BUILDARCH),$(ARCH))
-	docker run --rm --privileged multiarch/qemu-user-static:register || true
-endif
+get_common:=$(shell wget -nv https://raw.githubusercontent.com/rafaelvanoni/common/master/Makefile.common -O Makefile.common)
+include Makefile.common
 
 # list of arches *not* to build when doing *-all
 #    until s390x works correctly
 EXCLUDEARCH ?= s390x
 VALIDARCHES = $(filter-out $(EXCLUDEARCH),$(ARCHES))
 
-###############################################################################
 BUILD_IMAGE?=calico/felix
 PUSH_IMAGES?=$(BUILD_IMAGE) quay.io/calico/felix
 RELEASE_IMAGES?=
 PACKAGE_NAME?=github.com/projectcalico/felix
-
-# If this is a release, also tag and push additional images.
-ifeq ($(RELEASE),true)
-PUSH_IMAGES+=$(RELEASE_IMAGES)
-endif
-
-# remove from the list to push to manifest any registries that do not support multi-arch
-EXCLUDE_MANIFEST_REGISTRIES ?= quay.io/
-PUSH_MANIFEST_IMAGES=$(PUSH_IMAGES:$(EXCLUDE_MANIFEST_REGISTRIES)%=)
-PUSH_NONMANIFEST_IMAGES=$(filter-out $(PUSH_MANIFEST_IMAGES),$(PUSH_IMAGES))
-
-# location of docker credentials to push manifests
-DOCKER_CONFIG ?= $(HOME)/.docker/config.json
-
-GO_BUILD_VER?=v0.23
-# For building, we use the go-build image for the *host* architecture, even if the target is different
-# the one for the host should contain all the necessary cross-compilation tools
-# we do not need to use the arch since go-build:v0.15 now is multi-arch manifest
-CALICO_BUILD=calico/go-build:$(GO_BUILD_VER)
-ETCD_VERSION?=v3.3.7
-K8S_VERSION?=v1.14.1
-PROTOC_VER?=v0.1
-PROTOC_CONTAINER ?=calico/protoc:$(PROTOC_VER)-$(BUILDARCH)
 
 FV_ETCDIMAGE?=quay.io/coreos/etcd:$(ETCD_VERSION)-$(BUILDARCH)
 FV_K8SIMAGE?=gcr.io/google_containers/hyperkube-$(BUILDARCH):$(K8S_VERSION)
@@ -164,18 +74,6 @@ FV_NUM_BATCHES?=3
 FV_BATCHES_TO_RUN?=$(shell seq $(FV_NUM_BATCHES))
 FV_SLOW_SPEC_THRESH=90
 
-# Figure out version information.  To support builds from release tarballs, we default to
-# <unknown> if this isn't a git checkout.
-GIT_COMMIT:=$(shell git rev-parse HEAD || echo '<unknown>')
-BUILD_ID:=$(shell git rev-parse HEAD || uuidgen | sed 's/-//g')
-GIT_DESCRIPTION:=$(shell git describe --tags --dirty --always || echo '<unknown>')
-ifeq ($(LOCAL_BUILD),true)
-	GIT_DESCRIPTION = $(shell git describe --tags --dirty --always || echo '<unknown>')-dev-build
-endif
-
-# Calculate a timestamp for any build artefacts.
-DATE:=$(shell date -u +'%FT%T%z')
-
 # Linker flags for building Felix.
 #
 # We use -X to insert the version information into the placeholder variables
@@ -191,46 +89,12 @@ LDFLAGS:=-ldflags "\
 
 # List of Go files that are generated by the build process.  Builds should
 # depend on these, clean removes them.
-GENERATED_FILES:=proto/felixbackend.pb.go bpf/bpf-packr.go bpf/packrd/packed-packr.go bpf/xdp/generated/xdp.o bpf/sockmap/generated/sockops.o bpf/sockmap/generated/redir.o
+GENERATED_FILES=proto/felixbackend.pb.go bpf/bpf-packr.go bpf/packrd/packed-packr.go bpf/xdp/generated/xdp.o bpf/sockmap/generated/sockops.o bpf/sockmap/generated/redir.o
 
 # All Felix go files.
 SRC_FILES:=$(shell find . $(foreach dir,$(NON_FELIX_DIRS),-path ./$(dir) -prune -o) -type f -name '*.go' -print) $(GENERATED_FILES)
 
-# If local build is set, then always build the binary since we might not
-# detect when another local repository has been modified.
 ifeq ($(LOCAL_BUILD),true)
-.PHONY: $(SRC_FILES)
-endif
-
-# Figure out the users UID/GID.  These are needed to run docker containers
-# as the current user and ensure that files built inside containers are
-# owned by the current user.
-LOCAL_USER_ID:=$(shell id -u)
-LOCAL_GROUP_ID:=$(shell id -g)
-
-# Allow the ssh auth sock to be mapped into the build container.
-ifdef SSH_AUTH_SOCK
-	EXTRA_DOCKER_ARGS += -v $(SSH_AUTH_SOCK):/ssh-agent --env SSH_AUTH_SOCK=/ssh-agent
-endif
-
-# Volume-mount gopath into the build container to cache go module's packages. If the environment is using multiple
-# comma-separated directories for gopath, use the first one, as that is the default one used by go modules.
-ifneq ($(GOPATH),)
-	# If the environment is using multiple comma-separated directories for gopath, use the first one, as that
-	# is the default one used by go modules.
-	GOMOD_CACHE = $(shell echo $(GOPATH) | cut -d':' -f1)/pkg/mod
-else
-	# If gopath is empty, default to $(HOME)/go.
-	GOMOD_CACHE = $(HOME)/go/pkg/mod
-endif
-
-EXTRA_DOCKER_ARGS	+= -e GO111MODULE=on -v $(GOMOD_CACHE):/go/pkg/mod:rw
-
-# Build mounts for running in "local build" mode. This allows an easy build using local development code,
-# assuming that there is a local checkout of libcalico, typha and pod2daemon in the same directory as this repo.
-PHONY: local_build
-
-ifdef LOCAL_BUILD
 EXTRA_DOCKER_ARGS+=-v $(CURDIR)/../libcalico-go:/go/src/github.com/projectcalico/libcalico-go:rw
 EXTRA_DOCKER_ARGS+=-v $(CURDIR)/../typha:/go/src/github.com/projectcalico/typha:rw
 EXTRA_DOCKER_ARGS+=-v $(CURDIR)/../pod2daemon:/go/src/github.com/projectcalico/pod2daemon:rw
@@ -242,18 +106,6 @@ else
 local_build:
 	@echo "Building felix"
 endif
-
-DOCKER_RUN := mkdir -p .go-pkg-cache $(GOMOD_CACHE) && \
-	docker run --rm \
-		--net=host \
-		$(EXTRA_DOCKER_ARGS) \
-		-e LOCAL_USER_ID=$(LOCAL_USER_ID) \
-		-e GOCACHE=/go-cache \
-		-e GOARCH=$(ARCH) \
-		-e GOPATH=/go \
-		-v $(CURDIR):/go/src/$(PACKAGE_NAME):rw \
-		-v $(CURDIR)/.go-pkg-cache:/go-cache:rw \
-		-w /go/src/$(PACKAGE_NAME)
 
 .PHONY: clean
 clean:
@@ -273,55 +125,9 @@ clean:
 	find . -name "*.pyc" -type f -delete
 
 ###############################################################################
-# Updating pins
+# Automated pin updates
 ###############################################################################
-PIN_BRANCH?=$(shell git rev-parse --abbrev-ref HEAD)
-
-define get_remote_version
-	$(shell git ls-remote http://$(1) $(2) 2>/dev/null | cut -f 1)
-endef
-
-# update_pin updates the given package's version to the latest available in the specified repo and branch.
-# $(1) should be the name of the package, $(2) and $(3) the repository and branch from which to update it.
-define update_pin
-	$(eval new_ver := $(call get_remote_version,$(2),$(3)))
-
-	$(DOCKER_RUN) $(CALICO_BUILD) sh -c '\
-		if [[ ! -z "$(new_ver)" ]]; then \
-			go get $(1)@$(new_ver); \
-			go mod download; \
-		fi'
-endef
-
-TYPHA_BRANCH?=$(PIN_BRANCH)
-TYPHA_REPO?=github.com/projectcalico/typha
-LIBCALICO_BRANCH?=$(PIN_BRANCH)
-LIBCALICO_REPO?=github.com/projectcalico/libcalico-go
-
-update-typha-pin:
-	$(call update_pin,github.com/projectcalico/typha,$(TYPHA_REPO),$(TYPHA_BRANCH))
-
-update-libcalico-pin:
-	$(call update_pin,github.com/projectcalico/libcalico-go,$(LIBCALICO_REPO),$(LIBCALICO_BRANCH))
-
-git-status:
-	git status --porcelain
-
-git-config:
-ifdef CONFIRM
-	git config --global user.name "Semaphore Automatic Update"
-	git config --global user.email "marvin@projectcalico.io"
-endif
-
-git-commit:
-	git diff --quiet HEAD || git commit -m "Semaphore Automatic Update" go.mod go.sum
-
-git-push:
-	git push
-
 update-pins: update-libcalico-pin update-typha-pin
-
-commit-pin-updates: update-pins git-status ci git-config git-commit git-push
 
 ###############################################################################
 # Building the binary
@@ -481,73 +287,10 @@ ifeq ($(ARCH),amd64)
 	docker tag $(BUILD_IMAGE):latest-$(ARCH) $(BUILD_IMAGE):latest
 endif
 
-imagetag:
-ifndef IMAGETAG
-	$(error IMAGETAG is undefined - run using make <target> IMAGETAG=X.Y.Z)
-endif
-
-## push one arch
-push: imagetag $(addprefix sub-single-push-,$(call escapefs,$(PUSH_IMAGES)))
-
-sub-single-push-%:
-	docker push $(call unescapefs,$*:$(IMAGETAG)-$(ARCH))
-
-## push all arches
-push-all: imagetag $(addprefix sub-push-,$(VALIDARCHES))
-sub-push-%:
-	$(MAKE) push ARCH=$* IMAGETAG=$(IMAGETAG)
-
-## push multi-arch manifest where supported
-push-manifests: imagetag  $(addprefix sub-manifest-,$(call escapefs,$(PUSH_MANIFEST_IMAGES)))
-sub-manifest-%:
-	# Docker login to hub.docker.com required before running this target as we are using $(DOCKER_CONFIG) holds the docker login credentials
-	# path to credentials based on manifest-tool's requirements here https://github.com/estesp/manifest-tool#sample-usage
-	docker run -t --entrypoint /bin/sh -v $(DOCKER_CONFIG):/root/.docker/config.json $(CALICO_BUILD) -c "/usr/bin/manifest-tool push from-args --platforms $(call join_platforms,$(VALIDARCHES)) --template $(call unescapefs,$*:$(IMAGETAG))-ARCH --target $(call unescapefs,$*:$(IMAGETAG))"
-
-## push default amd64 arch where multi-arch manifest is not supported
-push-non-manifests: imagetag $(addprefix sub-non-manifest-,$(call escapefs,$(PUSH_NONMANIFEST_IMAGES)))
-sub-non-manifest-%:
-ifeq ($(ARCH),amd64)
-	docker push $(call unescapefs,$*:$(IMAGETAG))
-else
-	$(NOECHO) $(NOOP)
-endif
-
-## tag images of one arch for all supported registries
-tag-images: imagetag $(addprefix sub-single-tag-images-arch-,$(call escapefs,$(PUSH_IMAGES))) $(addprefix sub-single-tag-images-non-manifest-,$(call escapefs,$(PUSH_NONMANIFEST_IMAGES)))
-
-sub-single-tag-images-arch-%:
-	docker tag $(BUILD_IMAGE):latest-$(ARCH) $(call unescapefs,$*:$(IMAGETAG)-$(ARCH))
-
-# because some still do not support multi-arch manifest
-sub-single-tag-images-non-manifest-%:
-ifeq ($(ARCH),amd64)
-	docker tag $(BUILD_IMAGE):latest-$(ARCH) $(call unescapefs,$*:$(IMAGETAG))
-else
-	$(NOECHO) $(NOOP)
-endif
-
-## tag images of all archs
-tag-images-all: imagetag $(addprefix sub-tag-images-,$(VALIDARCHES))
-sub-tag-images-%:
-	$(MAKE) tag-images ARCH=$* IMAGETAG=$(IMAGETAG)
-
 ###############################################################################
 # Static checks
 ###############################################################################
-.PHONY: static-checks
-static-checks:
-	$(MAKE) check-typha-pins golangci-lint check-packr
-
-LINT_ARGS := --deadline 5m --max-issues-per-linter 0 --max-same-issues 0
-ifneq ($(CI),)
-	# govet uses too much memory for CI
-	LINT_ARGS += --disable govet
-endif
-
-.PHONY: golangci-lint
-golangci-lint: $(GENERATED_FILES)
-	$(DOCKER_RUN) $(CALICO_BUILD) golangci-lint run $(LINT_ARGS)
+LOCAL_CHECKS = check-typha-pins check-packr
 
 .PHONY: check-packr
 check-packr: bpf/packrd/packed-packr.go
@@ -555,11 +298,6 @@ check-packr: bpf/packrd/packed-packr.go
 		echo "bpf/xdp/filter.c changed but the generated compiled object wasn't checked in. Please run 'make packr' and commit the changes to bpf/packrd/packed-packr.go."; \
 		false; \
 	fi
-
-# Run go fmt on all our go files.
-.PHONY: go-fmt goimports fix
-fix go-fmt goimports:
-	$(DOCKER_RUN) $(CALICO_BUILD) sh -c 'find . -iname "*.go" ! -wholename "./vendor/*" | xargs goimports -w -local github.com/projectcalico/'
 
 LIBCALICO_FELIX?=$(shell $(DOCKER_RUN) $(CALICO_BUILD) go list -m -f "{{.Version}}" github.com/projectcalico/libcalico-go)
 TYPHA_GOMOD?=$(shell $(DOCKER_RUN) $(CALICO_BUILD) go list -m -f "{{.GoMod}}" github.com/projectcalico/typha)
@@ -578,17 +316,6 @@ check-typha-pins:
 	     echo "Typha and Felix libcalico-go pins differ."; \
 	     false; \
 	fi
-
-.PHONY: pre-commit
-pre-commit:
-	$(DOCKER_RUN) $(CALICO_BUILD) git-hooks/pre-commit-in-container
-
-.PHONY: install-git-hooks
-install-git-hooks:
-	./install-git-hooks
-
-foss-checks:
-	$(DOCKER_RUN) -e FOSSA_API_KEY=$(FOSSA_API_KEY) $(CALICO_BUILD) /usr/local/bin/fossa
 
 ###############################################################################
 # Unit Tests
@@ -744,9 +471,7 @@ bin/test-connection: $(SRC_FILES) local_build
 ###############################################################################
 # CI/CD
 ###############################################################################
-.PHONY: ci cd mod-download
-mod-download:
-	-$(DOCKER_RUN) $(CALICO_BUILD) go mod download
+.PHONY: ci cd
 
 ci: mod-download image-all ut static-checks check-packr
 ifeq (,$(filter fv, $(EXCEPT)))
