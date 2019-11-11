@@ -41,7 +41,12 @@
 #
 ###############################################################################
 
-get_common:=$(shell wget -nv https://raw.githubusercontent.com/rafaelvanoni/common/master/Makefile.common -O Makefile.common)
+GO_BUILD_VER?=v0.26
+
+MAKE_BRANCH?=$(GO_BUILD_VER)
+MAKE_REPO?=https://raw.githubusercontent.com/projectcalico/go-build/$(MAKE_BRANCH)/Makefile.common
+
+get_common:=$(shell wget -nv $(MAKE_REPO) -O Makefile.common)
 include Makefile.common
 
 # list of arches *not* to build when doing *-all
