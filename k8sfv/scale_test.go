@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017,2019 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,6 +54,7 @@ var _ = Context("with a k8s clientset", func() {
 		log.Info(">>> AfterEach <<<")
 		time.Sleep(10 * time.Second)
 		cleanupAll(clientset, nsPrefix)
+		log.Info(">>> End of AfterEach <<<")
 	})
 
 	Context("with 1 remote node", func() {
@@ -61,6 +62,8 @@ var _ = Context("with a k8s clientset", func() {
 		BeforeEach(func() {
 			log.Info(">>> BeforeEach <<<")
 			d = NewDeployment(clientset, 1, false)
+
+			expectFelixReady()
 		})
 
 		// Slow: takes about 3 minutes.
@@ -220,6 +223,13 @@ var _ = Context("with a k8s clientset", func() {
 		})
 	})
 })
+
+func expectFelixReady() {
+	EventuallyWithOffset(1,
+		func() int64 { return getFelixIntMetric("felix_resync_state") }, "10s").Should(
+		BeNumerically("==", 3),
+		"Felix never reported in-sync with datastore")
+}
 
 func triggerFelixGCAndMemoryDump() {
 	err := exec.Command("pkill", "-USR1", "calico-felix").Run()
