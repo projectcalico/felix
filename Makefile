@@ -48,11 +48,6 @@ include Makefile.common
 
 ###############################################################################
 
-# list of arches *not* to build when doing *-all
-#    until s390x works correctly
-EXCLUDEARCH ?= s390x
-VALIDARCHES = $(filter-out $(EXCLUDEARCH),$(ARCHES))
-
 BUILD_IMAGE?=calico/felix
 PUSH_IMAGES?=$(BUILD_IMAGE) quay.io/calico/felix
 RELEASE_IMAGES?=
