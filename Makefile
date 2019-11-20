@@ -41,12 +41,13 @@
 #
 ###############################################################################
 
-GO_BUILD_VER?=v0.26
+PACKAGE_NAME?=github.com/projectcalico/felix
+GO_BUILD_VER?=v0.27
 
 MAKE_BRANCH?=$(GO_BUILD_VER)
 MAKE_REPO?=https://raw.githubusercontent.com/projectcalico/go-build/$(MAKE_BRANCH)/Makefile.common
 
-get_common:=$(shell wget -nv $(MAKE_REPO) -O Makefile.common)
+get_common:=$(shell wget -nc -nv $(MAKE_REPO) -O Makefile.common)
 include Makefile.common
 
 # list of arches *not* to build when doing *-all
@@ -57,7 +58,6 @@ VALIDARCHES = $(filter-out $(EXCLUDEARCH),$(ARCHES))
 BUILD_IMAGE?=calico/felix
 PUSH_IMAGES?=$(BUILD_IMAGE) quay.io/calico/felix
 RELEASE_IMAGES?=
-PACKAGE_NAME?=github.com/projectcalico/felix
 
 FV_ETCDIMAGE?=quay.io/coreos/etcd:$(ETCD_VERSION)-$(BUILDARCH)
 FV_K8SIMAGE?=gcr.io/google_containers/hyperkube-$(BUILDARCH):$(K8S_VERSION)
@@ -472,6 +472,9 @@ bin/test-connection: $(SRC_FILES) local_build
 	mkdir -p bin
 	$(DOCKER_RUN) $(CALICO_BUILD) \
 	    sh -c 'go build -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/fv/test-connection"'
+
+st:
+	@echo "No STs available"
 
 ###############################################################################
 # CI/CD
