@@ -31,7 +31,9 @@ PACKAGE_NAME?=github.com/projectcalico/felix
 GO_BUILD_VER?=v0.27
 
 ###############################################################################
-# Download and include Makefile.common before anything else
+# Download and include Makefile.common
+#   Additions to EXTRA_DOCKER_ARGS need to happen before the include since
+#   that variable is evaluated when we declare DOCKER_RUN and siblings.
 ###############################################################################
 MAKE_BRANCH?=$(GO_BUILD_VER)
 MAKE_REPO?=https://raw.githubusercontent.com/projectcalico/go-build/$(MAKE_BRANCH)
@@ -43,6 +45,22 @@ Makefile.common.$(MAKE_BRANCH): $(WGET)
 	# Clean up any files downloaded from other branches so they don't accumulate.
 	rm -f Makefile.common.*
 	$(WGET) -nv $(MAKE_REPO)/Makefile.common -O "$@"
+
+# Build mounts for running in "local build" mode. This allows an easy build using local development code,
+# assuming that there is a local checkout of libcalico in the same directory as this repo.
+ifdef LOCAL_BUILD
+PHONY: set-up-local-build
+LOCAL_BUILD_DEP:=set-up-local-build
+
+EXTRA_DOCKER_ARGS+=-v $(CURDIR)/../libcalico-go:/go/src/github.com/projectcalico/libcalico-go:rw \
+	-v $(CURDIR)/../typha:/go/src/github.com/projectcalico/typha:rw \
+	-v $(CURDIR)/../pod2daemon:/go/src/github.com/projectcalico/pod2daemon:rw
+
+$(LOCAL_BUILD_DEP):
+	$(DOCKER_RUN) $(CALICO_BUILD) go mod edit -replace=github.com/projectcalico/libcalico-go=../libcalico-go \
+		-replace=github.com/projectcalico/typha=../typha \
+		-replace=github.com/projectcalico/pod2daemon=../pod2daemon
+endif
 
 include Makefile.common
 
@@ -91,23 +109,7 @@ GENERATED_FILES=proto/felixbackend.pb.go bpf/bpf-packr.go bpf/packrd/packed-pack
 
 # All Felix go files.
 SRC_FILES:=$(shell find . $(foreach dir,$(NON_FELIX_DIRS),-path ./$(dir) -prune -o) -type f -name '*.go' -print) $(GENERATED_FILES)
-
-ifeq ($(LOCAL_BUILD),true)
-# Build mounts for running in "local build" mode. This allows an easy build using local development code,
-# assuming that there is a local checkout of libcalico, typha and pod2daemon in the same directory as this repo.
-ifdef LOCAL_BUILD
-PHONY: set-up-local-build
-LOCAL_BUILD_DEP:=set-up-local-build
-
-EXTRA_DOCKER_ARGS+=-v $(CURDIR)/../libcalico-go:/go/src/github.com/projectcalico/libcalico-go:rw
-EXTRA_DOCKER_ARGS+=-v $(CURDIR)/../typha:/go/src/github.com/projectcalico/typha:rw
 EXTRA_DOCKER_ARGS+=-v $(CURDIR)/../pod2daemon:/go/src/github.com/projectcalico/pod2daemon:rw
-
-set-up-local-build:
-	$(DOCKER_RUN) $(CALICO_BUILD) go mod edit -replace=github.com/projectcalico/libcalico-go=../libcalico-go
-	$(DOCKER_RUN) $(CALICO_BUILD) go mod edit -replace=github.com/projectcalico/typha=../typha
-	$(DOCKER_RUN) $(CALICO_BUILD) go mod edit -replace=github.com/projectcalico/pod2daemon=../pod2daemon
-endif
 
 .PHONY: clean
 clean:
@@ -603,7 +605,7 @@ release-publish-latest: release-prereqs
 	# Disabling for now since no-one is consuming the images.
 	# $(MAKE) push-all IMAGETAG=latest
 
-# release-prereqs checks that the environment is configured properly to create a release.
+## release-prereqs checks that the environment is configured properly to create a release.
 release-prereqs:
 ifndef VERSION
 	$(error VERSION is undefined - run using make release VERSION=vX.Y.Z)
@@ -631,7 +633,7 @@ ut-watch: $(SRC_FILES)
 	@echo Watching go UTs for changes...
 	$(DOCKER_RUN) $(CALICO_BUILD) ginkgo watch -r -skipPackage fv,k8sfv,windows $(GINKGO_ARGS)
 
-# Launch a browser with Go coverage stats for the whole project.
+## Launch a browser with Go coverage stats for the whole project.
 .PHONY: cover-browser
 cover-browser: combined.coverprofile
 	go tool cover -html="combined.coverprofile"
@@ -661,68 +663,12 @@ bin/calico-felix.transfer-url: bin/calico-felix
 patch-script: bin/calico-felix.transfer-url
 	$(DOCKER_RUN) $(CALICO_BUILD) bash -c 'utils/make-patch-script.sh $$(cat bin/calico-felix.transfer-url)'
 
-# Generate a diagram of Felix's internal calculation graph.
+## Generate a diagram of Felix's internal calculation graph.
 docs/calc.pdf: docs/calc.dot
 	cd docs/ && dot -Tpdf calc.dot -o calc.pdf
 
-# Install or update the tools used by the build
+## Install or update the tools used by the build
 .PHONY: update-tools
 update-tools:
 	go get -u github.com/onsi/ginkgo/ginkgo
 	go get -u github.com/gobuffalo/packr/v2/packr2
-
-help:
-	@echo "Felix Makefile"
-	@echo
-	@echo "Dependencies: docker 1.12+; go 1.7+"
-	@echo
-	@echo "Note: initial builds can be slow because they generate docker-based"
-	@echo "build environments."
-	@echo
-	@echo "For any target, set ARCH=<target> to build for a given target."
-	@echo "For example, to build for arm64:"
-	@echo
-	@echo "  make build ARCH=arm64"
-	@echo
-	@echo "To generate a docker image for arm64:"
-	@echo
-	@echo "  make image ARCH=arm64"
-	@echo
-	@echo "By default, builds for the architecture on which it is running. Cross-building is supported"
-	@echo "only on amd64, i.e. building for other architectures when running on amd64."
-	@echo "Supported target ARCH options:       $(ARCHES)"
-	@echo
-	@echo "Initial set-up:"
-	@echo
-	@echo "  make update-tools  Update/install the go build dependencies."
-	@echo
-	@echo "Builds:"
-	@echo
-	@echo "  make all		    Build all the binary packages."
-	@echo "  make deb		    Build debs in ./dist."
-	@echo "  make rpm		    Build rpms in ./dist."
-	@echo "  make build		  Build binary."
-	@echo "  make image		  Build docker image."
-	@echo "  make build-all	      Build binary for all supported architectures."
-	@echo "  make image-all	      Build docker images for all supported architectures."
-	@echo "  make push IMAGETAG=tag      Deploy docker image with the tag IMAGETAG for the given ARCH, e.g. $(BUILD_IMAGE)<IMAGETAG>-<ARCH>."
-	@echo "  make push-all IMAGETAG=tag  Deploy docker images with the tag IMAGETAG all supported architectures"
-	@echo
-	@echo "Tests:"
-	@echo
-	@echo "  make ut		Run UTs."
-	@echo "  make go-cover-browser  Display go code coverage in browser."
-	@echo
-	@echo "Maintenance:"
-	@echo
-	@echo "  make go-fmt	Format our go code."
-	@echo "  make clean	 Remove binary files."
-	@echo "-----------------------------------------"
-	@echo "ARCH (target):	  $(ARCH)"
-	@echo "BUILDARCH (host):       $(BUILDARCH)"
-	@echo "CALICO_BUILD:	   $(CALICO_BUILD)"
-	@echo "PROTOC_CONTAINER:       $(PROTOC_CONTAINER)"
-	@echo "FV_ETCDIMAGE:	   $(FV_ETCDIMAGE)"
-	@echo "FV_K8SIMAGE:	    $(FV_K8SIMAGE)"
-	@echo "FV_TYPHAIMAGE:	  $(FV_TYPHAIMAGE)"
-	@echo "-----------------------------------------"
