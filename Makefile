@@ -41,7 +41,7 @@ WGET?=/usr/bin/wget
 
 Makefile.common: Makefile.common.$(MAKE_BRANCH)
 	cp "$<" "$@"
-Makefile.common.$(MAKE_BRANCH): $(WGET)
+Makefile.common.$(MAKE_BRANCH):
 	# Clean up any files downloaded from other branches so they don't accumulate.
 	rm -f Makefile.common.*
 	$(WGET) -nv $(MAKE_REPO)/Makefile.common -O "$@"
