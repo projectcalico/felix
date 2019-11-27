@@ -1019,35 +1019,10 @@ func (d *InternalDataplane) configureKernel() {
 	//
 	// Unless the IgnoreLooseRPF flag is set, we bail out rather than simply setting it
 	// because setting 2, "loose", is unusual and it is likely to have been set deliberately.
-	rpFilter, err := readRPFilter()
-	if err != nil {
-		logCxt := log.WithError(err)
-		if d.config.IgnoreLooseRPF {
-			logCxt.Error("Failed to read kernel's rp_filter value from /proc/sys. " +
-				"Ignoring due to IgnoreLooseRPF setting.")
-		} else {
-			logCxt.Fatal("Failed to read kernel's rp_filter value from /proc/sys")
-		}
-	} else if rpFilter > 1 {
-		if d.config.IgnoreLooseRPF {
-			log.Warn("Kernel's RPF check is set to 'loose' and IgnoreLooseRPF " +
-				"set to true.  Calico will not be able to prevent workloads " +
-				"from spoofing their source IP.  Please ensure that some " +
-				"other anti-spoofing mechanism is in place (such as running " +
-				"only non-privileged containers).")
-		} else {
-			log.Fatal("Kernel's RPF check is set to 'loose'.  This would " +
-				"allow endpoints to spoof their IP address.  Calico " +
-				"requires net.ipv4.conf.all.rp_filter to be set to " +
-				"0 or 1. If you require loose RPF and you are not concerned " +
-				"about spoofing, this check can be disabled by setting the " +
-				"IgnoreLooseRPF configuration parameter to 'true'.")
-		}
-	}
 
 	// Make sure the default for new interfaces is set to strict checking so that there's no
 	// race when a new interface is added and felix hasn't configured it yet.
-	err = writeProcSys("/proc/sys/net/ipv4/conf/default/rp_filter", "1")
+	err := writeProcSys("/proc/sys/net/ipv4/conf/default/rp_filter", "1")
 	if err != nil {
 		log.Warnf("failed to set rp_filter to '1': %v\n", err)
 	}
