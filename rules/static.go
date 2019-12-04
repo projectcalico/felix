@@ -15,6 +15,8 @@
 package rules
 
 import (
+	"fmt"
+
 	log "github.com/sirupsen/logrus"
 
 	. "github.com/projectcalico/felix/iptables"
@@ -218,8 +220,8 @@ func (r *DefaultRuleRenderer) filterInputChain(ipVersion uint8) *Chain {
 			},
 			Rule{
 				Match:   Match().ProtocolNum(ProtoIPIP),
-				Action:  DropAction{},
-				Comment: "Drop IPIP packets from non-Calico hosts",
+				Action:  r.dropActionOverride,
+				Comment: fmt.Sprintf("%s IPIP packets from non-Calico hosts", r.dropActionOverride),
 			},
 		)
 	}
@@ -240,8 +242,8 @@ func (r *DefaultRuleRenderer) filterInputChain(ipVersion uint8) *Chain {
 				Match: Match().ProtocolNum(ProtoUDP).
 					DestPorts(uint16(r.Config.VXLANPort)).
 					DestAddrType(AddrTypeLocal),
-				Action:  DropAction{},
-				Comment: "Drop VXLAN packets from non-whitelisted hosts",
+				Action:  r.dropActionOverride,
+				Comment: fmt.Sprintf("%s VXLAN packets from non-whitelisted hosts", r.dropActionOverride),
 			},
 		)
 	}
@@ -837,7 +839,7 @@ func (r *DefaultRuleRenderer) StaticRawPreroutingChain(ipVersion uint8) *Chain {
 		// case handling for DHCP to the host, which would require an exclusion.
 		rules = append(rules, Rule{
 			Match:  Match().MarkSingleBitSet(markFromWorkload).RPFCheckFailed(),
-			Action: DropAction{},
+			Action: r.dropActionOverride,
 		})
 	}
 

@@ -280,7 +280,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		// Endpoint is admin-down, drop all traffic to/from it.
 		rules = append(rules, Rule{
 			Match:   Match(),
-			Action:  DropAction{},
+			Action:  r.dropActionOverride,
 			Comment: "Endpoint admin disabled",
 		})
 		return &Chain{
@@ -314,13 +314,13 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		rules = append(rules, Rule{
 			Match: Match().ProtocolNum(ProtoUDP).
 				DestPorts(uint16(r.Config.VXLANPort)),
-			Action:  DropAction{},
-			Comment: "Drop VXLAN encapped packets originating in pods",
+			Action:  r.dropActionOverride,
+			Comment: fmt.Sprintf("%s VXLAN encapped packets originating in pods", r.dropActionOverride),
 		})
 		rules = append(rules, Rule{
 			Match:   Match().ProtocolNum(ProtoIPIP),
-			Action:  DropAction{},
-			Comment: "Drop IPinIP encapped packets originating in pods",
+			Action:  r.dropActionOverride,
+			Comment: fmt.Sprintf("%s IPinIP encapped packets originating in pods", r.dropActionOverride),
 		})
 	}
 
@@ -372,8 +372,8 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 			// normal rules still to be applied to the packet in the filter table.
 			rules = append(rules, Rule{
 				Match:   Match().MarkClear(r.IptablesMarkPass),
-				Action:  r.notPassedAction,
-				Comment: fmt.Sprintf("%s if no policies passed packet", r.notPassedAction),
+				Action:  r.dropActionOverride,
+				Comment: fmt.Sprintf("%s if no policies passed packet", r.dropActionOverride),
 			})
 		}
 
@@ -412,8 +412,8 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		// still to be applied to the packet in the filter table.
 		rules = append(rules, Rule{
 			Match:   Match(),
-			Action:  r.notPassedAction,
-			Comment: fmt.Sprintf("%s if no profiles matched", r.notPassedAction),
+			Action:  r.dropActionOverride,
+			Comment: fmt.Sprintf("%s if no profiles matched", r.dropActionOverride),
 		})
 	}
 
@@ -446,7 +446,7 @@ func (r *DefaultRuleRenderer) appendConntrackRules(rules []Rule, allowAction Act
 		// connection.
 		rules = append(rules, Rule{
 			Match:  Match().ConntrackState("INVALID"),
-			Action: DropAction{},
+			Action: r.dropActionOverride,
 		})
 	}
 	return rules
