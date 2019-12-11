@@ -99,7 +99,6 @@ type Config struct {
 	RuleRendererOverride rules.RuleRenderer
 	IPIPMTU              int
 	VXLANMTU             int
-	IgnoreLooseRPF       bool
 
 	MaxIPSetSize int
 
