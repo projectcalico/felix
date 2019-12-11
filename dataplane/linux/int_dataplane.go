@@ -16,12 +16,8 @@ package intdataplane
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
-	"os"
 	"reflect"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -657,14 +653,6 @@ func (d *InternalDataplane) doStaticDataplaneConfig() {
 	// Check/configure global kernel parameters.
 	d.configureKernel()
 
-	// Ensure that the default value of rp_filter is set to "strict" for newly-created
-	// interfaces.  This is required to prevent a race between starting an interface and
-	// Felix being able to configure it.
-	err := writeProcSys("/proc/sys/net/ipv4/conf/default/rp_filter", "1")
-	if err != nil {
-		log.Warnf("failed to set rp_filter to '1': %v\n", err)
-	}
-
 	for _, t := range d.iptablesRawTables {
 		rawChains := d.ruleRenderer.StaticRawTableChains(t.IPVersion)
 		t.UpdateChains(rawChains)
@@ -1001,32 +989,6 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 }
 
 func (d *InternalDataplane) configureKernel() {
-	// For IPv4, we rely on the kernel's reverse path filtering to prevent workloads from
-	// spoofing their IP addresses.
-	//
-	// The RPF check for a particular interface is controlled by several sysctls:
-	//
-	//     - ipv4.conf.all.rp_filter is a global override
-	//     - ipv4.conf.default.rp_filter controls the value that is set on a newly created
-	//       interface
-	//     - ipv4.conf.<interface>.rp_filter controls a particular interface.
-	//
-	// The algorithm for combining the global override and per-interface values is to take the
-	// *numeric* maximum between the two.  The values are: 0=off, 1=strict, 2=loose.  "loose"
-	// is not suitable for Calico since it would allow workloads to spoof packets from other
-	// workloads on the same host.  Hence, we need the global override to be <=1 or it would
-	// override the per-interface setting to "strict" that we require.
-	//
-	// Unless the IgnoreLooseRPF flag is set, we bail out rather than simply setting it
-	// because setting 2, "loose", is unusual and it is likely to have been set deliberately.
-
-	// Make sure the default for new interfaces is set to strict checking so that there's no
-	// race when a new interface is added and felix hasn't configured it yet.
-	err := writeProcSys("/proc/sys/net/ipv4/conf/default/rp_filter", "1")
-	if err != nil {
-		log.Warnf("failed to set rp_filter to '1': %v\n", err)
-	}
-
 	// Attempt to modprobe nf_conntrack_proto_sctp.  In some kernels this is a
 	// module that needs to be loaded, otherwise all SCTP packets are marked
 	// INVALID by conntrack and dropped by Calico's rules.  However, some kernels
@@ -1037,19 +999,6 @@ func (d *InternalDataplane) configureKernel() {
 	mp := newModProbe(moduleConntrackSCTP, newRealCmd)
 	out, err := mp.Exec()
 	log.WithError(err).WithField("output", out).Infof("attempted to modprobe %s", moduleConntrackSCTP)
-}
-
-func readRPFilter() (value int64, err error) {
-	f, err := os.Open("/proc/sys/net/ipv4/conf/all/rp_filter")
-	if err != nil {
-		return
-	}
-	rpFilterBytes, err := ioutil.ReadAll(f)
-	if err != nil {
-		return
-	}
-	value, err = strconv.ParseInt(strings.Trim(string(rpFilterBytes), "\n"), 10, 64)
-	return
 }
 
 func (d *InternalDataplane) recordMsgStat(msg interface{}) {
