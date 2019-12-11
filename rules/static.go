@@ -830,10 +830,13 @@ func (r *DefaultRuleRenderer) StaticRawPreroutingChain(ipVersion uint8) *Chain {
 	// Apply strict RPF check to packets from workload interfaces.  This prevents
 	// workloads from spoofing their IPs.  Note: non-privileged containers can't
 	// usually spoof but privileged containers and VMs can.
-	//
-	// We only do this for IPv6 because the IPv4 RPF check is handled via a sysctl.
-	// In addition, the IPv4 check is complicated by the fact that we have special
-	// case handling for DHCP to the host, which would require an exclusion.
+	// But we also need to allow DHCP discover requests to be sent from the host.
+	// These DHCP requests will have source IP "0.0.0.0" and would otherwise be
+	// dropped by our RPF check rule.
+	rules = append(rules, Rule{
+		Match:  Match().SourceNet("0.0.0.0/0").DestNet("255.255.255.255").Protocol("udp").SourcePorts(68).DestPorts(67),
+		Action: AcceptAction{},
+	})
 	rules = append(rules, Rule{
 		Match:  Match().MarkSingleBitSet(markFromWorkload).RPFCheckFailed(),
 		Action: DropAction{},
