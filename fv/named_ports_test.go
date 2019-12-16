@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
@@ -73,11 +74,12 @@ var _ = Context("SCTP: Source named ports: with initialized Felix, etcd datastor
 func describeNamedPortTests(testSourcePorts bool, protocol string) {
 
 	var (
-		etcd   *containers.Container
-		felix  *infrastructure.Felix
-		client client.Interface
-		w      [4]*workload.Workload
-		cc     *workload.ConnectivityChecker
+		etcd    *containers.Container
+		felix   *infrastructure.Felix
+		client  client.Interface
+		w       [4]*workload.Workload
+		cc      *workload.ConnectivityChecker
+		timeout time.Duration
 	)
 
 	const (
@@ -153,6 +155,12 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 		cc = &workload.ConnectivityChecker{
 			ReverseDirection: testSourcePorts,
 			Protocol:         protocol,
+		}
+		timeout = workload.DefaultConnectivityCheckTimeout
+		// SCTP tests take a little longer to converge, so increase the timeout
+		// to reduce FV flakiness
+		if protocol == "sctp" {
+			timeout = 30 * time.Second
 		}
 	})
 
@@ -240,7 +248,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 			cc.ExpectSome(w[1], w[0].Port(4000))
 			cc.ExpectSome(w[2], w[0].Port(4000))
 
-			cc.CheckConnectivity()
+			cc.CheckConnectivityWithTimeout(timeout)
 		})
 	})
 
@@ -382,7 +390,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 			cc.ExpectSome(w[0], w[1].Port(w1Port))
 			cc.ExpectSome(w[0], w[2].Port(w2Port))
 
-			cc.CheckConnectivity(dumpResource(pol))
+			cc.CheckConnectivityWithTimeout(timeout, dumpResource(pol))
 		},
 
 		// Non-negated named port match.  The rule will allow traffic to the named port.
@@ -481,7 +489,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 			cc.ExpectSome(w[3], w[0].Port(4000))       // Numeric port in list.
 			cc.ExpectNone(w[2], w[0].Port(3000))       // Numeric port not in list.
 
-			cc.CheckConnectivity(dumpResource(policy))
+			cc.CheckConnectivityWithTimeout(timeout, dumpResource(policy))
 		}
 		It("should have expected connectivity", expectBaselineConnectivity)
 
@@ -506,7 +514,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 				cc.ExpectSome(w[3], w[0].Port(4000))       // No change.
 				cc.ExpectNone(w[2], w[0].Port(3000))       // No change.
 
-				cc.CheckConnectivity(dumpResource(policy))
+				cc.CheckConnectivityWithTimeout(timeout, dumpResource(policy))
 			})
 		})
 
@@ -534,7 +542,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 				cc.ExpectSome(w[3], w[0].Port(4000))       // No change.
 				cc.ExpectNone(w[2], w[0].Port(3000))       // No change.
 
-				cc.CheckConnectivity(dumpResource(policy))
+				cc.CheckConnectivityWithTimeout(timeout, dumpResource(policy))
 			})
 		})
 
@@ -551,7 +559,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 			cc.ExpectNone(w[2], w[0].Port(4000))
 			cc.ExpectNone(w[2], w[0].Port(3000))
 
-			cc.CheckConnectivity(dumpResource(policy))
+			cc.CheckConnectivityWithTimeout(timeout, dumpResource(policy))
 		}
 
 		Describe("with "+oppositeDir+" selectors, removing w[2] and w[3]", func() {
@@ -674,7 +682,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 					cc.ExpectSome(w[3], w[0].Port(4000))       // No change.
 					cc.ExpectNone(w[2], w[0].Port(3000))       // No change.
 
-					cc.CheckConnectivity(dumpResource(policy))
+					cc.CheckConnectivityWithTimeout(timeout, dumpResource(policy))
 				})
 			})
 		})
@@ -705,7 +713,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 				cc.ExpectNone(w[3], w[0].Port(4000))       // Numeric port in NotPorts list.
 				cc.ExpectNone(w[2], w[0].Port(3000))       // No change
 
-				cc.CheckConnectivity(dumpResource(policy))
+				cc.CheckConnectivityWithTimeout(timeout, dumpResource(policy))
 			})
 		})
 	})

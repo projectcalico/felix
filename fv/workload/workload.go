@@ -63,6 +63,8 @@ var workloadIdx = 0
 var sideServIdx = 0
 var permConnIdx = 0
 
+const DefaultConnectivityCheckTimeout = 10 * time.Second
+
 func (w *Workload) Stop() {
 	if w == nil {
 		log.Info("Stop no-op because nil workload")
@@ -673,11 +675,11 @@ func (c *ConnectivityChecker) ExpectedConnectivity() []string {
 }
 
 func (c *ConnectivityChecker) CheckConnectivityOffset(offset int, optionalDescription ...interface{}) {
-	c.CheckConnectivityWithTimeoutOffset(offset+2, 10*time.Second, optionalDescription...)
+	c.CheckConnectivityWithTimeoutOffset(offset+2, DefaultConnectivityCheckTimeout, optionalDescription...)
 }
 
 func (c *ConnectivityChecker) CheckConnectivity(optionalDescription ...interface{}) {
-	c.CheckConnectivityWithTimeoutOffset(2, 10*time.Second, optionalDescription...)
+	c.CheckConnectivityWithTimeoutOffset(2, DefaultConnectivityCheckTimeout, optionalDescription...)
 }
 
 func (c *ConnectivityChecker) CheckConnectivityWithTimeout(timeout time.Duration, optionalDescription ...interface{}) {
