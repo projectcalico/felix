@@ -675,11 +675,11 @@ func (c *ConnectivityChecker) ExpectedConnectivity() []string {
 }
 
 func (c *ConnectivityChecker) CheckConnectivityOffset(offset int, optionalDescription ...interface{}) {
-	c.CheckConnectivityWithTimeoutOffset(offset+2, DefaultConnectivityCheckTimeout, optionalDescription...)
+	c.CheckConnectivityWithTimeoutOffset("", offset+2, DefaultConnectivityCheckTimeout, optionalDescription...)
 }
 
 func (c *ConnectivityChecker) CheckConnectivity(optionalDescription ...interface{}) {
-	c.CheckConnectivityWithTimeoutOffset(2, DefaultConnectivityCheckTimeout, optionalDescription...)
+	c.CheckConnectivityWithTimeoutOffset("", 2, DefaultConnectivityCheckTimeout, optionalDescription...)
 }
 
 func (c *ConnectivityChecker) CheckConnectivityWithTimeout(timeout time.Duration, optionalDescription ...interface{}) {
@@ -689,10 +689,14 @@ func (c *ConnectivityChecker) CheckConnectivityWithTimeout(timeout time.Duration
 		Expect(optionalDescription[0]).NotTo(BeAssignableToTypeOf(time.Second),
 			"Unexpected time.Duration passed for description")
 	}
-	c.CheckConnectivityWithTimeoutOffset(2, timeout, optionalDescription...)
+	c.CheckConnectivityWithTimeoutOffset("", 2, timeout, optionalDescription...)
 }
 
-func (c *ConnectivityChecker) CheckConnectivityWithTimeoutOffset(callerSkip int, timeout time.Duration, optionalDescription ...interface{}) {
+func (c *ConnectivityChecker) CheckConnectivityWithDiagsTimeout(diags string, timeout time.Duration, optionalDescription ...interface{}) {
+	c.CheckConnectivityWithTimeoutOffset(diags, 2, timeout, optionalDescription...)
+}
+
+func (c *ConnectivityChecker) CheckConnectivityWithTimeoutOffset(diags string, callerSkip int, timeout time.Duration, optionalDescription ...interface{}) {
 	expConnectivity := c.ExpectedConnectivity()
 	start := time.Now()
 
@@ -702,6 +706,11 @@ func (c *ConnectivityChecker) CheckConnectivityWithTimeoutOffset(callerSkip int,
 	completedAttempts := 0
 	var actualConn []string
 	for time.Since(start) < timeout || completedAttempts < 2 {
+		if diags != "" {
+			utils.Run("docker", "exec", diags, "iptables-save", "-c")
+			utils.Run("docker", "exec", diags, "ipset", "list")
+			utils.Run("docker", "exec", diags, "ip", "r")
+		}
 		actualConn = c.ActualConnectivity()
 		if reflect.DeepEqual(actualConn, expConnectivity) {
 			return
