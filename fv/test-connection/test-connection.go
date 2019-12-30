@@ -40,7 +40,8 @@ Usage:
   test-connection <namespace-path> <ip-address> <port> [--source-port=<source>] [--protocol=<protocol>] [--loop-with-file=<file>]
 
 Options:
-  --source-port=<source>  Source port to use for the connection [default: 0].
+  --source-ip=<source_ip> Source IP to use for the connection [default: 0.0.0.0].
+  --source-port=<source_port>  Source port to use for the connection [default: 0].
   --protocol=<protocol>   Protocol to test [default: tcp].
   --loop-with-file=<file>  Whether to send messages repeatedly, file is used for synchronization
 
@@ -75,7 +76,11 @@ func main() {
 	ipAddress := arguments["<ip-address>"].(string)
 	port := arguments["<port>"].(string)
 	sourcePort := arguments["--source-port"].(string)
-	log.Infof("Test connection from %v:%v to IP %v port %v", namespacePath, sourcePort, ipAddress, port)
+	sourceIpAddress := arguments["--source-ip"].(string)
+	if sourceIpAddress == "" {
+		sourceIpAddress = "0.0.0.0"
+	}
+	log.Infof("Test connection from namespace %v IP %v port%v to IP %v port %v", namespacePath, sourceIpAddress, sourcePort, ipAddress, port)
 	protocol := arguments["--protocol"].(string)
 	loopFile := ""
 	if arg, ok := arguments["--loop-with-file"]; ok && arg != nil {
@@ -95,7 +100,7 @@ func main() {
 
 	if namespacePath == "-" {
 		// Test connection from wherever we are already running.
-		err = tryConnect(ipAddress, port, sourcePort, protocol, loopFile)
+		err = tryConnect(ipAddress, port, sourceIpAddress, sourcePort, protocol, loopFile)
 	} else {
 		// Get the specified network namespace (representing a workload).
 		var namespace ns.NetNS
@@ -107,7 +112,7 @@ func main() {
 
 		// Now, in that namespace, try connecting to the target.
 		err = namespace.Do(func(_ ns.NetNS) error {
-			return tryConnect(ipAddress, port, sourcePort, protocol, loopFile)
+			return tryConnect(ipAddress, port, sourceIpAddress, sourcePort, protocol, loopFile)
 		})
 	}
 
@@ -116,7 +121,7 @@ func main() {
 	}
 }
 
-func tryConnect(ipAddress, port, sourcePort, protocol, loopFile string) error {
+func tryConnect(remoteIpAddr, remotePort, sourceIpAddr, sourcePort, protocol, loopFile string) error {
 
 	err := utils.RunCommand("ip", "r")
 	if err != nil {
@@ -128,12 +133,12 @@ func tryConnect(ipAddress, port, sourcePort, protocol, loopFile string) error {
 
 	var localAddr string
 	var remoteAddr string
-	if strings.Contains(ipAddress, ":") {
+	if strings.Contains(remoteIpAddr, ":") {
 		localAddr = "[::]:" + sourcePort
-		remoteAddr = "[" + ipAddress + "]:" + port
+		remoteAddr = "[" + remoteIpAddr + "]:" + remotePort
 	} else {
 		localAddr = "0.0.0.0:" + sourcePort
-		remoteAddr = ipAddress + ":" + port
+		remoteAddr = remoteIpAddr + ":" + remotePort
 	}
 	ls := newLoopState(loopFile)
 	log.Infof("Connecting from %v to %v over %s", localAddr, remoteAddr, protocol)
