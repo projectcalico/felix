@@ -35,64 +35,77 @@ var _ = infrastructure.DatastoreDescribe("spoof tests", []apiconfig.DatastoreTyp
 		cc      *workload.ConnectivityChecker
 	)
 
-	BeforeEach(func() {
-		infra = getInfra()
+	Context("using IPv4", func() {
+		BeforeEach(func() {
+			infra = getInfra()
 
-		// Setup 3 felixes. felixes[0] will spoof felixes[2] and try to reach
-		// felixes[1].
-		felixes, _ = infrastructure.StartNNodeTopology(3, infrastructure.DefaultTopologyOptions(), infra)
+			// Setup 3 felixes. felixes[0] will spoof felixes[2] and try to reach
+			// felixes[1].
+			felixes, _ = infrastructure.StartNNodeTopology(3, infrastructure.DefaultTopologyOptions(), infra)
 
-		// Install a default profile that allows all ingress and egress, in the absence of any Policy.
-		infra.AddDefaultAllow()
-	})
+			// Install a default profile that allows all ingress and egress, in the absence of any Policy.
+			infra.AddDefaultAllow()
+		})
 
-	AfterEach(func() {
-		if CurrentGinkgoTestDescription().Failed {
-			for _, felix := range felixes {
-				felix.Exec("iptables-save", "-c")
-				felix.Exec("ipset", "list")
-				felix.Exec("ip", "r")
-				felix.Exec("ip", "a")
+		AfterEach(func() {
+			if CurrentGinkgoTestDescription().Failed {
+				for _, felix := range felixes {
+					felix.Exec("iptables-save", "-c")
+					felix.Exec("ipset", "list")
+					felix.Exec("ip", "r")
+					felix.Exec("ip", "a")
+				}
 			}
+
+			for _, wl := range w {
+				wl.Stop()
+			}
+			for _, felix := range felixes {
+				felix.Stop()
+			}
+
+			if CurrentGinkgoTestDescription().Failed {
+				infra.DumpErrorData()
+			}
+			infra.Stop()
+		})
+
+		setupWorkloadsAndConnectivityChecker := func(protocol string) {
+			for ii := range w {
+				wIP := fmt.Sprintf("10.65.%d.2", ii)
+				wName := fmt.Sprintf("w%d", ii)
+				w[ii] = workload.Run(felixes[ii], wName, "default", wIP, "8055", protocol)
+				w[ii].ConfigureInDatastore(infra)
+			}
+
+			cc = &workload.ConnectivityChecker{Protocol: protocol}
 		}
 
-		for _, wl := range w {
-			wl.Stop()
-		}
-		for _, felix := range felixes {
-			felix.Stop()
-		}
+		It("should drop udp traffic that has had its IP spoofed", func() {
+			setupWorkloadsAndConnectivityChecker("udp")
+			// Setup a spoofed workload. w[0] has the IP 10.65.0.2.
+			// Make it use 10.65.2.2 to test connections instead.
+			spoofed := &workload.SpoofedWorkload{
+				Workload:        w[0],
+				SpoofedSourceIP: "10.65.2.2",
+			}
+			cc.ExpectNone(spoofed, w[1])
+			cc.ExpectSome(w[1], w[0])
+			cc.CheckConnectivity()
+		})
 
-		if CurrentGinkgoTestDescription().Failed {
-			infra.DumpErrorData()
-		}
-		infra.Stop()
+		It("should drop tcp traffic that has had its IP spoofed", func() {
+			setupWorkloadsAndConnectivityChecker("tcp")
+			// Setup a spoofed workload. w[0] has the IP 10.65.0.2.
+			// Make it use 10.65.2.2 to test connections instead.
+			spoofed := &workload.SpoofedWorkload{
+				Workload:        w[0],
+				SpoofedSourceIP: "10.65.2.2",
+			}
+			cc.ExpectNone(spoofed, w[1])
+			cc.ExpectSome(w[1], w[0])
+			cc.CheckConnectivity()
+		})
 	})
 
-	setupWorkloadsAndConnectivityChecker := func(protocol string) {
-		for ii := range w {
-			wIP := fmt.Sprintf("10.65.%d.2", ii)
-			wName := fmt.Sprintf("w%d", ii)
-			w[ii] = workload.Run(felixes[ii], wName, "default", wIP, "8055", protocol)
-			w[ii].ConfigureInDatastore(infra)
-		}
-
-		cc = &workload.ConnectivityChecker{Protocol: protocol}
-	}
-
-	It("should drop udp traffic that has had its IP spoofed", func() {
-		setupWorkloadsAndConnectivityChecker("udp")
-		felixes[0].Exec("iptables", "-t", "nat", "-A", "POSTROUTING", "-p", "udp", "-j", "SNAT", "--to-source", "10.65.3.2")
-		cc.ExpectNone(w[0], w[1])
-		cc.ExpectSome(w[1], w[0])
-		cc.CheckConnectivity()
-	})
-
-	It("should drop tcp traffic that has had its IP spoofed", func() {
-		setupWorkloadsAndConnectivityChecker("tcp")
-		felixes[0].Exec("iptables", "-t", "nat", "-A", "POSTROUTING", "-p", "tcp", "-j", "SNAT", "--to-source", "10.65.3.2")
-		cc.ExpectNone(w[0], w[1])
-		cc.ExpectSome(w[1], w[0])
-		cc.CheckConnectivity()
-	})
 })
