@@ -202,11 +202,11 @@ func tryConnect(remoteIpAddr, remotePort, sourceIpAddr, sourcePort, protocol, lo
 			return err
 		}
 		laddr := &sctp.SCTPAddr{IPAddrs: []net.IPAddr{*lip}, Port: lport}
-		rip, err := net.ResolveIPAddr("ip", ipAddress)
+		rip, err := net.ResolveIPAddr("ip", remoteIpAddr)
 		if err != nil {
 			return err
 		}
-		rport, err := strconv.Atoi(port)
+		rport, err := strconv.Atoi(remotePort)
 		if err != nil {
 			return err
 		}
