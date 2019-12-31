@@ -82,7 +82,11 @@ func main() {
 	ipAddress := arguments["<ip-address>"].(string)
 	port := arguments["<port>"].(string)
 	sourcePort := arguments["--source-port"].(string)
+	// Set default for source IP.
 	sourceIpAddress := defaultSourceIP
+	if strings.Contains(ipAddress, ":") {
+		sourceIpAddress = "::"
+	}
 	if srcIP, ok := arguments["--source-ip"].(string); ok {
 		sourceIpAddress = srcIP
 	}
