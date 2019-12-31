@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -37,7 +38,7 @@ import (
 const usage = `test-connection: test connection to some target, for Felix FV testing.
 
 Usage:
-  test-connection <namespace-path> <ip-address> <port> [--source-port=<source>] [--protocol=<protocol>] [--loop-with-file=<file>]
+  test-connection <namespace-path> <ip-address> <port> [--source-ip=<source_ip>] [--source-port=<source>] [--protocol=<protocol>] [--loop-with-file=<file>]
 
 Options:
   --source-ip=<source_ip> Source IP to use for the connection [default: 0.0.0.0].
@@ -63,6 +64,8 @@ If connection is unsuccessful, test-connection panics and so exits with a failur
 // If the other process creates the file again, it will tell this
 // program to close the connection, remove the file and quit.
 
+const defaultSourceIP = "0.0.0.0"
+
 func main() {
 	log.SetLevel(log.DebugLevel)
 
@@ -76,9 +79,9 @@ func main() {
 	ipAddress := arguments["<ip-address>"].(string)
 	port := arguments["<port>"].(string)
 	sourcePort := arguments["--source-port"].(string)
-	sourceIpAddress := arguments["--source-ip"].(string)
-	if sourceIpAddress == "" {
-		sourceIpAddress = "0.0.0.0"
+	sourceIpAddress := defaultSourceIP
+	if srcIP, ok := arguments["--source-ip"].(string); ok {
+		sourceIpAddress = srcIP
 	}
 	log.Infof("Test connection from namespace %v IP %v port%v to IP %v port %v", namespacePath, sourceIpAddress, sourcePort, ipAddress, port)
 	protocol := arguments["--protocol"].(string)
@@ -99,8 +102,12 @@ func main() {
 	}
 
 	if namespacePath == "-" {
+		// Add an interface for the source IP if any.
+		err = maybeAddInterface(sourceIpAddress)
 		// Test connection from wherever we are already running.
-		err = tryConnect(ipAddress, port, sourceIpAddress, sourcePort, protocol, loopFile)
+		if err == nil {
+			err = tryConnect(ipAddress, port, sourceIpAddress, sourcePort, protocol, loopFile)
+		}
 	} else {
 		// Get the specified network namespace (representing a workload).
 		var namespace ns.NetNS
@@ -112,6 +119,11 @@ func main() {
 
 		// Now, in that namespace, try connecting to the target.
 		err = namespace.Do(func(_ ns.NetNS) error {
+			// Add an interface for the source IP if any.
+			e := maybeAddInterface(sourceIpAddress)
+			if e != nil {
+				return e
+			}
 			return tryConnect(ipAddress, port, sourceIpAddress, sourcePort, protocol, loopFile)
 		})
 	}
@@ -119,6 +131,15 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func maybeAddInterface(sourceIP string) error {
+	var err error
+	if sourceIP != defaultSourceIP {
+		cmd := exec.Command("ip", "addr", "add", sourceIP+"/32", "dev", "eth0")
+		err = cmd.Run()
+	}
+	return err
 }
 
 func tryConnect(remoteIpAddr, remotePort, sourceIpAddr, sourcePort, protocol, loopFile string) error {
@@ -134,10 +155,10 @@ func tryConnect(remoteIpAddr, remotePort, sourceIpAddr, sourcePort, protocol, lo
 	var localAddr string
 	var remoteAddr string
 	if strings.Contains(remoteIpAddr, ":") {
-		localAddr = "[::]:" + sourcePort
+		localAddr = "[" + sourceIpAddr + "]:" + sourcePort
 		remoteAddr = "[" + remoteIpAddr + "]:" + remotePort
 	} else {
-		localAddr = "0.0.0.0:" + sourcePort
+		localAddr = sourceIpAddr + ":" + sourcePort
 		remoteAddr = remoteIpAddr + ":" + remotePort
 	}
 	ls := newLoopState(loopFile)
