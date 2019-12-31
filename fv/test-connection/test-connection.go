@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,10 +41,11 @@ import (
 const usage = `test-connection: test connection to some target, for Felix FV testing.
 
 Usage:
-  test-connection <namespace-path> <ip-address> <port> [--source-port=<source>] [--protocol=<protocol>] [--loop-with-file=<file>]
+  test-connection <namespace-path> <ip-address> <port> [--source-ip=<source_ip>] [--source-port=<source>] [--protocol=<protocol>] [--loop-with-file=<file>]
 
 Options:
-  --source-port=<source>  Source port to use for the connection [default: 0].
+  --source-ip=<source_ip> Source IP to use for the connection [default: 0.0.0.0].
+  --source-port=<source_port>  Source port to use for the connection [default: 0].
   --protocol=<protocol>   Protocol to test [default: tcp].
   --loop-with-file=<file>  Whether to send messages repeatedly, file is used for synchronization
 
@@ -65,6 +67,8 @@ If connection is unsuccessful, test-connection panics and so exits with a failur
 // If the other process creates the file again, it will tell this
 // program to close the connection, remove the file and quit.
 
+const defaultSourceIP = "0.0.0.0"
+
 func main() {
 	log.SetLevel(log.DebugLevel)
 
@@ -78,7 +82,11 @@ func main() {
 	ipAddress := arguments["<ip-address>"].(string)
 	port := arguments["<port>"].(string)
 	sourcePort := arguments["--source-port"].(string)
-	log.Infof("Test connection from %v:%v to IP %v port %v", namespacePath, sourcePort, ipAddress, port)
+	sourceIpAddress := defaultSourceIP
+	if srcIP, ok := arguments["--source-ip"].(string); ok {
+		sourceIpAddress = srcIP
+	}
+	log.Infof("Test connection from namespace %v IP %v port%v to IP %v port %v", namespacePath, sourceIpAddress, sourcePort, ipAddress, port)
 	protocol := arguments["--protocol"].(string)
 	loopFile := ""
 	if arg, ok := arguments["--loop-with-file"]; ok && arg != nil {
@@ -97,8 +105,12 @@ func main() {
 	}
 
 	if namespacePath == "-" {
+		// Add an interface for the source IP if any.
+		err = maybeAddInterface(sourceIpAddress)
 		// Test connection from wherever we are already running.
-		err = tryConnect(ipAddress, port, sourcePort, protocol, loopFile)
+		if err == nil {
+			err = tryConnect(ipAddress, port, sourceIpAddress, sourcePort, protocol, loopFile)
+		}
 	} else {
 		// Get the specified network namespace (representing a workload).
 		var namespace ns.NetNS
@@ -110,7 +122,12 @@ func main() {
 
 		// Now, in that namespace, try connecting to the target.
 		err = namespace.Do(func(_ ns.NetNS) error {
-			return tryConnect(ipAddress, port, sourcePort, protocol, loopFile)
+			// Add an interface for the source IP if any.
+			e := maybeAddInterface(sourceIpAddress)
+			if e != nil {
+				return e
+			}
+			return tryConnect(ipAddress, port, sourceIpAddress, sourcePort, protocol, loopFile)
 		})
 	}
 
@@ -119,7 +136,16 @@ func main() {
 	}
 }
 
-func tryConnect(ipAddress, port, sourcePort, protocol, loopFile string) error {
+func maybeAddInterface(sourceIP string) error {
+	var err error
+	if sourceIP != defaultSourceIP {
+		cmd := exec.Command("ip", "addr", "add", sourceIP+"/32", "dev", "eth0")
+		err = cmd.Run()
+	}
+	return err
+}
+
+func tryConnect(remoteIpAddr, remotePort, sourceIpAddr, sourcePort, protocol, loopFile string) error {
 
 	err := utils.RunCommand("ip", "r")
 	if err != nil {
@@ -141,12 +167,12 @@ func tryConnect(ipAddress, port, sourcePort, protocol, loopFile string) error {
 	var d reuse.Dialer
 	var localAddr string
 	var remoteAddr string
-	if strings.Contains(ipAddress, ":") {
-		localAddr = "[::]:" + sourcePort
-		remoteAddr = "[" + ipAddress + "]:" + port
+	if strings.Contains(remoteIpAddr, ":") {
+		localAddr = "[" + sourceIpAddr + "]:" + sourcePort
+		remoteAddr = "[" + remoteIpAddr + "]:" + remotePort
 	} else {
-		localAddr = "0.0.0.0:" + sourcePort
-		remoteAddr = ipAddress + ":" + port
+		localAddr = sourceIpAddr + ":" + sourcePort
+		remoteAddr = remoteIpAddr + ":" + remotePort
 	}
 	ls := newLoopState(loopFile)
 	log.Infof("Connecting from %v to %v over %s", localAddr, remoteAddr, protocol)
@@ -189,11 +215,11 @@ func tryConnect(ipAddress, port, sourcePort, protocol, loopFile string) error {
 			return err
 		}
 		laddr := &sctp.SCTPAddr{IPAddrs: []net.IPAddr{*lip}, Port: lport}
-		rip, err := net.ResolveIPAddr("ip", ipAddress)
+		rip, err := net.ResolveIPAddr("ip", remoteIpAddr)
 		if err != nil {
 			return err
 		}
-		rport, err := strconv.Atoi(port)
+		rport, err := strconv.Atoi(remotePort)
 		if err != nil {
 			return err
 		}
