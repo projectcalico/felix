@@ -91,7 +91,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 		sourceTestTargetPort = "10000"
 	)
 
-	BeforeEach(func() {
+	BeforeEach(func(done Done) {
 		felix, etcd, client = infrastructure.StartSingleNodeEtcdTopology(infrastructure.DefaultTopologyOptions())
 
 		// Install a default profile that allows workloads with this profile to talk to each
@@ -154,7 +154,28 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 			ReverseDirection: testSourcePorts,
 			Protocol:         protocol,
 		}
-	})
+		retries := 0
+		for {
+			err = utils.RunCommand("docker", "exec", felix.Name, "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-p", "sctp", "-j", "TRACE")
+			if err == nil {
+				break
+			} else {
+				retries++
+			}
+			Expect(retries).To(BeNumerically("<", 10))
+		}
+		retries = 0
+		for {
+			err = utils.RunCommand("docker", "exec", felix.Name, "iptables", "-t", "raw", "-I", "OUTPUT", "1", "-p", "sctp", "-j", "TRACE")
+			if err == nil {
+				break
+			} else {
+				retries++
+			}
+			Expect(retries).To(BeNumerically("<", 10))
+		}
+		close(done)
+	}, 300.)
 
 	AfterEach(func() {
 
