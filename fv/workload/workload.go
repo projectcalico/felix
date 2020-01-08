@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -477,7 +477,7 @@ type SpoofedWorkload struct {
 }
 
 func (s *SpoofedWorkload) CanConnectTo(ip, port, protocol string) bool {
-	return canConnectTo(s.Workload, ip, "", s.SpoofedSourceIP, "", protocol)
+	return canConnectTo(s.Workload, ip, port, s.SpoofedSourceIP, "", protocol)
 }
 
 func (p *Port) CanConnectTo(ip, port, protocol string) bool {

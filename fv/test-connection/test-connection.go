@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -108,7 +108,7 @@ func main() {
 	}
 
 	if namespacePath == "-" {
-		// Add an interface for the source IP if any.
+		// Add the source IP (if set) to eth0.
 		err = maybeAddAddr(sourceIpAddress)
 		// Test connection from wherever we are already running.
 		if err == nil {
@@ -144,8 +144,19 @@ func maybeAddAddr(sourceIP string) error {
 	if sourceIP != defaultIPv4SourceIP && sourceIP != defaultIPv6SourceIP {
 		if !strings.Contains(sourceIP, ":") {
 			sourceIP += "/32"
+		} else {
+			sourceIP += "/128"
 		}
 
+		// Check if the IP is already set on eth0.
+		out, err := exec.Command("ip", "a", "show", "dev", "eth0").Output()
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(out), sourceIP) {
+			log.Infof("IP addr %s already exists on eth0, skip adding IP", sourceIP)
+			return nil
+		}
 		cmd := exec.Command("ip", "addr", "add", sourceIP, "dev", "eth0")
 		err = cmd.Run()
 	}

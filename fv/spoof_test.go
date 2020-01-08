@@ -1,6 +1,6 @@
 // +build fvtests
 
-// Copyright (c) 2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,17 +17,16 @@
 package fv_test
 
 import (
-	. "github.com/onsi/ginkgo"
-
 	"fmt"
+
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 
 	"github.com/projectcalico/felix/fv/infrastructure"
 	"github.com/projectcalico/felix/fv/workload"
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 )
 
-var _ = infrastructure.DatastoreDescribe("spoof tests", []apiconfig.DatastoreType{apiconfig.EtcdV3}, func(getInfra infrastructure.InfraFactory) {
-
+var _ = Describe("Spoof tests", func() {
 	var (
 		infra   infrastructure.DatastoreInfra
 		felixes []*infrastructure.Felix
@@ -35,77 +34,129 @@ var _ = infrastructure.DatastoreDescribe("spoof tests", []apiconfig.DatastoreTyp
 		cc      *workload.ConnectivityChecker
 	)
 
-	Context("using IPv4", func() {
-		BeforeEach(func() {
-			infra = getInfra()
+	createTopology := func(withIPv6 bool) {
+		var err error
+		infra, err = infrastructure.GetEtcdDatastoreInfra()
+		Expect(err).NotTo(HaveOccurred())
+		opts := infrastructure.DefaultTopologyOptions()
+		opts.EnableIPv6 = withIPv6
+		felixes, _ = infrastructure.StartNNodeTopology(3, opts, infra)
+		// Install a default profile allowing all ingress and egress,
+		// in the absence of policy.
+		infra.AddDefaultAllow()
+	}
 
-			// Setup 3 felixes. felixes[0] will spoof felixes[2] and try to reach
-			// felixes[1].
-			felixes, _ = infrastructure.StartNNodeTopology(3, infrastructure.DefaultTopologyOptions(), infra)
-
-			// Install a default profile that allows all ingress and egress, in the absence of any Policy.
-			infra.AddDefaultAllow()
-		})
-
-		AfterEach(func() {
-			if CurrentGinkgoTestDescription().Failed {
-				for _, felix := range felixes {
-					felix.Exec("iptables-save", "-c")
-					felix.Exec("ipset", "list")
-					felix.Exec("ip", "r")
-					felix.Exec("ip", "a")
-				}
-			}
-
-			for _, wl := range w {
-				wl.Stop()
-			}
+	teardownInfra := func() {
+		if CurrentGinkgoTestDescription().Failed {
 			for _, felix := range felixes {
-				felix.Stop()
+				felix.Exec("iptables-save", "-c")
+				felix.Exec("ip6tables-save", "-c")
+				felix.Exec("ipset", "list")
+				felix.Exec("ip", "r")
+				felix.Exec("ip", "-6", "r")
+				felix.Exec("ip", "a")
+				felix.Exec("ip", "-6", "a")
 			}
+		}
+		for _, wl := range w {
+			wl.Stop()
+		}
+		for _, felix := range felixes {
+			felix.Stop()
+		}
+		if CurrentGinkgoTestDescription().Failed {
+			infra.DumpErrorData()
+		}
+		infra.Stop()
+	}
 
-			if CurrentGinkgoTestDescription().Failed {
-				infra.DumpErrorData()
+	spoofTests := func() {
+		It("should drop spoofed traffic", func() {
+			cc = &workload.ConnectivityChecker{}
+			// Setup a spoofed workload. Make w[0] spoof w[2] by making it
+			// use w[2]'s IP to test connections.
+			spoofed := &workload.SpoofedWorkload{
+				Workload:        w[0],
+				SpoofedSourceIP: w[2].IP,
 			}
-			infra.Stop()
+			// The spoofed connection should be dropped.
+			cc.ExpectNone(spoofed, w[1])
+			// But a connection from the real w[2] should succeed.
+			cc.ExpectSome(w[2], w[1])
+			// And a connection from w[0] without spoofing, vice versa,
+			// should also succeed.
+			cc.ExpectSome(w[0], w[1])
+			cc.ExpectSome(w[1], w[0])
+			cc.CheckConnectivity()
 		})
 
-		setupWorkloadsAndConnectivityChecker := func(protocol string) {
+		It("should allow workload's traffic if workload spoofs its own IP", func() {
+			cc = &workload.ConnectivityChecker{}
+			// Setup a "spoofed" workload. Make w[0] spoof itself.
+			spoofed := &workload.SpoofedWorkload{
+				Workload:        w[0],
+				SpoofedSourceIP: w[0].IP,
+			}
+			// The spoofed connection should be allowed.
+			cc.ExpectSome(spoofed, w[1])
+			cc.ExpectSome(w[1], spoofed)
+			cc.CheckConnectivity()
+		})
+	}
+
+	Context("IPv4", func() {
+		BeforeEach(func() {
+			var err error
+			infra, err = infrastructure.GetEtcdDatastoreInfra()
+			Expect(err).NotTo(HaveOccurred())
+			opts := infrastructure.DefaultTopologyOptions()
+			felixes, _ = infrastructure.StartNNodeTopology(3, opts, infra)
+			// Install a default profile allowing all ingress and egress,
+			// in the absence of policy.
+			infra.AddDefaultAllow()
+
+			// Create workloads using "default" profile.
 			for ii := range w {
 				wIP := fmt.Sprintf("10.65.%d.2", ii)
 				wName := fmt.Sprintf("w%d", ii)
-				w[ii] = workload.Run(felixes[ii], wName, "default", wIP, "8055", protocol)
+				w[ii] = workload.Run(felixes[ii], wName, "default", wIP, "8055", "tcp")
 				w[ii].ConfigureInDatastore(infra)
 			}
-
-			cc = &workload.ConnectivityChecker{Protocol: protocol}
-		}
-
-		It("should drop udp traffic that has had its IP spoofed", func() {
-			setupWorkloadsAndConnectivityChecker("udp")
-			// Setup a spoofed workload. w[0] has the IP 10.65.0.2.
-			// Make it use 10.65.2.2 to test connections instead.
-			spoofed := &workload.SpoofedWorkload{
-				Workload:        w[0],
-				SpoofedSourceIP: "10.65.2.2",
-			}
-			cc.ExpectNone(spoofed, w[1])
-			cc.ExpectSome(w[1], w[0])
-			cc.CheckConnectivity()
 		})
 
-		It("should drop tcp traffic that has had its IP spoofed", func() {
-			setupWorkloadsAndConnectivityChecker("tcp")
-			// Setup a spoofed workload. w[0] has the IP 10.65.0.2.
-			// Make it use 10.65.2.2 to test connections instead.
-			spoofed := &workload.SpoofedWorkload{
-				Workload:        w[0],
-				SpoofedSourceIP: "10.65.2.2",
-			}
-			cc.ExpectNone(spoofed, w[1])
-			cc.ExpectSome(w[1], w[0])
-			cc.CheckConnectivity()
+		AfterEach(func() {
+			teardownInfra()
 		})
+
+		spoofTests()
 	})
 
+	Context("IPv6", func() {
+		BeforeEach(func() {
+			var err error
+			infra, err = infrastructure.GetEtcdDatastoreInfra()
+			Expect(err).NotTo(HaveOccurred())
+			opts := infrastructure.DefaultTopologyOptions()
+			// For IPv6 we'll setup our workloads on a single felix.
+			felixes, _ = infrastructure.StartNNodeTopology(1, opts, infra)
+			// Install a default profile allowing all ingress and egress,
+			// in the absence of policy.
+			infra.AddDefaultAllow()
+
+			createTopology(true)
+			// Create workloads using "default" profile.
+			for ii := range w {
+				wIP := fmt.Sprintf("fdc6:3dbc:e983:cbc%x::1", ii)
+				wName := fmt.Sprintf("w%d", ii)
+				w[ii] = workload.Run(felixes[0], wName, "default", wIP, "8055", "tcp")
+				w[ii].ConfigureInDatastore(infra)
+			}
+		})
+
+		AfterEach(func() {
+			teardownInfra()
+		})
+
+		spoofTests()
+	})
 })
