@@ -41,7 +41,7 @@ Usage:
   test-connection <namespace-path> <ip-address> <port> [--source-ip=<source_ip>] [--source-port=<source>] [--protocol=<protocol>] [--loop-with-file=<file>]
 
 Options:
-  --source-ip=<source_ip> Source IP to use for the connection [default: 0.0.0.0].
+  --source-ip=<source_ip>  Source IP to use for the connection [default: 0.0.0.0].
   --source-port=<source_port>  Source port to use for the connection [default: 0].
   --protocol=<protocol>   Protocol to test [default: tcp].
   --loop-with-file=<file>  Whether to send messages repeatedly, file is used for synchronization
@@ -64,7 +64,8 @@ If connection is unsuccessful, test-connection panics and so exits with a failur
 // If the other process creates the file again, it will tell this
 // program to close the connection, remove the file and quit.
 
-const defaultSourceIP = "0.0.0.0"
+const defaultIPv4SourceIP = "0.0.0.0"
+const defaultIPv6SourceIP = "::"
 
 func main() {
 	log.SetLevel(log.DebugLevel)
@@ -79,14 +80,15 @@ func main() {
 	ipAddress := arguments["<ip-address>"].(string)
 	port := arguments["<port>"].(string)
 	sourcePort := arguments["--source-port"].(string)
-	// Set default for source IP.
-	sourceIpAddress := defaultSourceIP
-	if strings.Contains(ipAddress, ":") {
-		sourceIpAddress = "::"
+	sourceIpAddress := arguments["--source-ip"].(string)
+
+	// Set default for source IP. If we're using IPv6 as indicated by ipAddress
+	// and no --source-ip option was provided, set the source IP to the default
+	// IPv6 address.
+	if strings.Contains(ipAddress, ":") && sourceIpAddress == defaultIPv4SourceIP {
+		sourceIpAddress = defaultIPv6SourceIP
 	}
-	if srcIP, ok := arguments["--source-ip"].(string); ok {
-		sourceIpAddress = srcIP
-	}
+
 	log.Infof("Test connection from namespace %v IP %v port%v to IP %v port %v", namespacePath, sourceIpAddress, sourcePort, ipAddress, port)
 	protocol := arguments["--protocol"].(string)
 	loopFile := ""
