@@ -109,7 +109,7 @@ func main() {
 
 	if namespacePath == "-" {
 		// Add an interface for the source IP if any.
-		err = maybeAddInterface(sourceIpAddress)
+		err = maybeAddAddr(sourceIpAddress)
 		// Test connection from wherever we are already running.
 		if err == nil {
 			err = tryConnect(ipAddress, port, sourceIpAddress, sourcePort, protocol, loopFile)
@@ -126,7 +126,7 @@ func main() {
 		// Now, in that namespace, try connecting to the target.
 		err = namespace.Do(func(_ ns.NetNS) error {
 			// Add an interface for the source IP if any.
-			e := maybeAddInterface(sourceIpAddress)
+			e := maybeAddAddr(sourceIpAddress)
 			if e != nil {
 				return e
 			}
@@ -139,10 +139,14 @@ func main() {
 	}
 }
 
-func maybeAddInterface(sourceIP string) error {
+func maybeAddAddr(sourceIP string) error {
 	var err error
-	if sourceIP != defaultSourceIP {
-		cmd := exec.Command("ip", "addr", "add", sourceIP+"/32", "dev", "eth0")
+	if sourceIP != defaultIPv4SourceIP && sourceIP != defaultIPv6SourceIP {
+		if !strings.Contains(sourceIP, ":") {
+			sourceIP += "/32"
+		}
+
+		cmd := exec.Command("ip", "addr", "add", sourceIP, "dev", "eth0")
 		err = cmd.Run()
 	}
 	return err
