@@ -364,6 +364,8 @@ var _ = Describe("Static", func() {
 						{Action: ClearMarkAction{Mark: 0xf0}},
 						{Match: Match().InInterface("cali+"),
 							Action: SetMarkAction{Mark: 0x40}},
+						{Match: Match().MarkSingleBitSet(0x40).RPFCheckFailed(),
+							Action: DropAction{}},
 						{Match: Match().MarkClear(0x40),
 							Action: JumpAction{Target: ChainDispatchFromHostEndpoint}},
 						{Match: Match().MarkSingleBitSet(0x10),
