@@ -34,18 +34,6 @@ var _ = Describe("Spoof tests", func() {
 		cc      *workload.ConnectivityChecker
 	)
 
-	createTopology := func(withIPv6 bool) {
-		var err error
-		infra, err = infrastructure.GetEtcdDatastoreInfra()
-		Expect(err).NotTo(HaveOccurred())
-		opts := infrastructure.DefaultTopologyOptions()
-		opts.EnableIPv6 = withIPv6
-		felixes, _ = infrastructure.StartNNodeTopology(3, opts, infra)
-		// Install a default profile allowing all ingress and egress,
-		// in the absence of policy.
-		infra.AddDefaultAllow()
-	}
-
 	teardownInfra := func() {
 		if CurrentGinkgoTestDescription().Failed {
 			for _, felix := range felixes {
@@ -137,13 +125,17 @@ var _ = Describe("Spoof tests", func() {
 			infra, err = infrastructure.GetEtcdDatastoreInfra()
 			Expect(err).NotTo(HaveOccurred())
 			opts := infrastructure.DefaultTopologyOptions()
-			// For IPv6 we'll setup our workloads on a single felix.
+
+			// The IPv4 tests had each workload running on an individual
+			// felix, but our current topology setup tooling doesn't yet
+			// support that for IPv6. So for these tests, we'll run the
+			// workloads on a single felix.
 			felixes, _ = infrastructure.StartNNodeTopology(1, opts, infra)
+
 			// Install a default profile allowing all ingress and egress,
 			// in the absence of policy.
 			infra.AddDefaultAllow()
 
-			createTopology(true)
 			// Create workloads using "default" profile.
 			for ii := range w {
 				wIP := fmt.Sprintf("fdc6:3dbc:e983:cbc%x::1", ii)
