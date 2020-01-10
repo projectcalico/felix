@@ -140,7 +140,6 @@ func main() {
 }
 
 func maybeAddAddr(sourceIP string) error {
-	var err error
 	if sourceIP != defaultIPv4SourceIP && sourceIP != defaultIPv6SourceIP {
 		if !strings.Contains(sourceIP, ":") {
 			sourceIP += "/32"
@@ -158,9 +157,9 @@ func maybeAddAddr(sourceIP string) error {
 			return nil
 		}
 		cmd := exec.Command("ip", "addr", "add", sourceIP, "dev", "eth0")
-		err = cmd.Run()
+		return cmd.Run()
 	}
-	return err
+	return nil
 }
 
 func tryConnect(remoteIpAddr, remotePort, sourceIpAddr, sourcePort, protocol, loopFile string) error {
