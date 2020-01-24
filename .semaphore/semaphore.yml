@@ -1,0 +1,105 @@
+version: v1.0
+name: Felix
+agent:
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu1804
+
+auto_cancel:
+  running:
+    when: "branch != 'master'"
+  queued:
+    when: "branch != 'master'"
+
+blocks:
+- name: Build
+  dependencies: []
+  task:
+    agent:
+      machine:
+        type: e1-standard-4
+        os_image: ubuntu1804
+    jobs:
+    - name: Build
+      commands:
+      - checkout
+      - cache restore go-pkg-cache
+      - cache restore go-mod-cache
+      - >-
+        make image fv/fv.test bin/test-workload bin/test-connection
+        bin/calico-felix
+      - 'cache store bin-${SEMAPHORE_GIT_SHA} bin'
+      - cache store go-pkg-cache .go-pkg-cache
+      - 'cache store go-mod-cache ${HOME}/go/pkg/mod/cache'
+      - docker save -o /tmp/calico-felix.tar calico/felix:latest-amd64
+      - 'cache store felix-image-${SEMAPHORE_GIT_SHA} /tmp/calico-felix.tar'
+- name: FV Tests
+  dependencies: ["Build"]
+  task:
+    prologue:
+      commands:
+      - checkout
+      - cache restore go-pkg-cache
+      - cache restore go-mod-cache
+      - 'cache restore bin-${SEMAPHORE_GIT_SHA}'
+      - 'cache restore felix-image-${SEMAPHORE_GIT_SHA}'
+      - docker load -i /tmp/calico-felix.tar
+      - rm /tmp/calico-felix.tar
+      - touch bin/*
+    jobs:
+    - name: FV Test matrix
+      commands:
+      - make fv FV_BATCHES_TO_RUN="${SEMAPHORE_JOB_INDEX}" FV_NUM_BATCHES=${SEMAPHORE_JOB_COUNT}
+      parallelism: 5
+- name: Kubernetes FV Tests
+  dependencies: ["Build"]
+  task:
+    agent:
+      machine:
+        # k8sfv tests need more RAM.
+        type: e1-standard-2
+        os_image: ubuntu1804
+    prologue:
+      commands:
+      - checkout
+      - cache restore go-pkg-cache
+      - cache restore go-mod-cache
+      - 'cache restore bin-${SEMAPHORE_GIT_SHA}'
+      - 'cache restore felix-image-${SEMAPHORE_GIT_SHA}'
+      - docker load -i /tmp/calico-felix.tar
+      - rm /tmp/calico-felix.tar
+      - touch bin/*
+    jobs:
+    - name: Kubernetes FV tests
+      commands:
+      - make k8sfv-test JUST_A_MINUTE=true USE_TYPHA=true
+      - make k8sfv-test JUST_A_MINUTE=true USE_TYPHA=false
+- name: Static checks
+  dependencies: []
+  task:
+    agent:
+      machine:
+        # Linters use a lot of RAM so use a bigger machine type.
+        type: e1-standard-8
+        os_image: ubuntu1804
+    prologue:
+      commands:
+      - checkout
+      - cache restore go-pkg-cache
+      - cache restore go-mod-cache
+    jobs:
+    - name: Static checks
+      commands:
+      - make static-checks
+- name: Unit tests
+  dependencies: []
+  task:
+    prologue:
+      commands:
+      - checkout
+      - cache restore go-pkg-cache
+      - cache restore go-mod-cache
+    jobs:
+    - name: UT
+      commands:
+      - make ut
