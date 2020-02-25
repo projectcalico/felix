@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2020 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -183,16 +183,19 @@ func (c *VXLANResolver) OnResourceUpdate(update api.Update) (_ bool) {
 	logCxt := logrus.WithField("node", nodeName).WithField("update", update)
 	logCxt.Debug("OnResourceUpdate triggered")
 	if update.Value != nil && update.Value.(*apiv3.Node).Spec.BGP != nil {
+		// Calculate the pending and sent sets before adding 'node' to nodeNameToNode.
+		pendingSet, sentSet := c.routeSets()
+
 		node := update.Value.(*apiv3.Node)
 		bgp := node.Spec.BGP
 		c.nodeNameToNode[nodeName] = node
-		ipv4, _, err := cnet.ParseCIDROrIP(bgp.IPv4Address)
+		_, _, err := cnet.ParseCIDROrIP(bgp.IPv4Address)
 		if err != nil {
 			logCxt.WithError(err).Error("couldn't parse ipv4 address from node bgp info")
 			return
 		}
 
-		c.onNodeIPUpdate(nodeName, ipv4.String())
+		c.onNodeIPUpdate(nodeName, update.Value.(*cnet.IP).String(), pendingSet, sentSet)
 	} else {
 		delete(c.nodeNameToNode, nodeName)
 		c.onRemoveNode(nodeName)
@@ -210,20 +213,21 @@ func (c *VXLANResolver) OnHostIPUpdate(update api.Update) (_ bool) {
 	logrus.WithField("node", nodeName).Debug("OnHostIPUpdate triggered")
 
 	if update.Value != nil {
-		c.onNodeIPUpdate(nodeName, update.Value.(*cnet.IP).String())
+		pendingSet, sentSet := c.routeSets()
+		c.onNodeIPUpdate(nodeName, update.Value.(*cnet.IP).String(), pendingSet, sentSet)
 	} else {
 		c.onRemoveNode(nodeName)
 	}
 	return
 }
 
-func (c *VXLANResolver) onNodeIPUpdate(nodeName string, newIP string) {
+func (c *VXLANResolver) onNodeIPUpdate(nodeName string, newIP string, pendingSet set.Set, sentSet set.Set) {
 	logCxt := logrus.WithField("node", nodeName)
 	// Host IP updated or added. If it was added, we should check to see if we're ready
 	// to send a VTEP and associated routes. If we already knew about this one, we need to
 	// see if it has changed. If it has, we should remove and reprogram the VTEP and routes.
 	currIP := c.nodeNameToIPAddr[nodeName]
-	pendingSet, sentSet := c.routeSets()
+
 	logCxt = logCxt.WithFields(logrus.Fields{"newIP": newIP, "currIP": currIP})
 	if c.vtepSent(nodeName) {
 		if currIP == newIP {
