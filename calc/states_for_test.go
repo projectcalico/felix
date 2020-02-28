@@ -1152,6 +1152,10 @@ var vxlanTunnelIPDelete = vxlanWithBlock.withKVUpdates(
 	},
 ).withVTEPs()
 
+var vxlanToCrossSubnetSwitch = vxlanWithBlock.withKVUpdates(
+	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLanCrossSubnet},
+).withName("VXLAN switched to CrossSubnet")
+
 type StateList []State
 
 func (l StateList) String() string {
