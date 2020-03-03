@@ -322,10 +322,7 @@ var baseTests = []StateList{
 		vxlanWithMAC,
 	},
 	{
-		vxlanWithBlock,
-		vxlanToCrossSubnetSwitch,
-		vxlanWithBlock,
-		vxlanToCrossSubnetSwitch,
+		vxlanWithCrossSubnet,
 	},
 }
 
