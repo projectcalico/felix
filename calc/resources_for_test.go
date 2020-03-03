@@ -601,6 +601,11 @@ var ipPoolWithVXLAN = IPPool{
 	VXLANMode: encap.Always,
 }
 
+var ipPoolWithVXLanCrossSubnet = IPPool{
+	CIDR:      mustParseNet("10.0.0.0/16"),
+	VXLANMode: encap.CrossSubnet,
+}
+
 var remoteIPAMBlockKey = BlockKey{
 	CIDR: mustParseNet("10.0.1.0/29"),
 }
