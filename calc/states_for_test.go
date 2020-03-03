@@ -912,6 +912,21 @@ var vxlanWithBlock = empty.withKVUpdates(
 	},
 )
 
+// VXLAN CrossSubnet test.
+var vxlanWithCrossSubnet = empty.withKVUpdates(
+	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLanCrossSubnet}, // configure a CrossSubnet VXLAN ipPool
+	KVPair{Key: remoteHostIPKey, Value: &remoteHostIP},         // felix receives an update on N2
+	KVPair{Key: localHostIPKey, Value: &localHostIP},           // felix received an update on N1
+	KVPair{Key: remoteHost2IPKey, Value: &remoteHost2IP},       // felix received anohter update on N2
+).withName("Felix pushed all CrossSubnet routes to dataplane").withRoutes(
+	proto.RouteUpdate{
+		Type: proto.RouteType_VXLAN,
+		Node: remoteHostname,
+		Gw:   remoteHostVXLANTunnelIP,
+		Dst:  "10.0.1.0/29",
+	},
+)
+
 // Minimal VXLAN set-up with a MAC address.
 var vxlanWithMAC = vxlanWithBlock.withKVUpdates(
 	KVPair{Key: remoteHostVXLANTunnelMACConfigKey, Value: remoteHostVXLANTunnelMAC},
@@ -1151,6 +1166,10 @@ var vxlanTunnelIPDelete = vxlanWithBlock.withKVUpdates(
 		Type: proto.RouteType_WORKLOADS_NODE,
 	},
 ).withVTEPs()
+
+var vxlanToCrossSubnetSwitch = vxlanWithBlock.withKVUpdates(
+	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLanCrossSubnet},
+).withName("VXLAN switched to CrossSubnet")
 
 type StateList []State
 
