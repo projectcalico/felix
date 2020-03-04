@@ -1152,6 +1152,43 @@ var vxlanTunnelIPDelete = vxlanWithBlock.withKVUpdates(
 	},
 ).withVTEPs()
 
+// Two nodes with VXLAN and CrossSubnet.
+var vxlanWithCrossSubnet = empty.withKVUpdates(
+	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLANCrossSubnet},
+	KVPair{Key: localIPAMBlockKey, Value: &localIPAMBlock},
+	KVPair{Key: localHostIPKey, Value: &localHostIP},
+	KVPair{Key: localHostVXLANTunnelConfigKey, Value: localHostVXLANTunnelIP},
+	KVPair{Key: remoteHostIPKey, Value: &remoteHostIP},
+	KVPair{Key: remoteIPAMBlockKey, Value: &remoteIPAMBlock},
+	KVPair{Key: remoteHostVXLANTunnelConfigKey, Value: remoteHostVXLANTunnelIP},
+).withName("VXLAN with CrossSubnet").withVTEPs(
+	proto.VXLANTunnelEndpointUpdate{
+		Node:           localHostname,
+		Mac:            "66:48:f6:56:dc:f1",
+		Ipv4Addr:       localHostVXLANTunnelIP,
+		ParentDeviceIp: localHostIP.String(),
+	},
+	proto.VXLANTunnelEndpointUpdate{
+		Node:           remoteHostname,
+		Mac:            "66:3e:ca:a4:db:65",
+		Ipv4Addr:       remoteHostVXLANTunnelIP,
+		ParentDeviceIp: remoteHostIP.String(),
+	},
+).withRoutes(
+	proto.RouteUpdate{
+		Type: proto.RouteType_WORKLOADS_NODE,
+		Dst:  "10.0.1.0/29",
+		Node: remoteHostname,
+		Gw:   remoteHostIP.String(),
+	},
+	proto.RouteUpdate{
+		Type: proto.RouteType_VXLAN,
+		Dst:  "10.0.1.0/29",
+		Node: remoteHostname,
+		Gw:   remoteHostVXLANTunnelIP,
+	},
+)
+
 type StateList []State
 
 func (l StateList) String() string {
