@@ -606,6 +606,10 @@ var remoteIPAMBlockKey = BlockKey{
 	CIDR: mustParseNet("10.0.1.0/29"),
 }
 
+var localIPAMBlockKey = BlockKey{
+	CIDR: mustParseNet("10.0.0.0/29"),
+}
+
 var localHostAffinity = "host:" + localHostname
 var remoteHostAffinity = "host:" + remoteHostname
 var remoteHost2Affinity = "host:" + remoteHostname2
