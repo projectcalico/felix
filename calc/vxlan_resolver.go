@@ -189,13 +189,13 @@ func (c *VXLANResolver) OnResourceUpdate(update api.Update) (_ bool) {
 		node := update.Value.(*apiv3.Node)
 		bgp := node.Spec.BGP
 		c.nodeNameToNode[nodeName] = node
-		_, _, err := cnet.ParseCIDROrIP(bgp.IPv4Address)
+		ipv4, _, err := cnet.ParseCIDROrIP(bgp.IPv4Address)
 		if err != nil {
 			logCxt.WithError(err).Error("couldn't parse ipv4 address from node bgp info")
 			return
 		}
 
-		c.onNodeIPUpdate(nodeName, update.Value.(*cnet.IP).String(), pendingSet, sentSet)
+		c.onNodeIPUpdate(nodeName, ipv4.String(), pendingSet, sentSet)
 	} else {
 		delete(c.nodeNameToNode, nodeName)
 		c.onRemoveNode(nodeName)
