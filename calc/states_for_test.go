@@ -882,6 +882,42 @@ var hostEp1WithPolicyAndANetworkSetMatchingBEqB = hostEp1WithPolicy.withKVUpdate
 	"12.1.0.0/24",
 })
 
+var vxlanWithCrossSubnet = empty.withKVUpdates(
+	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLANCrossSubnet},
+	KVPair{Key: localIPAMBlockKey, Value: &localIPAMBlock},
+	KVPair{Key: localHostIPKey, Value: &localHostIP},
+	KVPair{Key: localHostVXLANTunnelConfigKey, Value: localHostVXLANTunnelIP},
+	KVPair{Key: remoteHostIPKey, Value: &remoteHostIP},
+	KVPair{Key: remoteIPAMBlockKey, Value: &remoteIPAMBlock},
+	KVPair{Key: remoteHostVXLANTunnelConfigKey, Value: remoteHostVXLANTunnelIP},
+).withName("VXLAN with CrossSubnet").withVTEPs(
+	proto.VXLANTunnelEndpointUpdate{
+		Node:           localHostname,
+		Mac:            "66:48:f6:56:dc:f1",
+		Ipv4Addr:       localHostVXLANTunnelIP,
+		ParentDeviceIp: localHostIP.String(),
+	},
+	proto.VXLANTunnelEndpointUpdate{
+		Node:           remoteHostname,
+		Mac:            "66:3e:ca:a4:db:65",
+		Ipv4Addr:       remoteHostVXLANTunnelIP,
+		ParentDeviceIp: remoteHostIP.String(),
+	},
+).withRoutes(
+	proto.RouteUpdate{
+		Type: proto.RouteType_WORKLOADS_NODE,
+		Dst:  "10.0.1.0/29",
+		Node: remoteHostname,
+		Gw:   remoteHostIP.String(),
+	},
+	proto.RouteUpdate{
+		Type: proto.RouteType_VXLAN,
+		Dst:  "10.0.1.0/29",
+		Node: remoteHostname,
+		Gw:   remoteHostVXLANTunnelIP,
+	},
+)
+
 // Minimal VXLAN set-up, all the data needed for a remote VTEP, a pool and a block.
 var vxlanWithBlock = empty.withKVUpdates(
 	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLAN},
@@ -909,21 +945,6 @@ var vxlanWithBlock = empty.withKVUpdates(
 		Dst:  "10.0.1.0/29",
 		Gw:   remoteHostIP.String(),
 		Type: proto.RouteType_WORKLOADS_NODE,
-	},
-)
-
-// VXLAN CrossSubnet test.
-var vxlanWithCrossSubnet = empty.withKVUpdates(
-	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLanCrossSubnet}, // configure a CrossSubnet VXLAN ipPool
-	KVPair{Key: remoteHostIPKey, Value: &remoteHostIP},         // felix receives an update on N2
-	KVPair{Key: localHostIPKey, Value: &localHostIP},           // felix received an update on N1
-	KVPair{Key: remoteHost2IPKey, Value: &remoteHost2IP},       // felix received anohter update on N2
-).withName("Felix pushed all CrossSubnet routes to dataplane").withRoutes(
-	proto.RouteUpdate{
-		Type: proto.RouteType_VXLAN,
-		Node: remoteHostname,
-		Gw:   remoteHostVXLANTunnelIP,
-		Dst:  "10.0.1.0/29",
 	},
 )
 
@@ -1166,10 +1187,6 @@ var vxlanTunnelIPDelete = vxlanWithBlock.withKVUpdates(
 		Type: proto.RouteType_WORKLOADS_NODE,
 	},
 ).withVTEPs()
-
-var vxlanToCrossSubnetSwitch = vxlanWithBlock.withKVUpdates(
-	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLanCrossSubnet},
-).withName("VXLAN switched to CrossSubnet")
 
 type StateList []State
 

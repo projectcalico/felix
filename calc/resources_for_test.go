@@ -601,11 +601,6 @@ var ipPoolWithVXLAN = IPPool{
 	VXLANMode: encap.Always,
 }
 
-var ipPoolWithVXLanCrossSubnet = IPPool{
-	CIDR:      mustParseNet("10.0.0.0/16"),
-	VXLANMode: encap.CrossSubnet,
-}
-
 var remoteIPAMBlockKey = BlockKey{
 	CIDR: mustParseNet("10.0.1.0/29"),
 }
@@ -617,6 +612,14 @@ var localIPAMBlockKey = BlockKey{
 var localHostAffinity = "host:" + localHostname
 var remoteHostAffinity = "host:" + remoteHostname
 var remoteHost2Affinity = "host:" + remoteHostname2
+
+var localIPAMBlock = AllocationBlock{
+	CIDR:        mustParseNet("10.0.0.0/29"),
+	Affinity:    &localHostAffinity,
+	Allocations: make([]*int, 8),
+	Unallocated: []int{0, 1, 2, 3, 4, 5, 6, 7},
+}
+
 var remoteIPAMBlock = AllocationBlock{
 	CIDR:        mustParseNet("10.0.1.0/29"),
 	Affinity:    &remoteHostAffinity,
@@ -706,3 +709,8 @@ var remoteHostVXLANTunnelIP = "10.0.1.0"
 var remoteHostVXLANTunnelIP2 = "10.0.1.1"
 var remoteHost2VXLANTunnelIP = "10.0.2.0"
 var remoteHostVXLANTunnelMAC = "66:74:c5:72:3f:01"
+
+var ipPoolWithVXLANCrossSubnet = IPPool{
+	CIDR:      mustParseNet("10.0.0.0/16"),
+	VXLANMode: encap.CrossSubnet,
+}
