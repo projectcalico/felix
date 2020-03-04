@@ -567,7 +567,8 @@ var netSet2 = NetworkSet{
 
 var localHostIP = mustParseIP("192.168.0.1")
 var remoteHostIP = mustParseIP("192.168.0.2")
-var remoteHost2IP = mustParseIP("192.168.0.3")
+var remoteHostIP2 = mustParseIP("192.168.0.3")
+var remoteHostIP3 = mustParseIP("10.0.1.10")
 
 var localHostVXLANTunnelConfigKey = HostConfigKey{
 	Hostname: localHostname,
@@ -605,13 +606,10 @@ var remoteIPAMBlockKey = BlockKey{
 	CIDR: mustParseNet("10.0.1.0/29"),
 }
 
-var localIPAMBlockKey = BlockKey{
-	CIDR: mustParseNet("10.0.0.0/29"),
-}
-
 var localHostAffinity = "host:" + localHostname
 var remoteHostAffinity = "host:" + remoteHostname
 var remoteHost2Affinity = "host:" + remoteHostname2
+
 var remoteIPAMBlock = AllocationBlock{
 	CIDR:        mustParseNet("10.0.1.0/29"),
 	Affinity:    &remoteHostAffinity,
@@ -697,7 +695,13 @@ func intPtr(i int) *int {
 }
 
 var localHostVXLANTunnelIP = "10.0.0.0"
+var localHostVXLANTunnelIP2 = "192.168.0.10"
 var remoteHostVXLANTunnelIP = "10.0.1.0"
 var remoteHostVXLANTunnelIP2 = "10.0.1.1"
 var remoteHost2VXLANTunnelIP = "10.0.2.0"
 var remoteHostVXLANTunnelMAC = "66:74:c5:72:3f:01"
+
+var ipPoolWithVXLANCrossSubnet = IPPool{
+	CIDR:      mustParseNet("10.0.0.0/16"),
+	VXLANMode: encap.CrossSubnet,
+}
