@@ -566,6 +566,7 @@ var netSet2 = NetworkSet{
 }
 
 var localHostIP = mustParseIP("192.168.0.1")
+var localHostIP2 = mustParseIP("10.0.0.1")
 var remoteHostIP = mustParseIP("192.168.0.2")
 var remoteHost2IP = mustParseIP("192.168.0.3")
 
