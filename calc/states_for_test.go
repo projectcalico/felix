@@ -930,7 +930,7 @@ var vxlanWithMAC = vxlanWithBlock.withKVUpdates(
 // other node.
 var vxlanWithBlockAndBorrows = vxlanWithBlock.withKVUpdates(
 	KVPair{Key: remoteIPAMBlockKey, Value: &remoteIPAMBlockWithBorrows},
-	KVPair{Key: remoteHost2IPKey, Value: &remoteHost2IP},
+	KVPair{Key: remoteHostIP2Key, Value: &remoteHostIP2},
 	KVPair{Key: remoteHost2VXLANTunnelConfigKey, Value: remoteHost2VXLANTunnelIP},
 ).withName("VXLAN borrow").withVTEPs(
 	proto.VXLANTunnelEndpointUpdate{
@@ -943,7 +943,7 @@ var vxlanWithBlockAndBorrows = vxlanWithBlock.withKVUpdates(
 		Node:           remoteHostname2,
 		Mac:            "66:40:18:59:1f:16",
 		Ipv4Addr:       remoteHost2VXLANTunnelIP,
-		ParentDeviceIp: remoteHost2IP.String(),
+		ParentDeviceIp: remoteHostIP2.String(),
 	},
 ).withRoutes(
 	proto.RouteUpdate{
@@ -967,7 +967,7 @@ var vxlanWithBlockAndBorrows = vxlanWithBlock.withKVUpdates(
 	proto.RouteUpdate{
 		Type: proto.RouteType_WORKLOADS_NODE,
 		Node: remoteHostname2,
-		Gw:   remoteHost2IP.String(),
+		Gw:   remoteHostIP2.String(),
 		Dst:  "10.0.1.2/32",
 	},
 )
@@ -1001,14 +1001,14 @@ var vxlanWithBlockAndDifferentTunnelIP = vxlanWithBlock.withKVUpdates(
 
 // vxlanWithBlock but with a different node IP.
 var vxlanWithBlockAndDifferentNodeIP = vxlanWithBlock.withKVUpdates(
-	KVPair{Key: remoteHostIPKey, Value: &remoteHost2IP},
+	KVPair{Key: remoteHostIPKey, Value: &remoteHostIP2},
 ).withName("VXLAN different node IP").withVTEPs(
 	// VTEP for the remote node.
 	proto.VXLANTunnelEndpointUpdate{
 		Node:           remoteHostname,
 		Mac:            "66:3e:ca:a4:db:65",
 		Ipv4Addr:       remoteHostVXLANTunnelIP,
-		ParentDeviceIp: remoteHost2IP.String(),
+		ParentDeviceIp: remoteHostIP2.String(),
 	},
 ).withRoutes(
 	// Single route for the block.
@@ -1021,7 +1021,7 @@ var vxlanWithBlockAndDifferentNodeIP = vxlanWithBlock.withKVUpdates(
 	proto.RouteUpdate{
 		Node: remoteHostname,
 		Dst:  "10.0.1.0/29",
-		Gw:   remoteHost2IP.String(),
+		Gw:   remoteHostIP2.String(),
 		Type: proto.RouteType_WORKLOADS_NODE,
 	},
 )
@@ -1045,7 +1045,7 @@ var vxlanBlockOwnerSwitch = vxlanWithBlockAndBorrows.withKVUpdates(
 	proto.RouteUpdate{
 		Type: proto.RouteType_WORKLOADS_NODE,
 		Node: remoteHostname2,
-		Gw:   remoteHost2IP.String(),
+		Gw:   remoteHostIP2.String(),
 		Dst:  "10.0.1.0/29",
 	},
 	proto.RouteUpdate{
@@ -1103,7 +1103,7 @@ var vxlanWithBlockAndBorrowsAndMissingFirstVTEP = vxlanWithBlockAndBorrows.withK
 		Node:           remoteHostname2,
 		Mac:            "66:40:18:59:1f:16",
 		Ipv4Addr:       remoteHost2VXLANTunnelIP,
-		ParentDeviceIp: remoteHost2IP.String(),
+		ParentDeviceIp: remoteHostIP2.String(),
 	},
 ).withRoutes(
 	proto.RouteUpdate{
@@ -1115,7 +1115,7 @@ var vxlanWithBlockAndBorrowsAndMissingFirstVTEP = vxlanWithBlockAndBorrows.withK
 	proto.RouteUpdate{
 		Node: remoteHostname2,
 		Dst:  "10.0.1.2/32",
-		Gw:   remoteHost2IP.String(),
+		Gw:   remoteHostIP2.String(),
 		Type: proto.RouteType_WORKLOADS_NODE,
 	},
 )
@@ -1154,61 +1154,47 @@ var vxlanTunnelIPDelete = vxlanWithBlock.withKVUpdates(
 
 // Two nodes with VXLAN and CrossSubnet.
 var vxlanCrossSubnetRemote = empty.withKVUpdates(
-	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLANCrossSubnet},
-	KVPair{Key: remoteHostIPKey, Value: &remoteHostIP},
-	KVPair{Key: remoteIPAMBlockKey, Value: &remoteIPAMBlock},
-	KVPair{Key: remoteHostVXLANTunnelConfigKey, Value: remoteHostVXLANTunnelIP},
-).withName("VXLAN with CrossSubnet").withVTEPs(
+	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLANCrossSubnet},                   // 10.0.0.0/16
+	KVPair{Key: remoteIPAMBlockKey, Value: &remoteIPAMBlock},                     // 10.0.1.0/29
+	KVPair{Key: remoteHostIPKey, Value: &remoteHostIP3},                          // 10.0.1.10
+	KVPair{Key: remoteHostVXLANTunnelConfigKey, Value: remoteHostVXLANTunnelIP2}, // 10.0.1.1
+).withName("Remote VXLAN with CrossSubnet").withVTEPs(
 	proto.VXLANTunnelEndpointUpdate{
 		Node:           remoteHostname,
 		Mac:            "66:3e:ca:a4:db:65",
-		Ipv4Addr:       remoteHostVXLANTunnelIP,
-		ParentDeviceIp: remoteHostIP.String(),
+		Ipv4Addr:       remoteHostVXLANTunnelIP2,
+		ParentDeviceIp: remoteHostIP3.String(),
 	},
 ).withRoutes(
 	proto.RouteUpdate{
 		Type: proto.RouteType_WORKLOADS_NODE,
 		Dst:  "10.0.1.0/29",
 		Node: remoteHostname,
-		Gw:   remoteHostIP.String(),
+		Gw:   remoteHostIP3.String(),
 	},
 	proto.RouteUpdate{
 		Type: proto.RouteType_VXLAN,
 		Dst:  "10.0.1.0/29",
 		Node: remoteHostname,
-		Gw:   remoteHostVXLANTunnelIP,
+		Gw:   remoteHostVXLANTunnelIP2,
 	},
 )
 
 var vxlanCrossSubnetCluster = vxlanCrossSubnetRemote.withKVUpdates(
-	KVPair{Key: localIPAMBlockKey, Value: &localIPAMBlock},
-	KVPair{Key: localHostIPKey, Value: &localHostIP2},
-	KVPair{Key: localHostVXLANTunnelConfigKey, Value: localHostVXLANTunnelIP},
-).withName("VXLAN with CrossSubnet Cluster").withVTEPs(
-	proto.VXLANTunnelEndpointUpdate{
-		Node:           localHostname,
-		Mac:            "66:48:f6:56:dc:f1",
-		Ipv4Addr:       localHostVXLANTunnelIP,
-		ParentDeviceIp: localHostIP2.String(),
-	},
+	KVPair{Key: localHostIPKey, Value: &localHostIP},                           // 192.168.0.1
+	KVPair{Key: localHostVXLANTunnelConfigKey, Value: localHostVXLANTunnelIP2}, // 192.168.0.10
+).withName("Local VXLAN with CrossSubnet").withVTEPs(
 	proto.VXLANTunnelEndpointUpdate{
 		Node:           remoteHostname,
 		Mac:            "66:3e:ca:a4:db:65",
-		Ipv4Addr:       remoteHostVXLANTunnelIP,
-		ParentDeviceIp: remoteHostIP.String(),
+		Ipv4Addr:       remoteHostVXLANTunnelIP2,
+		ParentDeviceIp: remoteHostIP3.String(),
 	},
-).withRoutes(
-	proto.RouteUpdate{
-		Type: proto.RouteType_WORKLOADS_NODE,
-		Dst:  "10.0.1.0/29",
-		Node: remoteHostname,
-		Gw:   remoteHostIP.String(),
-	},
-	proto.RouteUpdate{
-		Type: proto.RouteType_VXLAN,
-		Dst:  "10.0.1.0/29",
-		Node: remoteHostname,
-		Gw:   remoteHostVXLANTunnelIP,
+	proto.VXLANTunnelEndpointUpdate{
+		Node:           localHostname,
+		Mac:            "66:48:f6:56:dc:f1",
+		Ipv4Addr:       localHostVXLANTunnelIP2,
+		ParentDeviceIp: localHostIP.String(),
 	},
 )
 
