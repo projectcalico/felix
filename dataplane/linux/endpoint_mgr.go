@@ -995,9 +995,8 @@ func (m *endpointManager) resolveHostEndpoints() {
 	log.WithField("resolvedHostEpIds", newPreDNATIfaceNameToHostEpID).Debug("Rewrite mangle dispatch chains?")
 	defaultChainName = ""
 	if _, ok := newPreDNATIfaceNameToHostEpID[allInterfaces]; ok {
-		// All-interfaces host endpoint is active.  Arrange for it to be the default,
-		// instead of trying to dispatch to it directly based on the non-existent interface
-		// name *.
+		// All-interfaces host endpoint is active.  Arrange for it to be the
+		// default. This is handled the same as the filter dispatch chains above.
 		defaultChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
 		delete(newPreDNATIfaceNameToHostEpID, allInterfaces)
 	}

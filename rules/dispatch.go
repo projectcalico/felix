@@ -101,14 +101,14 @@ func (r *DefaultRuleRenderer) HostDispatchChains(
 	defaultChainName string,
 	applyOnForward bool,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultChainName, false, applyOnForward)
+	return r.hostDispatchChains(endpoints, defaultChainName, false, applyOnForward, false)
 }
 
 func (r *DefaultRuleRenderer) FromHostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
 	defaultChainName string,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultChainName, true, false)
+	return r.hostDispatchChains(endpoints, defaultChainName, true, false, true)
 }
 
 func (r *DefaultRuleRenderer) hostDispatchChains(
@@ -116,6 +116,7 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 	defaultChainName string,
 	fromOnly bool,
 	applyOnForward bool,
+	preDNAT bool,
 ) []*Chain {
 	// Extract endpoint names.
 	log.WithField("numEndpoints", len(endpoints)).Debug("Rendering host dispatch chains")
@@ -133,10 +134,14 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 				Action: GotoAction{Target: defaultChainName},
 			},
 		}
-		toEndRules = []Rule{
-			Rule{
-				Action: GotoAction{Target: defaultChainName},
-			},
+		// Only add the "goto default chain" toEndRules if the dispatch chain
+		// will not handle preDNAT.
+		if !preDNAT {
+			toEndRules = []Rule{
+				Rule{
+					Action: GotoAction{Target: defaultChainName},
+				},
+			}
 		}
 	}
 	if fromOnly {
