@@ -98,22 +98,24 @@ func (r *DefaultRuleRenderer) EndpointMarkDispatchChains(
 
 func (r *DefaultRuleRenderer) HostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	defaultChainName string,
+	defaultFromChainName string,
+	defaultToChainName string,
 	applyOnForward bool,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultChainName, false, applyOnForward, false)
+	return r.hostDispatchChains(endpoints, defaultFromChainName, defaultToChainName, false, applyOnForward, false)
 }
 
 func (r *DefaultRuleRenderer) FromHostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	defaultChainName string,
+	defaultFromChainName string,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultChainName, true, false, true)
+	return r.hostDispatchChains(endpoints, defaultFromChainName, "", true, false, true)
 }
 
 func (r *DefaultRuleRenderer) hostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	defaultChainName string,
+	defaultFromChainName string,
+	defaultToChainName string,
 	fromOnly bool,
 	applyOnForward bool,
 	preDNAT bool,
@@ -126,14 +128,16 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 	}
 
 	var fromEndRules, toEndRules []Rule
-	if defaultChainName != "" {
+	if defaultFromChainName != "" {
 		// Arrange to goto the specified default chain for any packets that don't match an
 		// interface in the `endpoints` map.
 		fromEndRules = []Rule{
 			Rule{
-				Action: GotoAction{Target: defaultChainName},
+				Action: GotoAction{Target: defaultFromChainName},
 			},
 		}
+	}
+	if defaultToChainName != "" {
 		// For traffic to a host endpoint, we only use the default chain - i.e. policy
 		// applying to the wildcard HEP - when we're egressing through a fabric-facing
 		// interface.  We never apply wildcard HEP policy for traffic going to a local
@@ -147,7 +151,7 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 			})
 		}
 		toEndRules = append(toEndRules, Rule{
-			Action: GotoAction{Target: defaultChainName},
+			Action: GotoAction{Target: defaultToChainName},
 		})
 	}
 	if fromOnly {

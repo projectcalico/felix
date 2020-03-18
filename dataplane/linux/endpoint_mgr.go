@@ -978,15 +978,16 @@ func (m *endpointManager) resolveHostEndpoints() {
 
 	// Rewrite the filter dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newIfaceNameToHostEpID).Debug("Rewrite filter dispatch chains?")
-	defaultFilterChainName := ""
+	var defaultFilterFromChainName, defaultFilterToChainName string
 	if _, ok := newIfaceNameToHostEpID[allInterfaces]; ok {
 		// All-interfaces host endpoint is active.  Arrange for it to be the default,
 		// instead of trying to dispatch to it directly based on the non-existent interface
 		// name *.
-		defaultFilterChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
+		defaultFilterFromChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
+		defaultFilterToChainName = rules.EndpointChainName(rules.HostToEndpointPfx, allInterfaces)
 		delete(newIfaceNameToHostEpID, allInterfaces)
 	}
-	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, defaultFilterChainName, true)
+	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, defaultFilterFromChainName, defaultFilterToChainName, true)
 	m.updateDispatchChains(m.activeHostFilterDispatchChains, newFilterDispatchChains, m.filterTable)
 	// Set flag to update endpoint mark chains.
 	m.needToCheckEndpointMarkChains = true
@@ -1005,7 +1006,7 @@ func (m *endpointManager) resolveHostEndpoints() {
 
 	// Rewrite the raw dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newUntrackedIfaceNameToHostEpID).Debug("Rewrite raw dispatch chains?")
-	newRawDispatchChains := m.ruleRenderer.HostDispatchChains(newUntrackedIfaceNameToHostEpID, "", false)
+	newRawDispatchChains := m.ruleRenderer.HostDispatchChains(newUntrackedIfaceNameToHostEpID, "", "", false)
 	m.updateDispatchChains(m.activeHostRawDispatchChains, newRawDispatchChains, m.rawTable)
 
 	log.Debug("Done resolving host endpoints.")
