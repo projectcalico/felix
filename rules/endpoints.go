@@ -50,6 +50,7 @@ func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 			adminUp,
 			r.filterAllowAction, // Workload endpoint chains are only used in the filter table
 			dontDropEncap,
+			true,
 		),
 		// Chain for traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -64,6 +65,7 @@ func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 			adminUp,
 			r.filterAllowAction, // Workload endpoint chains are only used in the filter table
 			dropEncap,
+			true,
 		),
 	)
 
@@ -106,6 +108,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			false,
 		),
 		// Chain for input traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -120,6 +123,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			false,
 		),
 		// Chain for forward traffic _to_ the endpoint.
 		r.endpointIptablesChain(
@@ -134,6 +138,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			true,
 		),
 		// Chain for forward traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -148,6 +153,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			false,
 		),
 	)
 
@@ -185,6 +191,7 @@ func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 			true, // Host endpoints are always admin up.
 			AcceptAction{},
 			dontDropEncap,
+			false,
 		),
 		// Chain for traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -199,6 +206,7 @@ func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 			true, // Host endpoints are always admin up.
 			AcceptAction{},
 			dontDropEncap,
+			false,
 		),
 	}
 }
@@ -223,6 +231,7 @@ func (r *DefaultRuleRenderer) HostEndpointToMangleChains(
 			true, // Host endpoints are always admin up.
 			r.mangleAllowAction,
 			dontDropEncap,
+			false,
 		),
 	}
 }
@@ -270,6 +279,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 	adminUp bool,
 	allowAction Action,
 	dropEncap bool,
+	dropIfNoProfilesMatched bool,
 ) *Chain {
 	rules := []Rule{}
 	chainName := EndpointChainName(endpointPrefix, name)
@@ -408,11 +418,13 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		//
 		// For untracked rules, we don't do that because there may be tracked rules
 		// still to be applied to the packet in the filter table.
-		rules = append(rules, Rule{
-			Match:   Match(),
-			Action:  DropAction{},
-			Comment: []string{"Drop if no profiles matched"},
-		})
+		if dropIfNoProfilesMatched {
+			rules = append(rules, Rule{
+				Match:   Match(),
+				Action:  DropAction{},
+				Comment: []string{"Drop if no profiles matched"},
+			})
+		}
 	}
 
 	return &Chain{

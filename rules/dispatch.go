@@ -98,23 +98,25 @@ func (r *DefaultRuleRenderer) EndpointMarkDispatchChains(
 
 func (r *DefaultRuleRenderer) HostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
+	defaultChainName string,
 	applyOnForward bool,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, "", false, applyOnForward)
+	return r.hostDispatchChains(endpoints, defaultChainName, false, applyOnForward, false)
 }
 
 func (r *DefaultRuleRenderer) FromHostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
 	defaultChainName string,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultChainName, true, false)
+	return r.hostDispatchChains(endpoints, defaultChainName, true, false, true)
 }
 
 func (r *DefaultRuleRenderer) hostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	defaultFromChainName string,
+	defaultChainName string,
 	fromOnly bool,
 	applyOnForward bool,
+	preDNAT bool,
 ) []*Chain {
 	// Extract endpoint names.
 	log.WithField("numEndpoints", len(endpoints)).Debug("Rendering host dispatch chains")
@@ -124,16 +126,22 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 	}
 
 	var fromEndRules, toEndRules []Rule
-	if defaultFromChainName != "" {
+	if defaultChainName != "" {
 		// Arrange to goto the specified default chain for any packets that don't match an
-		// interface in the `endpoints` map.  (Currently we only use this for pre-DNAT
-		// policy, so it's only needed for 'from' chain programming; but we will extend
-		// later to other kinds of policy, and then it will be wanted equally in 'to' chain
-		// programming.)
+		// interface in the `endpoints` map.
 		fromEndRules = []Rule{
 			Rule{
-				Action: GotoAction{Target: defaultFromChainName},
+				Action: GotoAction{Target: defaultChainName},
 			},
+		}
+		// Only add the "goto default chain" toEndRules if the dispatch chain
+		// will not handle preDNAT.
+		if !preDNAT {
+			toEndRules = []Rule{
+				Rule{
+					Action: GotoAction{Target: defaultChainName},
+				},
+			}
 		}
 	}
 	if fromOnly {
