@@ -92,15 +92,13 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 			felix.Exec("ip", "a")
 		}
 
-		/*
-			for ii := range w {
-				w[ii].Stop()
-			}
-			felix.Stop()
+		for ii := range w {
+			w[ii].Stop()
+		}
+		felix.Stop()
 
-			infra.Stop()
-			externalClient.Stop()
-		*/
+		infra.Stop()
+		externalClient.Stop()
 	})
 
 	Context("with node port DNATs", func() {
