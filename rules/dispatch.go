@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -134,15 +134,21 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 				Action: GotoAction{Target: defaultChainName},
 			},
 		}
-		// Only add the "goto default chain" toEndRules if the dispatch chain
-		// will not handle preDNAT.
-		if !preDNAT {
-			toEndRules = []Rule{
-				Rule{
-					Action: GotoAction{Target: defaultChainName},
-				},
-			}
+		// For traffic to a host endpoint, we only use the default chain - i.e. policy
+		// applying to the wildcard HEP - when we're egressing through a fabric-facing
+		// interface.  We never apply wildcard HEP policy for traffic going to a local
+		// workload.
+		for _, prefix := range r.WorkloadIfacePrefixes {
+			ifaceMatch := prefix + "+"
+			toEndRules = append(toEndRules, Rule{
+				Match:   Match().OutInterface(ifaceMatch),
+				Action:  ReturnAction{},
+				Comment: []string{"Skip egress WHEP policy for traffic to local workload"},
+			})
 		}
+		toEndRules = append(toEndRules, Rule{
+			Action: GotoAction{Target: defaultChainName},
+		})
 	}
 	if fromOnly {
 		return r.interfaceNameDispatchChains(
