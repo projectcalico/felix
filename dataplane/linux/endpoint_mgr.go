@@ -705,7 +705,6 @@ func (m *endpointManager) resolveEndpointMarks() {
 }
 
 func (m *endpointManager) resolveHostEndpoints() {
-
 	// Host endpoint resolution
 	// ------------------------
 	//
@@ -857,7 +856,8 @@ func (m *endpointManager) resolveHostEndpoints() {
 			newPreDNATIfaceNameToHostEpID[allInterfaces] = bestHostEpId
 		}
 		if len(bestHostEp.Tiers) > 0 {
-			logCxt.Debug("Endpoint has normal policies.")
+			log.Infof("bestHostEp: %+v\n", bestHostEp)
+			logCxt.Info("Endpoint has normal policies.")
 			newIfaceNameToHostEpID[allInterfaces] = bestHostEpId
 		}
 		// Record that this host endpoint is in use, for status reporting.
@@ -978,29 +978,29 @@ func (m *endpointManager) resolveHostEndpoints() {
 
 	// Rewrite the filter dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newIfaceNameToHostEpID).Debug("Rewrite filter dispatch chains?")
-	defaultChainName := ""
+	defaultFilterChainName := ""
 	if _, ok := newIfaceNameToHostEpID[allInterfaces]; ok {
 		// All-interfaces host endpoint is active.  Arrange for it to be the default,
 		// instead of trying to dispatch to it directly based on the non-existent interface
 		// name *.
-		defaultChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
+		defaultFilterChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
 		delete(newIfaceNameToHostEpID, allInterfaces)
 	}
-	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, defaultChainName, true)
+	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, defaultFilterChainName, true)
 	m.updateDispatchChains(m.activeHostFilterDispatchChains, newFilterDispatchChains, m.filterTable)
 	// Set flag to update endpoint mark chains.
 	m.needToCheckEndpointMarkChains = true
 
 	// Rewrite the mangle dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newPreDNATIfaceNameToHostEpID).Debug("Rewrite mangle dispatch chains?")
-	defaultChainName = ""
+	defaultPreDNATChainName := ""
 	if _, ok := newPreDNATIfaceNameToHostEpID[allInterfaces]; ok {
 		// All-interfaces host endpoint is active.  Arrange for it to be the
 		// default. This is handled the same as the filter dispatch chains above.
-		defaultChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
+		defaultPreDNATChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
 		delete(newPreDNATIfaceNameToHostEpID, allInterfaces)
 	}
-	newMangleDispatchChains := m.ruleRenderer.FromHostDispatchChains(newPreDNATIfaceNameToHostEpID, defaultChainName)
+	newMangleDispatchChains := m.ruleRenderer.FromHostDispatchChains(newPreDNATIfaceNameToHostEpID, defaultPreDNATChainName)
 	m.updateDispatchChains(m.activeHostMangleDispatchChains, newMangleDispatchChains, m.mangleTable)
 
 	// Rewrite the raw dispatch chains if they've changed.
