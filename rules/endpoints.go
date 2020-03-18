@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -279,7 +279,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 	adminUp bool,
 	allowAction Action,
 	dropEncap bool,
-	dropIfNoProfilesMatched bool,
+	_ bool,
 ) *Chain {
 	rules := []Rule{}
 	chainName := EndpointChainName(endpointPrefix, name)
@@ -418,13 +418,13 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		//
 		// For untracked rules, we don't do that because there may be tracked rules
 		// still to be applied to the packet in the filter table.
-		if dropIfNoProfilesMatched {
-			rules = append(rules, Rule{
-				Match:   Match(),
-				Action:  DropAction{},
-				Comment: []string{"Drop if no profiles matched"},
-			})
-		}
+		//if dropIfNoProfilesMatched {
+		rules = append(rules, Rule{
+			Match:   Match(),
+			Action:  DropAction{},
+			Comment: []string{"Drop if no profiles matched"},
+		})
+		//}
 	}
 
 	return &Chain{
