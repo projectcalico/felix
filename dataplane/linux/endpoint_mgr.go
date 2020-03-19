@@ -978,35 +978,34 @@ func (m *endpointManager) resolveHostEndpoints() {
 
 	// Rewrite the filter dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newIfaceNameToHostEpID).Debug("Rewrite filter dispatch chains?")
-	var defaultFilterFromChainName, defaultFilterToChainName string
+	defaultIfaceName := ""
 	if _, ok := newIfaceNameToHostEpID[allInterfaces]; ok {
 		// All-interfaces host endpoint is active.  Arrange for it to be the default,
 		// instead of trying to dispatch to it directly based on the non-existent interface
 		// name *.
-		defaultFilterFromChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
-		defaultFilterToChainName = rules.EndpointChainName(rules.HostToEndpointPfx, allInterfaces)
+		defaultIfaceName = allInterfaces
 		delete(newIfaceNameToHostEpID, allInterfaces)
 	}
-	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, defaultFilterFromChainName, defaultFilterToChainName, true)
+	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, defaultIfaceName, true)
 	m.updateDispatchChains(m.activeHostFilterDispatchChains, newFilterDispatchChains, m.filterTable)
 	// Set flag to update endpoint mark chains.
 	m.needToCheckEndpointMarkChains = true
 
 	// Rewrite the mangle dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newPreDNATIfaceNameToHostEpID).Debug("Rewrite mangle dispatch chains?")
-	defaultPreDNATChainName := ""
+	defaultIfaceName = ""
 	if _, ok := newPreDNATIfaceNameToHostEpID[allInterfaces]; ok {
 		// All-interfaces host endpoint is active.  Arrange for it to be the
 		// default. This is handled the same as the filter dispatch chains above.
-		defaultPreDNATChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
+		defaultIfaceName = allInterfaces
 		delete(newPreDNATIfaceNameToHostEpID, allInterfaces)
 	}
-	newMangleDispatchChains := m.ruleRenderer.FromHostDispatchChains(newPreDNATIfaceNameToHostEpID, defaultPreDNATChainName)
+	newMangleDispatchChains := m.ruleRenderer.FromHostDispatchChains(newPreDNATIfaceNameToHostEpID, defaultIfaceName)
 	m.updateDispatchChains(m.activeHostMangleDispatchChains, newMangleDispatchChains, m.mangleTable)
 
 	// Rewrite the raw dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newUntrackedIfaceNameToHostEpID).Debug("Rewrite raw dispatch chains?")
-	newRawDispatchChains := m.ruleRenderer.HostDispatchChains(newUntrackedIfaceNameToHostEpID, "", "", false)
+	newRawDispatchChains := m.ruleRenderer.HostDispatchChains(newUntrackedIfaceNameToHostEpID, "", false)
 	m.updateDispatchChains(m.activeHostRawDispatchChains, newRawDispatchChains, m.rawTable)
 
 	log.Debug("Done resolving host endpoints.")

@@ -98,24 +98,22 @@ func (r *DefaultRuleRenderer) EndpointMarkDispatchChains(
 
 func (r *DefaultRuleRenderer) HostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	defaultFromChainName string,
-	defaultToChainName string,
+	defaultIfaceName string,
 	applyOnForward bool,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultFromChainName, defaultToChainName, false, applyOnForward, false)
+	return r.hostDispatchChains(endpoints, defaultIfaceName, false, applyOnForward, false)
 }
 
 func (r *DefaultRuleRenderer) FromHostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	defaultFromChainName string,
+	defaultIfaceName string,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultFromChainName, "", true, false, true)
+	return r.hostDispatchChains(endpoints, defaultIfaceName, true, false, true)
 }
 
 func (r *DefaultRuleRenderer) hostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	defaultFromChainName string,
-	defaultToChainName string,
+	defaultIfaceName string,
 	fromOnly bool,
 	applyOnForward bool,
 	preDNAT bool,
@@ -128,7 +126,16 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 	}
 
 	var fromEndRules, toEndRules []Rule
-	if defaultFromChainName != "" {
+	if defaultIfaceName != "" {
+		var defaultFromChainName, defaultToChainName string
+		if applyOnForward {
+			defaultFromChainName = EndpointChainName(HostFromEndpointForwardPfx, defaultIfaceName)
+			defaultToChainName = EndpointChainName(HostToEndpointForwardPfx, defaultIfaceName)
+		} else {
+			defaultFromChainName = EndpointChainName(HostFromEndpointPfx, defaultIfaceName)
+			defaultToChainName = EndpointChainName(HostToEndpointPfx, defaultIfaceName)
+		}
+
 		// Arrange to goto the specified default chain for any packets that don't match an
 		// interface in the `endpoints` map.
 		fromEndRules = []Rule{
@@ -136,8 +143,7 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 				Action: GotoAction{Target: defaultFromChainName},
 			},
 		}
-	}
-	if defaultToChainName != "" {
+
 		// For traffic to a host endpoint, we only use the default chain - i.e. policy
 		// applying to the wildcard HEP - when we're egressing through a fabric-facing
 		// interface.  We never apply wildcard HEP policy for traffic going to a local
@@ -154,6 +160,7 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 			Action: GotoAction{Target: defaultToChainName},
 		})
 	}
+
 	if fromOnly {
 		return r.interfaceNameDispatchChains(
 			names,
