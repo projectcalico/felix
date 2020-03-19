@@ -893,6 +893,7 @@ func (m *endpointManager) resolveHostEndpoints() {
 					ingressForwardPolicyNames,
 					egressForwardPolicyNames,
 					hostEp.ProfileIds,
+					ifaceName != allInterfaces,
 				)
 
 				if !reflect.DeepEqual(filtChains, m.activeHostIfaceToFiltChains[ifaceName]) {
