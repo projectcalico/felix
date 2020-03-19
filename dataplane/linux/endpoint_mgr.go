@@ -705,6 +705,7 @@ func (m *endpointManager) resolveEndpointMarks() {
 }
 
 func (m *endpointManager) resolveHostEndpoints() {
+
 	// Host endpoint resolution
 	// ------------------------
 	//
