@@ -101,14 +101,14 @@ func (r *DefaultRuleRenderer) HostDispatchChains(
 	defaultIfaceName string,
 	applyOnForward bool,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultIfaceName, false, applyOnForward, false)
+	return r.hostDispatchChains(endpoints, defaultIfaceName, false, applyOnForward)
 }
 
 func (r *DefaultRuleRenderer) FromHostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
 	defaultIfaceName string,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultIfaceName, true, false, true)
+	return r.hostDispatchChains(endpoints, defaultIfaceName, true, false)
 }
 
 func (r *DefaultRuleRenderer) hostDispatchChains(
@@ -116,7 +116,6 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 	defaultIfaceName string,
 	fromOnly bool,
 	applyOnForward bool,
-	preDNAT bool,
 ) []*Chain {
 	// Extract endpoint names.
 	log.WithField("numEndpoints", len(endpoints)).Debug("Rendering host dispatch chains")
