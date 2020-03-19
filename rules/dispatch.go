@@ -143,17 +143,19 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 			},
 		}
 
-		// For traffic to a host endpoint, we only use the default chain - i.e. policy
-		// applying to the wildcard HEP - when we're egressing through a fabric-facing
-		// interface.  We never apply wildcard HEP policy for traffic going to a local
-		// workload.
-		for _, prefix := range r.WorkloadIfacePrefixes {
-			ifaceMatch := prefix + "+"
-			toEndRules = append(toEndRules, Rule{
-				Match:   Match().OutInterface(ifaceMatch),
-				Action:  ReturnAction{},
-				Comment: []string{"Skip egress WHEP policy for traffic to local workload"},
-			})
+		// For traffic from the host to a host endpoint, we only use the default chain -
+		// i.e. policy applying to the wildcard HEP - when we're egressing through a
+		// fabric-facing interface.  We never apply wildcard HEP normal policy for traffic
+		// going to a local workload.
+		if !applyOnForward {
+			for _, prefix := range r.WorkloadIfacePrefixes {
+				ifaceMatch := prefix + "+"
+				toEndRules = append(toEndRules, Rule{
+					Match:   Match().OutInterface(ifaceMatch),
+					Action:  ReturnAction{},
+					Comment: []string{"Skip egress WHEP policy for traffic to local workload"},
+				})
+			}
 		}
 		toEndRules = append(toEndRules, Rule{
 			Action: GotoAction{Target: defaultToChainName},
