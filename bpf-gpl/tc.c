@@ -178,6 +178,20 @@ static CALI_BPF_INLINE int forward_or_drop(struct __sk_buff *skb,
 		if  (CALI_F_FROM_HOST) {
 			redir_flags = BPF_F_INGRESS;
 		}
+
+		/* Revalidate the access to the packet */
+		if ((void *)(long)skb->data + sizeof(struct ethhdr) > (void *)(long)skb->data_end) {
+			reason = CALI_REASON_SHORT;
+			goto deny;
+		}
+
+		/* Swap the MACs as we are turning it back */
+		struct ethhdr *eth_hdr = (void *)(long)skb->data;
+		unsigned char mac[ETH_ALEN];
+		__builtin_memcpy(mac, &eth_hdr->h_dest, ETH_ALEN);
+		__builtin_memcpy(&eth_hdr->h_dest, &eth_hdr->h_source, ETH_ALEN);
+		__builtin_memcpy(&eth_hdr->h_source, mac, ETH_ALEN);
+
 		rc = bpf_redirect(skb->ifindex, redir_flags);
 		if (rc == TC_ACT_REDIRECT) {
 			CALI_DEBUG("Redirect to the same interface (%d) succeeded\n", skb->ifindex);
@@ -214,14 +228,8 @@ static CALI_BPF_INLINE int forward_or_drop(struct __sk_buff *skb,
 		/* set the ipv4 here, otherwise the ipv4/6 unions do not get
 		 * zeroed properly
 		 */
-		if (fwd->fib_flags & BPF_FIB_LOOKUP_OUTPUT) {
-			// Flip src/dest.
-			fib_params.ipv4_src = state->ip_dst;
-			fib_params.ipv4_dst = state->ip_src;
-		} else {
-			fib_params.ipv4_src = state->ip_src;
-			fib_params.ipv4_dst = state->ip_dst;
-		}
+		fib_params.ipv4_src = state->ip_src;
+		fib_params.ipv4_dst = state->ip_dst;
 
 		CALI_DEBUG("FIB family=%d\n", fib_params.family);
 		CALI_DEBUG("FIB tot_len=%d\n", fib_params.tot_len);
@@ -339,7 +347,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	}
 
 	struct iphdr *ip_header;
-	if (CALI_F_TO_HEP) {
+	if (CALI_F_TO_HEP || CALI_F_TO_WEP) {
 		switch (skb->mark) {
 		case CALI_SKB_MARK_BYPASS_FWD:
 			CALI_DEBUG("Packet approved for forward.\n");
@@ -443,7 +451,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	struct udphdr *udp_header = (void*)(ip_header+1);
 	struct icmphdr *icmp_header = (void*)(ip_header+1);
 
-	state.ip_proto = ip_header->protocol;
+	tc_state_fill_from_iphdr(&state, ip_header);
 
 	switch (state.ip_proto) {
 	case IPPROTO_TCP:
@@ -478,8 +486,6 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 		CALI_DEBUG("Unknown protocol (%d), unable to extract ports\n", (int)state.ip_proto);
 	}
 
-	state.ip_src = ip_header->saddr;
-	state.ip_dst = ip_header->daddr;
 	state.pol_rc = CALI_POL_NO_MATCH;
 
 	switch (state.ip_proto) {
@@ -824,8 +830,9 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct __sk_buff *skb,
 		}
 
 		if (encap_needed) {
-			if (ip_is_dnf(ip_header) && vxlan_v4_encap_too_big(skb)) {
-				CALI_DEBUG("Request packet with DNF set is too big");
+			if (!(state->ip_proto == IPPROTO_TCP && skb_is_gso(skb)) &&
+					ip_is_dnf(ip_header) && vxlan_v4_encap_too_big(skb)) {
+				CALI_DEBUG("Request packet with DNF set is too big\n");
 				goto icmp_too_big;
 			}
 			state->ip_src = cali_host_ip();
@@ -876,7 +883,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct __sk_buff *skb,
 				CALI_DEBUG("DSR enabled, skipping SNAT + encap\n");
 				goto allow;
 			}
-			/* XXX do this before NAT until we can track the icmp back */
+
 			if (!(state->ip_proto == IPPROTO_TCP && skb_is_gso(skb)) &&
 					ip_is_dnf(ip_header) && vxlan_v4_encap_too_big(skb)) {
 				CALI_DEBUG("Return ICMP mtu is too big\n");
@@ -978,31 +985,39 @@ icmp_ttl_exceeded:
 	/* we need to allow the reponse for the IP stack to route it back.
 	 * XXX we might want to send it back the same iface
 	 */
-	goto allow;
+	goto icmp_allow;
 
 icmp_too_big:
-	if (skb_shorter(skb, ETH_IPV4_UDP_SIZE)) {
-		reason = CALI_REASON_SHORT;
-		goto deny;
-	}
 	if (icmp_v4_too_big(skb)) {
 		reason = CALI_REASON_ICMP_DF;
 		goto deny;
 	}
 
-	seen_mark = CALI_SKB_MARK_BYPASS_FWD;
-
 	/* XXX we might use skb->ifindex to redirect it straight back
 	 * to where it came from if it is guaranteed to be the path
 	 */
-	state->sport = state->dport = 0;
-	state->ip_proto = IPPROTO_ICMP;
-
 	fib_flags |= BPF_FIB_LOOKUP_OUTPUT;
 	if (CALI_F_FROM_WEP) {
 		/* we know it came from workload, just send it back the same way */
 		rc = CALI_RES_REDIR_IFINDEX;
 	}
+
+	goto icmp_allow;
+
+icmp_allow:
+	/* recheck the size of the packet after it was turned into icmp and set
+	 * state so that it can processed further.
+	 */
+	if (skb_shorter(skb, ETH_IPV4_UDP_SIZE)) {
+		reason = CALI_REASON_SHORT;
+		goto deny;
+	}
+	ip_header = skb_iphdr(skb);
+	tc_state_fill_from_iphdr(state, ip_header);
+	state->sport = state->dport = 0;
+
+	/* packet was created because of approved traffic, treat it as related */
+	seen_mark = CALI_SKB_MARK_BYPASS_FWD;
 
 	goto allow;
 
