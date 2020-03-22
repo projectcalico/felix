@@ -97,7 +97,7 @@ func (u *UsageReporter) PeriodicallyReportUsage(ctx context.Context) {
 
 	doReport := func() {
 		alpEnabled := (config["PolicySyncPathPrefix"] != "")
-		u.reportUsage(config["ClusterGUID"], config["ClusterType"], u.staticItems.KubernetesVersion, config["KubernetesVersion"], alpEnabled, stats)
+		u.reportUsage(config["ClusterGUID"], config["ClusterType"], config["CalicoVersion"], u.staticItems.KubernetesVersion, alpEnabled, stats)
 	}
 
 	var ticker *jitter.Ticker
