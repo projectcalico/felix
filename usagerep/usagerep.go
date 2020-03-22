@@ -35,12 +35,14 @@ const (
 )
 
 func New(
+	staticItems  StaticItems,
 	initialDelay time.Duration,
 	interval time.Duration,
 	statsUpdateC <-chan calc.StatsUpdate,
 	configUpdateC <-chan map[string]string,
 ) *UsageReporter {
 	return &UsageReporter{
+		staticItems:   staticItems,
 		interval:      interval,
 		statsUpdateC:  statsUpdateC,
 		configUpdateC: configUpdateC,
@@ -54,7 +56,13 @@ func New(
 	}
 }
 
+type StaticItems struct {
+	KubernetesVersion string
+}
+
 type UsageReporter struct {
+	staticItems StaticItems
+
 	interval      time.Duration
 	statsUpdateC  <-chan calc.StatsUpdate
 	configUpdateC <-chan map[string]string
@@ -89,7 +97,7 @@ func (u *UsageReporter) PeriodicallyReportUsage(ctx context.Context) {
 
 	doReport := func() {
 		alpEnabled := (config["PolicySyncPathPrefix"] != "")
-		u.reportUsage(config["ClusterGUID"], config["ClusterType"], config["CalicoVersion"], alpEnabled, stats)
+		u.reportUsage(config["ClusterGUID"], config["ClusterType"], u.staticItems.KubernetesVersion, config["KubernetesVersion"], alpEnabled, stats)
 	}
 
 	var ticker *jitter.Ticker
@@ -141,8 +149,8 @@ func (u *UsageReporter) calculateInitialDelay(numHosts int) time.Duration {
 	return initialDelay
 }
 
-func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion string, alpEnabled bool, stats calc.StatsUpdate) {
-	fullURL := u.calculateURL(clusterGUID, clusterType, calicoVersion, alpEnabled, stats)
+func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion, kubernetesVersion string, alpEnabled bool, stats calc.StatsUpdate) {
+	fullURL := u.calculateURL(clusterGUID, clusterType, calicoVersion, kubernetesVersion, alpEnabled, stats)
 	resp, err := u.httpClient.Get(fullURL)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -164,7 +172,7 @@ func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion stri
 	}
 }
 
-func (u *UsageReporter) calculateURL(clusterGUID, clusterType, calicoVersion string, alpEnabled bool, stats calc.StatsUpdate) string {
+func (u *UsageReporter) calculateURL(clusterGUID, clusterType, calicoVersion, kubernetesVersion string, alpEnabled bool, stats calc.StatsUpdate) string {
 	if clusterType == "" {
 		clusterType = "unknown"
 	}
@@ -175,18 +183,20 @@ func (u *UsageReporter) calculateURL(clusterGUID, clusterType, calicoVersion str
 		clusterGUID = "baddecaf"
 	}
 	log.WithFields(log.Fields{
-		"clusterGUID":   clusterGUID,
-		"clusterType":   clusterType,
-		"calicoVersion": calicoVersion,
-		"alpEnabled":    alpEnabled,
-		"stats":         stats,
-		"version":       buildinfo.GitVersion,
-		"gitRevision":   buildinfo.GitRevision,
+		"clusterGUID":       clusterGUID,
+		"clusterType":       clusterType,
+		"calicoVersion":     calicoVersion,
+		"kubernetesVersion": kubernetesVersion,
+		"alpEnabled":        alpEnabled,
+		"stats":             stats,
+		"version":           buildinfo.GitVersion,
+		"gitRevision":       buildinfo.GitRevision,
 	}).Info("Reporting cluster usage/checking for deprecation warnings.")
 	queryParams := url.Values{
 		"guid":         {clusterGUID},
 		"type":         {clusterType},
 		"cal_ver":      {calicoVersion},
+		"k8s_ver":      {kubernetesVersion},
 		"alp":          {fmt.Sprint(alpEnabled)},
 		"size":         {fmt.Sprint(stats.NumHosts)},
 		"weps":         {fmt.Sprint(stats.NumWorkloadEndpoints)},
