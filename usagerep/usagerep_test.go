@@ -32,7 +32,7 @@ import (
 	"github.com/projectcalico/felix/calc"
 )
 
-const expectedNumberOfURLParams = 12
+const expectedNumberOfURLParams = 13
 
 // These tests start a local HTTP server on a random port and tell the usage reporter to
 // connect to it.  Then we can check that it correctly makes HTTP requests at the right times.
