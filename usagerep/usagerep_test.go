@@ -234,11 +234,11 @@ var _ = Describe("UsageReporter with default URL", func() {
 	var u *UsageReporter
 
 	BeforeEach(func() {
-		u = New(StaticItems{KubernetesVersion: "v1.17.0"}, 5*time.Minute, 24*time.Hour, nil, nil)
+		u = New(StaticItems{KubernetesVersion: ""}, 5*time.Minute, 24*time.Hour, nil, nil)
 	})
 
 	It("should calculate correct URL mainline", func() {
-		rawURL := u.calculateURL("theguid", "atype", "testVer", "v1.17.0", true, calc.StatsUpdate{
+		rawURL := u.calculateURL("theguid", "atype", "testVer",true, calc.StatsUpdate{
 			NumHostEndpoints:     123,
 			NumWorkloadEndpoints: 234,
 			NumHosts:             10,
@@ -250,7 +250,7 @@ var _ = Describe("UsageReporter with default URL", func() {
 		Expect(q.Get("guid")).To(Equal("theguid"))
 		Expect(q.Get("type")).To(Equal("atype"))
 		Expect(q.Get("cal_ver")).To(Equal("testVer"))
-		Expect(q.Get("k8s_ver")).To(Equal("v1.17.0"))
+		Expect(q.Get("k8s_ver")).To(Equal("unknown"))
 		Expect(q.Get("alp")).To(Equal("true"))
 		Expect(q.Get("size")).To(Equal("10"))
 		Expect(q.Get("weps")).To(Equal("234"))
@@ -263,7 +263,7 @@ var _ = Describe("UsageReporter with default URL", func() {
 		Expect(url.Path).To(Equal("/UsageCheck/calicoVersionCheck"))
 	})
 	It("should default cluster type, GUID, and Calico Version", func() {
-		rawURL := u.calculateURL("", "", "", "", false, calc.StatsUpdate{
+		rawURL := u.calculateURL("", "", "", false, calc.StatsUpdate{
 			NumHostEndpoints:     123,
 			NumWorkloadEndpoints: 234,
 			NumHosts:             10,

@@ -149,7 +149,7 @@ func (u *UsageReporter) calculateInitialDelay(numHosts int) time.Duration {
 	return initialDelay
 }
 
-func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion, alpEnabled bool, stats calc.StatsUpdate) {
+func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion string, alpEnabled bool, stats calc.StatsUpdate) {
 	fullURL := u.calculateURL(clusterGUID, clusterType, calicoVersion, alpEnabled, stats)
 	resp, err := u.httpClient.Get(fullURL)
 	if resp != nil && resp.Body != nil {
