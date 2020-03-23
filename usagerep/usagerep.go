@@ -97,7 +97,7 @@ func (u *UsageReporter) PeriodicallyReportUsage(ctx context.Context) {
 
 	doReport := func() {
 		alpEnabled := (config["PolicySyncPathPrefix"] != "")
-		u.reportUsage(config["ClusterGUID"], config["ClusterType"], config["CalicoVersion"], u.staticItems.KubernetesVersion, alpEnabled, stats)
+		u.reportUsage(config["ClusterGUID"], config["ClusterType"], config["CalicoVersion"], alpEnabled, stats)
 	}
 
 	var ticker *jitter.Ticker
@@ -149,8 +149,8 @@ func (u *UsageReporter) calculateInitialDelay(numHosts int) time.Duration {
 	return initialDelay
 }
 
-func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion, kubernetesVersion string, alpEnabled bool, stats calc.StatsUpdate) {
-	fullURL := u.calculateURL(clusterGUID, clusterType, calicoVersion, kubernetesVersion, alpEnabled, stats)
+func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion, alpEnabled bool, stats calc.StatsUpdate) {
+	fullURL := u.calculateURL(clusterGUID, clusterType, calicoVersion, alpEnabled, stats)
 	resp, err := u.httpClient.Get(fullURL)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -172,15 +172,19 @@ func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion, kub
 	}
 }
 
-func (u *UsageReporter) calculateURL(clusterGUID, clusterType, calicoVersion, kubernetesVersion string, alpEnabled bool, stats calc.StatsUpdate) string {
+func (u *UsageReporter) calculateURL(clusterGUID, clusterType, calicoVersion string, alpEnabled bool, stats calc.StatsUpdate) string {
+	var kubernetesVersion string
+
 	if clusterType == "" {
 		clusterType = "unknown"
 	}
 	if calicoVersion == "" {
 		calicoVersion = "unknown"
 	}
-	if kubernetesVersion == "" {
+	if u.staticItems.KubernetesVersion == "" {
 		kubernetesVersion = "unknown"
+	} else {
+		kubernetesVersion = u.staticItems.KubernetesVersion
 	}
 	if clusterGUID == "" {
 		clusterGUID = "baddecaf"
