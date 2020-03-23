@@ -179,6 +179,9 @@ func (u *UsageReporter) calculateURL(clusterGUID, clusterType, calicoVersion, ku
 	if calicoVersion == "" {
 		calicoVersion = "unknown"
 	}
+	if kubernetesVersion == "" {
+		kubernetesVersion = "unknown"
+	}
 	if clusterGUID == "" {
 		clusterGUID = "baddecaf"
 	}
