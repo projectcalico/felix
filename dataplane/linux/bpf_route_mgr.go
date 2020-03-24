@@ -311,6 +311,7 @@ func (m *bpfRouteManager) onIPAMPoolUpdate(msg *proto.IPAMPoolUpdate) {
 		log.WithError(err).Panic("Failed to parse IPAM pool CIDR")
 	}
 	newPool := bpfIPAMPool{CIDR: cidr, Masquerade: pool.Masquerade}
+	log.WithField("pool", newPool).Debug("Pool updated")
 	oldPool, ok := m.ipPools[msg.Id]
 	if !ok || oldPool != newPool {
 		m.ipPools[msg.Id] = newPool
