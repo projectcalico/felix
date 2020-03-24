@@ -124,22 +124,19 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 		names = append(names, ifaceName)
 	}
 
-	var fromEndRules, toEndRules []Rule
-	if defaultIfaceName != "" {
-		var defaultFromChainName, defaultToChainName string
-		if applyOnForward {
-			defaultFromChainName = EndpointChainName(HostFromEndpointForwardPfx, defaultIfaceName)
-			defaultToChainName = EndpointChainName(HostToEndpointForwardPfx, defaultIfaceName)
-		} else {
-			defaultFromChainName = EndpointChainName(HostFromEndpointPfx, defaultIfaceName)
-			defaultToChainName = EndpointChainName(HostToEndpointPfx, defaultIfaceName)
-		}
+	var fromEndRules, toEndRules, fromEndForwardRules, toEndForwardRules []Rule
 
-		// Arrange to goto the specified default chain for any packets that don't match an
+	if defaultIfaceName != "" {
+		// Arrange sets of rules to goto the specified default chain for any packets that don't match an
 		// interface in the `endpoints` map.
 		fromEndRules = []Rule{
 			Rule{
-				Action: GotoAction{Target: defaultFromChainName},
+				Action: GotoAction{Target: EndpointChainName(HostFromEndpointPfx, defaultIfaceName)},
+			},
+		}
+		fromEndForwardRules = []Rule{
+			Rule{
+				Action: GotoAction{Target: EndpointChainName(HostFromEndpointForwardPfx, defaultIfaceName)},
 			},
 		}
 
@@ -157,8 +154,12 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 				})
 			}
 		}
+
 		toEndRules = append(toEndRules, Rule{
-			Action: GotoAction{Target: defaultToChainName},
+			Action: GotoAction{Target: EndpointChainName(HostToEndpointPfx, defaultIfaceName)},
+		})
+		toEndForwardRules = append(toEndRules, Rule{
+			Action: GotoAction{Target: EndpointChainName(HostToEndpointForwardPfx, defaultIfaceName)},
 		})
 	}
 
@@ -169,8 +170,8 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 			"",
 			ChainDispatchFromHostEndpoint,
 			"",
-			fromEndRules,
-			toEndRules,
+			fromEndForwardRules,
+			toEndForwardRules,
 		)
 	}
 
@@ -202,8 +203,8 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 			HostToEndpointForwardPfx,
 			ChainDispatchFromHostEndPointForward,
 			ChainDispatchToHostEndpointForward,
-			fromEndRules,
-			toEndRules,
+			fromEndForwardRules,
+			toEndForwardRules,
 		)...,
 	)
 }
