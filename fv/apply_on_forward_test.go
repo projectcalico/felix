@@ -120,7 +120,7 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 
 	// The following tests verify that a HostEndpoint does not block forwarded traffic
 	// when there is no applyOnForward policy that applies to that HostEndpoint.  We
-	// create a HostEndpoint for eth0 on two hosts (A and B) and then test two cases:
+	// create a HostEndpoint two hosts (A and B) and then test two cases:
 	//
 	// 1. Workload on host A -> Workload on host B.  In this case, the traffic is
 	// forwarded on both hosts.
@@ -139,7 +139,7 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 			cancel context.CancelFunc
 		)
 
-		Context("with named hostendpoints", func() {
+		Context("with named host endpoints on eth0", func() {
 			BeforeEach(func() {
 				addAllowAllToHostEndpoints()
 
@@ -246,15 +246,15 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 
 				// Forwarded traffic is unaffected by the deny-all policy.
 				cc.ExpectSome(w[0], w[1])
-				//cc.ExpectSome(w[1], w[0])
+				cc.ExpectSome(w[1], w[0])
 
 				// Traffic originating/terminating on the host is policed by
 				// the deny-all policy.
-				//cc.ExpectNone(w[0], hostW[1])
-				//cc.ExpectNone(w[1], hostW[0])
-				//cc.ExpectNone(hostW[0], w[1])
-				//cc.ExpectNone(hostW[1], w[0])
-				//cc.ExpectNone(hostW[0], hostW[1])
+				cc.ExpectNone(w[0], hostW[1])
+				cc.ExpectNone(w[1], hostW[0])
+				cc.ExpectNone(hostW[0], w[1])
+				cc.ExpectNone(hostW[1], w[0])
+				cc.ExpectNone(hostW[0], hostW[1])
 				cc.CheckConnectivity()
 			})
 		})
