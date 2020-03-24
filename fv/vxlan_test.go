@@ -218,6 +218,14 @@ var _ = infrastructure.DatastoreDescribe("VXLAN topology before adding host IPs 
 					policy.Spec.Selector = "has(host-endpoint)"
 					_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 					Expect(err).NotTo(HaveOccurred())
+
+					policy = api.NewGlobalNetworkPolicy()
+					policy.Name = "allow-all-egress-normal"
+					policy.Spec.Order = &order
+					policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
+					policy.Spec.Selector = "has(host-endpoint)"
+					_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+					Expect(err).NotTo(HaveOccurred())
 				})
 
 				It("should not block any traffic", func() {
