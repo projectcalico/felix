@@ -158,9 +158,11 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 		toEndRules = append(toEndRules, Rule{
 			Action: GotoAction{Target: EndpointChainName(HostToEndpointPfx, defaultIfaceName)},
 		})
-		toEndForwardRules = append(toEndRules, Rule{
-			Action: GotoAction{Target: EndpointChainName(HostToEndpointForwardPfx, defaultIfaceName)},
-		})
+		toEndForwardRules = []Rule{
+			Rule{
+				Action: GotoAction{Target: EndpointChainName(HostToEndpointForwardPfx, defaultIfaceName)},
+			},
+		}
 	}
 
 	if fromOnly {
@@ -170,8 +172,8 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 			"",
 			ChainDispatchFromHostEndpoint,
 			"",
-			fromEndForwardRules,
-			toEndForwardRules,
+			fromEndRules,
+			toEndRules,
 		)
 	}
 
