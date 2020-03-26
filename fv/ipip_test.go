@@ -196,18 +196,8 @@ var _ = infrastructure.DatastoreDescribe("IPIP topology before adding host IPs t
 			}
 
 			policy := api.NewGlobalNetworkPolicy()
-			policy.Name = "allow-all-prednat"
-			order := float64(20)
-			policy.Spec.Order = &order
-			policy.Spec.PreDNAT = true
-			policy.Spec.ApplyOnForward = true
-			policy.Spec.Ingress = []api.Rule{{Action: api.Allow}}
-			policy.Spec.Selector = "has(host-endpoint)"
-			_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
-			Expect(err).NotTo(HaveOccurred())
-
-			policy = api.NewGlobalNetworkPolicy()
 			policy.Name = "allow-all-egress-normal"
+			order := float64(20)
 			policy.Spec.Order = &order
 			policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
 			policy.Spec.Selector = "has(host-endpoint)"

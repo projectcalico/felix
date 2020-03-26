@@ -174,8 +174,7 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 			It("should not block forwarded traffic if normal policy selects the hostendpoint", func() {
 				policy := api.NewGlobalNetworkPolicy()
 				policy.Name = "deny-normal"
-				var order float64
-				order = 1
+				order := float64(1)
 				policy.Spec.Order = &order
 				policy.Spec.Selector = "host-endpoint=='true'"
 				policy.Spec.Ingress = []api.Rule{{Action: api.Deny}}
@@ -233,8 +232,7 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 			expectWorkloadToWorkloadAndHostConnectivity()
 
 			It("should not block forwarded traffic if normal policy selects the hostendpoint", func() {
-				var order float64
-				order = 1
+				order := float64(1)
 				policy := api.NewGlobalNetworkPolicy()
 				policy.Name = "deny-normal"
 				policy.Spec.Selector = "host-endpoint=='true'"
