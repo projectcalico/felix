@@ -152,6 +152,8 @@ func (c *L3RouteResolver) OnBlockUpdate(update api.Update) (_ bool) {
 		}
 		delete(c.blockToRoutes, key)
 	}
+
+	c.flush()
 	return
 }
 
@@ -180,6 +182,7 @@ func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 		c.onRemoveNode(nodeName)
 	}
 
+	c.flush()
 	return
 }
 
@@ -196,6 +199,8 @@ func (c *L3RouteResolver) OnHostIPUpdate(update api.Update) (_ bool) {
 	} else {
 		c.onRemoveNode(nodeName)
 	}
+
+	c.flush()
 	return
 }
 
@@ -208,13 +213,16 @@ func (c *L3RouteResolver) onNodeIPUpdate(nodeName string, newIP string) {
 		return
 	}
 	if oldIP != "" {
-
+		oldCIDR := ip.MustParseCIDROrIP(oldIP).(ip.V4CIDR)
+		c.trie.RemoveHost(oldCIDR)
 	}
 
 	if newIP == "" {
 		delete(c.nodeNameToIPAddr, nodeName)
 	} else {
 		c.nodeNameToIPAddr[nodeName] = newIP
+		newCIDR := ip.MustParseCIDROrIP(newIP).(ip.V4CIDR)
+		c.trie.AddHost(newCIDR)
 	}
 	c.markAllNodeRoutesDirty(nodeName)
 }
@@ -280,12 +288,15 @@ func (c *L3RouteResolver) OnPoolUpdate(update api.Update) (_ bool) {
 		logCxt.Info("Pool is active")
 		c.allPools[poolKey] = *newPool
 		poolCIDR = ip.CIDRFromCalicoNet(newPool.CIDR).(ip.V4CIDR)
+		c.trie.UpdatePool(poolCIDR, newPoolType, newPool.Masquerade)
 	} else {
 		delete(c.allPools, poolKey)
+		c.trie.RemovePool(poolCIDR)
 	}
 
 	c.markAllRoutesInCIDRDirty(poolCIDR)
 
+	c.flush()
 	return
 }
 
@@ -298,12 +309,6 @@ func (c *L3RouteResolver) containsRoute(pool model.IPPool, r nodenameRoute) bool
 func (c *L3RouteResolver) routeReady(r nodenameRoute) bool {
 	logCxt := logrus.WithField("route", r)
 
-	poolType := c.poolTypeForRoute(r)
-	if poolType == PoolTypeUnknown {
-		logCxt.Debug("Route not ready: Route's pool is not known")
-		return false
-	}
-
 	gw := c.nodeNameToIPAddr[r.nodeName]
 	if gw == "" {
 		logCxt.Debug("Route not ready: No gateway yet for route, skip")
@@ -313,81 +318,17 @@ func (c *L3RouteResolver) routeReady(r nodenameRoute) bool {
 	return true
 }
 
-type PoolType int
-
-const (
-	PoolTypeUnknown PoolType = iota
-	PoolTypeNoEncap
-	PoolTypeVXLAN
-	PoolTypeVXLANCrossSubnet
-	PoolTypeIPIP
-	PoolTypeIPIPCrossSubnet
-)
-
-func (t PoolType) String() string {
-	switch t {
-	case PoolTypeUnknown:
-		return "PoolTypeUnknown"
-	case PoolTypeNoEncap:
-		return "PoolTypeNoEncap"
-	case PoolTypeVXLAN:
-		return "PoolTypeVXLAN"
-	case PoolTypeVXLANCrossSubnet:
-		return "PoolTypeVXLANCrossSubnet"
-	case PoolTypeIPIP:
-		return "PoolTypeIPIP"
-	case PoolTypeIPIPCrossSubnet:
-		return "PoolTypeIPIPCrossSubnet"
-	default:
-		return fmt.Sprintf("PoolType(%d)", int(t))
-	}
-}
-
-
 func (c *L3RouteResolver) poolTypeForPool(pool *model.IPPool) PoolType {
 	if pool == nil {
-		return PoolTypeUnknown
+		return proto.PoolType_NONE
 	}
-	if pool.VXLANMode == encap.CrossSubnet {
-		return PoolTypeVXLANCrossSubnet
+	if pool.VXLANMode != encap.Undefined {
+		return proto.PoolType_VXLAN
 	}
-	if pool.VXLANMode == encap.Always {
-		return PoolTypeVXLAN
+	if pool.IPIPMode != encap.Undefined {
+		return proto.PoolType_IPIP
 	}
-	if pool.IPIPMode == encap.CrossSubnet {
-		return PoolTypeIPIPCrossSubnet
-	}
-	if pool.IPIPMode == encap.Always {
-		return PoolTypeIPIP
-	}
-	return PoolTypeNoEncap
-}
-
-// withdrawRouteIfActive will send a *proto.RouteRemove for the given route.
-func (c *L3RouteResolver) withdrawRouteIfActive(r nodenameRoute) {
-	if !c.trie.Get(r.dst.(ip.V4CIDR)).WasSent {
-		logrus.WithField("route", r).Debug("Route was never sent, ignoring withdraw")
-		return
-	}
-	logrus.WithField("route", r).Info("Sending route remove")
-	c.callbacks.OnRouteRemove(proto.RouteType_WORKLOADS_NODE, r.dst.String())
-	c.trie.SetRouteSent(r.dst.(ip.V4CIDR), false)
-}
-
-// sendRouteIfActive will send a *proto.RouteUpdate for the given route.
-func (c *L3RouteResolver) sendRouteIfActive(r nodenameRoute) {
-	if !c.routeReady(r) {
-		logrus.WithField("route", r).Debug("Route wasn't ready, ignoring send")
-		return
-	}
-	logrus.WithField("route", r).Info("Sending route update")
-	c.callbacks.OnRouteUpdate(&proto.RouteUpdate{
-		Type: proto.RouteType_WORKLOADS_NODE, // FIXME we throw away the route type, will want that if we rework VXLAN resolver to use our routes.
-		Dst:  r.dst.String(),
-		Node: r.nodeName,
-		Gw:   c.nodeNameToIPAddr[r.nodeName],
-	})
-	c.trie.SetRouteSent(r.dst.(ip.V4CIDR), true)
+	return proto.PoolType_NO_ENCAP
 }
 
 // routesFromBlock returns a list of routes which should exist based on the provided
@@ -422,6 +363,89 @@ func (c *L3RouteResolver) routesFromBlock(blockKey string, b *model.AllocationBl
 
 	return routes
 }
+
+func (c *L3RouteResolver) flush() {
+	var buf []ip.V4TrieEntry
+	c.trie.dirtyCIDRs.Iter(func(item interface{}) error {
+		cidr := item.(ip.V4CIDR)
+
+		// We know the CIDR may be dirty, look up the path through the trie to the CIDR.  This will
+		// give us the information about the enclosing CIDRs.  For example, if we have:
+		// - IP pool     10.0.0.0/16 VXLAN
+		// - IPAM block  10.0.1.0/26 node x
+		// - IP          10.0.0.1/32 node y
+		// Then, we'll see the pool, block and IP in turn on the lookup path allowing us to collect the
+		// relevant information from each.
+		buf = c.trie.t.LookupPath(buf, cidr)
+
+		if len(buf) == 0 {
+			// CIDR is not in the trie.  Nothing to do.  Route removed before it had even been sent?
+			return set.RemoveItem
+		}
+
+		// Otherwise, check if the route is removed.
+		ri := buf[len(buf)-1].Data.(RouteInfo)
+		if ri.WasSent && ri.IsEmpty() {
+			c.callbacks.OnRouteRemove(proto.RouteType_WORKLOADS_NODE, cidr.String())
+			c.trie.SetRouteSent(cidr, false)
+			return set.RemoveItem
+		}
+
+		natOutgoing := false
+		poolType := PoolTypeUnknown
+		nodeName := ""
+		nodeIP := ""
+		sameSubnet := false
+		isHost := false
+		for _, entry := range buf {
+			if entry.Data != nil {
+				ri := entry.Data.(RouteInfo)
+				if ri.PoolType != PoolTypeUnknown {
+					poolType = ri.PoolType
+				}
+				if ri.NATOutgoing {
+					natOutgoing = true
+				}
+				if ri.NodeName != "" {
+					nodeName = ri.NodeName
+					nodeIP = c.nodeNameToIPAddr[nodeName]
+				}
+				if ri.IsHost {
+					isHost = true
+				}
+				if ri.OurSubnet {
+					sameSubnet = true
+				}
+			}
+		}
+
+		c.callbacks.OnRouteUpdate(&proto.RouteUpdate{
+			Type: poolType,
+			Dst:  cidr.String(),
+			Node: nodeName,
+			Gw:   nodeIP,
+		})
+
+		return set.RemoveItem
+	})
+}
+
+// sendRouteIfActive will send a *proto.RouteUpdate for the given route.
+func (c *L3RouteResolver) sendRouteIfActive(r nodenameRoute) {
+	if !c.routeReady(r) {
+		logrus.WithField("route", r).Debug("Route wasn't ready, ignoring send")
+		return
+	}
+	logrus.WithField("route", r).Info("Sending route update")
+	c.callbacks.OnRouteUpdate(&proto.RouteUpdate{
+		Type: proto.RouteType_WORKLOADS_NODE, // FIXME we throw away the route type, will want that if we rework VXLAN resolver to use our routes.
+		Dst:  r.dst.String(),
+		Node: r.nodeName,
+		Gw:   c.nodeNameToIPAddr[r.nodeName],
+	})
+	c.trie.SetRouteSent(r.dst.(ip.V4CIDR), true)
+}
+
 
 // nodenameRoute is the L3RouteResolver's internal representation of a route.
 type nodenameRoute struct {
@@ -468,13 +492,19 @@ type RouteTrie struct {
 	dirtyCIDRs set.Set
 }
 
-func (r *RouteTrie) UpdatePool(cidr ip.V4CIDR, poolType PoolType) {
+func (r *RouteTrie) UpdatePool(cidr ip.V4CIDR, poolType PoolType, natOutgoing bool) {
 	changed := r.updateCIDR(cidr, func(ri *RouteInfo) {
 		ri.PoolType = poolType
+		ri.NATOutgoing = natOutgoing
 	})
 	if !changed {
 		return
 	}
+	r.markChildrenDirty(cidr)
+}
+
+func (r *RouteTrie) markChildrenDirty(cidr ip.V4CIDR) {
+	// TODO: avoid full scan to mark children dirty
 	r.t.Visit(func(c ip.V4CIDR, data interface{}) bool {
 		if cidr.ContainsV4(c.Addr().(ip.V4Addr)) {
 			r.dirtyCIDRs.Add(c)
@@ -484,7 +514,7 @@ func (r *RouteTrie) UpdatePool(cidr ip.V4CIDR, poolType PoolType) {
 }
 
 func (r *RouteTrie) RemovePool(cidr ip.V4CIDR) {
-	r.UpdatePool(cidr, PoolTypeUnknown)
+	r.UpdatePool(cidr, PoolTypeUnknown, false)
 }
 
 func (r *RouteTrie) UpdateBlockRoute(cidr ip.V4CIDR, nodeName string) {
@@ -515,6 +545,16 @@ func (r *RouteTrie) SetRouteSent(cidr ip.V4CIDR, sent bool) {
 	})
 }
 
+func (r *RouteTrie) SetOurSubnet(cidr ip.V4CIDR, ours bool) {
+	changed := r.updateCIDR(cidr, func(ri *RouteInfo) {
+		ri.OurSubnet = ours
+	})
+	if !changed {
+		return
+	}
+	r.markChildrenDirty(cidr)
+}
+
 func (r RouteTrie) updateCIDR(cidr ip.V4CIDR, updateFn func(info *RouteInfo)) bool {
 	// Get the RouteInfo for the given CIDR and take a copy so we can compare.
 	ri := r.Get(cidr)
@@ -531,7 +571,7 @@ func (r RouteTrie) updateCIDR(cidr ip.V4CIDR, updateFn func(info *RouteInfo)) bo
 
 	// Not a no-op; mark CIDR as dirty.
 	r.dirtyCIDRs.Add(cidr)
-	if ri.Empty() {
+	if ri.IsZero() {
 		// No longer have anything to track about this CIDR, clean it up.
 		r.t.Delete(cidr)
 		return true
@@ -549,14 +589,22 @@ func (r RouteTrie) Get(cidr ip.V4CIDR) RouteInfo {
 }
 
 type RouteInfo struct {
-	PoolType PoolType // Only set if this CIDR represents an IP pool
-	NodeName string   // Set for each route that comes from an IPAM block.
-	IsHost   bool     // true if this is a host's own IP.
-	WasSent  bool
+	PoolType  PoolType // Only set if this CIDR represents an IP pool
+	NodeName  string   // Set for each route that comes from an IPAM block.
+	NATOutgoing bool
+	IsHost    bool     // true if this is a host's own IP.
+	WasSent   bool
+	OurSubnet bool
 }
 
-// Empty returns true if the RouteInfo no longer has any useful information; I.e. the CIDR it represents
+// IsEmpty returns true if the RouteInfo no longer has any useful information; I.e. the CIDR it represents
 // is not a pool, block route or host.
-func (r RouteInfo) Empty() bool {
-	return r.PoolType == PoolTypeUnknown && r.NodeName == "" && !r.IsHost && !r.WasSent
+func (r RouteInfo) IsEmpty() bool {
+	return r.PoolType == PoolTypeUnknown && r.NodeName == "" && !r.IsHost && !r.OurSubnet && !r.NATOutgoing
+}
+
+// IsZero returns true if the RouteInfo no longer has any useful information; I.e. the CIDR it represents
+// is not a pool, block route or host.
+func (r RouteInfo) IsZero() bool {
+	return r == RouteInfo{}
 }
