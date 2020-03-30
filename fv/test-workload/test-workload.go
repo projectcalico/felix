@@ -383,7 +383,7 @@ func main() {
 					}
 					err = wrt.Flush()
 					if err != nil {
-						log.Errorf("Writing to connection failed to flush out", request.ResponseSize-n)
+						log.WithError(err).Error("Writing to connection failed to flush out")
 						break
 					}
 				}
