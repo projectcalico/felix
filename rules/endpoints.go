@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,6 +50,7 @@ func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 			adminUp,
 			r.filterAllowAction, // Workload endpoint chains are only used in the filter table
 			dontDropEncap,
+			true,
 		),
 		// Chain for traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -64,6 +65,7 @@ func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 			adminUp,
 			r.filterAllowAction, // Workload endpoint chains are only used in the filter table
 			dropEncap,
+			true,
 		),
 	)
 
@@ -89,6 +91,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 	ingressForwardPolicyNames []string,
 	egressForwardPolicyNames []string,
 	profileIDs []string,
+	defaultDropWhenNoPolicy bool,
 ) []*Chain {
 	log.WithField("ifaceName", ifaceName).Debug("Rendering filter host endpoint chain.")
 	result := []*Chain{}
@@ -106,6 +109,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			defaultDropWhenNoPolicy,
 		),
 		// Chain for input traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -120,6 +124,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			defaultDropWhenNoPolicy,
 		),
 		// Chain for forward traffic _to_ the endpoint.
 		r.endpointIptablesChain(
@@ -134,6 +139,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			defaultDropWhenNoPolicy,
 		),
 		// Chain for forward traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -148,6 +154,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			defaultDropWhenNoPolicy,
 		),
 	)
 
@@ -185,6 +192,7 @@ func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 			true, // Host endpoints are always admin up.
 			AcceptAction{},
 			dontDropEncap,
+			false,
 		),
 		// Chain for traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -199,6 +207,7 @@ func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 			true, // Host endpoints are always admin up.
 			AcceptAction{},
 			dontDropEncap,
+			false,
 		),
 	}
 }
@@ -223,6 +232,7 @@ func (r *DefaultRuleRenderer) HostEndpointToMangleChains(
 			true, // Host endpoints are always admin up.
 			r.mangleAllowAction,
 			dontDropEncap,
+			false,
 		),
 	}
 }
@@ -270,6 +280,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 	adminUp bool,
 	allowAction Action,
 	dropEncap bool,
+	defaultDropWhenNoPolicy bool,
 ) *Chain {
 	rules := []Rule{}
 	chainName := EndpointChainName(endpointPrefix, name)
@@ -403,16 +414,31 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 				})
 		}
 
-		// When rendering normal rules, if no profile marked the packet as accepted, drop
-		// the packet.
+		// When rendering normal rules, except for the wildcard HEP, drop the packet if no
+		// policy or profile allowed it.
 		//
-		// For untracked rules, we don't do that because there may be tracked rules
-		// still to be applied to the packet in the filter table.
-		rules = append(rules, Rule{
-			Match:   Match(),
-			Action:  DropAction{},
-			Comment: []string{"Drop if no profiles matched"},
-		})
+		// For untracked and pre-DNAT rules, we don't do that because there may be tracked
+		// rules still to be applied to the packet in the filter table.
+		//
+		// For the wildcard HEP, we allow when there is no policy, because wildcard HEPs
+		// were previously implemented only for pre-DNAT policy and so had no interaction
+		// with normal policy.
+		if defaultDropWhenNoPolicy {
+			rules = append(rules, Rule{
+				Match:   Match(),
+				Action:  DropAction{},
+				Comment: []string{"Drop if no profiles matched"},
+			})
+		} else {
+			rules = append(rules, Rule{
+				Action:  SetMarkAction{Mark: r.IptablesMarkAccept},
+				Comment: []string{"Allow traffic by default"},
+			})
+			rules = append(rules, Rule{
+				Action:  ReturnAction{},
+				Comment: []string{"Return for allowed traffic"},
+			})
+		}
 	}
 
 	return &Chain{
