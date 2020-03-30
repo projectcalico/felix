@@ -39,7 +39,20 @@ const (
 	applyPeriod  = 5 * time.Second
 )
 
-var _ = infrastructure.DatastoreDescribe("with initialized Felix", []apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
+var _ = infrastructure.DatastoreDescribe("xdp, with named host endpoints",
+	[]apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
+		describeXDPTests(getInfra, false)
+	})
+
+var _ = infrastructure.DatastoreDescribe("xdp, with all-interfaces host endpoints",
+	[]apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
+		describeXDPTests(getInfra, false)
+	})
+
+// describeXDPTests describes tests with xdp acceleration. If namedHostEndpoint
+// is true, a named hostendpoint using eth0 is created for each felix. Otherwise
+// an all-interfaces host endpoint is created for the felixes.
+func describeXDPTests(getInfra infrastructure.InfraFactory, namedHostEndpoint bool) {
 	var (
 		infra        infrastructure.DatastoreInfra
 		felixes      []*infrastructure.Felix
@@ -90,7 +103,11 @@ var _ = infrastructure.DatastoreDescribe("with initialized Felix", []apiconfig.D
 				"role":          roles[ii],
 			}
 			hostEp.Spec.Node = felix.Hostname
-			hostEp.Spec.InterfaceName = "eth0"
+			if namedHostEndpoint {
+				hostEp.Spec.InterfaceName = "eth0"
+			} else {
+				hostEp.Spec.InterfaceName = "*"
+			}
 			hostEp.Spec.ExpectedIPs = []string{felix.IP}
 			_, err = client.HostEndpoints().Create(utils.Ctx, hostEp, utils.NoOptions)
 			Expect(err).NotTo(HaveOccurred())
@@ -183,8 +200,13 @@ var _ = infrastructure.DatastoreDescribe("with initialized Felix", []apiconfig.D
 	}
 
 	It("should have expected no connectivity at first", func() {
-		expectNoConnectivity(ccUDP)
-		expectNoConnectivity(ccTCP)
+		if namedHostEndpoint {
+			expectNoConnectivity(ccUDP)
+			expectNoConnectivity(ccTCP)
+		} else {
+			expectAllAllowed(ccUDP)
+			expectAllAllowed(ccTCP)
+		}
 	})
 
 	Context("with XDP blacklist on felix[1] blocking felixes[0]", func() {
@@ -512,4 +534,4 @@ var _ = infrastructure.DatastoreDescribe("with initialized Felix", []apiconfig.D
 			})
 		})
 	})
-})
+}
