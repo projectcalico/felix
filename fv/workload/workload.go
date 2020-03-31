@@ -16,10 +16,8 @@ package workload
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"regexp"
@@ -31,14 +29,15 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/fv/connectivity"
-	"github.com/projectcalico/felix/fv/containers"
-	"github.com/projectcalico/felix/fv/infrastructure"
-	"github.com/projectcalico/felix/fv/utils"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/backend/k8s/conversion"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/options"
+
+	"github.com/projectcalico/felix/fv/connectivity"
+	"github.com/projectcalico/felix/fv/containers"
+	"github.com/projectcalico/felix/fv/infrastructure"
+	"github.com/projectcalico/felix/fv/utils"
 )
 
 type Workload struct {
@@ -237,11 +236,11 @@ func (w *Workload) SourceIPs() []string {
 	return []string{w.IP}
 }
 
-func (w *Workload) CanConnectTo(ip, port, protocol string) *connectivity.Response {
+func (w *Workload) CanConnectTo(ip, port, protocol string, opts ...connectivity.CheckOption) *connectivity.Result {
 	anyPort := Port{
 		Workload: w,
 	}
-	return anyPort.CanConnectTo(ip, port, protocol)
+	return anyPort.CanConnectTo(ip, port, protocol, opts...)
 }
 
 func (w *Workload) Port(port uint16) *Port {
@@ -259,6 +258,11 @@ func (w *Workload) NamespaceID() string {
 func (w *Workload) ExecOutput(args ...string) (string, error) {
 	args = append([]string{"ip", "netns", "exec", w.NamespaceID()}, args...)
 	return w.C.ExecOutput(args...)
+}
+
+func (w *Workload) ExecCombinedOutput(args ...string) (string, error) {
+	args = append([]string{"ip", "netns", "exec", w.NamespaceID()}, args...)
+	return w.C.ExecCombinedOutput(args...)
 }
 
 var (
@@ -300,6 +304,20 @@ func (w *Workload) LatencyTo(ip, port string) (time.Duration, string) {
 		"hping reported a large number of >1s RTTs; full output:\n"+out)
 	meanRtt := rttSum / time.Duration(len(lines))
 	return meanRtt, out
+}
+
+func (w *Workload) SendPacketsTo(ip string, count int, size int) (error, string) {
+	if strings.Contains(ip, ":") {
+		ip = fmt.Sprintf("[%s]", ip)
+	}
+	c := fmt.Sprintf("%d", count)
+	s := fmt.Sprintf("%d", size)
+	_, err := w.ExecOutput("ping", "-c", c, "-W", "1", "-s", s, ip)
+	stderr := ""
+	if err, ok := err.(*exec.ExitError); ok {
+		stderr = string(err.Stderr)
+	}
+	return err, stderr
 }
 
 type SideService struct {
@@ -479,13 +497,53 @@ func (w *Workload) ToMatcher(explicitPort ...uint16) *connectivity.Matcher {
 	}
 }
 
+func (w *Workload) RunCmd(cmd string, args ...string) (string, error) {
+	netns := strings.TrimPrefix(w.namespacePath, "/var/run/netns/")
+	dockerArgs := []string{"exec", w.C.Name, "ip", "netns", "exec", netns, cmd}
+	dockerArgs = append(dockerArgs, args...)
+	dockerCmd := utils.Command("docker", dockerArgs...)
+	out, err := dockerCmd.CombinedOutput()
+
+	log.WithField("output", string(out)).Debug("Workload.RunCmd")
+	return string(out), err
+}
+
+func (w *Workload) PathMTU(ip string) (int, error) {
+	out, err := w.RunCmd("ip", "route", "show", "cached")
+	if err != nil {
+		return 0, err
+	}
+
+	outRd := bufio.NewReader(strings.NewReader(out))
+	ipRegex := regexp.MustCompile("^" + ip + ".*")
+	mtuRegex := regexp.MustCompile(".*mtu ([0-9]+)")
+	for {
+		line, err := outRd.ReadString('\n')
+		if err != nil {
+			return 0, nil
+		}
+		if ipRegex.MatchString(line) {
+			line, err := outRd.ReadString('\n')
+			if err != nil {
+				return 0, nil
+			}
+			m := mtuRegex.FindStringSubmatch(line)
+			if len(m) == 0 {
+				return 0, nil
+			}
+			return strconv.Atoi(m[1])
+		}
+	}
+}
+
 type SpoofedWorkload struct {
 	*Workload
 	SpoofedSourceIP string
 }
 
-func (s *SpoofedWorkload) CanConnectTo(ip, port, protocol string) *connectivity.Response {
-	return canConnectTo(s.Workload, ip, port, s.SpoofedSourceIP, "", protocol)
+func (s *SpoofedWorkload) CanConnectTo(ip, port, protocol string, opts ...connectivity.CheckOption) *connectivity.Result {
+	opts = append(opts, connectivity.WithSourceIP(s.SpoofedSourceIP))
+	return canConnectTo(s.Workload, ip, port, protocol, "(spoofed)", opts...)
 }
 
 type Port struct {
@@ -504,14 +562,14 @@ func (p *Port) SourceIPs() []string {
 	return []string{p.IP}
 }
 
-func (p *Port) CanConnectTo(ip, port, protocol string) *connectivity.Response {
-	srcPort := strconv.Itoa(int(p.Port))
-	return canConnectTo(p.Workload, ip, port, "", srcPort, protocol)
+// Return if a connection is good and packet loss string "PacketLoss[xx]".
+// If it is not a packet loss test, packet loss string is "".
+func (p *Port) CanConnectTo(ip, port, protocol string, opts ...connectivity.CheckOption) *connectivity.Result {
+	opts = append(opts, connectivity.WithSourcePort(strconv.Itoa(int(p.Port))))
+	return canConnectTo(p.Workload, ip, port, protocol, "(with source port)", opts...)
 }
 
-func canConnectTo(w *Workload, ip, port, srcIp, srcPort, protocol string) *connectivity.Response {
-	// Ensure that the host has the 'test-connection' binary.
-	w.C.EnsureBinary("test-connection")
+func canConnectTo(w *Workload, ip, port, protocol, logSuffix string, opts ...connectivity.CheckOption) *connectivity.Result {
 
 	if protocol == "udp" || protocol == "sctp" {
 		// If this is a retry then we may have stale conntrack entries and we don't want those
@@ -527,52 +585,13 @@ func canConnectTo(w *Workload, ip, port, srcIp, srcPort, protocol string) *conne
 
 	logMsg := "Connection test"
 
-	// Run 'test-connection' to the target.
-	args := []string{
-		"exec", w.C.Name, "/test-connection", w.namespacePath, ip, port, "--protocol=" + protocol,
-	}
-	if srcIp != "" {
-		args = append(args, fmt.Sprintf("--source-ip=%s", srcIp))
-		logMsg += " (spoofed)"
-	}
-	if srcPort != "" {
-		// If we are using a particular source port, fill it in.
-		args = append(args, fmt.Sprintf("--source-port=%s", srcPort))
-		logMsg += " (with source port)"
-	}
-	connectionCmd := utils.Command("docker", args...)
-	outPipe, err := connectionCmd.StdoutPipe()
-	Expect(err).NotTo(HaveOccurred())
-	errPipe, err := connectionCmd.StderrPipe()
-	Expect(err).NotTo(HaveOccurred())
-	err = connectionCmd.Start()
-	Expect(err).NotTo(HaveOccurred())
+	// enforce the name space as we want to execute it in the workload
+	opts = append(opts, connectivity.WithNamespacePath(w.namespacePath))
+	logMsg += " " + logSuffix
 
-	wOut, err := ioutil.ReadAll(outPipe)
-	Expect(err).NotTo(HaveOccurred())
-	wErr, err := ioutil.ReadAll(errPipe)
-	Expect(err).NotTo(HaveOccurred())
-	err = connectionCmd.Wait()
+	w.C.EnsureBinary(connectivity.BinaryName)
 
-	log.WithFields(log.Fields{
-		"stdout": string(wOut),
-		"stderr": string(wErr)}).WithError(err).Info(logMsg)
-
-	if err != nil {
-		return nil
-	}
-
-	r := regexp.MustCompile(`RESPONSE=(.*)\n`)
-	m := r.FindSubmatch(wOut)
-	if len(m) > 0 {
-		var resp connectivity.Response
-		err := json.Unmarshal(m[1], &resp)
-		if err != nil {
-			log.WithError(err).WithField("output", string(wOut)).Panic("Failed to parse connection check response")
-		}
-		return &resp
-	}
-	return nil
+	return connectivity.Check(w.C.Name, logMsg, ip, port, protocol, opts...)
 }
 
 // ToMatcher implements the connectionTarget interface, allowing this port to be used as

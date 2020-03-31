@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,19 +21,21 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"github.com/kelseyhightower/envconfig"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/calc"
-	"github.com/projectcalico/felix/ipsets"
-	"github.com/projectcalico/felix/rules"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/projectcalico/libcalico-go/lib/selector"
+
+	"github.com/projectcalico/felix/calc"
+	"github.com/projectcalico/felix/ipsets"
+	"github.com/projectcalico/felix/rules"
 )
 
 type EnvConfig struct {
@@ -82,7 +84,8 @@ func run(checkNoError bool, command string, args ...string) error {
 			"output":  string(outputBytes)}).WithError(err).Warning("Command failed")
 	}
 	if checkNoError {
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Command failed\nCommand: %v args: %v\nOutput:\n\n%v",
+			command, args, string(outputBytes)))
 	}
 	return err
 }
@@ -105,11 +108,16 @@ var _ = AfterEach(func() {
 	}
 })
 
-func RunCommand(command string, args ...string) error {
+func GetCommandOutput(command string, args ...string) (string, error) {
 	cmd := Command(command, args...)
 	log.Infof("Running '%s %s'", cmd.Path, strings.Join(cmd.Args, " "))
 	output, err := cmd.CombinedOutput()
-	log.Infof("output: %v", string(output))
+	return string(output), err
+}
+
+func RunCommand(command string, args ...string) error {
+	output, err := GetCommandOutput(command, args...)
+	log.Infof("output: %v", output)
 	return err
 }
 
@@ -196,4 +204,34 @@ func IPSetNameForSelector(ipVersion int, rawSelector string) string {
 	)
 
 	return ipVerConf.NameForMainIPSet(setID)
+}
+
+// HasSyscallConn represents objects that can return a syscall.RawConn
+type HasSyscallConn interface {
+	SyscallConn() (syscall.RawConn, error)
+}
+
+// ConnMTU returns the MTU of the connection for _connected_ connections. That
+// excludes unconnected udp which requires different approach for each peer.
+func ConnMTU(hsc HasSyscallConn) (int, error) {
+	c, err := hsc.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+
+	mtu := 0
+	var sysErr error
+	err = c.Control(func(fd uintptr) {
+		mtu, sysErr = syscall.GetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_MTU)
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	if sysErr != nil {
+		return 0, sysErr
+	}
+
+	return mtu, nil
 }
