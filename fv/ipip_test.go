@@ -187,6 +187,7 @@ var _ = infrastructure.DatastoreDescribe("IPIP topology before adding host IPs t
 				hep.Name = "all-interfaces-" + f.Name
 				hep.Labels = map[string]string{
 					"host-endpoint": "true",
+					"hostname":      f.Hostname,
 				}
 				hep.Spec.Node = f.Hostname
 				hep.Spec.ExpectedIPs = []string{f.IP}
@@ -195,19 +196,40 @@ var _ = infrastructure.DatastoreDescribe("IPIP topology before adding host IPs t
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			policy := api.NewGlobalNetworkPolicy()
-			policy.Name = "allow-all-prednat"
-			order := float64(20)
-			policy.Spec.Order = &order
-			policy.Spec.PreDNAT = true
-			policy.Spec.ApplyOnForward = true
-			policy.Spec.Ingress = []api.Rule{{Action: api.Allow}}
-			policy.Spec.Selector = "has(host-endpoint)"
-			_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
-			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("should not block any traffic", func() {
+		It("should block host-to-host traffic in the absence of egress policy allowing it", func() {
+			cc.ExpectNone(felixes[0], hostW[1])
+			cc.ExpectNone(felixes[1], hostW[0])
+			cc.ExpectSome(w[0], w[1])
+			cc.ExpectSome(w[1], w[0])
+			cc.CheckConnectivity()
+		})
+
+		It("should allow a host to reach another host traffic if policy allows that egress", func() {
+			// Create a policy selecting felix[1] that allows egress.
+			policy := api.NewGlobalNetworkPolicy()
+			policy.Name = "allow-egress-one-host"
+			policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
+			policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[1].Hostname)
+			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
+
+			cc.ExpectNone(felixes[0], hostW[1])
+			cc.ExpectSome(felixes[1], hostW[0])
+			cc.ExpectSome(w[0], w[1])
+			cc.ExpectSome(w[1], w[0])
+			cc.CheckConnectivity()
+		})
+
+		It("should allow host-to-host traffic if all egress allowed from all host endpoints", func() {
+			policy := api.NewGlobalNetworkPolicy()
+			policy.Name = "allow-all-egress-normal"
+			policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
+			policy.Spec.Selector = "has(host-endpoint)"
+			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
+
 			// An all-interfaces host endpoint does not block any traffic by default.
 			cc.ExpectSome(felixes[0], hostW[1])
 			cc.ExpectSome(felixes[1], hostW[0])
