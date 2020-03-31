@@ -39,20 +39,7 @@ const (
 	applyPeriod  = 5 * time.Second
 )
 
-var _ = infrastructure.DatastoreDescribe("xdp, with named host endpoints",
-	[]apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
-		describeXDPTests(getInfra, false)
-	})
-
-var _ = infrastructure.DatastoreDescribe("xdp, with all-interfaces host endpoints",
-	[]apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
-		describeXDPTests(getInfra, false)
-	})
-
-// describeXDPTests describes tests with xdp acceleration. If namedHostEndpoint
-// is true, a named hostendpoint using eth0 is created for each felix. Otherwise
-// an all-interfaces host endpoint is created for the felixes.
-func describeXDPTests(getInfra infrastructure.InfraFactory, namedHostEndpoint bool) {
+var _ = infrastructure.DatastoreDescribe("with initialized Felix", []apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
 	var (
 		infra        infrastructure.DatastoreInfra
 		felixes      []*infrastructure.Felix
@@ -103,11 +90,7 @@ func describeXDPTests(getInfra infrastructure.InfraFactory, namedHostEndpoint bo
 				"role":          roles[ii],
 			}
 			hostEp.Spec.Node = felix.Hostname
-			if namedHostEndpoint {
-				hostEp.Spec.InterfaceName = "eth0"
-			} else {
-				hostEp.Spec.InterfaceName = "*"
-			}
+			hostEp.Spec.InterfaceName = "eth0"
 			hostEp.Spec.ExpectedIPs = []string{felix.IP}
 			_, err = client.HostEndpoints().Create(utils.Ctx, hostEp, utils.NoOptions)
 			Expect(err).NotTo(HaveOccurred())
@@ -200,13 +183,8 @@ func describeXDPTests(getInfra infrastructure.InfraFactory, namedHostEndpoint bo
 	}
 
 	It("should have expected no connectivity at first", func() {
-		if namedHostEndpoint {
-			expectNoConnectivity(ccUDP)
-			expectNoConnectivity(ccTCP)
-		} else {
-			expectAllAllowed(ccUDP)
-			expectAllAllowed(ccTCP)
-		}
+		expectNoConnectivity(ccUDP)
+		expectNoConnectivity(ccTCP)
 	})
 
 	Context("with XDP blacklist on felix[1] blocking felixes[0]", func() {
@@ -534,4 +512,4 @@ func describeXDPTests(getInfra infrastructure.InfraFactory, namedHostEndpoint bo
 			})
 		})
 	})
-}
+})
