@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,10 @@ import (
 	"fmt"
 	"strings"
 
+	. "github.com/projectcalico/libcalico-go/lib/backend/model"
+
 	"github.com/projectcalico/felix/dataplane/mock"
 	"github.com/projectcalico/felix/proto"
-	. "github.com/projectcalico/libcalico-go/lib/backend/model"
 )
 
 // Pre-defined datastore states.  Each State object wraps up the complete state
@@ -882,6 +883,34 @@ var hostEp1WithPolicyAndANetworkSetMatchingBEqB = hostEp1WithPolicy.withKVUpdate
 	"12.1.0.0/24",
 })
 
+var routeUpdateIPPoolVXLAN = proto.RouteUpdate{
+	RouteType:   proto.RouteType_CIDR_INFO,
+	IpPoolType:  proto.IPPoolType_VXLAN,
+	Dst:         ipPoolWithVXLAN.CIDR.String(),
+	NatOutgoing: ipPoolWithVXLAN.Masquerade,
+}
+
+var routeUpdateIPPoolIPIP = proto.RouteUpdate{
+	RouteType:   proto.RouteType_CIDR_INFO,
+	IpPoolType:  proto.IPPoolType_IPIP,
+	Dst:         ipPoolWithVXLAN.CIDR.String(),
+	NatOutgoing: ipPoolWithVXLAN.Masquerade,
+}
+
+var routeUpdateRemoteHost = proto.RouteUpdate{
+	RouteType:   proto.RouteType_REMOTE_HOST,
+	IpPoolType:  proto.IPPoolType_NONE,
+	Dst:         remoteHostIP.String() + "/32",
+	DstNodeName: remoteHostname,
+}
+
+var routeUpdateRemoteHost2 = proto.RouteUpdate{
+	RouteType:   proto.RouteType_REMOTE_HOST,
+	IpPoolType:  proto.IPPoolType_NONE,
+	Dst:         remoteHost2IP.String() + "/32",
+	DstNodeName: remoteHostname2,
+}
+
 // Minimal VXLAN set-up, all the data needed for a remote VTEP, a pool and a block.
 var vxlanWithBlock = empty.withKVUpdates(
 	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLAN},
@@ -897,18 +926,15 @@ var vxlanWithBlock = empty.withKVUpdates(
 		ParentDeviceIp: remoteHostIP.String(),
 	},
 ).withRoutes(
+	routeUpdateIPPoolVXLAN,
+	routeUpdateRemoteHost,
 	// Single route for the block.
 	proto.RouteUpdate{
-		Node: remoteHostname,
-		Dst:  "10.0.1.0/29",
-		Gw:   remoteHostVXLANTunnelIP,
-		Type: proto.RouteType_VXLAN,
-	},
-	proto.RouteUpdate{
-		Node: remoteHostname,
-		Dst:  "10.0.1.0/29",
-		Gw:   remoteHostIP.String(),
-		Type: proto.RouteType_WORKLOADS_NODE,
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.1.0/29",
+		DstNodeName: remoteHostname,
+		DstNodeIP:   remoteHostIP.String(),
 	},
 )
 
@@ -946,29 +972,23 @@ var vxlanWithBlockAndBorrows = vxlanWithBlock.withKVUpdates(
 		ParentDeviceIp: remoteHost2IP.String(),
 	},
 ).withRoutes(
+	routeUpdateIPPoolVXLAN,
+	routeUpdateRemoteHost,
+	routeUpdateRemoteHost2,
+	// Single route for the block.
 	proto.RouteUpdate{
-		Type: proto.RouteType_VXLAN,
-		Node: remoteHostname,
-		Gw:   remoteHostVXLANTunnelIP,
-		Dst:  "10.0.1.0/29",
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.1.0/29",
+		DstNodeName: remoteHostname,
+		DstNodeIP:   remoteHostIP.String(),
 	},
 	proto.RouteUpdate{
-		Type: proto.RouteType_VXLAN,
-		Node: remoteHostname2,
-		Gw:   remoteHost2VXLANTunnelIP,
-		Dst:  "10.0.1.2/32",
-	},
-	proto.RouteUpdate{
-		Type: proto.RouteType_WORKLOADS_NODE,
-		Node: remoteHostname,
-		Gw:   remoteHostIP.String(),
-		Dst:  "10.0.1.0/29",
-	},
-	proto.RouteUpdate{
-		Type: proto.RouteType_WORKLOADS_NODE,
-		Node: remoteHostname2,
-		Gw:   remoteHost2IP.String(),
-		Dst:  "10.0.1.2/32",
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.1.2/32",
+		DstNodeName: remoteHostname2,
+		DstNodeIP:   remoteHost2IP.String(),
 	},
 )
 
@@ -982,20 +1002,6 @@ var vxlanWithBlockAndDifferentTunnelIP = vxlanWithBlock.withKVUpdates(
 		Mac:            "66:3e:ca:a4:db:65",
 		Ipv4Addr:       remoteHostVXLANTunnelIP2,
 		ParentDeviceIp: remoteHostIP.String(),
-	},
-).withRoutes(
-	// Single route for the block.
-	proto.RouteUpdate{
-		Node: remoteHostname,
-		Dst:  "10.0.1.0/29",
-		Gw:   remoteHostVXLANTunnelIP2,
-		Type: proto.RouteType_VXLAN,
-	},
-	proto.RouteUpdate{
-		Node: remoteHostname,
-		Dst:  "10.0.1.0/29",
-		Gw:   remoteHostIP.String(),
-		Type: proto.RouteType_WORKLOADS_NODE,
 	},
 )
 
@@ -1011,18 +1017,20 @@ var vxlanWithBlockAndDifferentNodeIP = vxlanWithBlock.withKVUpdates(
 		ParentDeviceIp: remoteHost2IP.String(),
 	},
 ).withRoutes(
+	routeUpdateIPPoolVXLAN,
+	proto.RouteUpdate{
+		RouteType:   proto.RouteType_REMOTE_HOST,
+		IpPoolType:  proto.IPPoolType_NONE,
+		Dst:         remoteHost2IP.String() + "/32",
+		DstNodeName: remoteHostname,
+	},
 	// Single route for the block.
 	proto.RouteUpdate{
-		Node: remoteHostname,
-		Dst:  "10.0.1.0/29",
-		Gw:   remoteHostVXLANTunnelIP,
-		Type: proto.RouteType_VXLAN,
-	},
-	proto.RouteUpdate{
-		Node: remoteHostname,
-		Dst:  "10.0.1.0/29",
-		Gw:   remoteHost2IP.String(),
-		Type: proto.RouteType_WORKLOADS_NODE,
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.1.0/29",
+		DstNodeName: remoteHostname,
+		DstNodeIP:   remoteHost2IP.String(),
 	},
 )
 
@@ -1030,33 +1038,27 @@ var vxlanWithBlockAndDifferentNodeIP = vxlanWithBlock.withKVUpdates(
 var vxlanBlockOwnerSwitch = vxlanWithBlockAndBorrows.withKVUpdates(
 	KVPair{Key: remoteIPAMBlockKey, Value: &remoteIPAMBlockWithBorrowsSwitched},
 ).withRoutes(
+	routeUpdateIPPoolVXLAN,
+	routeUpdateRemoteHost,
+	routeUpdateRemoteHost2,
+	// Single route for the block.
 	proto.RouteUpdate{
-		Type: proto.RouteType_VXLAN,
-		Node: remoteHostname2,
-		Gw:   remoteHost2VXLANTunnelIP,
-		Dst:  "10.0.1.0/29",
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.1.0/29",
+		DstNodeName: remoteHostname2,
+		DstNodeIP:   remoteHost2IP.String(),
 	},
 	proto.RouteUpdate{
-		Type: proto.RouteType_VXLAN,
-		Node: remoteHostname,
-		Gw:   remoteHostVXLANTunnelIP,
-		Dst:  "10.0.1.2/32",
-	},
-	proto.RouteUpdate{
-		Type: proto.RouteType_WORKLOADS_NODE,
-		Node: remoteHostname2,
-		Gw:   remoteHost2IP.String(),
-		Dst:  "10.0.1.0/29",
-	},
-	proto.RouteUpdate{
-		Type: proto.RouteType_WORKLOADS_NODE,
-		Node: remoteHostname,
-		Gw:   remoteHostIP.String(),
-		Dst:  "10.0.1.2/32",
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.1.2/32",
+		DstNodeName: remoteHostname,
+		DstNodeIP:   remoteHostIP.String(),
 	},
 ).withName("VXLAN owner switch")
 
-// As above but with the owner of the block and the borrows switched.
+// VXLAN set-up with local block.
 var vxlanLocalBlockWithBorrows = empty.withKVUpdates(
 	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLAN},
 
@@ -1081,21 +1083,32 @@ var vxlanLocalBlockWithBorrows = empty.withKVUpdates(
 		ParentDeviceIp: localHostIP.String(),
 	},
 ).withRoutes(
+	routeUpdateIPPoolVXLAN,
+	routeUpdateRemoteHost,
 	proto.RouteUpdate{
-		Type: proto.RouteType_VXLAN,
-		Node: remoteHostname,
-		Gw:   remoteHostVXLANTunnelIP,
-		Dst:  "10.0.0.2/32",
+		RouteType:   proto.RouteType_LOCAL_HOST,
+		IpPoolType:  proto.IPPoolType_NONE,
+		Dst:         localHostIP.String() + "/32",
+		DstNodeName: localHostname,
+	},
+	// Single route for the block.
+	proto.RouteUpdate{
+		RouteType:   proto.RouteType_LOCAL_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.0.0/29",
+		DstNodeName: localHostname,
+		DstNodeIP:   localHostIP.String(),
 	},
 	proto.RouteUpdate{
-		Type: proto.RouteType_WORKLOADS_NODE,
-		Node: remoteHostname,
-		Gw:   remoteHostIP.String(),
-		Dst:  "10.0.0.2/32",
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.0.2/32",
+		DstNodeName: remoteHostname,
+		DstNodeIP:   remoteHostIP.String(),
 	},
 ).withName("VXLAN local with borrows")
 
-// vxlanWithBlockAndBorrows but missing hte VTEP information for the first host.
+// vxlanWithBlockAndBorrows but missing the VTEP information for the first host.
 var vxlanWithBlockAndBorrowsAndMissingFirstVTEP = vxlanWithBlockAndBorrows.withKVUpdates(
 	KVPair{Key: remoteHostIPKey, Value: nil},
 ).withName("VXLAN borrow missing VTEP").withVTEPs(
@@ -1106,51 +1119,64 @@ var vxlanWithBlockAndBorrowsAndMissingFirstVTEP = vxlanWithBlockAndBorrows.withK
 		ParentDeviceIp: remoteHost2IP.String(),
 	},
 ).withRoutes(
+	routeUpdateIPPoolVXLAN,
+	routeUpdateRemoteHost2,
+	// Single route for the block.
 	proto.RouteUpdate{
-		Node: remoteHostname2,
-		Dst:  "10.0.1.2/32",
-		Gw:   remoteHost2VXLANTunnelIP,
-		Type: proto.RouteType_VXLAN,
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.1.0/29",
+		DstNodeName: remoteHostname,
 	},
 	proto.RouteUpdate{
-		Node: remoteHostname2,
-		Dst:  "10.0.1.2/32",
-		Gw:   remoteHost2IP.String(),
-		Type: proto.RouteType_WORKLOADS_NODE,
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.1.2/32",
+		DstNodeName: remoteHostname2,
+		DstNodeIP:   remoteHost2IP.String(),
 	},
 )
 
 var vxlanToIPIPSwitch = vxlanWithBlock.withKVUpdates(
 	KVPair{Key: ipPoolKey, Value: &ipPoolWithIPIP},
 ).withName("VXLAN switched to IPIP").withRoutes(
-	// VXLAN route removed but still get the simple route.
+	routeUpdateIPPoolIPIP,
+	routeUpdateRemoteHost,
+	// Single route for the block.
 	proto.RouteUpdate{
-		Node: remoteHostname,
-		Dst:  "10.0.1.0/29",
-		Gw:   remoteHostIP.String(),
-		Type: proto.RouteType_WORKLOADS_NODE,
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_IPIP,
+		Dst:         "10.0.1.0/29",
+		DstNodeName: remoteHostname,
+		DstNodeIP:   remoteHostIP.String(),
 	},
 )
 
 var vxlanBlockDelete = vxlanWithBlock.withKVUpdates(
 	KVPair{Key: remoteIPAMBlockKey, Value: nil},
-).withName("VXLAN block removed").withRoutes()
+).withName("VXLAN block removed").withRoutes(
+	// VXLAN block route removed but still keep the IP pool and host routes.
+	routeUpdateIPPoolVXLAN,
+	routeUpdateRemoteHost,
+)
 
 var vxlanHostIPDelete = vxlanWithBlock.withKVUpdates(
 	KVPair{Key: remoteHostIPKey, Value: nil},
-).withName("VXLAN host IP removed").withRoutes().withVTEPs()
+).withName("VXLAN host IP removed").withRoutes(
+	routeUpdateIPPoolVXLAN,
+	// Host removed but keep the route without the node IP.
+	proto.RouteUpdate{
+		RouteType:   proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.1.0/29",
+		DstNodeName: remoteHostname,
+		DstNodeIP:   "",
+	},
+).withVTEPs()
 
 var vxlanTunnelIPDelete = vxlanWithBlock.withKVUpdates(
 	KVPair{Key: remoteHostVXLANTunnelConfigKey, Value: nil},
-).withName("VXLAN host tunnel IP removed").withRoutes(
-	// VXLAN route removed but still get the simple route.
-	proto.RouteUpdate{
-		Node: remoteHostname,
-		Dst:  "10.0.1.0/29",
-		Gw:   remoteHostIP.String(),
-		Type: proto.RouteType_WORKLOADS_NODE,
-	},
-).withVTEPs()
+).withName("VXLAN tunnel IP removed").withVTEPs()
 
 type StateList []State
 

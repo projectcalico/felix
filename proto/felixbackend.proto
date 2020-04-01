@@ -471,9 +471,11 @@ enum RouteType {
   CIDR_INFO = 0;
   REMOTE_WORKLOAD = 1;
   REMOTE_HOST = 2;
+  LOCAL_WORKLOAD = 3;
+  LOCAL_HOST = 4;
 }
 
-enum EncapType {
+enum IPPoolType {
   NONE = 0;
   NO_ENCAP = 1;
   VXLAN = 2;
@@ -482,10 +484,14 @@ enum EncapType {
 
 message RouteUpdate {
   RouteType routeType = 1;
-  EncapType dstPoolType = 2;
+  IPPoolType ipPoolType = 2;
   string dst = 3;
+  // The name of the node holding this destination, if this route targets a calico node.
   string dstNodeName = 4;
-  string nextHop = 5;
+  // IP of the node holding this destination.
+  string dstNodeIP = 5;
+  bool sameSubnet = 7;
+  bool natOutgoing = 8;
 }
 
 message RouteRemove {
