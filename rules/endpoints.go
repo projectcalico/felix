@@ -23,8 +23,10 @@ import (
 )
 
 const (
-	dropEncap     = true
-	dontDropEncap = false
+	dropEncap              = true
+	dontDropEncap          = false
+	trafficFromTheEndpoint = "from"
+	trafficToTheEndpoint   = "to"
 )
 
 func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
@@ -41,31 +43,13 @@ func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 		r.endpointIptablesChain(
 			ingressPolicies,
 			profileIDs,
-			ifaceName,
-			PolicyInboundPfx,
-			ProfileInboundPfx,
-			WorkloadToEndpointPfx,
-			"", // No fail-safe chains for workloads.
-			chainTypeNormal,
-			adminUp,
-			r.filterAllowAction, // Workload endpoint chains are only used in the filter table
-			dontDropEncap,
-			true,
+			r.newWorkloadEndpointIptablesChainOptions(ifaceName, trafficToTheEndpoint, adminUp, dontDropEncap),
 		),
 		// Chain for traffic _from_ the endpoint.
 		r.endpointIptablesChain(
 			egressPolicies,
 			profileIDs,
-			ifaceName,
-			PolicyOutboundPfx,
-			ProfileOutboundPfx,
-			WorkloadFromEndpointPfx,
-			"", // No fail-safe chains for workloads.
-			chainTypeNormal,
-			adminUp,
-			r.filterAllowAction, // Workload endpoint chains are only used in the filter table
-			dropEncap,
-			true,
+			r.newWorkloadEndpointIptablesChainOptions(ifaceName, trafficFromTheEndpoint, adminUp, dropEncap),
 		),
 	)
 
@@ -100,61 +84,25 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 		r.endpointIptablesChain(
 			egressPolicyNames,
 			profileIDs,
-			ifaceName,
-			PolicyOutboundPfx,
-			ProfileOutboundPfx,
-			HostToEndpointPfx,
-			ChainFailsafeOut,
-			chainTypeNormal,
-			true, // Host endpoints are always admin up.
-			r.filterAllowAction,
-			dontDropEncap,
-			defaultDropWhenNoPolicy,
+			r.newHostEndpointIptablesChainOptions(ifaceName, trafficToTheEndpoint, chainTypeNormal, defaultDropWhenNoPolicy),
 		),
 		// Chain for input traffic _from_ the endpoint.
 		r.endpointIptablesChain(
 			ingressPolicyNames,
 			profileIDs,
-			ifaceName,
-			PolicyInboundPfx,
-			ProfileInboundPfx,
-			HostFromEndpointPfx,
-			ChainFailsafeIn,
-			chainTypeNormal,
-			true, // Host endpoints are always admin up.
-			r.filterAllowAction,
-			dontDropEncap,
-			defaultDropWhenNoPolicy,
+			r.newHostEndpointIptablesChainOptions(ifaceName, trafficFromTheEndpoint, chainTypeNormal, defaultDropWhenNoPolicy),
 		),
 		// Chain for forward traffic _to_ the endpoint.
 		r.endpointIptablesChain(
 			egressForwardPolicyNames,
 			profileIDs,
-			ifaceName,
-			PolicyOutboundPfx,
-			ProfileOutboundPfx,
-			HostToEndpointForwardPfx,
-			"", // No fail-safe chains for forward traffic.
-			chainTypeForward,
-			true, // Host endpoints are always admin up.
-			r.filterAllowAction,
-			dontDropEncap,
-			defaultDropWhenNoPolicy,
+			r.newHostEndpointIptablesChainOptions(ifaceName, trafficToTheEndpoint, chainTypeForward, defaultDropWhenNoPolicy),
 		),
 		// Chain for forward traffic _from_ the endpoint.
 		r.endpointIptablesChain(
 			ingressForwardPolicyNames,
 			profileIDs,
-			ifaceName,
-			PolicyInboundPfx,
-			ProfileInboundPfx,
-			HostFromEndpointForwardPfx,
-			"", // No fail-safe chains for forward traffic.
-			chainTypeForward,
-			true, // Host endpoints are always admin up.
-			r.filterAllowAction,
-			dontDropEncap,
-			defaultDropWhenNoPolicy,
+			r.newHostEndpointIptablesChainOptions(ifaceName, trafficFromTheEndpoint, chainTypeForward, defaultDropWhenNoPolicy),
 		),
 	)
 
@@ -182,32 +130,14 @@ func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 		// Chain for traffic _to_ the endpoint.
 		r.endpointIptablesChain(
 			egressPolicyNames,
-			nil, // We don't render profiles into the raw table.
-			ifaceName,
-			PolicyOutboundPfx,
-			ProfileOutboundPfx,
-			HostToEndpointPfx,
-			ChainFailsafeOut,
-			chainTypeUntracked,
-			true, // Host endpoints are always admin up.
-			AcceptAction{},
-			dontDropEncap,
-			false,
+			nil,
+			r.newHostEndpointIptablesChainOptions(ifaceName, trafficToTheEndpoint, chainTypeUntracked, false),
 		),
 		// Chain for traffic _from_ the endpoint.
 		r.endpointIptablesChain(
 			ingressPolicyNames,
-			nil, // We don't render profiles into the raw table.
-			ifaceName,
-			PolicyInboundPfx,
-			ProfileInboundPfx,
-			HostFromEndpointPfx,
-			ChainFailsafeIn,
-			chainTypeUntracked,
-			true, // Host endpoints are always admin up.
-			AcceptAction{},
-			dontDropEncap,
-			false,
+			nil,
+			r.newHostEndpointIptablesChainOptions(ifaceName, trafficFromTheEndpoint, chainTypeUntracked, true),
 		),
 	}
 }
@@ -222,17 +152,8 @@ func (r *DefaultRuleRenderer) HostEndpointToMangleChains(
 		// outgoing traffic through a host endpoint.
 		r.endpointIptablesChain(
 			preDNATPolicyNames,
-			nil, // We don't render profiles into the raw table.
-			ifaceName,
-			PolicyInboundPfx,
-			ProfileInboundPfx,
-			HostFromEndpointPfx,
-			ChainFailsafeIn,
-			chainTypePreDNAT,
-			true, // Host endpoints are always admin up.
-			r.mangleAllowAction,
-			dontDropEncap,
-			false,
+			nil,
+			r.newHostEndpointIptablesChainOptions(ifaceName, trafficFromTheEndpoint, chainTypePreDNAT, false),
 		),
 	}
 }
@@ -268,24 +189,118 @@ func (r *DefaultRuleRenderer) endpointSetMarkChain(
 	}
 }
 
+// endpointChainOptions are options for the endpointIptablesChain method.
+type endpointIptablesChainOptions struct {
+	ifaceName               string
+	policyPrefix            PolicyChainNamePrefix
+	profilePrefix           ProfileChainNamePrefix
+	endpointPrefix          string
+	failsafeChainTarget     string
+	chainType               endpointChainType
+	interfaceIsAdminUp      bool
+	allowAction             Action
+	dropEncap               bool
+	defaultDropWhenNoPolicy bool
+}
+
+// newWorkloadEndpointIptablesChainOptions returns a set of options to create
+// a workload endpoint chain. It's used by the endpointIptablesChain method.
+func (r *DefaultRuleRenderer) newWorkloadEndpointIptablesChainOptions(ifaceName string, direction string, ifaceIsAdminUp bool, dropEncap bool) *endpointIptablesChainOptions {
+	var policyPrefix PolicyChainNamePrefix
+	var profilePrefix ProfileChainNamePrefix
+	var endpointPrefix string
+
+	if direction == trafficToTheEndpoint {
+		// Chain for input traffic _to_ the endpoint.
+		policyPrefix = PolicyInboundPfx
+		profilePrefix = ProfileInboundPfx
+		endpointPrefix = WorkloadToEndpointPfx
+	} else if direction == trafficFromTheEndpoint {
+		// Chain for output traffic _from_ the endpoint.
+		policyPrefix = PolicyOutboundPfx
+		profilePrefix = ProfileOutboundPfx
+		endpointPrefix = WorkloadFromEndpointPfx
+	}
+
+	return &endpointIptablesChainOptions{
+		ifaceName,
+		policyPrefix,
+		profilePrefix,
+		endpointPrefix,
+		"", // No fail-safe chains for workloads.
+		chainTypeNormal,
+		ifaceIsAdminUp,
+		r.filterAllowAction, // Use the configured Allow action in the rule renderer.
+		dropEncap,
+		true, // defaultDropWhenNoPolicy defaults to true.
+	}
+}
+
+// newHostEndpointIptablesChainOptions returns a set of options to create a host
+// endpoint chain. It's used by the endpointIptablesChain method.
+func (r *DefaultRuleRenderer) newHostEndpointIptablesChainOptions(ifaceName string, direction string, chainType endpointChainType, defaultDropWhenNoPolicy bool) *endpointIptablesChainOptions {
+	var policyPrefix PolicyChainNamePrefix
+	var profilePrefix ProfileChainNamePrefix
+	var endpointPrefix, failsafeChainTarget string
+
+	// Set prefixes based off of the traffic direction.
+	// Also set the fail-safe chain target if this is not the forward chain.
+	if direction == trafficFromTheEndpoint {
+		// Chain for input traffic _from_ the endpoint.
+		policyPrefix = PolicyInboundPfx
+		profilePrefix = ProfileInboundPfx
+
+		if chainType == chainTypeForward {
+			endpointPrefix = HostFromEndpointForwardPfx
+		} else {
+			endpointPrefix = HostFromEndpointPfx
+			failsafeChainTarget = ChainFailsafeIn
+		}
+
+	} else if direction == trafficToTheEndpoint {
+		// Chain for input traffic _to the endpoint.
+		policyPrefix = PolicyOutboundPfx
+		profilePrefix = ProfileOutboundPfx
+
+		if chainType == chainTypeForward {
+			endpointPrefix = HostToEndpointForwardPfx
+		} else {
+			endpointPrefix = HostToEndpointPfx
+			failsafeChainTarget = ChainFailsafeOut
+		}
+	}
+
+	allowAction := r.filterAllowAction
+	if chainType == chainTypeUntracked {
+		allowAction = AcceptAction{}
+	}
+	if chainType == chainTypePreDNAT {
+		allowAction = r.mangleAllowAction
+	}
+
+	return &endpointIptablesChainOptions{
+		ifaceName,
+		policyPrefix,
+		profilePrefix,
+		endpointPrefix,
+		failsafeChainTarget,
+		chainType,
+		true, // interfaceIsAdminUp defaults to true.
+		allowAction,
+		dontDropEncap,
+		defaultDropWhenNoPolicy, // defaultDropWhenNoPolicy
+	}
+}
+
 func (r *DefaultRuleRenderer) endpointIptablesChain(
 	policyNames []string,
 	profileIds []string,
-	name string,
-	policyPrefix PolicyChainNamePrefix,
-	profilePrefix ProfileChainNamePrefix,
-	endpointPrefix string,
-	failsafeChain string,
-	chainType endpointChainType,
-	adminUp bool,
-	allowAction Action,
-	dropEncap bool,
-	defaultDropWhenNoPolicy bool,
+	options *endpointIptablesChainOptions,
 ) *Chain {
 	rules := []Rule{}
-	chainName := EndpointChainName(endpointPrefix, name)
+	chainName := EndpointChainName(options.endpointPrefix, options.ifaceName)
 
-	if !adminUp {
+	if !options.interfaceIsAdminUp {
 		// Endpoint is admin-down, drop all traffic to/from it.
 		rules = append(rules, Rule{
 			Match:   Match(),
@@ -298,16 +313,16 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		}
 	}
 
-	if chainType != chainTypeUntracked {
+	if options.chainType != chainTypeUntracked {
 		// Tracked chain: install conntrack rules, which implement our stateful connections.
 		// This allows return traffic associated with a previously-permitted request.
-		rules = r.appendConntrackRules(rules, allowAction)
+		rules = r.appendConntrackRules(rules, options.allowAction)
 	}
 
 	// First set up failsafes.
-	if failsafeChain != "" {
+	if options.failsafeChainTarget != "" {
 		rules = append(rules, Rule{
-			Action: JumpAction{Target: failsafeChain},
+			Action: JumpAction{Target: options.failsafeChainTarget},
 		})
 	}
 
@@ -319,7 +334,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		},
 	})
 
-	if dropEncap {
+	if options.dropEncap {
 		rules = append(rules, Rule{
 			Match: Match().ProtocolNum(ProtoUDP).
 				DestPorts(uint16(r.Config.VXLANPort)),
@@ -346,7 +361,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		// Then, jump to each policy in turn.
 		for _, polID := range policyNames {
 			polChainName := PolicyChainName(
-				policyPrefix,
+				options.policyPrefix,
 				&proto.PolicyID{Name: polID},
 			)
 
@@ -357,7 +372,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 			})
 			// If policy marked packet as accepted, it returns, setting the accept
 			// mark bit.
-			if chainType == chainTypeUntracked {
+			if options.chainType == chainTypeUntracked {
 				// For an untracked policy, map allow to "NOTRACK and ALLOW".
 				rules = append(rules, Rule{
 					Match:  Match().MarkSingleBitSet(r.IptablesMarkAccept),
@@ -373,7 +388,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 			})
 		}
 
-		if chainType == chainTypeNormal || chainType == chainTypeForward {
+		if options.chainType == chainTypeNormal || options.chainType == chainTypeForward {
 			// When rendering normal and forward rules, if no policy marked the packet as "pass", drop the
 			// packet.
 			//
@@ -386,7 +401,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 			})
 		}
 
-	} else if chainType == chainTypeForward {
+	} else if options.chainType == chainTypeForward {
 		// Forwarded traffic is allowed when there are no policies with
 		// applyOnForward that apply to this endpoint (and in this direction).
 		rules = append(rules, Rule{
@@ -399,10 +414,10 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		})
 	}
 
-	if chainType == chainTypeNormal {
+	if options.chainType == chainTypeNormal {
 		// Then, jump to each profile in turn.
 		for _, profileID := range profileIds {
-			profChainName := ProfileChainName(profilePrefix, &proto.ProfileID{Name: profileID})
+			profChainName := ProfileChainName(options.profilePrefix, &proto.ProfileID{Name: profileID})
 			rules = append(rules,
 				Rule{Action: JumpAction{Target: profChainName}},
 				// If policy marked packet as accepted, it returns, setting the
@@ -423,7 +438,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		// For the wildcard HEP, we allow when there is no policy, because wildcard HEPs
 		// were previously implemented only for pre-DNAT policy and so had no interaction
 		// with normal policy.
-		if defaultDropWhenNoPolicy {
+		if options.defaultDropWhenNoPolicy {
 			rules = append(rules, Rule{
 				Match:   Match(),
 				Action:  DropAction{},
