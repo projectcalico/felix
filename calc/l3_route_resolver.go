@@ -94,6 +94,9 @@ func (c *L3RouteResolver) RegisterWith(allUpdDispatcher *dispatcher.Dispatcher) 
 }
 
 func (c *L3RouteResolver) OnBlockUpdate(update api.Update) (_ bool) {
+	// Queue up a flush.
+	defer c.flush()
+
 	// Update the routes map based on the provided block update.
 	key := update.Key.String()
 
@@ -171,8 +174,6 @@ func (c *L3RouteResolver) OnBlockUpdate(update api.Update) (_ bool) {
 		}
 		delete(c.blockToRoutes, key)
 	}
-
-	c.flush()
 	return
 }
 
@@ -182,6 +183,9 @@ func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 	if resourceKey.Kind != apiv3.KindNode {
 		return
 	}
+
+	// Queue up a flush.
+	defer c.flush()
 
 	// Extract the nodename and check whether the node was known already.
 	nodeName := update.Key.(model.ResourceKey).Name
@@ -239,8 +243,6 @@ func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 			})
 		}
 	}
-
-	c.flush()
 	return
 }
 
@@ -255,6 +257,9 @@ func safeCIDRsEqual(a *cnet.IPNet, b *cnet.IPNet) bool {
 
 // OnHostIPUpdate gets called whenever a node IP address changes.
 func (c *L3RouteResolver) OnHostIPUpdate(update api.Update) (_ bool) {
+	// Queue up a flush.
+	defer c.flush()
+
 	nodeName := update.Key.(model.HostIPKey).Hostname
 	logrus.WithField("node", nodeName).Debug("OnHostIPUpdate triggered")
 
@@ -263,8 +268,6 @@ func (c *L3RouteResolver) OnHostIPUpdate(update api.Update) (_ bool) {
 	} else {
 		c.onRemoveNode(nodeName)
 	}
-
-	c.flush()
 	return
 }
 
@@ -323,6 +326,9 @@ func (c *L3RouteResolver) visitAllRoutes(v func(route nodenameRoute)) {
 
 // OnPoolUpdate gets called whenever an IP pool changes.
 func (c *L3RouteResolver) OnPoolUpdate(update api.Update) (_ bool) {
+	// Queue up a flush.
+	defer c.flush()
+
 	k := update.Key.(model.IPPoolKey)
 	poolKey := k.String()
 	oldPool, oldPoolExists := c.allPools[poolKey]
@@ -359,8 +365,6 @@ func (c *L3RouteResolver) OnPoolUpdate(update api.Update) (_ bool) {
 	}
 
 	c.markAllRoutesInCIDRDirty(poolCIDR)
-
-	c.flush()
 	return
 }
 
@@ -427,6 +431,8 @@ func (c *L3RouteResolver) routesFromBlock(b *model.AllocationBlock) map[string]n
 	return routes
 }
 
+// flush() iterates over the CIDRs that are marked dirty in the trie and sends any route updates
+// that it finds.
 func (c *L3RouteResolver) flush() {
 	var buf []ip.V4TrieEntry
 	c.trie.dirtyCIDRs.Iter(func(item interface{}) error {
@@ -521,6 +527,8 @@ func (c *L3RouteResolver) flush() {
 	})
 }
 
+// nodeInOurSubnet returns true if the IP of the given node is known and it's in our subnet.
+// Return false if either the remote IP or our subnet is not known.
 func (c *L3RouteResolver) nodeInOurSubnet(name string) bool {
 	localNodeCidr, err := c.nodeCidr(c.myNodeName)
 	if err != nil {
