@@ -89,7 +89,7 @@ func Run(c *infrastructure.Felix, name, profile, ip, ports, protocol string) (w 
 	return w
 }
 
-func run(c *infrastructure.Felix, name, profile, ip, ports, protocol string) (w *Workload, err error) {
+func New(c *infrastructure.Felix, name, profile, ip, ports, protocol string) *Workload {
 	workloadIdx++
 	n := fmt.Sprintf("%s-idx%v", name, workloadIdx)
 	interfaceName := conversion.VethNameForWorkload(profile, n)
@@ -98,7 +98,8 @@ func run(c *infrastructure.Felix, name, profile, ip, ports, protocol string) (w 
 	}
 	// Build unique workload name and struct.
 	workloadIdx++
-	w = &Workload{
+
+	return &Workload{
 		C:             c.Container,
 		Name:          n,
 		InterfaceName: interfaceName,
@@ -106,6 +107,12 @@ func run(c *infrastructure.Felix, name, profile, ip, ports, protocol string) (w 
 		Ports:         ports,
 		Protocol:      protocol,
 	}
+}
+
+func run(c *infrastructure.Felix, name, profile, ip, ports, protocol string) (w *Workload, err error) {
+
+	w = New(c, name, profile, ip, ports, protocol)
+	n := w.Name
 
 	// Ensure that the host has the 'test-workload' binary.
 	w.C.EnsureBinary("test-workload")
