@@ -178,7 +178,7 @@ type RuleRenderer interface {
 		hepEndpoints map[string]proto.HostEndpointID,
 	) []*iptables.Chain
 
-	HostDispatchChains(map[string]proto.HostEndpointID, bool) []*iptables.Chain
+	HostDispatchChains(map[string]proto.HostEndpointID, string, bool) []*iptables.Chain
 	FromHostDispatchChains(map[string]proto.HostEndpointID, string) []*iptables.Chain
 	HostEndpointToFilterChains(
 		ifaceName string,
@@ -188,6 +188,7 @@ type RuleRenderer interface {
 		ingressForwardPolicyNames []string,
 		egressForwardPolicyNames []string,
 		profileIDs []string,
+		defaultDropWhenNoPolicy bool,
 	) []*iptables.Chain
 	HostEndpointToRawChains(
 		ifaceName string,
