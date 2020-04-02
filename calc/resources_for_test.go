@@ -596,6 +596,14 @@ var ipPoolWithIPIP = IPPool{
 	IPIPMode: encap.Always,
 }
 
+var v6IPPoolKey = IPPoolKey{
+	CIDR: mustParseNet("feed:beef::/64"),
+}
+
+var v6IPPool = IPPool{
+	CIDR:     mustParseNet("feed:beef::/64"),
+}
+
 var ipPoolWithVXLAN = IPPool{
 	CIDR:      mustParseNet("10.0.0.0/16"),
 	VXLANMode: encap.Always,
@@ -603,6 +611,10 @@ var ipPoolWithVXLAN = IPPool{
 
 var remoteIPAMBlockKey = BlockKey{
 	CIDR: mustParseNet("10.0.1.0/29"),
+}
+
+var remotev6IPAMBlockKey = BlockKey{
+	CIDR: mustParseNet("feed:beef:0001::/96"),
 }
 
 var localIPAMBlockKey = BlockKey{
@@ -614,6 +626,12 @@ var remoteHostAffinity = "host:" + remoteHostname
 var remoteHost2Affinity = "host:" + remoteHostname2
 var remoteIPAMBlock = AllocationBlock{
 	CIDR:        mustParseNet("10.0.1.0/29"),
+	Affinity:    &remoteHostAffinity,
+	Allocations: make([]*int, 8),
+	Unallocated: []int{0, 1, 2, 3, 4, 5, 6, 7},
+}
+var remotev6IPAMBlock = AllocationBlock{
+	CIDR:        mustParseNet("feed:beef:0001::/96"),
 	Affinity:    &remoteHostAffinity,
 	Allocations: make([]*int, 8),
 	Unallocated: []int{0, 1, 2, 3, 4, 5, 6, 7},
