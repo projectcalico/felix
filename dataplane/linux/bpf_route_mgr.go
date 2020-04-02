@@ -438,6 +438,13 @@ func (m *bpfRouteManager) onRouteUpdate(update *proto.RouteUpdate) {
 	}
 	key := routes.NewKey(v4CIDR)
 
+	if update.DstNodeIP == "" {
+		// Calc graph doesn't know the node's IP yet or the IP has been removed, clean up
+		// the route.
+		m.removeRoute(v4CIDR)
+		return
+	}
+
 	nextHop := ip.MustParseCIDROrIP(update.DstNodeIP)
 	v4NextHop, ok := nextHop.(ip.V4CIDR)
 	if !ok {
@@ -470,6 +477,10 @@ func (m *bpfRouteManager) onRouteRemove(update *proto.RouteRemove) {
 		// FIXME IPv6
 		return
 	}
+	m.removeRoute(v4CIDR)
+}
+
+func (m *bpfRouteManager) removeRoute(v4CIDR ip.V4CIDR) {
 	key := routes.NewKey(v4CIDR)
 	if _, ok := m.desiredRoutes[key]; ok {
 		delete(m.desiredRoutes, key)
