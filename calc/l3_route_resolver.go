@@ -16,6 +16,7 @@ package calc
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -107,7 +108,7 @@ func (c *L3RouteResolver) OnBlockUpdate(update api.Update) (_ bool) {
 		// We don't allow multiple blocks with the same CIDR, so no need to check
 		// for duplicates here. Look at the routes contributed by this block and determine if we
 		// need to send any updates.
-		newRoutes := c.routesFromBlock(update.Value.(*model.AllocationBlock))
+		newRoutes := c.v4RoutesFromBlock(update.Value.(*model.AllocationBlock))
 		logrus.WithField("numRoutes", len(newRoutes)).Debug("IPAM block update")
 		cachedRoutes, ok := c.blockToRoutes[key]
 		if !ok {
@@ -148,17 +149,16 @@ func (c *L3RouteResolver) OnBlockUpdate(update api.Update) (_ bool) {
 			adds.Add(r)
 		}
 
-		// At this point we've determined the correct diff to perform based on the block update.
-		// Delete any routes which are gone for good, withdraw modified routes, and send updates for
-		// new ones.
+		// At this point we've determined the correct diff to perform based on the block update. Queue up
+		// updates.
 		deletes.Iter(func(item interface{}) error {
 			nr := item.(nodenameRoute)
-			c.trie.RemoveBlockRoute(nr.dst.(ip.V4CIDR))
+			c.trie.RemoveBlockRoute(nr.dst)
 			return nil
 		})
 		adds.Iter(func(item interface{}) error {
 			nr := item.(nodenameRoute)
-			c.trie.UpdateBlockRoute(nr.dst.(ip.V4CIDR), nr.nodeName)
+			c.trie.UpdateBlockRoute(nr.dst, nr.nodeName)
 			return nil
 		})
 	} else {
@@ -168,7 +168,7 @@ func (c *L3RouteResolver) OnBlockUpdate(update api.Update) (_ bool) {
 		if routes != nil {
 			routes.Iter(func(item interface{}) error {
 				nr := item.(nodenameRoute)
-				c.trie.RemoveBlockRoute(nr.dst.(ip.V4CIDR))
+				c.trie.RemoveBlockRoute(nr.dst)
 				return nil
 			})
 		}
@@ -238,7 +238,7 @@ func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 				nowSameSubnet := myNewCIDR != nil && myNewCIDR.Contains(otherNodesCIDR.IP)
 				if wasSameSubnet != nowSameSubnet {
 					logrus.WithField("route", r).Debug("Update to our subnet invalidated route")
-					c.trie.MarkCIDRDirty(r.dst.(ip.V4CIDR))
+					c.trie.MarkCIDRDirty(r.dst)
 				}
 			})
 		}
@@ -273,6 +273,12 @@ func (c *L3RouteResolver) OnHostIPUpdate(update api.Update) (_ bool) {
 
 func (c *L3RouteResolver) onNodeIPUpdate(nodeName string, newIP string) {
 	logCxt := logrus.WithFields(logrus.Fields{"node": nodeName, "newIP": newIP})
+
+	if strings.Contains(newIP, ":") {
+		logrus.Debug("Ignoring IPv6 address for node")
+		newIP = ""
+	}
+
 	oldIP := c.nodeNameToIPAddr[nodeName]
 	if oldIP == newIP {
 		logCxt.Debug("IP update but IP is unchanged, ignoring")
@@ -302,16 +308,7 @@ func (c *L3RouteResolver) markAllNodeRoutesDirty(nodeName string) {
 		if route.nodeName != nodeName {
 			return
 		}
-		c.trie.MarkCIDRDirty(route.dst.(ip.V4CIDR))
-	})
-}
-
-func (c *L3RouteResolver) markAllRoutesInCIDRDirty(cidr ip.V4CIDR) {
-	c.visitAllRoutes(func(route nodenameRoute) {
-		if !cidr.ContainsV4(route.dst.Addr().(ip.V4Addr)) {
-			return
-		}
-		c.trie.MarkCIDRDirty(route.dst.(ip.V4CIDR))
+		c.trie.MarkCIDRDirty(route.dst)
 	})
 }
 
@@ -342,17 +339,13 @@ func (c *L3RouteResolver) OnPoolUpdate(update api.Update) (_ bool) {
 	var newPool *model.IPPool
 	if update.Value != nil {
 		newPool = update.Value.(*model.IPPool)
+		if len(newPool.CIDR.IP.To4()) == 0 {
+			logrus.Debug("Ignoring IPv6 pool")
+			newPool = nil
+		}
 	}
 	newPoolType := c.poolTypeForPool(newPool)
-
-	if oldPoolType == newPoolType {
-		logrus.WithField("poolType", newPoolType).Debug(
-			"Ignoring change to IPPool that didn't change pool type.")
-		return
-	}
-
 	logCxt := logrus.WithFields(logrus.Fields{"oldType": oldPoolType, "newType": newPoolType})
-
 	if newPool != nil && newPoolType != proto.IPPoolType_NONE {
 		logCxt.Info("Pool is active")
 		c.allPools[poolKey] = *newPool
@@ -364,7 +357,6 @@ func (c *L3RouteResolver) OnPoolUpdate(update api.Update) (_ bool) {
 		c.trie.RemovePool(poolCIDR)
 	}
 
-	c.markAllRoutesInCIDRDirty(poolCIDR)
 	return
 }
 
@@ -381,11 +373,15 @@ func (c *L3RouteResolver) poolTypeForPool(pool *model.IPPool) proto.IPPoolType {
 	return proto.IPPoolType_NO_ENCAP
 }
 
-// routesFromBlock returns a list of routes which should exist based on the provided
+// v4RoutesFromBlock returns a list of routes which should exist based on the provided
 // allocation block.
-func (c *L3RouteResolver) routesFromBlock(b *model.AllocationBlock) map[string]nodenameRoute {
-	routes := make(map[string]nodenameRoute)
+func (c *L3RouteResolver) v4RoutesFromBlock(b *model.AllocationBlock) map[string]nodenameRoute {
+	if len(b.CIDR.IP.To4()) == 0 {
+		logrus.Debug("Ignoring IPv6 block")
+		return nil
+	}
 
+	routes := make(map[string]nodenameRoute)
 	for _, alloc := range b.NonAffineAllocations() {
 		if alloc.Host == "" {
 			logrus.WithField("IP", alloc.Addr).Warn(
@@ -393,7 +389,7 @@ func (c *L3RouteResolver) routesFromBlock(b *model.AllocationBlock) map[string]n
 			continue
 		}
 		r := nodenameRoute{
-			dst:      ip.CIDRFromNetIP(alloc.Addr.IP),
+			dst:      ip.CIDRFromNetIP(alloc.Addr.IP).(ip.V4CIDR),
 			nodeName: alloc.Host,
 		}
 		routes[r.Key()] = r
@@ -403,7 +399,7 @@ func (c *L3RouteResolver) routesFromBlock(b *model.AllocationBlock) map[string]n
 	if host != "" {
 		logrus.WithField("host", host).Debug("Block has a host, including block-via-host route")
 		r := nodenameRoute{
-			dst:      ip.CIDRFromCalicoNet(b.CIDR),
+			dst:      ip.CIDRFromCalicoNet(b.CIDR).(ip.V4CIDR),
 			nodeName: host,
 		}
 		routes[r.Key()] = r
@@ -547,7 +543,7 @@ func (c *L3RouteResolver) nodeCidr(nodeName string) (*cnet.IPNet, error) {
 // nodenameRoute is the L3RouteResolver's internal representation of a route.
 type nodenameRoute struct {
 	nodeName string
-	dst      ip.CIDR
+	dst      ip.V4CIDR
 }
 
 func (r nodenameRoute) Key() string {

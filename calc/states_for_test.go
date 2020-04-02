@@ -938,6 +938,11 @@ var vxlanWithBlock = empty.withKVUpdates(
 	},
 )
 
+var vxlanWithIPv6Resources = vxlanWithBlock.withKVUpdates(
+	KVPair{Key: v6IPPoolKey, Value: &v6IPPool},
+	KVPair{Key: remotev6IPAMBlockKey, Value: &remotev6IPAMBlock},
+).withName("VXLAN with IPv6")
+
 // Minimal VXLAN set-up with a MAC address.
 var vxlanWithMAC = vxlanWithBlock.withKVUpdates(
 	KVPair{Key: remoteHostVXLANTunnelMACConfigKey, Value: remoteHostVXLANTunnelMAC},

@@ -269,6 +269,10 @@ var baseTests = []StateList{
 
 		// Add it back again.
 		vxlanWithBlock,
+
+		// Adding/removing IPv6 pool should cause no problems.
+		vxlanWithIPv6Resources,
+		vxlanWithBlock,
 	},
 	{
 		// This sequence switches the IP pool between VXLAN and IPIP.
