@@ -133,10 +133,10 @@ func TestICMPRelatedNATPodPod(t *testing.T) {
 	runBpfTest(t, "calico_to_workload_ep", rulesAllowUDP, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(icmpUNreachable)
 		Expect(err).NotTo(HaveOccurred())
-		// we have a normal ct record, it is related, must be allowe
+		// we have a normal ct record, it is related, must be allowed
 		Expect(res.Retval).To(Equal(resTC_ACT_UNSPEC))
 
-		checkICMP(res.dataOut, ipv4.SrcIP, ipv4.SrcIP, ipv4.DstIP, ipv4.Protocol,
+		checkICMP(res.dataOut, hostIP, ipv4.SrcIP, ipv4.SrcIP, ipv4.DstIP, ipv4.Protocol,
 			uint16(udp.SrcPort), uint16(udp.DstPort))
 	})
 }
@@ -164,7 +164,7 @@ func TestICMPRelatedFromHost(t *testing.T) {
 		// we have a normal ct record, it is related, must be allowed
 		Expect(res.Retval).To(Equal(resTC_ACT_UNSPEC))
 
-		checkICMP(res.dataOut, ipv4.SrcIP, ipv4.SrcIP, ipv4.DstIP, ipv4.Protocol,
+		checkICMP(res.dataOut, hostIP, ipv4.SrcIP, ipv4.SrcIP, ipv4.DstIP, ipv4.Protocol,
 			uint16(udp.SrcPort), uint16(udp.DstPort))
 	})
 }
@@ -226,7 +226,7 @@ func TestICMPRelatedFromHostBeforeNAT(t *testing.T) {
 		// we have a normal ct record, it is related, must be allowed
 		Expect(res.Retval).To(Equal(resTC_ACT_UNSPEC))
 
-		checkICMP(res.dataOut, ipv4.SrcIP, ipv4.SrcIP, ipv4.DstIP, ipv4.Protocol,
+		checkICMP(res.dataOut, hostIP, ipv4.SrcIP, ipv4.SrcIP, ipv4.DstIP, ipv4.Protocol,
 			uint16(udp.SrcPort), uint16(udp.DstPort))
 	})
 }
@@ -266,7 +266,7 @@ func makeICMPError(ipInner *layers.IPv4, l4 gopacket.SerializableLayer, icmpType
 	return pkt.Bytes()
 }
 
-func checkICMP(bytes []byte, origSrc, innerSrc, innerDst net.IP,
+func checkICMP(bytes []byte, outSrc, outDst, innerSrc, innerDst net.IP,
 	innerProto layers.IPProtocol, innerPortSrc, innerPortDst uint16) {
 
 	icmpPkt := gopacket.NewPacket(bytes, layers.LayerTypeEthernet, gopacket.Default)
@@ -275,7 +275,8 @@ func checkICMP(bytes []byte, origSrc, innerSrc, innerDst net.IP,
 	Expect(ipv4L).NotTo(BeNil())
 	ipv4R := ipv4L.(*layers.IPv4)
 
-	Expect(ipv4R.DstIP.String()).To(Equal(origSrc.String()))
+	Expect(ipv4R.SrcIP.String()).To(Equal(outSrc.String()))
+	Expect(ipv4R.DstIP.String()).To(Equal(outDst.String()))
 
 	payloadL := icmpPkt.ApplicationLayer()
 	Expect(payloadL).NotTo(BeNil())
