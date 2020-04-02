@@ -93,15 +93,20 @@ func (t *TCPDump) MatchCount(name string) int {
 	return c
 }
 
-func (t *TCPDump) Start() {
+func (t *TCPDump) Start(expr ...string) {
 	// docker run --rm --network=container:48b6c5f44d57 --privileged corfr/tcpdump -nli cali01
 
-	t.cmd = utils.Command("docker", "run",
+	args := []string{
+		"run",
 		"--rm",
 		fmt.Sprintf("--network=container:%s", t.containerID),
 		"--privileged",
 		"corfr/tcpdump", "-nli", t.iface,
-	)
+	}
+
+	args = append(args, expr...)
+
+	t.cmd = utils.Command("docker", args...)
 	var err error
 	t.out, err = t.cmd.StdoutPipe()
 	Expect(err).NotTo(HaveOccurred())
