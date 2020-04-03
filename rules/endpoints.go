@@ -91,7 +91,6 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 	ingressForwardPolicyNames []string,
 	egressForwardPolicyNames []string,
 	profileIDs []string,
-	defaultDropWhenNoPolicy bool,
 ) []*Chain {
 	log.WithField("ifaceName", ifaceName).Debug("Rendering filter host endpoint chain.")
 	result := []*Chain{}
@@ -109,7 +108,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
-			defaultDropWhenNoPolicy,
+			false,
 		),
 		// Chain for input traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -124,7 +123,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
-			defaultDropWhenNoPolicy,
+			false,
 		),
 		// Chain for forward traffic _to_ the endpoint.
 		r.endpointIptablesChain(
@@ -139,7 +138,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
-			defaultDropWhenNoPolicy,
+			true,
 		),
 		// Chain for forward traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -154,7 +153,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
-			defaultDropWhenNoPolicy,
+			false,
 		),
 	)
 
@@ -280,7 +279,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 	adminUp bool,
 	allowAction Action,
 	dropEncap bool,
-	defaultDropWhenNoPolicy bool,
+	_ bool,
 ) *Chain {
 	rules := []Rule{}
 	chainName := EndpointChainName(endpointPrefix, name)
@@ -414,31 +413,18 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 				})
 		}
 
-		// When rendering normal rules, except for the wildcard HEP, drop the packet if no
-		// policy or profile allowed it.
+		// When rendering normal rules, if no profile marked the packet as accepted, drop
+		// the packet.
 		//
-		// For untracked and pre-DNAT rules, we don't do that because there may be tracked
-		// rules still to be applied to the packet in the filter table.
-		//
-		// For the wildcard HEP, we allow when there is no policy, because wildcard HEPs
-		// were previously implemented only for pre-DNAT policy and so had no interaction
-		// with normal policy.
-		if defaultDropWhenNoPolicy {
-			rules = append(rules, Rule{
-				Match:   Match(),
-				Action:  DropAction{},
-				Comment: []string{"Drop if no profiles matched"},
-			})
-		} else {
-			rules = append(rules, Rule{
-				Action:  SetMarkAction{Mark: r.IptablesMarkAccept},
-				Comment: []string{"Allow traffic by default"},
-			})
-			rules = append(rules, Rule{
-				Action:  ReturnAction{},
-				Comment: []string{"Return for allowed traffic"},
-			})
-		}
+		// For untracked rules, we don't do that because there may be tracked rules
+		// still to be applied to the packet in the filter table.
+		//if dropIfNoProfilesMatched {
+		rules = append(rules, Rule{
+			Match:   Match(),
+			Action:  DropAction{},
+			Comment: []string{"Drop if no profiles matched"},
+		})
+		//}
 	}
 
 	return &Chain{

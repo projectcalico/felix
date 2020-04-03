@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -275,7 +275,7 @@ var _ = Describe("Endpoints", func() {
 					epMarkMapper,
 					[]string{"ai", "bi"}, []string{"ae", "be"},
 					[]string{"afi", "bfi"}, []string{"afe", "bfe"},
-					[]string{"prof1", "prof2"}, true)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+					[]string{"prof1", "prof2"})).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
 					{
 						Name: "cali-th-eth0",
 						Rules: []Rule{

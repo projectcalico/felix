@@ -188,7 +188,6 @@ type RuleRenderer interface {
 		ingressForwardPolicyNames []string,
 		egressForwardPolicyNames []string,
 		profileIDs []string,
-		defaultDropWhenNoPolicy bool,
 	) []*iptables.Chain
 	HostEndpointToRawChains(
 		ifaceName string,
