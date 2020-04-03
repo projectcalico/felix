@@ -170,31 +170,6 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 			})
 
 			expectWorkloadToWorkloadAndHostConnectivity()
-
-			It("should not block forwarded traffic if normal policy selects the hostendpoint", func() {
-				policy := api.NewGlobalNetworkPolicy()
-				policy.Name = "deny-normal"
-				order := float64(1)
-				policy.Spec.Order = &order
-				policy.Spec.Selector = "host-endpoint=='true'"
-				policy.Spec.Ingress = []api.Rule{{Action: api.Deny}}
-				policy.Spec.Egress = []api.Rule{{Action: api.Deny}}
-				_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Forwarded traffic is unaffected by the deny-all policy.
-				cc.ExpectSome(w[0], w[1])
-				cc.ExpectSome(w[1], w[0])
-
-				// Traffic originating/terminating on the host is policed by
-				// the deny-all policy.
-				cc.ExpectNone(w[0], hostW[1])
-				cc.ExpectNone(w[1], hostW[0])
-				cc.ExpectNone(hostW[0], w[1])
-				cc.ExpectNone(hostW[1], w[0])
-				cc.ExpectNone(hostW[0], hostW[1])
-				cc.CheckConnectivity()
-			})
 		})
 
 		Context("with all-interfaces host endpoints", func() {
@@ -230,31 +205,6 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 			})
 
 			expectWorkloadToWorkloadAndHostConnectivity()
-
-			It("should not block forwarded traffic if normal policy selects the hostendpoint", func() {
-				order := float64(1)
-				policy := api.NewGlobalNetworkPolicy()
-				policy.Name = "deny-normal"
-				policy.Spec.Selector = "host-endpoint=='true'"
-				policy.Spec.Order = &order
-				policy.Spec.Ingress = []api.Rule{{Action: api.Deny}}
-				policy.Spec.Egress = []api.Rule{{Action: api.Deny}}
-				_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
-				Expect(err).NotTo(HaveOccurred())
-
-				// Forwarded traffic is unaffected by the deny-all policy.
-				cc.ExpectSome(w[0], w[1])
-				cc.ExpectSome(w[1], w[0])
-
-				// Traffic originating/terminating on the host is policed by
-				// the deny-all policy.
-				cc.ExpectNone(w[0], hostW[1])
-				cc.ExpectNone(w[1], hostW[0])
-				cc.ExpectNone(hostW[0], w[1])
-				cc.ExpectNone(hostW[1], w[0])
-				cc.ExpectNone(hostW[0], hostW[1])
-				cc.CheckConnectivity()
-			})
 		})
 	})
 })
