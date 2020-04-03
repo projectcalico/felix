@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/projectcalico/felix/fv/connectivity"
-	"github.com/projectcalico/felix/fv/utils"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -134,7 +133,6 @@ var _ = infrastructure.DatastoreDescribe("VXLAN topology before adding host IPs 
 					}, "10s", "100ms").Should(ContainSubstring("--random-fully"))
 				}
 			})
-
 			It("should have workload to workload connectivity", func() {
 				cc.ExpectSome(w[0], w[1])
 				cc.ExpectSome(w[1], w[0])
@@ -209,85 +207,64 @@ var _ = infrastructure.DatastoreDescribe("VXLAN topology before adding host IPs 
 					}
 				})
 
-				It("should block egress from host => host and host => workload, but allow host => own-workload", func() {
-					// host => host
+				It("should have workload connectivity but not host connectivity", func() {
+					// Host endpoints (with no policies) block host-host traffic due to default drop.
 					cc.ExpectNone(felixes[0], hostW[1])
 					cc.ExpectNone(felixes[1], hostW[0])
 
-					// host => workload
+					// Host => workload is not allowed
 					cc.ExpectNone(felixes[0], w[1])
 					cc.ExpectNone(felixes[1], w[0])
 
-					// host => own-workload
+					// But host => own-workload is allowed
 					cc.ExpectSome(felixes[0], w[0])
 					cc.ExpectSome(felixes[1], w[1])
 
-					// workload to other workloads allowed
+					// But the rules to allow VXLAN between our hosts let the workload traffic through.
 					cc.ExpectSome(w[0], w[1])
 					cc.ExpectSome(w[1], w[0])
-
 					cc.CheckConnectivity()
 				})
 
-				It("should do the same if a pre-dnat allow-all policy is in place", func() {
-					policy := api.NewGlobalNetworkPolicy()
-					policy.Name = "allow-all-prednat"
-					order := float64(20)
-					policy.Spec.Order = &order
-					policy.Spec.PreDNAT = true
-					policy.Spec.ApplyOnForward = true
-					policy.Spec.Ingress = []api.Rule{{Action: api.Allow}}
-					policy.Spec.Selector = "has(host-endpoint)"
-					_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
-					Expect(err).NotTo(HaveOccurred())
+				/*
+					It("should allow felixes[0] to reach felixes[1] if ingress and egress policies are in place", func() {
+						// Create a policy selecting felix[1] that allows egress.
+						policy := api.NewGlobalNetworkPolicy()
+						policy.Name = "f0-egress"
+						policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
+						policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[0].Hostname)
+						_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+						Expect(err).NotTo(HaveOccurred())
 
-					// host => host
-					cc.ExpectNone(felixes[0], hostW[1])
-					cc.ExpectNone(felixes[1], hostW[0])
+						// But there is no policy allowing ingress into felix[1].
+						cc.ExpectNone(felixes[0], hostW[1])
+						cc.ExpectNone(felixes[1], hostW[0])
 
-					// host => workload
-					cc.ExpectNone(felixes[0], w[1])
-					cc.ExpectNone(felixes[1], w[0])
+						// Workload connectivity is unchanged.
+						cc.ExpectSome(w[0], w[1])
+						cc.ExpectSome(w[1], w[0])
+						cc.CheckConnectivity()
 
-					// host => own-workload
-					cc.ExpectSome(felixes[0], w[0])
-					cc.ExpectSome(felixes[1], w[1])
+						cc.ResetExpectations()
 
-					// workload to other workloads allowed
-					cc.ExpectSome(w[0], w[1])
-					cc.ExpectSome(w[1], w[0])
+						// Now add a policy selecting felix[1] that allows ingress.
+						policy = api.NewGlobalNetworkPolicy()
+						policy.Name = "f1-ingress"
+						policy.Spec.Ingress = []api.Rule{{Action: api.Allow}}
+						policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[1].Hostname)
+						_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+						Expect(err).NotTo(HaveOccurred())
 
-					cc.CheckConnectivity()
-				})
+						// Now felixes[0] can reach felixes[1].
+						cc.ExpectSome(felixes[0], hostW[1])
+						cc.ExpectNone(felixes[1], hostW[0])
 
-				It("should allow all traffic if a normal allow-all policy is then added", func() {
-					policy := api.NewGlobalNetworkPolicy()
-					policy.Name = "allow-all-egress-normal"
-					order := float64(20)
-					policy.Spec.Order = &order
-					policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
-					policy.Spec.Selector = "has(host-endpoint)"
-					_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
-					Expect(err).NotTo(HaveOccurred())
-
-					// host => host
-					cc.ExpectSome(felixes[0], hostW[1])
-					cc.ExpectSome(felixes[1], hostW[0])
-
-					// host => workload
-					cc.ExpectSome(felixes[0], w[1])
-					cc.ExpectSome(felixes[1], w[0])
-
-					// host => own-worload
-					cc.ExpectSome(felixes[0], w[0])
-					cc.ExpectSome(felixes[1], w[1])
-
-					// workload to other workloads allowed
-					cc.ExpectSome(w[0], w[1])
-					cc.ExpectSome(w[1], w[0])
-
-					cc.CheckConnectivity()
-				})
+						// Workload connectivity is unchanged.
+						cc.ExpectSome(w[0], w[1])
+						cc.ExpectSome(w[1], w[0])
+						cc.CheckConnectivity()
+					})
+				*/
 			})
 
 			Context("after removing BGP address from third node", func() {

@@ -33,7 +33,19 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/options"
 )
 
-var _ = infrastructure.DatastoreDescribe("all-interfaces host endpoints", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+var _ = infrastructure.DatastoreDescribe("named host endpoints",
+	[]apiconfig.DatastoreType{apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+		describeHostEndpointTests(getInfra, false)
+	})
+
+var _ = infrastructure.DatastoreDescribe("all-interfaces host endpoints",
+	[]apiconfig.DatastoreType{apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+		describeHostEndpointTests(getInfra, true)
+	})
+
+// describeHostEndpointTests describes tests exercising host endpoints.
+// If allInterfaces, then interfaceName: "*". Otherwise, interfaceName: "eth0".
+func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfaces bool) {
 	var (
 		infra   infrastructure.DatastoreInfra
 		felixes []*infrastructure.Felix
@@ -47,6 +59,7 @@ var _ = infrastructure.DatastoreDescribe("all-interfaces host endpoints", []apic
 		infra = getInfra()
 		options := infrastructure.DefaultTopologyOptions()
 		options.IPIPEnabled = false
+		options.FelixLogSeverity = "Debug"
 		felixes, client = infrastructure.StartNNodeTopology(2, options, infra)
 
 		// Create workloads, using that profile. One on each "host".
@@ -88,189 +101,275 @@ var _ = infrastructure.DatastoreDescribe("all-interfaces host endpoints", []apic
 		infra.Stop()
 	})
 
-	Context("with all-interfaces host protection policy in place", func() {
+	allowHostToHostTraffic := func() {
+		cc.ExpectSome(felixes[0], hostW[1])
+		cc.ExpectSome(felixes[1], hostW[0])
+	}
+	allowHostToOtherPodTraffic := func() {
+		// host to other pod
+		cc.ExpectSome(felixes[0], w[1])
+		cc.ExpectSome(felixes[1], w[0])
+	}
+	allowHostToOwnPodTraffic := func() {
+		// host to own pod always allowed
+		cc.ExpectSome(felixes[0], w[0])
+		cc.ExpectSome(felixes[1], w[1])
+	}
+	allowPodToPodTraffic := func() {
+		cc.ExpectSome(w[0], w[1])
+		cc.ExpectSome(w[1], w[0])
+	}
+	denyHostToHostTraffic := func() {
+		cc.ExpectNone(felixes[0], hostW[1])
+		cc.ExpectNone(felixes[1], hostW[0])
+	}
+	denyHostToOtherPodTraffic := func() {
+		cc.ExpectNone(felixes[0], w[1])
+		cc.ExpectNone(felixes[1], w[0])
+	}
+
+	Context("with no policies and no profiles on the host endpoints", func() {
 		BeforeEach(func() {
-			// Install a default profile that allows all ingress and egress, in the absence of any policy.
+
+			// Install a default profile that allows all pod ingress and egress, in the absence of any policy.
 			infra.AddDefaultAllow()
 
 			for _, f := range felixes {
 				hep := api.NewHostEndpoint()
 				hep.Name = "all-interfaces-" + f.Name
 				hep.Labels = map[string]string{
-					"host-endpoint": "true",
+					"name":          hep.Name,
 					"hostname":      f.Hostname,
+					"host-endpoint": "true",
 				}
 				hep.Spec.Node = f.Hostname
 				hep.Spec.ExpectedIPs = []string{f.IP}
-				hep.Spec.InterfaceName = "*"
+				if allInterfaces {
+					hep.Spec.InterfaceName = "*"
+				} else {
+					hep.Spec.InterfaceName = "eth0"
+				}
 				_, err := client.HostEndpoints().Create(utils.Ctx, hep, options.SetOptions{})
 				Expect(err).NotTo(HaveOccurred())
 			}
 		})
 
-		It("should have workload to workload connectivity", func() {
-			cc.ExpectSome(w[0], w[1])
-			cc.ExpectSome(w[1], w[0])
+		It("should block all traffic except pod-to-pod and host-to-own-pod traffic", func() {
+			denyHostToHostTraffic()
+			denyHostToOtherPodTraffic()
+			allowPodToPodTraffic()
+			allowHostToOwnPodTraffic()
 			cc.CheckConnectivity()
 		})
 
-		It("should have host to workload connectivity", func() {
-			cc.ExpectSome(felixes[0], w[1])
-			cc.ExpectSome(felixes[0], w[0])
-			cc.CheckConnectivity()
-		})
+		It("should allow felixes[0] => felixes[1] traffic if ingress and egress policies are in place", func() {
+			// Create a policy selecting felix[1] that allows egress.
+			policy := api.NewGlobalNetworkPolicy()
+			policy.Name = "f0-egress"
+			policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
+			policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[0].Hostname)
+			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
 
-		It("should have host to host connectivity", func() {
+			// But no policy allowing ingress into felix[1].
+			cc.ExpectNone(felixes[0], hostW[1])
+
+			// No policy allowing egress from felixes[1] nor ingress into
+			// felixes[0]
+			cc.ExpectNone(felixes[1], w[0])
+			cc.ExpectNone(felixes[1], hostW[0])
+
+			allowPodToPodTraffic()
+			allowHostToOwnPodTraffic()
+			cc.CheckConnectivity()
+
+			cc.ResetExpectations()
+
+			// Now add a policy selecting felix[1] that allows ingress.
+			policy = api.NewGlobalNetworkPolicy()
+			policy.Name = "f1-ingress"
+			policy.Spec.Ingress = []api.Rule{{Action: api.Allow}}
+			policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[1].Hostname)
+			_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Now felixes[0] can reach felixes[1].
 			cc.ExpectSome(felixes[0], hostW[1])
-			cc.ExpectSome(felixes[1], hostW[0])
+
+			// But not traffic the other way.
+			cc.ExpectNone(felixes[1], hostW[0])
+
+			allowPodToPodTraffic()
+			allowHostToOwnPodTraffic()
 			cc.CheckConnectivity()
 		})
 
-		Context("With a deny all policy that selects all hosts", func() {
-			var res *api.GlobalNetworkPolicy
-			var err error
+		It("should not deny host-to-own pod traffic even if an apply-on-forward deny policy is applied", func() {
+			// Create an AOF policy denying all traffic on the host endpoints.
+			policy := api.NewGlobalNetworkPolicy()
+			policy.Name = "aof-deny"
+			policy.Spec.Ingress = []api.Rule{{Action: api.Deny}}
+			policy.Spec.Egress = []api.Rule{{Action: api.Deny}}
+			policy.Spec.Selector = "has(host-endpoint)"
+			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
 
-			BeforeEach(func() {
-				policy := api.NewGlobalNetworkPolicy()
-				policy.Name = "deny-all"
-				policy.Spec.Selector = "has(host-endpoint)"
-				policy.Spec.Ingress = []api.Rule{{Action: api.Deny}}
-				policy.Spec.Egress = []api.Rule{{Action: api.Deny}}
-				res, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			denyHostToHostTraffic()
+			denyHostToOtherPodTraffic()
+			allowPodToPodTraffic()
+			allowHostToOwnPodTraffic()
+			cc.CheckConnectivity()
+		})
+	})
+
+	Context("with no policies and an allow-all profile on the host endpoints", func() {
+		BeforeEach(func() {
+			// Install a default profile that allows all pod ingress and egress, in the absence of any policy.
+			infra.AddDefaultAllow()
+
+			// Determine "default" profile name.
+			defaultProfileName := "default"
+			if infrastructure.K8sInfra != nil {
+				defaultProfileName = "kns.default"
+			}
+
+			for _, f := range felixes {
+				hep := api.NewHostEndpoint()
+				hep.Name = "all-interfaces-" + f.Name
+				hep.Labels = map[string]string{
+					"name":          hep.Name,
+					"hostname":      f.Hostname,
+					"host-endpoint": "true",
+				}
+				hep.Spec.Node = f.Hostname
+				hep.Spec.ExpectedIPs = []string{f.IP}
+				if allInterfaces {
+					hep.Spec.InterfaceName = "*"
+				} else {
+					hep.Spec.InterfaceName = "eth0"
+				}
+				hep.Spec.Profiles = []string{defaultProfileName}
+				_, err := client.HostEndpoints().Create(utils.Ctx, hep, options.SetOptions{})
 				Expect(err).NotTo(HaveOccurred())
-			})
-
-			It("should still have workload to workload connectivity", func() {
-				cc.ExpectSome(w[0], w[1])
-				cc.ExpectSome(w[1], w[0])
-				cc.CheckConnectivity()
-			})
-
-			It("should not have host to other workload connectivity", func() {
-				cc.ExpectNone(felixes[0], w[1])
-				cc.CheckConnectivity()
-			})
-
-			It("should not have host to host connectivity", func() {
-				cc.ExpectNone(felixes[0], hostW[1])
-				cc.ExpectNone(felixes[1], hostW[0])
-				cc.CheckConnectivity()
-			})
-
-			It("should always have host to own workload connectivity despite of any normal deny policy rules", func() {
-				cc.ExpectSome(felixes[0], w[0])
-				cc.ExpectSome(felixes[1], w[1])
-				cc.CheckConnectivity()
-			})
-
-			Context("with apply-on-forward set on the existing deny-all policy", func() {
-				BeforeEach(func() {
-					res.Spec.ApplyOnForward = true
-					_, err := client.GlobalNetworkPolicies().Update(utils.Ctx, res, utils.NoOptions)
-					Expect(err).NotTo(HaveOccurred())
-				})
-				It("should no longer have workload to workload connectivity", func() {
-					cc.ExpectNone(w[0], w[1])
-					cc.ExpectNone(w[1], w[0])
-					cc.CheckConnectivity()
-				})
-
-				It("should stll not have host to other workload connectivity", func() {
-					cc.ExpectNone(felixes[0], w[1])
-					cc.CheckConnectivity()
-				})
-
-				It("should still not have host to host connectivity", func() {
-					cc.ExpectNone(felixes[0], hostW[1])
-					cc.ExpectNone(felixes[1], hostW[0])
-					cc.CheckConnectivity()
-				})
-
-				It("should still have host to own workload connectivity despite any normal deny policy rules", func() {
-					cc.ExpectSome(felixes[0], w[0])
-					cc.ExpectSome(felixes[1], w[1])
-					cc.CheckConnectivity()
-				})
-			})
+			}
 		})
 
-		Context("With a deny all ingress policy on felix-1 host", func() {
+		It("should allow all traffic", func() {
+			allowHostToHostTraffic()
+			allowHostToOtherPodTraffic()
+			allowHostToOwnPodTraffic()
+			allowPodToPodTraffic()
+			cc.CheckConnectivity()
+		})
+
+		It("should deny felixes[0] => felixes[1] traffic if policy denies egress from felixes[0]", func() {
+			// Create a policy selecting felix[1] that denies egress.
+			policy := api.NewGlobalNetworkPolicy()
+			policy.Name = "f0-egress"
+			policy.Spec.Egress = []api.Rule{{Action: api.Deny}}
+			policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[0].Hostname)
+			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Egress from felixes[0] denied
+			cc.ExpectNone(felixes[0], hostW[1])
+			cc.ExpectNone(felixes[0], w[1])
+
+			// Egress from felixes[1] allowed
+			cc.ExpectSome(felixes[1], hostW[0])
+			cc.ExpectSome(felixes[1], w[0])
+
+			allowHostToOwnPodTraffic()
+			allowPodToPodTraffic()
+			cc.CheckConnectivity()
+		})
+
+		Context("with a policy denying ingress on felixes[1]", func() {
 			BeforeEach(func() {
-				// Create a policy selecting felix[1] that denies ingress.
+				// Create a policy selecting felix[1] that allows ingress.
 				policy := api.NewGlobalNetworkPolicy()
-				policy.Name = "felix-1"
-				policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[1].Hostname)
+				policy.Name = "f1-ingress"
 				policy.Spec.Ingress = []api.Rule{{Action: api.Deny}}
+				policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[1].Hostname)
 				_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			It("should still have workload to workload connectivity", func() {
-				cc.ExpectSome(w[0], w[1])
-				cc.ExpectSome(w[1], w[0])
-				cc.CheckConnectivity()
-			})
-
-			It("should still allow traffic to its (felix-1's) workloads", func() {
-				cc.ExpectSome(felixes[0], w[1])
-				cc.CheckConnectivity()
-			})
-
-			It("should not allow other hosts or other workloads to reach it", func() {
-				cc.ExpectNone(felixes[0], hostW[1])
-				cc.ExpectNone(w[0], hostW[1])
-				cc.CheckConnectivity()
-			})
-
-			It("should still be able to reach felix-0", func() {
-				// felix-1 is still allowed egress.
+			It("should deny felixes[0] => felixes[1] traffic if policy denies ingress on felixes[1]", func() {
+				// Egress from felixes[1] is allowed
 				cc.ExpectSome(felixes[1], hostW[0])
 				cc.ExpectSome(felixes[1], w[0])
+
+				// Ingress into felixes[1] denied
+				cc.ExpectNone(felixes[0], hostW[1])
+
+				// Forwarded traffic to felixes[1] is allowed
+				cc.ExpectSome(felixes[0], w[1])
+
+				allowHostToOwnPodTraffic()
+				allowPodToPodTraffic()
 				cc.CheckConnectivity()
+			})
+
+			Context("with an apply-on-forward policy blocking ingress into felixes[1]", func() {
+				BeforeEach(func() {
+					policy := api.NewGlobalNetworkPolicy()
+					policy.Name = "f1-ingress-aof"
+					policy.Spec.Ingress = []api.Rule{{Action: api.Deny}}
+					policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[1].Hostname)
+					policy.Spec.ApplyOnForward = true
+					_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("should block forwarded traffic to felixes[1]", func() {
+					cc.ResetExpectations()
+
+					// Same as the parent - Egress from felixes[1] is allowed
+					cc.ExpectSome(felixes[1], hostW[0])
+					cc.ExpectSome(felixes[1], w[0])
+
+					// Same as the parent - Ingress into felixes[1] denied
+					cc.ExpectNone(felixes[0], hostW[1])
+
+					// Because of the AOF policy, forwarded traffic to
+					// felixes[1] is now blocked.
+					cc.ExpectNone(felixes[0], w[1])
+					cc.ExpectNone(w[0], w[1])
+
+					// Same as the parent
+					cc.ExpectSome(w[1], w[0])
+					allowHostToOwnPodTraffic()
+					cc.CheckConnectivity()
+				})
 			})
 		})
 
-		Context("With an apply-on-forward policy on felix-0 blocking egress to felix-1", func() {
-			var err error
+		It("should deny forwarded traffic from felixes[0] to felixes[1] if an AOF policy denies it", func() {
+			// Create an apply-on-forward policy selecting felix[1] that denies ingress.
+			policy := api.NewGlobalNetworkPolicy()
+			policy.Name = "aof-f1"
+			policy.Spec.Ingress = []api.Rule{{Action: api.Deny}}
+			policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[1].Hostname)
+			policy.Spec.ApplyOnForward = true
+			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
 
-			BeforeEach(func() {
-				// Create an AOF policy selecting felix[0] denying egress to
-				// felix[1].
-				policy := api.NewGlobalNetworkPolicy()
-				policy.Name = "felix-0"
-				policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[0].Hostname)
-				policy.Spec.ApplyOnForward = true
-				policy.Spec.Egress = []api.Rule{
-					{
-						Action: api.Deny,
-						Destination: api.EntityRule{
-							Selector: fmt.Sprintf("hostname == '%s'", felixes[1].Hostname),
-						},
-					},
-				}
-				_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
-				Expect(err).NotTo(HaveOccurred())
-			})
+			// Egress from felixes[1] is allowed
+			cc.ExpectSome(felixes[1], hostW[0])
+			cc.ExpectSome(felixes[1], w[0])
 
-			It("should not have workload to workload connectivity", func() {
-				cc.ExpectNone(w[0], w[1])
-				cc.CheckConnectivity()
-			})
+			// Ingress into felixes[1] denied
+			cc.ExpectNone(felixes[0], hostW[1])
 
-			It("will deny(?) felix-1 from reaching felix-0", func() {
-				// TODO
-				cc.ExpectNone(w[1], w[0])
-				cc.ExpectNone(felixes[1], w[0])
-				cc.CheckConnectivity()
-			})
+			// Because of the AOF policy, forwarded traffic to felixes[1] is blocked.
+			cc.ExpectNone(felixes[0], w[1])
+			cc.ExpectNone(w[0], w[1])
 
-			It("should deny felix-0 from reaching felix-1", func() {
-				cc.ExpectNone(felixes[0], hostW[1])
-				cc.ExpectNone(felixes[0], w[1])
-				// But felix-1 can reach felix-0
-				cc.ExpectSome(felixes[1], hostW[0])
-				cc.CheckConnectivity()
-			})
+			// Forwarded raffic to felixes[0] is allowed
+			cc.ExpectSome(w[1], w[0])
+			allowHostToOwnPodTraffic()
+			cc.CheckConnectivity()
 		})
 	})
-})
+}
