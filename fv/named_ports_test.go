@@ -955,23 +955,7 @@ func describeNamedPortHostEndpointTests(getInfra infrastructure.InfraFactory, na
 		pol, err := client.GlobalNetworkPolicies().Create(utils.Ctx, pol, options.SetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 
-		// If this is a named hostendpoint, no connectivity is expected: we have
-		// policy allowing egress to the named "http" port but no policy
-		// allowing ingress.
-		//
-		// If this is an all-interfaces host endpoint, we _do_ have traffic
-		// allowed to the named "http" port since all-interface host endpoints
-		// have default allow semantics.
-		if namedHostEndpoint {
-			expectNoConnectivity()
-		} else {
-			cc.ExpectSome(felixes[0], hostW[1].Port(8055))
-			cc.ExpectSome(felixes[1], hostW[0].Port(8055))
-			cc.ExpectNone(felixes[0], hostW[1].Port(8056))
-			cc.ExpectNone(felixes[1], hostW[0].Port(8056))
-			cc.CheckConnectivityOffset(1)
-			cc.ResetExpectations()
-		}
+		expectNoConnectivity()
 
 		pol2 := api.NewGlobalNetworkPolicy()
 		pol2.Name = "test-policy-2"
