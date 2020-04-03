@@ -1161,7 +1161,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 					})
 				}
 
-				Context("with icmp blocked", func() {
+				Context("with icmp blocked from workloads, external client", func() {
 					var (
 						testSvc          *v1.Service
 						testSvcNamespace string
@@ -1226,7 +1226,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 							tgtWorkload = deadWorkload
 						})
 
-						It("should get host unreachable from nodepot via node1->node0 fwd", func() {
+						It("should get host unreachable from nodeport via node1->node0 fwd", func() {
 							if testOpts.connTimeEnabled {
 								Skip("FIXME externalClient also does conntime balancing")
 							}
@@ -1236,16 +1236,17 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 
 							tcpdump := containers.AttachTCPDump(externalClient, "any")
 							tcpdump.SetLogEnabled(true)
-							tcpdump.AddMatcher("ICMP", regexp.MustCompile(
-								fmt.Sprintf("IP %s > %s: ICMP host %s unreachable",
-									felixes[1].IP, externalClient.IP, felixes[1].IP)))
+							matcher := fmt.Sprintf("IP %s > %s: ICMP host %s unreachable",
+								felixes[1].IP, externalClient.IP, felixes[1].IP)
+							tcpdump.AddMatcher("ICMP", regexp.MustCompile(matcher))
 							tcpdump.Start(testOpts.protocol, "port", strconv.Itoa(int(npPort)), "or", "icmp")
 							defer tcpdump.Stop()
 
 							cc.ExpectNone(externalClient, TargetIP(felixes[1].IP), npPort)
 							cc.CheckConnectivity()
 
-							Eventually(func() int { return tcpdump.MatchCount("ICMP") }).Should(BeNumerically(">", 0))
+							Eventually(func() int { return tcpdump.MatchCount("ICMP") }).
+								Should(BeNumerically(">", 0), matcher)
 						})
 					})
 
@@ -1268,15 +1269,16 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 
 							tcpdump := containers.AttachTCPDump(externalClient, "any")
 							tcpdump.SetLogEnabled(true)
-							tcpdump.AddMatcher("ICMP", regexp.MustCompile(
-								fmt.Sprintf("IP %s > %s: ICMP %s udp port %d unreachable",
-									felixes[1].IP, externalClient.IP, felixes[1].IP, npPort)))
+							matcher := fmt.Sprintf("IP %s > %s: ICMP %s udp port %d unreachable",
+								felixes[1].IP, externalClient.IP, felixes[1].IP, npPort)
+							tcpdump.AddMatcher("ICMP", regexp.MustCompile(matcher))
 							tcpdump.Start(testOpts.protocol, "port", strconv.Itoa(tgtPort), "or", "icmp")
 							defer tcpdump.Stop()
 
 							cc.ExpectNone(externalClient, TargetIP(felixes[1].IP), npPort)
 							cc.CheckConnectivity()
-							Eventually(func() int { return tcpdump.MatchCount("ICMP") }).Should(BeNumerically(">", 0))
+							Eventually(func() int { return tcpdump.MatchCount("ICMP") }).
+								Should(BeNumerically(">", 0), matcher)
 						})
 					})
 				})
