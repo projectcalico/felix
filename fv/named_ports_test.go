@@ -857,6 +857,12 @@ func describeNamedPortHostEndpointTests(getInfra infrastructure.InfraFactory, na
 		err := infra.AddAllowToDatastore("host-endpoint=='true'")
 		Expect(err).NotTo(HaveOccurred())
 
+		// We're attaching the allow-all profile to the host endpoints.
+		defaultProfileName := "default"
+		if infrastructure.K8sInfra != nil {
+			defaultProfileName = "kns.default"
+		}
+
 		// Start a host-networked workload on each host so we have something to connect to.
 		for ii, felix := range felixes {
 			hostW[ii] = workload.Run(
@@ -879,6 +885,7 @@ func describeNamedPortHostEndpointTests(getInfra infrastructure.InfraFactory, na
 				hostEp.Spec.InterfaceName = "eth0"
 			} else {
 				hostEp.Spec.InterfaceName = "*"
+				hostEp.Spec.Profiles = []string{defaultProfileName}
 			}
 
 			hostEp.Spec.ExpectedIPs = []string{felix.IP}
@@ -960,8 +967,8 @@ func describeNamedPortHostEndpointTests(getInfra infrastructure.InfraFactory, na
 		// allowing ingress.
 		//
 		// If this is an all-interfaces host endpoint, we _do_ have traffic
-		// allowed to the named "http" port since all-interface host endpoints
-		// have default allow semantics.
+		// allowed to the named "http" port since the all-interface host endpoints
+		// will have default allow semantics due to an attached allow-all profile.
 		if namedHostEndpoint {
 			expectNoConnectivity()
 		} else {
