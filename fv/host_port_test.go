@@ -48,7 +48,7 @@ func MetricsPortReachable(felix *infrastructure.Felix) bool {
 }
 
 // Here we test reachability to a port number running on a Calico host itself, specifically Felix's
-// metrics port 9091, and how that is affected by policy, host endpoint (eth0/*) and workload endpoint
+// metrics port 9091, and how that is affected by policy, host endpoint (eth0 or *) and workload endpoint
 // configuration.
 //
 // - When there is no policy or endpoint configuration, the port should be reachable.
@@ -77,9 +77,6 @@ var _ = infrastructure.DatastoreDescribe("host-port tests", []apiconfig.Datastor
 		infra = getInfra()
 
 		felix, client = infrastructure.StartSingleNodeTopology(infrastructure.DefaultTopologyOptions(), infra)
-
-		err := infra.AddAllowToDatastore("host-endpoint=='true'")
-		Expect(err).NotTo(HaveOccurred())
 
 		metricsPortReachable = func() bool {
 			return MetricsPortReachable(felix)
