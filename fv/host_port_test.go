@@ -180,7 +180,6 @@ var _ = infrastructure.DatastoreDescribe("host-port tests", []apiconfig.Datastor
 			hostEp.Labels = map[string]string{"host-endpoint": "true"}
 			hostEp.Spec.Node = felix.Hostname
 			hostEp.Spec.InterfaceName = "*"
-			hostEp.Spec.ExpectedIPs = []string{felix.IP}
 			_, err := client.HostEndpoints().Create(utils.Ctx, hostEp, utils.NoOptions)
 			Expect(err).NotTo(HaveOccurred())
 		})
