@@ -100,29 +100,29 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 		infra.Stop()
 	})
 
-	allowHostToHostTraffic := func() {
+	expectHostToHostTraffic := func() {
 		cc.ExpectSome(felixes[0], hostW[1])
 		cc.ExpectSome(felixes[1], hostW[0])
 	}
-	allowHostToOtherPodTraffic := func() {
+	expectHostToOtherPodTraffic := func() {
 		// host to other pod
 		cc.ExpectSome(felixes[0], w[1])
 		cc.ExpectSome(felixes[1], w[0])
 	}
-	allowHostToOwnPodTraffic := func() {
+	expectHostToOwnPodTraffic := func() {
 		// host to own pod always allowed
 		cc.ExpectSome(felixes[0], w[0])
 		cc.ExpectSome(felixes[1], w[1])
 	}
-	allowPodToPodTraffic := func() {
+	expectPodToPodTraffic := func() {
 		cc.ExpectSome(w[0], w[1])
 		cc.ExpectSome(w[1], w[0])
 	}
-	denyHostToHostTraffic := func() {
+	expectDenyHostToHostTraffic := func() {
 		cc.ExpectNone(felixes[0], hostW[1])
 		cc.ExpectNone(felixes[1], hostW[0])
 	}
-	denyHostToOtherPodTraffic := func() {
+	expectDenyHostToOtherPodTraffic := func() {
 		cc.ExpectNone(felixes[0], w[1])
 		cc.ExpectNone(felixes[1], w[0])
 	}
@@ -154,15 +154,15 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 		})
 
 		It("should block all traffic except pod-to-pod and host-to-own-pod traffic", func() {
-			denyHostToHostTraffic()
-			denyHostToOtherPodTraffic()
-			allowPodToPodTraffic()
-			allowHostToOwnPodTraffic()
+			expectDenyHostToHostTraffic()
+			expectDenyHostToOtherPodTraffic()
+			expectPodToPodTraffic()
+			expectHostToOwnPodTraffic()
 			cc.CheckConnectivity()
 		})
 
 		It("should allow felixes[0] => felixes[1] traffic if ingress and egress policies are in place", func() {
-			// Create a policy selecting felix[1] that allows egress.
+			// Create a policy selecting felix[0] that allows egress.
 			policy := api.NewGlobalNetworkPolicy()
 			policy.Name = "f0-egress"
 			policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
@@ -178,8 +178,8 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 			cc.ExpectNone(felixes[1], w[0])
 			cc.ExpectNone(felixes[1], hostW[0])
 
-			allowPodToPodTraffic()
-			allowHostToOwnPodTraffic()
+			expectPodToPodTraffic()
+			expectHostToOwnPodTraffic()
 			cc.CheckConnectivity()
 
 			cc.ResetExpectations()
@@ -198,8 +198,8 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 			// But not traffic the other way.
 			cc.ExpectNone(felixes[1], hostW[0])
 
-			allowPodToPodTraffic()
-			allowHostToOwnPodTraffic()
+			expectPodToPodTraffic()
+			expectHostToOwnPodTraffic()
 			cc.CheckConnectivity()
 		})
 
@@ -213,10 +213,10 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 			Expect(err).NotTo(HaveOccurred())
 
-			denyHostToHostTraffic()
-			denyHostToOtherPodTraffic()
-			allowPodToPodTraffic()
-			allowHostToOwnPodTraffic()
+			expectDenyHostToHostTraffic()
+			expectDenyHostToOtherPodTraffic()
+			expectPodToPodTraffic()
+			expectHostToOwnPodTraffic()
 			cc.CheckConnectivity()
 		})
 	})
@@ -254,10 +254,10 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 		})
 
 		It("should allow all traffic", func() {
-			allowHostToHostTraffic()
-			allowHostToOtherPodTraffic()
-			allowHostToOwnPodTraffic()
-			allowPodToPodTraffic()
+			expectHostToHostTraffic()
+			expectHostToOtherPodTraffic()
+			expectHostToOwnPodTraffic()
+			expectPodToPodTraffic()
 			cc.CheckConnectivity()
 		})
 
@@ -278,8 +278,8 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 			cc.ExpectSome(felixes[1], hostW[0])
 			cc.ExpectSome(felixes[1], w[0])
 
-			allowHostToOwnPodTraffic()
-			allowPodToPodTraffic()
+			expectHostToOwnPodTraffic()
+			expectPodToPodTraffic()
 			cc.CheckConnectivity()
 		})
 
@@ -305,8 +305,8 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 				// Forwarded traffic to felixes[1] is allowed
 				cc.ExpectSome(felixes[0], w[1])
 
-				allowHostToOwnPodTraffic()
-				allowPodToPodTraffic()
+				expectHostToOwnPodTraffic()
+				expectPodToPodTraffic()
 				cc.CheckConnectivity()
 			})
 		})
@@ -360,7 +360,7 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 			// Forwarded traffic the other way should be unaffected
 			cc.ExpectSome(w[1], w[0])
 
-			allowHostToOwnPodTraffic()
+			expectHostToOwnPodTraffic()
 			cc.CheckConnectivity()
 		})
 	})
