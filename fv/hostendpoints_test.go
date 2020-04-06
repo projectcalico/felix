@@ -126,10 +126,6 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 		cc.ExpectNone(felixes[0], w[1])
 		cc.ExpectNone(felixes[1], w[0])
 	}
-	denyPodToPodTraffic := func() {
-		cc.ExpectNone(w[0], w[1])
-		cc.ExpectNone(w[1], w[0])
-	}
 
 	Context("with no policies and no profiles on the host endpoints", func() {
 		BeforeEach(func() {
