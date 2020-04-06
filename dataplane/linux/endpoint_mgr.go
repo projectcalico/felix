@@ -856,11 +856,9 @@ func (m *endpointManager) resolveHostEndpoints() {
 			logCxt.Debug("Endpoint has pre-DNAT policies.")
 			newPreDNATIfaceNameToHostEpID[allInterfaces] = bestHostEpId
 		}
-		if len(bestHostEp.Tiers) > 0 || len(bestHostEp.ForwardTiers) > 0 {
-			log.Infof("bestHostEp: %+v\n", bestHostEp)
-			logCxt.Info("Endpoint has normal or AOF policies")
-			newIfaceNameToHostEpID[allInterfaces] = bestHostEpId
-		}
+
+		newIfaceNameToHostEpID[allInterfaces] = bestHostEpId
+
 		// Record that this host endpoint is in use, for status reporting.
 		newHostEpIDToIfaceNames[bestHostEpId] = append(
 			newHostEpIDToIfaceNames[bestHostEpId], allInterfaces)
