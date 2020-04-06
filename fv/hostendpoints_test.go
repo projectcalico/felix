@@ -312,19 +312,43 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 		})
 
 		It("should deny forwarded traffic from felixes[0] to felixes[1] if an AOF policy denies it", func() {
-			// Create an apply-on-forward policy selecting felix[1] that denies ingress.
+
+			// Create an apply-on-forward policy selecting felix[1] that
+			// - only allows ingress from its own pod
+			// - allows all egress
+			//
+			// Note that AOF policy on all-interfaces host endpoints will result in
+			// the ingress and egress policy boundaries being enforced.
+			//
+			// E.g. forwarded traffic from w[1] out of eth0 will need to pass:
+			// - egress policy on w[1]
+			// - AOF ingress policy on the all-interfaces HEP
+			// - AOF egress policy on the all-interfaces HEP
+
 			policy := api.NewGlobalNetworkPolicy()
 			policy.Name = "aof-f1"
-			policy.Spec.Ingress = []api.Rule{{Action: api.Deny}}
+			policy.Spec.Ingress = []api.Rule{
+				{
+					Action: api.Allow,
+					Source: api.EntityRule{
+						Selector: fmt.Sprintf("name == '%s'", w[1].WorkloadEndpoint.Labels["name"]),
+					},
+				},
+			}
 			policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
 			policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[1].Hostname)
 			policy.Spec.ApplyOnForward = true
 			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 			Expect(err).NotTo(HaveOccurred())
 
-			// Egress from felixes[1] is allowed
-			cc.ExpectSome(felixes[1], hostW[0])
-			cc.ExpectSome(felixes[1], w[0])
+			policy = api.NewGlobalNetworkPolicy()
+			policy.Name = "aof-f0"
+			policy.Spec.Ingress = []api.Rule{{Action: api.Allow}}
+			policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
+			policy.Spec.Selector = fmt.Sprintf("hostname == '%s'", felixes[0].Hostname)
+			policy.Spec.ApplyOnForward = true
+			_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
 
 			// Ingress into felixes[1] denied
 			cc.ExpectNone(felixes[0], hostW[1])
