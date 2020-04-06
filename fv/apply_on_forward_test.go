@@ -96,7 +96,7 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 		infra.Stop()
 	})
 
-	expectWorkloadToWorkloadAndHostConnectivity := func() {
+	itShouldHaveWorkloadToWorkloadAndHostConnectivity := func() {
 		It("should have workload to workload/host connectivity", func() {
 			cc.ExpectSome(w[0], w[1])
 			cc.ExpectSome(w[1], w[0])
@@ -106,7 +106,7 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 		})
 	}
 
-	expectWorkloadToWorkloadAndHostConnectivity()
+	itShouldHaveWorkloadToWorkloadAndHostConnectivity()
 
 	addAllowAllToHostEndpoints := func() {
 		policy := api.NewGlobalNetworkPolicy()
@@ -169,7 +169,7 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 				}
 			})
 
-			expectWorkloadToWorkloadAndHostConnectivity()
+			itShouldHaveWorkloadToWorkloadAndHostConnectivity()
 		})
 
 		Context("with all-interfaces host endpoints", func() {
@@ -204,7 +204,7 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 				}
 			})
 
-			expectWorkloadToWorkloadAndHostConnectivity()
+			itShouldHaveWorkloadToWorkloadAndHostConnectivity()
 		})
 	})
 })
