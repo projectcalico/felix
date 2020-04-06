@@ -57,7 +57,7 @@ var _ = infrastructure.DatastoreDescribe("IPIP topology before adding host IPs t
 		felixes, client = infrastructure.StartNNodeTopology(2, infrastructure.DefaultTopologyOptions(), infra)
 
 		// Install a default profile that allows all ingress and egress, in the absence of any Policy.
-		infra.AddDefaultAllow()
+		_ = infra.AddDefaultAllow()
 
 		// Wait until the tunl0 device appears; it is created when felix inserts the ipip module
 		// into the kernel.

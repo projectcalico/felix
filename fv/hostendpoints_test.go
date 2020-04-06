@@ -131,7 +131,7 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 		BeforeEach(func() {
 
 			// Install a default profile that allows all pod ingress and egress, in the absence of any policy.
-			infra.AddDefaultAllow()
+			_ = infra.AddDefaultAllow()
 
 			for _, f := range felixes {
 				hep := api.NewHostEndpoint()
@@ -224,13 +224,7 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 	Context("with no policies and an allow-all profile on the host endpoints", func() {
 		BeforeEach(func() {
 			// Install a default profile that allows all pod ingress and egress, in the absence of any policy.
-			infra.AddDefaultAllow()
-
-			// Determine "default" profile name.
-			defaultProfileName := "default"
-			if infrastructure.K8sInfra != nil {
-				defaultProfileName = "kns.default"
-			}
+			defaultProfileName := infra.AddDefaultAllow()
 
 			for _, f := range felixes {
 				hep := api.NewHostEndpoint()
