@@ -106,17 +106,16 @@ var _ = infrastructure.DatastoreDescribe("host-port tests", []apiconfig.Datastor
 		Eventually(metricsPortReachable, "10s", "1s").Should(BeTrue(), "With workload stopped, not reachable")
 	})
 
-	runTest := func() {
+	describeMetricsPortTests := func() {
 		It("port should not be reachable", func() {
 			Eventually(metricsPortReachable, "10s", "1s").Should(BeFalse())
 		})
 
 		Context("with pre-DNAT policy defined", func() {
-			policy := api.NewGlobalNetworkPolicy()
 			protocol := numorstring.ProtocolFromString("tcp")
 
 			BeforeEach(func() {
-				policy = api.NewGlobalNetworkPolicy()
+				policy := api.NewGlobalNetworkPolicy()
 				policy.Name = "prednat-deny-port-123"
 				policy.Spec.PreDNAT = true
 				policy.Spec.ApplyOnForward = true
@@ -139,7 +138,7 @@ var _ = infrastructure.DatastoreDescribe("host-port tests", []apiconfig.Datastor
 			})
 
 			It("should be able to reach the metrics port once a policy allows that port", func() {
-				policy = api.NewGlobalNetworkPolicy()
+				policy := api.NewGlobalNetworkPolicy()
 				policy.Name = "prednat-allow-metrics-port"
 				policy.Spec.PreDNAT = true
 				policy.Spec.ApplyOnForward = true
@@ -171,7 +170,7 @@ var _ = infrastructure.DatastoreDescribe("host-port tests", []apiconfig.Datastor
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		runTest()
+		describeMetricsPortTests()
 	})
 
 	Context("with all-interfaces host endpoint defined", func() {
@@ -186,6 +185,6 @@ var _ = infrastructure.DatastoreDescribe("host-port tests", []apiconfig.Datastor
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		runTest()
+		describeMetricsPortTests()
 	})
 })
