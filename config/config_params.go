@@ -107,8 +107,8 @@ type Config struct {
 	WireguardListeningPort       int    `config:"int;51902"`
 	WireguardRoutingRulePriority int    `config:"int;99"`
 	WireguardRoutingTableIndex   int    `config:"int;99"`
-	WireguardInterfaceName       string `config:"iface-list;wireguard.cali;non-zero"`
-	WireguardMTU                 *int   `config:"int;1410;non-zero"`
+	WireguardInterfaceName       string `config:"iface-param;wireguard.cali;non-zero"`
+	WireguardMTU                 int    `config:"int;1410;non-zero"`
 
 	BPFEnabled                         bool           `config:"bool;false"`
 	BPFLogLevel                        string         `config:"oneof(off,info,debug);off;non-zero"`
