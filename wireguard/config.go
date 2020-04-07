@@ -8,5 +8,5 @@ type Config struct {
 	RoutingRulePriority int
 	RoutingTableIndex   int
 	InterfaceName       string
-	MTU                 *int
+	MTU                 int
 }

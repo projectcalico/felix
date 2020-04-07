@@ -21,13 +21,13 @@ import (
 	"sync"
 	"time"
 
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
-	"github.com/projectcalico/felix/routetable"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
+	"github.com/projectcalico/felix/routetable"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 
@@ -42,7 +42,7 @@ const (
 )
 
 var (
- 	WireguardNotSupported       = errors.New("wireguard not supported")
+	WireguardNotSupported = errors.New("wireguard not supported")
 
 	zeroKey = wgtypes.Key{}
 )
@@ -51,7 +51,8 @@ const (
 	wireguardType = "wireguard"
 )
 
-type noOpConnTrack struct {}
+type noOpConnTrack struct{}
+
 func (*noOpConnTrack) RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP) {
 	return
 }
@@ -92,7 +93,7 @@ type nodeUpdateData struct {
 func newNodeUpdateData() *nodeUpdateData {
 	return &nodeUpdateData{
 		allowedCidrsDeleted: set.New(),
-		allowedCidrsAdded: set.New(),
+		allowedCidrsAdded:   set.New(),
 	}
 }
 
@@ -144,7 +145,7 @@ func New(
 	config *Config,
 	netlinkTimeout time.Duration,
 	deviceRouteProtocol int,
-	statusCallback func (publicKey wgtypes.Key) error,
+	statusCallback func(publicKey wgtypes.Key) error,
 ) *Wireguard {
 	return NewWithShims(
 		hostname,
@@ -169,16 +170,16 @@ func NewWithShims(
 	netlinkTimeout time.Duration,
 	timeShim timeIface,
 	deviceRouteProtocol int,
-	statusCallback func (publicKey wgtypes.Key) error,
+	statusCallback func(publicKey wgtypes.Key) error,
 ) *Wireguard {
 	// Create routetable. We provide dummy callbacks for ARP and conntrack processing.
 	rt := routetable.NewWithShims(
-		[]string{config.InterfaceName},
+		[]string{config.InterfaceName}, false,
 		4, // ipVersion
 		newRoutetableHandle,
 		false, // vxlan
 		netlinkTimeout,
-		func(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error {return nil}, // addStaticARPEntry
+		func(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error { return nil }, // addStaticARPEntry
 		&noOpConnTrack{},
 		timeShim,
 		nil, //deviceRouteSourceAddress
@@ -188,13 +189,13 @@ func NewWithShims(
 	)
 
 	return &Wireguard{
-		hostname:              hostname,
-		config:                config,
-		logCxt:                logrus.WithFields(logrus.Fields{"enabled": config.Enabled, "ifaceName": config.InterfaceName}),
-		newNetlinkClient:      newNetlinkClient,
-		newWireguardClient:    newWireguardClient,
-		time:                  timeShim,
-		nodes:                 map[string]*nodeData{
+		hostname:           hostname,
+		config:             config,
+		logCxt:             logrus.WithFields(logrus.Fields{"enabled": config.Enabled, "ifaceName": config.InterfaceName}),
+		newNetlinkClient:   newNetlinkClient,
+		newWireguardClient: newWireguardClient,
+		time:               timeShim,
+		nodes: map[string]*nodeData{
 			hostname: newNodeData(),
 		},
 		cidrToNodeName:        map[ip.CIDR]string{},
@@ -399,7 +400,7 @@ func (w *Wireguard) Apply() error {
 	// 3. Update of route table routes.
 	// 4. Construction of wireguard delta (if performing deltas, or re-sync of wireguard configuration)
 	// 5. Simultaneous updates of wireguard, routes and rules.
-	var conflictingKeys= set.New()
+	var conflictingKeys = set.New()
 	wireguardPeerDelete := w.handleAsyncPeerDeletionsFromNodeUpdates(conflictingKeys)
 	w.updateCacheFromNodeUpdates(conflictingKeys)
 	w.updateRouteTableFromNodeUpdates()
@@ -675,7 +676,6 @@ func (w *Wireguard) updateRouteTableFromNodeUpdates() {
 		// If the node routing to wireguard does not match with whether we should route then we need to do a full
 		// route update, otherwise do an incremental update.
 		var updateSet set.Set
-		var targetType routetable.TargetType
 		shouldRouteToWireguard := w.shouldRouteToWireguard(node)
 		if node.routingToWireguard != shouldRouteToWireguard {
 			updateSet = node.cidrs
@@ -683,15 +683,29 @@ func (w *Wireguard) updateRouteTableFromNodeUpdates() {
 			updateSet = update.allowedCidrsAdded
 		}
 
+		var targetType routetable.TargetType
+		var ifaceName, deleteIfaceName string
 		if shouldRouteToWireguard {
 			// If we should not route to wireguard then we need to use a throw directive to skip wireguard routing and
-			// return to normal routing.
+			// return to normal routing. We may also need to delete the existing route to wireguard.
 			targetType = routetable.TargetTypeThrow
+			ifaceName = routetable.InterfaceNone
+			deleteIfaceName = w.config.InterfaceName
+		} else {
+			// If we should route to wireguard then route to the wireguard interface. We may also need to delete the
+			// existing throw route that was used to circumvent wireguard routing.
+			ifaceName = w.config.InterfaceName
+			deleteIfaceName = routetable.InterfaceNone
 		}
 
 		updateSet.Iter(func(item interface{}) error {
 			cidr := item.(ip.CIDR)
-			w.routetable.RouteUpdate(w.config.InterfaceName, routetable.Target{
+			if node.routingToWireguard != shouldRouteToWireguard {
+				// The wireguard setting has changed. It is possible that some of the entries we are "removing" were
+				// never added - the routetable component handles that gracefully.
+				w.routetable.RouteRemove(deleteIfaceName, cidr)
+			}
+			w.routetable.RouteUpdate(ifaceName, routetable.Target{
 				Type: targetType,
 				CIDR: cidr,
 			})
@@ -862,7 +876,7 @@ func (w *Wireguard) constructWireguardDeltaForResync() (wgtypes.Key, *wgtypes.Co
 			w.logCxt.Infof("Peer key is not expected or associated with multiple nodes: %v", key)
 			wireguardUpdate.Peers = append(wireguardUpdate.Peers, wgtypes.PeerConfig{
 				PublicKey: key,
-				Remove: true,
+				Remove:    true,
 			})
 			processedKeys.Add(key)
 			wireguardUpdateRequired = true
@@ -891,8 +905,8 @@ func (w *Wireguard) constructWireguardDeltaForResync() (wgtypes.Key, *wgtypes.Co
 		expectedEndpointIP := node.ipv4EndpointAddr.AsNetIP()
 		if replaceCidrs || configuredAddr == nil || configuredAddr.Port != w.config.ListeningPort || !configuredAddr.IP.Equal(expectedEndpointIP) {
 			peer := wgtypes.PeerConfig{
-				PublicKey: key,
-				UpdateOnly: true,
+				PublicKey:         key,
+				UpdateOnly:        true,
 				ReplaceAllowedIPs: replaceCidrs,
 			}
 
@@ -962,7 +976,7 @@ func (w *Wireguard) ensureLink() (bool, error) {
 		attr.Name = w.config.InterfaceName
 		lwg := netlink.GenericLink{
 			LinkAttrs: attr,
-			LinkType: wireguardType,
+			LinkType:  wireguardType,
 		}
 
 		if err := netlink.LinkAdd(&lwg); err != nil {
@@ -986,9 +1000,9 @@ func (w *Wireguard) ensureLink() (bool, error) {
 	w.logCxt.Debug("Wireguard device exists, checking settings")
 	attrs := link.Attrs()
 	oldMTU := attrs.MTU
-	if w.config.MTU != nil && oldMTU != *w.config.MTU {
+	if w.config.MTU != 0 && oldMTU != w.config.MTU {
 		w.logCxt.WithField("oldMTU", oldMTU).Info("Wireguard device MTU needs to be updated")
-		if err := client.LinkSetMTU(link, *w.config.MTU); err != nil {
+		if err := client.LinkSetMTU(link, w.config.MTU); err != nil {
 			w.logCxt.WithError(err).Warn("failed to set tunnel device MTU")
 			return false, err
 		}
@@ -1182,7 +1196,7 @@ func (w *Wireguard) shouldProgramWireguardPeer(node *nodeData) bool {
 
 func (w *Wireguard) getWireguardClient() (WireguardClient, error) {
 	if w.cachedWireguardClient == nil {
-		if w.numConsistentWireguardClientFailures >= maxConnFailures && w.numConsistentWireguardClientFailures % wireguardClientRetryInterval != 0 {
+		if w.numConsistentWireguardClientFailures >= maxConnFailures && w.numConsistentWireguardClientFailures%wireguardClientRetryInterval != 0 {
 			// It is a valid condition that we cannot connect to the wireguard client, so just log.
 			w.logCxt.WithField("numFailures", w.numConsistentWireguardClientFailures).Debug(
 				"Repeatedly failed to connect to wireguard client.")
