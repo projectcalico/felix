@@ -102,7 +102,7 @@ var _ = Describe("Spoof tests", func() {
 			felixes, _ = infrastructure.StartNNodeTopology(3, opts, infra)
 			// Install a default profile allowing all ingress and egress,
 			// in the absence of policy.
-			_ = infra.AddDefaultAllow()
+			infra.AddDefaultAllow()
 
 			// Create workloads using "default" profile.
 			for ii := range w {
@@ -135,7 +135,7 @@ var _ = Describe("Spoof tests", func() {
 
 			// Install a default profile allowing all ingress and egress,
 			// in the absence of policy.
-			_ = infra.AddDefaultAllow()
+			infra.AddDefaultAllow()
 
 			// Create workloads using "default" profile.
 			for ii := range w {

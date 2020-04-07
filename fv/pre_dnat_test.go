@@ -65,7 +65,7 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 		felix, client = infrastructure.StartSingleNodeTopology(options, infra)
 
 		// Install a default profile that allows all ingress and egress, in the absence of any Policy.
-		_ = infra.AddDefaultAllow()
+		infra.AddDefaultAllow()
 
 		// Create workloads, using that profile.
 		for ii := range w {

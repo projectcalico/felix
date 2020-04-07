@@ -131,7 +131,7 @@ func describeHostEndpointTests(getInfra infrastructure.InfraFactory, allInterfac
 		BeforeEach(func() {
 
 			// Install a default profile that allows all pod ingress and egress, in the absence of any policy.
-			_ = infra.AddDefaultAllow()
+			infra.AddDefaultAllow()
 
 			for _, f := range felixes {
 				hep := api.NewHostEndpoint()

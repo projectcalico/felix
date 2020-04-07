@@ -60,7 +60,7 @@ var _ = infrastructure.DatastoreDescribe("VXLAN topology before adding host IPs 
 				felixes, client = infrastructure.StartNNodeTopology(3, topologyOptions, infra)
 
 				// Install a default profile that allows all ingress and egress, in the absence of any Policy.
-				_ = infra.AddDefaultAllow()
+				infra.AddDefaultAllow()
 
 				// Wait until the vxlan device appears.
 				Eventually(func() error {

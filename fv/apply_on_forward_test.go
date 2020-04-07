@@ -55,7 +55,7 @@ var _ = infrastructure.DatastoreDescribe("apply on forward tests; with 2 nodes",
 		felixes, client = infrastructure.StartNNodeTopology(2, options, infra)
 
 		// Install a default profile that allows all ingress and egress, in the absence of any Policy.
-		_ = infra.AddDefaultAllow()
+		infra.AddDefaultAllow()
 
 		// Create workloads, using that profile.  One on each "host".
 		for ii := range w {
