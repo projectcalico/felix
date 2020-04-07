@@ -15,10 +15,11 @@
 package intdataplane
 
 import (
-	"github.com/projectcalico/felix/ip"
-	"github.com/projectcalico/felix/wireguard"
 	log "github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+
+	"github.com/projectcalico/felix/ip"
+	"github.com/projectcalico/felix/wireguard"
 
 	"github.com/projectcalico/felix/proto"
 )
@@ -36,7 +37,7 @@ import (
 // that fail are left in the pending state so they can be retried later.
 type wireguardManager struct {
 	// Our dependencies.
-	wireguardRouteTable       *wireguard.Wireguard
+	wireguardRouteTable *wireguard.Wireguard
 }
 
 type WireguardStatusUpdateCallback func(ipVersion uint8, id interface{}, status string)
@@ -60,20 +61,16 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		m.wireguardRouteTable.EndpointRemove(msg.Hostname)
 	case *proto.RouteUpdate:
 		log.WithField("msg", msg).Debug("RouteUpdate update")
-		if msg.Type != proto.RouteType_WORKLOADS_NODE {
+		if msg.Type != proto.RouteType_REMOTE_WORKLOAD {
 			log.Debug("RouteUpdate is not a node workload update, ignoring")
 			return
 		}
 		cidr := ip.MustParseCIDROrIP(msg.Dst)
 		if cidr != nil {
-			m.wireguardRouteTable.EndpointAllowedCIDRAdd(msg.Node, cidr)
+			m.wireguardRouteTable.EndpointAllowedCIDRAdd(msg.DstNodeName, cidr)
 		}
 	case *proto.RouteRemove:
 		log.WithField("msg", msg).Debug("RouteRemove update")
-		if msg.Type != proto.RouteType_WORKLOADS_NODE {
-			log.Debug("RouteRemove is not a node workload update, ignoring")
-			return
-		}
 		cidr := ip.MustParseCIDROrIP(msg.Dst)
 		if cidr != nil {
 			m.wireguardRouteTable.EndpointAllowedCIDRRemove(cidr)
