@@ -61,7 +61,6 @@ type realTime struct{}
 
 func (realTime) Now() time.Time {
 	return time.Now()
-	netlink.RouteList()
 }
 
 func (realTime) Since(t time.Time) time.Duration {

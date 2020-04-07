@@ -110,7 +110,7 @@ func (r *realNetlinkClient) AddrDel(link netlink.Link, addr *netlink.Addr) error
 	return netlink.AddrDel(link, addr)
 }
 
-func (r *realNetlinkClient) RuleList(family int) ([]Rule, error) {
+func (r *realNetlinkClient) RuleList(family int) ([]netlink.Rule, error) {
 	return netlink.RuleList(family)
 }
 
