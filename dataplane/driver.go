@@ -17,10 +17,11 @@
 package dataplane
 
 import (
-	"github.com/projectcalico/felix/wireguard"
 	"math/bits"
 	"net"
 	"os/exec"
+
+	"github.com/projectcalico/felix/wireguard"
 
 	"github.com/projectcalico/felix/bpf/conntrack"
 

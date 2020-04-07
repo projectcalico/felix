@@ -16,14 +16,14 @@ package intdataplane
 
 import (
 	"fmt"
-	"github.com/projectcalico/felix/wireguard"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"net"
 	"reflect"
 	"regexp"
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
 	"github.com/projectcalico/felix/bpf/state"
 	"github.com/projectcalico/felix/bpf/tc"
@@ -54,6 +54,7 @@ import (
 	"github.com/projectcalico/felix/routetable"
 	"github.com/projectcalico/felix/rules"
 	"github.com/projectcalico/felix/throttle"
+	"github.com/projectcalico/felix/wireguard"
 )
 
 const (
@@ -132,7 +133,7 @@ type Config struct {
 	IptablesLockProbeInterval      time.Duration
 	XDPRefreshInterval             time.Duration
 
-	Wireguard                      wireguard.Config
+	Wireguard wireguard.Config
 
 	NetlinkTimeout time.Duration
 
@@ -606,11 +607,11 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	// Add a manager for wireguard configuration. This is added irrespective of whether wireguard is actually enabled
 	// because it may need to tidy up some of the routing rules when disabled.
 	cryptoRouteTableWireguard := wireguard.New(config.Hostname, &config.Wireguard, config.NetlinkTimeout,
-		config.DeviceRouteProtocol, func (publicKey wgtypes.Key) error {
+		config.DeviceRouteProtocol, func(publicKey wgtypes.Key) error {
 			dp.fromDataplane <- &proto.WireguardStatusUpdate{PublicKey: publicKey.String()}
 			return nil
 		})
-	dp.wireguardManager = newWireguardManager(cryptoRouteTableWireguard, nil)
+	dp.wireguardManager = newWireguardManager(cryptoRouteTableWireguard)
 	dp.RegisterManager(dp.wireguardManager) // IPv4-only
 
 	if config.IPv6Enabled {
@@ -1226,6 +1227,13 @@ func (d *InternalDataplane) configureKernel() {
 	mp := newModProbe(moduleConntrackSCTP, newRealCmd)
 	out, err := mp.Exec()
 	log.WithError(err).WithField("output", out).Infof("attempted to modprobe %s", moduleConntrackSCTP)
+
+	if d.config.Wireguard.Enabled {
+		// wireguard module is available in linux kernel >= 5.6
+		mpwg := newModProbe(moduleWireguard, newRealCmd)
+		out, err = mpwg.Exec()
+		log.WithError(err).WithField("output", out).Infof("attempted to modprobe %s", moduleWireguard)
+	}
 }
 
 func (d *InternalDataplane) recordMsgStat(msg interface{}) {
