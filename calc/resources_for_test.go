@@ -569,6 +569,9 @@ var localHostIP = mustParseIP("192.168.0.1")
 var remoteHostIP = mustParseIP("192.168.0.2")
 var remoteHost2IP = mustParseIP("192.168.0.3")
 
+var localHostIPWithPrefix = "192.168.0.1/24"
+var remoteHostIPWithPrefix = "192.168.0.2/24"
+
 var localHostVXLANTunnelConfigKey = HostConfigKey{
 	Hostname: localHostname,
 	Name:     "IPv4VXLANTunnelAddr",
@@ -599,6 +602,12 @@ var ipPoolWithIPIP = IPPool{
 var ipPoolWithVXLAN = IPPool{
 	CIDR:      mustParseNet("10.0.0.0/16"),
 	VXLANMode: encap.Always,
+}
+
+var ipPoolWithVXLANCrossSubnet = IPPool{
+	CIDR:       mustParseNet("10.0.0.0/16"),
+	VXLANMode:  encap.CrossSubnet,
+	Masquerade: false, // For coverage, make this different to the Always version of the pool
 }
 
 var remoteIPAMBlockKey = BlockKey{
