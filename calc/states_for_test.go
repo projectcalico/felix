@@ -924,6 +924,7 @@ var routeUpdateRemoteHost = proto.RouteUpdate{
 	IpPoolType:  proto.IPPoolType_NONE,
 	Dst:         remoteHostIP.String() + "/32",
 	DstNodeName: remoteHostname,
+	DstNodeIp:   remoteHostIP.String(),
 }
 
 // RouteUpdate expected for the second remote host.
@@ -932,6 +933,7 @@ var routeUpdateRemoteHost2 = proto.RouteUpdate{
 	IpPoolType:  proto.IPPoolType_NONE,
 	Dst:         remoteHost2IP.String() + "/32",
 	DstNodeName: remoteHostname2,
+	DstNodeIp:   remoteHost2IP.String(),
 }
 
 // Minimal VXLAN set-up, all the data needed for a remote VTEP, a pool and a block.
@@ -1069,6 +1071,7 @@ var vxlanWithBlockAndDifferentNodeIP = vxlanWithBlock.withKVUpdates(
 		IpPoolType:  proto.IPPoolType_NONE,
 		Dst:         remoteHost2IP.String() + "/32",
 		DstNodeName: remoteHostname,
+		DstNodeIp:   remoteHost2IP.String(),
 	},
 	// Single route for the block.
 	proto.RouteUpdate{
@@ -1139,6 +1142,7 @@ var vxlanLocalBlockWithBorrows = empty.withKVUpdates(
 		IpPoolType:  proto.IPPoolType_NONE,
 		Dst:         localHostIP.String() + "/32",
 		DstNodeName: localHostname,
+		DstNodeIp:   localHostIP.String(),
 	},
 	// Single route for the block.
 	proto.RouteUpdate{
@@ -1191,6 +1195,7 @@ var vxlanLocalBlockWithBorrowsCrossSubnetNodeRes = vxlanLocalBlockWithBorrowsNod
 		IpPoolType:  proto.IPPoolType_NONE,
 		Dst:         localHostIP.String() + "/32",
 		DstNodeName: localHostname,
+		DstNodeIp:   localHostIP.String(),
 	},
 	// Single route for the block.
 	proto.RouteUpdate{
@@ -1236,6 +1241,7 @@ var vxlanLocalBlockWithBorrowsDifferentSubnetNodeRes = vxlanLocalBlockWithBorrow
 		IpPoolType:  proto.IPPoolType_NONE,
 		Dst:         localHostIP.String() + "/32",
 		DstNodeName: localHostname,
+		DstNodeIp:   localHostIP.String(),
 	},
 	// Single route for the block.
 	proto.RouteUpdate{
@@ -1415,6 +1421,7 @@ var hostInIPPool = vxlanWithBlock.withKVUpdates(
 		IpPoolType:  proto.IPPoolType_NO_ENCAP, // Host now marked as inside the IP pool.
 		Dst:         remoteHostIP.String() + "/32",
 		DstNodeName: remoteHostname,
+		DstNodeIp:   remoteHostIP.String(),
 		NatOutgoing: true,
 	},
 	// Single route for the block.
