@@ -68,7 +68,7 @@ type bpfEndpointManager struct {
 	dataIfaceRegex   *regexp.Regexp
 	ipSetIDAlloc     *idalloc.IDAllocator
 	epToHostDrop     bool
-	natTunnelMTU     int
+	vxlanMTU         int
 	dsrEnabled       bool
 
 	ipSetMap bpf.Map
@@ -81,7 +81,7 @@ func newBPFEndpointManager(
 	epToHostDrop bool,
 	dataIfaceRegex *regexp.Regexp,
 	ipSetIDAlloc *idalloc.IDAllocator,
-	natTunnelMTU int,
+	vxlanMTU int,
 	dsrEnabled bool,
 	ipSetMap bpf.Map,
 	stateMap bpf.Map,
@@ -100,7 +100,7 @@ func newBPFEndpointManager(
 		dataIfaceRegex:      dataIfaceRegex,
 		ipSetIDAlloc:        ipSetIDAlloc,
 		epToHostDrop:        epToHostDrop,
-		natTunnelMTU:        natTunnelMTU,
+		vxlanMTU:            vxlanMTU,
 		dsrEnabled:          dsrEnabled,
 		ipSetMap:            ipSetMap,
 		stateMap:            stateMap,
@@ -500,8 +500,11 @@ func (m *bpfEndpointManager) ensureQdisc(ifaceName string) {
 func (m *bpfEndpointManager) attachWorkloadProgram(endpoint *proto.WorkloadEndpoint, polDirection PolDirection) error {
 	ap := m.calculateTCAttachPoint(tc.EpTypeWorkload, polDirection, endpoint.Name)
 	// Host side of the veth is always configured as 169.254.1.1.
-	hostIP := net.IPv4(169, 254, 1, 1)
-	err := tc.AttachProgram(ap, hostIP)
+	ap.IP = net.IPv4(169, 254, 1, 1)
+	// vxlanMTU is the MTU of workload devices, we need to use another 50 less
+	// to fit in the final packet
+	ap.TunnelMTU = uint16(m.vxlanMTU - 50)
+	err := ap.AttachProgram()
 	if err != nil {
 		return err
 	}
@@ -548,9 +551,11 @@ func FindJumpMap(ap tc.AttachPoint) (bpf.MapFD, error) {
 	if err != nil {
 		return 0, errors.Wrap(err, "failed to find TC filter for interface "+ap.Iface)
 	}
+
+	progName := ap.ProgramName()
 	for _, line := range bytes.Split(out, []byte("\n")) {
 		line := string(line)
-		if strings.Contains(line, ap.Section) {
+		if strings.Contains(line, progName) {
 			re := regexp.MustCompile(`id (\d+)`)
 			m := re.FindStringSubmatch(line)
 			if len(m) > 0 {
@@ -600,11 +605,11 @@ func (m *bpfEndpointManager) attachDataIfaceProgram(ifaceName string, polDirecti
 	}
 	ap := m.calculateTCAttachPoint(epType, polDirection, ifaceName)
 	iface := m.ifaces[ifaceName]
-	var addr net.IP
 	if len(iface.addrs) > 0 {
-		addr = iface.addrs[0]
+		ap.IP = iface.addrs[0]
 	}
-	return tc.AttachProgram(ap, addr)
+	ap.TunnelMTU = uint16(m.vxlanMTU)
+	return ap.AttachProgram()
 }
 
 // PolDirection is the Calico datamodel direction of policy.  On a host endpoint, ingress is towards the host.
@@ -642,10 +647,13 @@ func (m *bpfEndpointManager) calculateTCAttachPoint(endpointType tc.EndpointType
 		toOrFrom = tc.ToEp
 	}
 
-	ap.Section = tc.SectionName(endpointType, toOrFrom)
 	ap.Iface = ifaceName
-	ap.Filename = tc.ProgFilename(endpointType, toOrFrom, m.epToHostDrop, m.fibLookupEnabled,
-		m.dsrEnabled, m.bpfLogLevel)
+	ap.Type = endpointType
+	ap.ToOrFrom = toOrFrom
+	ap.ToHostDrop = m.epToHostDrop
+	ap.FIB = m.fibLookupEnabled
+	ap.DSR = m.dsrEnabled
+	ap.LogLevel = m.bpfLogLevel
 
 	return ap
 }
