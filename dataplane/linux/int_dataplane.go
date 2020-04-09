@@ -16,6 +16,8 @@ package intdataplane
 
 import (
 	"fmt"
+	"github.com/projectcalico/felix/wireguard"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"net"
 	"reflect"
 	"regexp"
@@ -130,6 +132,8 @@ type Config struct {
 	IptablesLockProbeInterval      time.Duration
 	XDPRefreshInterval             time.Duration
 
+	Wireguard                      wireguard.Config
+
 	NetlinkTimeout time.Duration
 
 	RulesConfig rules.Config
@@ -207,6 +211,8 @@ type InternalDataplane struct {
 	ipSets               []*ipsets.IPSets
 
 	ipipManager *ipipManager
+
+	wireguardManager *wireguardManager
 
 	ifaceMonitor     *ifacemonitor.InterfaceMonitor
 	ifaceUpdates     chan *ifaceUpdate
@@ -600,6 +606,17 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		dp.ipipManager = newIPIPManager(ipSetsV4, config.MaxIPSetSize, config.ExternalNodesCidrs)
 		dp.RegisterManager(dp.ipipManager) // IPv4-only
 	}
+
+	// Add a manager for wireguard configuration. This is added irrespective of whether wireguard is actually enabled
+	// because it may need to tidy up some of the routing rules when disabled.
+	cryptoRouteTableWireguard := wireguard.New(config.Hostname, &config.Wireguard, config.NetlinkTimeout,
+		config.DeviceRouteProtocol, func (publicKey wgtypes.Key) error {
+			dp.fromDataplane <- &proto.WireguardStatusUpdate{PublicKey: publicKey.String()}
+			return nil
+		})
+	dp.wireguardManager = newWireguardManager(cryptoRouteTableWireguard, nil)
+	dp.RegisterManager(dp.wireguardManager) // IPv4-only
+
 	if config.IPv6Enabled {
 		mangleTableV6 := iptables.NewTable(
 			"mangle",
@@ -709,13 +726,13 @@ type Manager interface {
 
 type ManagerWithRouteTables interface {
 	Manager
-	GetRouteTables() []routeTable
+	GetRouteTableSyncers() []routeTableSyncer
 }
 
-func (d *InternalDataplane) routeTables() []routeTable {
-	var rts []routeTable
+func (d *InternalDataplane) routeTableSyncers() []routeTableSyncer {
+	var rts []routeTableSyncer
 	for _, mrts := range d.managersWithRouteTables {
-		rts = append(rts, mrts.GetRouteTables()...)
+		rts = append(rts, mrts.GetRouteTableSyncers()...)
 	}
 
 	return rts
@@ -1063,7 +1080,7 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 		}
 
 		for _, mgr := range d.managersWithRouteTables {
-			for _, routeTable := range mgr.GetRouteTables() {
+			for _, routeTable := range mgr.GetRouteTableSyncers() {
 				routeTable.OnIfaceStateChanged(ifaceUpdate.Name, ifaceUpdate.State)
 			}
 		}
@@ -1271,7 +1288,7 @@ func (d *InternalDataplane) apply() {
 
 	if d.forceRouteRefresh {
 		// Refresh timer popped.
-		for _, r := range d.routeTables() {
+		for _, r := range d.routeTableSyncers() {
 			// Queue a resync on the next Apply().
 			r.QueueResync()
 		}
@@ -1302,9 +1319,9 @@ func (d *InternalDataplane) apply() {
 	// Update the routing table in parallel with the other updates.  We'll wait for it to finish
 	// before we return.
 	var routesWG sync.WaitGroup
-	for _, r := range d.routeTables() {
+	for _, r := range d.routeTableSyncers() {
 		routesWG.Add(1)
-		go func(r routeTable) {
+		go func(r routeTableSyncer) {
 			err := r.Apply()
 			if err != nil {
 				log.Warn("Failed to synchronize routing table, will retry...")
