@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,15 @@ package calc_test
 
 import (
 	"os"
+	"sort"
+	"time"
+
+	"github.com/projectcalico/libcalico-go/lib/set"
 
 	. "github.com/projectcalico/felix/calc"
 	"github.com/projectcalico/felix/dataplane/mock"
 
 	"fmt"
-	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -505,7 +508,7 @@ func expectCorrectDataplaneState(mockDataplane *mock.MockDataplane, state State)
 	Expect(mockDataplane.ActiveVTEPs()).To(Equal(state.ExpectedVTEPs),
 		"Active VTEPs were incorrect after moving to state: %v",
 		state.Name)
-	Expect(mockDataplane.ActiveRoutes()).To(Equal(state.ExpectedRoutes),
+	Expect(stringifyRoutes(mockDataplane.ActiveRoutes())).To(Equal(stringifyRoutes(state.ExpectedRoutes)),
 		"Active routes were incorrect after moving to state: %v",
 		state.Name)
 	Expect(mockDataplane.EndpointToPolicyOrder()).To(Equal(state.ExpectedEndpointPolicyOrder),
@@ -523,6 +526,16 @@ func expectCorrectDataplaneState(mockDataplane *mock.MockDataplane, state State)
 	Expect(mockDataplane.ActivePreDNATPolicies()).To(Equal(state.ExpectedPreDNATPolicyIDs),
 		"PreDNAT policies incorrect after moving to state: %v",
 		state.Name)
+}
+
+func stringifyRoutes(routes set.Set) []string {
+	out := make([]string, 0, routes.Len())
+	routes.Iter(func(item interface{}) error {
+		out = append(out, fmt.Sprintf("%+v", item))
+		return nil
+	})
+	sort.Strings(out)
+	return out
 }
 
 type flushStrategy int
@@ -549,6 +562,7 @@ func doStateSequenceTest(expandedTest StateList, flushStrategy flushStrategy) {
 		conf.FelixHostname = localHostname
 		conf.VXLANEnabled = true
 		conf.BPFEnabled = true
+		conf.SetUseNodeResourceUpdates(expandedTest.UsesNodeResources())
 		mockDataplane = mock.NewMockDataplane()
 		eventBuf = NewEventSequencer(mockDataplane)
 		eventBuf.Callback = mockDataplane.OnEvent
