@@ -43,6 +43,7 @@ import (
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
 	cnet "github.com/projectcalico/libcalico-go/lib/net"
+	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	options2 "github.com/projectcalico/libcalico-go/lib/options"
 
 	"github.com/projectcalico/felix/bpf"
@@ -137,6 +138,7 @@ func withUDPConnectedRecvMsg() bpfTestOpt {
 
 const expectedRouteDump = `10.65.0.2/32: local workload in-pool nat-out idx -
 10.65.0.3/32: local workload in-pool nat-out idx -
+10.65.0.4/32: local workload in-pool nat-out idx -
 10.65.1.0/26: remote workload in-pool nh FELIX_1
 10.65.2.0/26: remote workload in-pool nh FELIX_2
 FELIX_0/32: local host
@@ -146,6 +148,7 @@ FELIX_2/32: remote host`
 const expectedRouteDumpIPIP = `10.65.0.1/32: local host in-pool nat-out
 10.65.0.2/32: local workload in-pool nat-out idx -
 10.65.0.3/32: local workload in-pool nat-out idx -
+10.65.0.4/32: local workload in-pool nat-out idx -
 10.65.1.0/26: remote workload in-pool nh FELIX_1
 10.65.2.0/26: remote workload in-pool nh FELIX_2
 FELIX_0/32: local host
@@ -182,6 +185,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 			calicoClient   client.Interface
 			cc             *Checker
 			externalClient *containers.Container
+			deadWorkload   *workload.Workload
 			bpfLog         *containers.Container
 			options        infrastructure.TopologyOptions
 			numericProto   uint8
@@ -433,8 +437,40 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 			BeforeEach(func() {
 				felixes, calicoClient = infrastructure.StartNNodeTopology(numNodes, options, infra)
 
+				addWorkload := func(run bool, ii, wi, port int, labels map[string]string) *workload.Workload {
+					if labels == nil {
+						labels = make(map[string]string)
+					}
+
+					wIP := fmt.Sprintf("10.65.%d.%d", ii, wi+2)
+					wName := fmt.Sprintf("w%d%d", ii, wi)
+
+					w := workload.New(felixes[ii], wName, "default",
+						wIP, strconv.Itoa(port), testOpts.protocol)
+					if run {
+						w.Start()
+					}
+
+					labels["name"] = w.Name
+
+					w.WorkloadEndpoint.Labels = labels
+					w.ConfigureInDatastore(infra)
+					// Assign the workload's IP in IPAM, this will trigger calculation of routes.
+					err := calicoClient.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
+						IP:       cnet.MustParseIP(wIP),
+						HandleID: &w.Name,
+						Attrs: map[string]string{
+							ipam.AttributeNode: felixes[ii].Hostname,
+						},
+						Hostname: felixes[ii].Hostname,
+					})
+					Expect(err).NotTo(HaveOccurred())
+
+					return w
+				}
+
 				// Start a host networked workload on each host for connectivity checks.
-				for ii, felix := range felixes {
+				for ii := range felixes {
 					// We tell each host-networked workload to open:
 					// TODO: Copied from another test
 					// - its normal (uninteresting) port, 8055
@@ -442,48 +478,21 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 					// - port 22, which is an inbound failsafe port.
 					// This allows us to test the interaction between do-not-track policy and failsafe
 					// ports.
-					const portsToOpen = "8055"
 					hostW[ii] = workload.Run(
 						felixes[ii],
 						fmt.Sprintf("host%d", ii),
 						"default",
 						felixes[ii].IP, // Same IP as felix means "run in the host's namespace"
-						portsToOpen,
+						"8055",
 						testOpts.protocol)
 
 					// Two workloads on each host so we can check the same host and other host cases.
-					iiStr := strconv.Itoa(ii)
-					wIP := "10.65." + iiStr + ".2"
-					w[ii][0] = workload.Run(felix, "w"+iiStr+"0", "default", wIP, "8055", testOpts.protocol)
-					w[ii][0].WorkloadEndpoint.Labels = map[string]string{
-						"name": w[ii][0].Name,
-						"port": "8055",
-					}
-					w[ii][0].ConfigureInDatastore(infra)
-					// Assign the workload's IP in IPAM, this will trigger calculation of routes.
-					err := calicoClient.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
-						IP:       cnet.MustParseIP(wIP),
-						HandleID: &w[ii][0].Name,
-						Attrs: map[string]string{
-							ipam.AttributeNode: felixes[ii].Hostname,
-						},
-						Hostname: felixes[ii].Hostname,
-					})
-					Expect(err).NotTo(HaveOccurred())
-					wIP = "10.65." + iiStr + ".3"
-					w[ii][1] = workload.Run(felix, "w"+iiStr+"1", "default", wIP, "8056", testOpts.protocol)
-					w[ii][1].WorkloadEndpoint.Labels = map[string]string{"name": w[ii][1].Name}
-					w[ii][1].ConfigureInDatastore(infra)
-					// Assign the workload's IP in IPAM, this will trigger calculation of routes.
-					err = calicoClient.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
-						IP:       cnet.MustParseIP(wIP),
-						HandleID: &w[ii][1].Name,
-						Attrs: map[string]string{
-							ipam.AttributeNode: felixes[ii].Hostname,
-						},
-						Hostname: felixes[ii].Hostname,
-					})
+					w[ii][0] = addWorkload(true, ii, 0, 8055, map[string]string{"port": "8055"})
+					w[ii][1] = addWorkload(true, ii, 1, 8056, nil)
 				}
+
+				// Create a workload on node 0 that does not run, but we can use it to set up paths
+				deadWorkload = addWorkload(false, 0, 2, 8057, nil)
 
 				// We will use this container to model an external client trying to connect into
 				// workloads on a host.  Create a route in the container for the workload CIDR.
@@ -1151,6 +1160,128 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						nodePortsTest(true)
 					})
 				}
+
+				Context("with icmp blocked from workloads, external client", func() {
+					var (
+						testSvc          *v1.Service
+						testSvcNamespace string
+					)
+
+					testSvcName := "test-service"
+
+					BeforeEach(func() {
+						icmpProto := numorstring.ProtocolFromString("icmp")
+						pol.Spec.Ingress = []api.Rule{
+							{
+								Action: "Allow",
+								Source: api.EntityRule{
+									Nets: []string{"0.0.0.0/0"},
+								},
+							},
+						}
+						pol.Spec.Egress = []api.Rule{
+							{
+								Action: "Allow",
+								Source: api.EntityRule{
+									Nets: []string{"0.0.0.0/0"},
+								},
+							},
+							{
+								Action:   "Deny",
+								Protocol: &icmpProto,
+							},
+						}
+						pol = updatePolicy(pol)
+					})
+
+					var tgtPort int
+					var tgtWorkload *workload.Workload
+
+					JustBeforeEach(func() {
+						k8sClient := infra.(*infrastructure.K8sDatastoreInfra).K8sClient
+						testSvc = k8sService(testSvcName, "10.101.0.10",
+							tgtWorkload, 80, tgtPort, int32(npPort), testOpts.protocol)
+						testSvcNamespace = testSvc.ObjectMeta.Namespace
+						_, err := k8sClient.CoreV1().Services(testSvcNamespace).Create(testSvc)
+						Expect(err).NotTo(HaveOccurred())
+						Eventually(k8sGetEpsForServiceFunc(k8sClient, testSvc), "10s").Should(HaveLen(1),
+							"Service endpoints didn't get created? Is controller-manager happy?")
+
+						// sync with NAT table being applied
+						natFtKey := nat.NewNATKey(net.ParseIP(felixes[1].IP), npPort, numericProto)
+						Eventually(func() bool {
+							m := dumpNATMap(felixes[1])
+							v, ok := m[natFtKey]
+							return ok && v.Count() > 0
+						}, 5*time.Second).Should(BeTrue())
+
+						// Sync with policy
+						cc.ExpectSome(w[1][0], w[0][0])
+						cc.CheckConnectivity()
+					})
+
+					Describe("with dead workload", func() {
+						BeforeEach(func() {
+							tgtPort = 8057
+							tgtWorkload = deadWorkload
+						})
+
+						It("should get host unreachable from nodeport via node1->node0 fwd", func() {
+							if testOpts.connTimeEnabled {
+								Skip("FIXME externalClient also does conntime balancing")
+							}
+
+							err := felixes[0].ExecMayFail("ip", "route", "add", "unreachable", deadWorkload.IP)
+							Expect(err).NotTo(HaveOccurred())
+
+							tcpdump := containers.AttachTCPDump(externalClient, "any")
+							tcpdump.SetLogEnabled(true)
+							matcher := fmt.Sprintf("IP %s > %s: ICMP host %s unreachable",
+								felixes[1].IP, externalClient.IP, felixes[1].IP)
+							tcpdump.AddMatcher("ICMP", regexp.MustCompile(matcher))
+							tcpdump.Start(testOpts.protocol, "port", strconv.Itoa(int(npPort)), "or", "icmp")
+							defer tcpdump.Stop()
+
+							cc.ExpectNone(externalClient, TargetIP(felixes[1].IP), npPort)
+							cc.CheckConnectivity()
+
+							Eventually(func() int { return tcpdump.MatchCount("ICMP") }).
+								Should(BeNumerically(">", 0), matcher)
+						})
+					})
+
+					Describe("with wrong target port", func() {
+						// TCP would send RST instead of ICMP, it is enough to test one wa of
+						// triggering the ICMP message
+						if testOpts.protocol != "udp" {
+							return
+						}
+
+						BeforeEach(func() {
+							tgtPort = 0xdead
+							tgtWorkload = w[0][0]
+						})
+
+						It("should get port unreachable via node1->node0 fwd", func() {
+							if testOpts.connTimeEnabled {
+								Skip("FIXME externalClient also does conntime balancing")
+							}
+
+							tcpdump := containers.AttachTCPDump(externalClient, "any")
+							tcpdump.SetLogEnabled(true)
+							matcher := fmt.Sprintf("IP %s > %s: ICMP %s udp port %d unreachable",
+								felixes[1].IP, externalClient.IP, felixes[1].IP, npPort)
+							tcpdump.AddMatcher("ICMP", regexp.MustCompile(matcher))
+							tcpdump.Start(testOpts.protocol, "port", strconv.Itoa(tgtPort), "or", "icmp")
+							defer tcpdump.Stop()
+
+							cc.ExpectNone(externalClient, TargetIP(felixes[1].IP), npPort)
+							cc.CheckConnectivity()
+							Eventually(func() int { return tcpdump.MatchCount("ICMP") }).
+								Should(BeNumerically(">", 0), matcher)
+						})
+					})
+				})
 			})
 		})
 	})
