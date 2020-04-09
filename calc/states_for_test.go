@@ -18,6 +18,10 @@ import (
 	"fmt"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
+
 	"github.com/projectcalico/felix/dataplane/mock"
 	"github.com/projectcalico/felix/proto"
 	. "github.com/projectcalico/libcalico-go/lib/backend/model"
@@ -882,6 +886,11 @@ var hostEp1WithPolicyAndANetworkSetMatchingBEqB = hostEp1WithPolicy.withKVUpdate
 	"12.1.0.0/24",
 })
 
+// RouteUpdate expected for ipPoolWithVXLANCrossSubnet.
+var routeUpdateIPPoolVXLANCrossSubnet = proto.RouteUpdate{
+	Dst: ipPoolWithVXLANCrossSubnet.CIDR.String(),
+}
+
 // Minimal VXLAN set-up, all the data needed for a remote VTEP, a pool and a block.
 var vxlanWithBlock = empty.withKVUpdates(
 	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLAN},
@@ -1095,6 +1104,91 @@ var vxlanLocalBlockWithBorrows = empty.withKVUpdates(
 	},
 ).withName("VXLAN local with borrows")
 
+// As vxlanLocalBlockWithBorrows but using Node resources instead of host IPs.
+var vxlanLocalBlockWithBorrowsNodeRes = vxlanLocalBlockWithBorrows.withKVUpdates(
+	KVPair{Key: localHostIPKey, Value: nil},
+	KVPair{Key: remoteHostIPKey, Value: nil},
+	KVPair{Key: remoteNodeResKey, Value: &apiv3.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: remoteHostname,
+		},
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
+			IPv4Address: remoteHostIPWithPrefix,
+		}}}},
+	KVPair{Key: localNodeResKey, Value: &apiv3.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: localHostname,
+		},
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
+			IPv4Address: localHostIPWithPrefix,
+		}}}},
+).withName("VXLAN local with borrows (node resources)")
+
+// As vxlanLocalBlockWithBorrowsNodeRes using the cross-subnet version of the IP pool.
+// Hosts are in the same subnet.
+var vxlanLocalBlockWithBorrowsCrossSubnetNodeRes = vxlanLocalBlockWithBorrowsNodeRes.withKVUpdates(
+	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLANCrossSubnet},
+).withRoutes(
+	proto.RouteUpdate{
+		Type: proto.RouteType_NOENCAP,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   remoteHostIP.String(),
+	},
+
+	proto.RouteUpdate{
+		Type: proto.RouteType_WORKLOADS_NODE,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   remoteHostIP.String(),
+	},
+	proto.RouteUpdate{
+		Type: proto.RouteType_VXLAN,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   "10.0.1.0",
+	},
+).withName("VXLAN local with borrows cross subnet (node resources)")
+
+// As vxlanLocalBlockWithBorrowsCrossSubnetNodeRes but hosts are in a different pool.
+var vxlanLocalBlockWithBorrowsDifferentSubnetNodeRes = vxlanLocalBlockWithBorrowsNodeRes.withKVUpdates(
+	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLANCrossSubnet},
+	KVPair{Key: remoteNodeResKey, Value: &apiv3.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: remoteHostname,
+		},
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
+			IPv4Address: remoteHostIP.String(), // Omitting the /32 here to check the v3 validator is used for this resource.
+		}}}},
+	KVPair{Key: localNodeResKey, Value: &apiv3.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: localHostname,
+		},
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
+			IPv4Address: localHostIP.String() + "/32",
+		}}}},
+).withRoutes(
+	proto.RouteUpdate{
+		Type: proto.RouteType_NOENCAP,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   remoteHostIP.String(),
+	},
+
+	proto.RouteUpdate{
+		Type: proto.RouteType_WORKLOADS_NODE,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   remoteHostIP.String(),
+	},
+	proto.RouteUpdate{
+		Type: proto.RouteType_VXLAN,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   "10.0.1.0",
+	},
+).withName("VXLAN cross subnet different subnet (node resources)")
+
 // vxlanWithBlockAndBorrows but missing hte VTEP information for the first host.
 var vxlanWithBlockAndBorrowsAndMissingFirstVTEP = vxlanWithBlockAndBorrows.withKVUpdates(
 	KVPair{Key: remoteHostIPKey, Value: nil},
@@ -1119,6 +1213,21 @@ var vxlanWithBlockAndBorrowsAndMissingFirstVTEP = vxlanWithBlockAndBorrows.withK
 		Type: proto.RouteType_WORKLOADS_NODE,
 	},
 )
+
+var remoteNodeResKey = ResourceKey{Name: remoteHostname, Kind: apiv3.KindNode}
+var localNodeResKey = ResourceKey{Name: localHostname, Kind: apiv3.KindNode}
+
+// As vxlanWithBlock but with node resources instead of host IPs.
+var vxlanWithBlockNodeRes = vxlanWithBlock.withKVUpdates(
+	KVPair{Key: remoteHostIPKey, Value: nil},
+	KVPair{Key: remoteNodeResKey, Value: &apiv3.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: localHostname,
+		},
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
+			IPv4Address: remoteHostIP.String() + "/24",
+		}}}},
+).withName("VXLAN with node resource (node resources)")
 
 var vxlanToIPIPSwitch = vxlanWithBlock.withKVUpdates(
 	KVPair{Key: ipPoolKey, Value: &ipPoolWithIPIP},
@@ -1160,6 +1269,19 @@ func (l StateList) String() string {
 		names = append(names, state.String())
 	}
 	return "[" + strings.Join(names, ", ") + "]"
+}
+
+// UsesNodeResources returns true if any of the KVs in this state are apiv3.Node resources.
+// Some calculation graph nodes support either the v3 Node or the old model.HostIP object.
+func (l StateList) UsesNodeResources() bool {
+	for _, s := range l {
+		for _, kv := range s.DatastoreState {
+			if resourceKey, ok := kv.Key.(ResourceKey); ok && resourceKey.Kind == apiv3.KindNode {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // identity is a test expander that returns the test unaltered.

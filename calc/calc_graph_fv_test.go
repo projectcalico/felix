@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ package calc_test
 
 import (
 	"os"
+	"time"
 
 	. "github.com/projectcalico/felix/calc"
 	"github.com/projectcalico/felix/dataplane/mock"
 
 	"fmt"
-	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -321,6 +321,17 @@ var baseTests = []StateList{
 		// Add it back again.
 		vxlanWithMAC,
 	},
+	{
+		// Test L3 route resolver in node resource mode.
+		// Note: the test logic below auto-enables the Node resources flag if it detects any states with
+		// Node resources (and the route resolver ignores whichever datatype it expects to be disabled).
+		// Hence, we have to use all Node resource-based states or all host IP-base ones.
+		vxlanWithBlockNodeRes,
+		vxlanLocalBlockWithBorrowsNodeRes,
+		vxlanLocalBlockWithBorrowsCrossSubnetNodeRes,
+		vxlanLocalBlockWithBorrowsDifferentSubnetNodeRes,
+		vxlanWithBlockNodeRes,
+	},
 }
 
 func testExpanders() (testExpanders []func(baseTest StateList) (desc string, mappedTests []StateList)) {
@@ -410,6 +421,7 @@ var _ = Describe("Async calculation graph state sequencing tests:", func() {
 					conf.FelixHostname = localHostname
 					conf.VXLANEnabled = true
 					conf.BPFEnabled = true
+					conf.SetUseNodeResourceUpdates(test.UsesNodeResources())
 					outputChan := make(chan interface{})
 					asyncGraph := NewAsyncCalcGraph(conf, []chan<- interface{}{outputChan}, nil)
 					// And a validation filter, with a channel between it
@@ -537,6 +549,7 @@ func doStateSequenceTest(expandedTest StateList, flushStrategy flushStrategy) {
 		conf.FelixHostname = localHostname
 		conf.VXLANEnabled = true
 		conf.BPFEnabled = true
+		conf.SetUseNodeResourceUpdates(expandedTest.UsesNodeResources())
 		mockDataplane = mock.NewMockDataplane()
 		eventBuf = NewEventSequencer(mockDataplane)
 		eventBuf.Callback = mockDataplane.OnEvent
