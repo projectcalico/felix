@@ -19,10 +19,7 @@ package calc_test
 
 import (
 	"os"
-	"sort"
 	"time"
-
-	"github.com/projectcalico/libcalico-go/lib/set"
 
 	. "github.com/projectcalico/felix/calc"
 	"github.com/projectcalico/felix/dataplane/mock"
@@ -508,7 +505,7 @@ func expectCorrectDataplaneState(mockDataplane *mock.MockDataplane, state State)
 	Expect(mockDataplane.ActiveVTEPs()).To(Equal(state.ExpectedVTEPs),
 		"Active VTEPs were incorrect after moving to state: %v",
 		state.Name)
-	Expect(stringifyRoutes(mockDataplane.ActiveRoutes())).To(Equal(stringifyRoutes(state.ExpectedRoutes)),
+	Expect(mockDataplane.ActiveRoutes()).To(Equal(state.ExpectedRoutes),
 		"Active routes were incorrect after moving to state: %v",
 		state.Name)
 	Expect(mockDataplane.EndpointToPolicyOrder()).To(Equal(state.ExpectedEndpointPolicyOrder),
@@ -526,16 +523,6 @@ func expectCorrectDataplaneState(mockDataplane *mock.MockDataplane, state State)
 	Expect(mockDataplane.ActivePreDNATPolicies()).To(Equal(state.ExpectedPreDNATPolicyIDs),
 		"PreDNAT policies incorrect after moving to state: %v",
 		state.Name)
-}
-
-func stringifyRoutes(routes set.Set) []string {
-	out := make([]string, 0, routes.Len())
-	routes.Iter(func(item interface{}) error {
-		out = append(out, fmt.Sprintf("%+v", item))
-		return nil
-	})
-	sort.Strings(out)
-	return out
 }
 
 type flushStrategy int
