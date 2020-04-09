@@ -888,18 +888,7 @@ var hostEp1WithPolicyAndANetworkSetMatchingBEqB = hostEp1WithPolicy.withKVUpdate
 
 // RouteUpdate expected for ipPoolWithVXLANCrossSubnet.
 var routeUpdateIPPoolVXLANCrossSubnet = proto.RouteUpdate{
-	//	Type:        proto.RouteType_CIDR_INFO,
-	//IpPoolType:  proto.IPPoolType_VXLAN,
 	Dst: ipPoolWithVXLANCrossSubnet.CIDR.String(),
-	//NatOutgoing: ipPoolWithVXLANCrossSubnet.Masquerade,
-}
-
-// RouteUpdate expected for the remote host with its normal IP.
-var routeUpdateRemoteHost = proto.RouteUpdate{
-	//Type:        proto.RouteType_REMOTE_HOST,
-	//IpPoolType:  proto.IPPoolType_NONE,
-	Dst:  remoteHostIP.String() + "/32",
-	Node: remoteHostname,
 }
 
 // Minimal VXLAN set-up, all the data needed for a remote VTEP, a pool and a block.
@@ -1140,30 +1129,24 @@ var vxlanLocalBlockWithBorrowsNodeRes = vxlanLocalBlockWithBorrows.withKVUpdates
 var vxlanLocalBlockWithBorrowsCrossSubnetNodeRes = vxlanLocalBlockWithBorrowsNodeRes.withKVUpdates(
 	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLANCrossSubnet},
 ).withRoutes(
-	routeUpdateIPPoolVXLANCrossSubnet,
-	routeUpdateRemoteHost,
 	proto.RouteUpdate{
-		//Type:        proto.RouteType_LOCAL_HOST,
-		//IpPoolType:  proto.IPPoolType_NONE,
-		Dst:  localHostIP.String() + "/32",
-		Node: localHostname,
-	},
-	// Single route for the block.
-	proto.RouteUpdate{
-		//Type:        proto.RouteType_LOCAL_WORKLOAD,
-		//IpPoolType:  proto.IPPoolType_VXLAN,
-		Dst:  "10.0.0.0/29",
-		Node: localHostname,
-		Gw:   localHostIP.String(),
-		//SameSubnet: true, // cross subnet.
-	},
-	proto.RouteUpdate{
-		//Type:        proto.RouteType_REMOTE_WORKLOAD,
-		//IpPoolType:  proto.IPPoolType_VXLAN,
+		Type: proto.RouteType_NOENCAP,
 		Dst:  "10.0.0.2/32",
 		Node: remoteHostname,
 		Gw:   remoteHostIP.String(),
-		//SameSubnet: true, // cross subnet.
+	},
+
+	proto.RouteUpdate{
+		Type: proto.RouteType_WORKLOADS_NODE,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   remoteHostIP.String(),
+	},
+	proto.RouteUpdate{
+		Type: proto.RouteType_VXLAN,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   "10.0.1.0",
 	},
 ).withName("VXLAN local with borrows cross subnet (node resources)")
 
@@ -1185,30 +1168,24 @@ var vxlanLocalBlockWithBorrowsDifferentSubnetNodeRes = vxlanLocalBlockWithBorrow
 			IPv4Address: localHostIP.String() + "/32",
 		}}}},
 ).withRoutes(
-	routeUpdateIPPoolVXLANCrossSubnet,
-	routeUpdateRemoteHost,
 	proto.RouteUpdate{
-		//Type:        proto.RouteType_LOCAL_HOST,
-		//IpPoolType:  proto.IPPoolType_NONE,
-		Dst:  localHostIP.String() + "/32",
-		Node: localHostname,
-	},
-	// Single route for the block.
-	proto.RouteUpdate{
-		//Type:        proto.RouteType_LOCAL_WORKLOAD,
-		//IpPoolType:  proto.IPPoolType_VXLAN,
-		Dst:  "10.0.0.0/29",
-		Node: localHostname,
-		Gw:   localHostIP.String(),
-		//SameSubnet:  true, // cross subnet.
-	},
-	proto.RouteUpdate{
-		//Type:        proto.RouteType_REMOTE_WORKLOAD,
-		//IpPoolType:  proto.IPPoolType_VXLAN,
+		Type: proto.RouteType_NOENCAP,
 		Dst:  "10.0.0.2/32",
 		Node: remoteHostname,
 		Gw:   remoteHostIP.String(),
-		//SameSubnet:  false, // subnets don't match.
+	},
+
+	proto.RouteUpdate{
+		Type: proto.RouteType_WORKLOADS_NODE,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   remoteHostIP.String(),
+	},
+	proto.RouteUpdate{
+		Type: proto.RouteType_VXLAN,
+		Dst:  "10.0.0.2/32",
+		Node: remoteHostname,
+		Gw:   "10.0.1.0",
 	},
 ).withName("VXLAN cross subnet different subnet (node resources)")
 
