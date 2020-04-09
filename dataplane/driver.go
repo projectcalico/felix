@@ -17,6 +17,7 @@
 package dataplane
 
 import (
+	"github.com/projectcalico/felix/wireguard"
 	"math/bits"
 	"net"
 	"os/exec"
@@ -60,6 +61,19 @@ func StartDataplaneDriver(configParams *config.Config,
 		// that we use for communicating between chains.
 		markAccept, _ := markBitsManager.NextSingleBitMark()
 		markPass, _ := markBitsManager.NextSingleBitMark()
+
+		var markWireguard uint32
+		if configParams.WireguardEnabled {
+			log.Info("Wireguard enabled, allocating a mark bit")
+			markWireguard, _ = markBitsManager.NextSingleBitMark()
+			if markWireguard == 0 {
+				log.WithFields(log.Fields{
+					"Name":     "felix-iptables",
+					"MarkMask": configParams.IptablesMarkMask,
+				}).Panic("Failed to allocate a mark bit for IPsec, not enough mark bits available.")
+			}
+		}
+
 		// Short-lived mark bits for local calculations within a chain.
 		markScratch0, _ := markBitsManager.NextSingleBitMark()
 		markScratch1, _ := markBitsManager.NextSingleBitMark()
@@ -146,6 +160,15 @@ func StartDataplaneDriver(configParams *config.Config,
 				IptablesNATOutgoingInterfaceFilter: configParams.IptablesNATOutgoingInterfaceFilter,
 				NATOutgoingAddress:                 configParams.NATOutgoingAddress,
 				BPFEnabled:                         configParams.BPFEnabled,
+			},
+			Wireguard: wireguard.Config{
+				Enabled:             configParams.WireguardEnabled,
+				ListeningPort:       configParams.WireguardListeningPort,
+				FirewallMark:        int(markWireguard),
+				RoutingRulePriority: configParams.WireguardRoutingRulePriority,
+				RoutingTableIndex:   configParams.WireguardRoutingTableIndex,
+				InterfaceName:       configParams.WireguardInterfaceName,
+				MTU:                 configParams.WireguardMTU,
 			},
 			IPIPMTU:                        configParams.IpInIpMtu,
 			VXLANMTU:                       configParams.VXLANMTU,
