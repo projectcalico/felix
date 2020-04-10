@@ -33,13 +33,13 @@ type HandleIface interface {
 	SetSocketTimeout(to time.Duration) error
 	LinkList() ([]netlink.Link, error)
 	LinkByName(name string) (netlink.Link, error)
-	RouteList(link netlink.Link, family int) ([]netlink.Route, error)
+	RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error)
 	RouteAdd(route *netlink.Route) error
 	RouteDel(route *netlink.Route) error
 	Delete()
 }
 
-func newNetlinkHandle() (HandleIface, error) {
+func NewNetlinkHandle() (HandleIface, error) {
 	return netlink.NewHandle(syscall.NETLINK_ROUTE)
 }
 
