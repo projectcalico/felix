@@ -100,13 +100,21 @@ func (c *L3RouteResolver) RegisterWith(allUpdDispatcher, localDispatcher *dispat
 		allUpdDispatcher.Register(model.HostIPKey{}, c.OnHostIPUpdate)
 	}
 
-	allUpdDispatcher.Register(model.BlockKey{}, c.OnBlockUpdate)
+	// TODO: Uncomment this.
+	//allUpdDispatcher.Register(model.BlockKey{}, c.OnBlockUpdate)
 	allUpdDispatcher.Register(model.IPPoolKey{}, c.OnPoolUpdate)
 
-	localDispatcher.Register(model.WorkloadEndpointKey{}, c.OnLocalWorkloadUpdate)
+	// Depending on if we're using workload endpoints for routing information, we may
+	// need all WEPs, or only local WEPs.
+	routeSourceWEPs := true
+	if routeSourceWEPs {
+		allUpdDispatcher.Register(model.WorkloadEndpointKey{}, c.OnWorkloadUpdate)
+	} else {
+		localDispatcher.Register(model.WorkloadEndpointKey{}, c.OnWorkloadUpdate)
+	}
 }
 
-func (c *L3RouteResolver) OnLocalWorkloadUpdate(update api.Update) (_ bool) {
+func (c *L3RouteResolver) OnWorkloadUpdate(update api.Update) (_ bool) {
 	defer c.flush()
 
 	key := update.Key.(model.WorkloadEndpointKey)
@@ -130,12 +138,12 @@ func (c *L3RouteResolver) OnLocalWorkloadUpdate(update api.Update) (_ bool) {
 
 	// Incref the new CIDRs.
 	for _, newCIDR := range newCIDRs {
-		c.trie.AddLocalWEP(ip.CIDRFromCalicoNet(newCIDR).(ip.V4CIDR))
+		c.trie.AddWEP(ip.CIDRFromCalicoNet(newCIDR).(ip.V4CIDR), key.Hostname)
 	}
 
 	// Decref the old.
 	for _, oldCIDR := range oldCIDRs {
-		c.trie.RemoveLocalWEP(ip.CIDRFromCalicoNet(oldCIDR).(ip.V4CIDR))
+		c.trie.RemoveWEP(ip.CIDRFromCalicoNet(oldCIDR).(ip.V4CIDR), key.Hostname)
 	}
 
 	if len(newCIDRs) > 0 {
@@ -507,7 +515,7 @@ func (c *L3RouteResolver) flush() {
 			if ri.Block.NodeName != "" {
 				rt.DstNodeName = ri.Block.NodeName
 				if rt.DstNodeName == c.myNodeName {
-					logCxt.Debug("Local workload route.")
+					logCxt.Debug(" workload route.")
 					rt.Type = proto.RouteType_LOCAL_WORKLOAD
 				} else {
 					logCxt.Debug("Remote workload route.")
@@ -518,18 +526,27 @@ func (c *L3RouteResolver) flush() {
 				rt.DstNodeName = ri.Host.NodeNames[0]
 
 				if rt.DstNodeName == c.myNodeName {
-					logCxt.Debug("Local host route.")
+					logCxt.Debug(" host route.")
 					rt.Type = proto.RouteType_LOCAL_HOST
 				} else {
 					logCxt.Debug("Remote host route.")
 					rt.Type = proto.RouteType_REMOTE_HOST
 				}
 			}
-			if ri.LocalWEP.RefCount > 0 {
-				// We have a local WEP with this IP.
-				rt.DstNodeName = c.myNodeName
-				rt.Type = proto.RouteType_LOCAL_WORKLOAD
-				rt.LocalWorkload = true
+
+			for nodename, _ := range ri.WEP.RefCount {
+				// At least one WEP exists with this IP. It may be on this node, or a remote node.
+				// In steady state we only ever expect a single WEP for this CIDR. However there are rare
+				// cases we must handle where we may have two WEPs with the same IP. Since this will be transient,
+				// we can always just use one entry from the map.
+				rt.DstNodeName = nodename
+				if nodename == c.myNodeName {
+					rt.Type = proto.RouteType_LOCAL_WORKLOAD
+					rt.LocalWorkload = true
+				} else {
+					rt.Type = proto.RouteType_REMOTE_WORKLOAD
+				}
+				break
 			}
 		}
 
@@ -688,17 +705,23 @@ func (r *RouteTrie) RemoveHost(cidr ip.V4CIDR, nodeName string) {
 	})
 }
 
-func (r *RouteTrie) AddLocalWEP(cidr ip.V4CIDR) {
+func (r *RouteTrie) AddWEP(cidr ip.V4CIDR, nodename string) {
 	r.updateCIDR(cidr, func(ri *RouteInfo) {
-		ri.LocalWEP.RefCount++
+		if ri.WEP.RefCount == nil {
+			ri.WEP.RefCount = map[string]int{}
+		}
+		ri.WEP.RefCount[nodename]++
 	})
 }
 
-func (r *RouteTrie) RemoveLocalWEP(cidr ip.V4CIDR) {
+func (r *RouteTrie) RemoveWEP(cidr ip.V4CIDR, nodename string) {
 	r.updateCIDR(cidr, func(ri *RouteInfo) {
-		ri.LocalWEP.RefCount--
-		if ri.LocalWEP.RefCount < 0 {
-			logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a local workload past 0.")
+		ri.WEP.RefCount[nodename]--
+		if ri.WEP.RefCount[nodename] == 0 {
+			delete(ri.WEP.RefCount, nodename)
+		}
+		if ri.WEP.RefCount[nodename] < 0 {
+			logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a workload past 0.")
 		}
 	})
 }
@@ -763,11 +786,12 @@ type RouteInfo struct {
 		NodeNames []string // set if this CIDR _is_ a node's own IP.
 	}
 
-	// LocalWEP contains information extracted from the local workload endpoints.
-	LocalWEP struct {
-		// Count of local WEPs that have this CIDR.  Normally, this will be 0 or 1 but Felix has to be tolerant
-		// to bad data (two local WEPs with the same CIDR) so we do ref counting.
-		RefCount int
+	// WEP contains information extracted from the workload endpoints.
+	WEP struct {
+		// Count of WEPs that have this CIDR.  Normally, this will be 0 or 1 but Felix has to be tolerant
+		// to bad data (two WEPs with the same CIDR) so we do ref counting.
+		// The RefCount is tracked per-node, to properly handle remote weps.
+		RefCount map[string]int
 	}
 
 	// WasSent is set to true when the route is sent downstream.
@@ -783,7 +807,7 @@ func (r RouteInfo) IsValidRoute() bool {
 		r.Block.NodeName != "" ||
 		len(r.Host.NodeNames) > 0 ||
 		r.Pool.NATOutgoing ||
-		r.LocalWEP.RefCount > 0
+		len(r.WEP.RefCount) > 0
 }
 
 // IsZero() returns true if this node in the trie now contains no tracking information at all and is
