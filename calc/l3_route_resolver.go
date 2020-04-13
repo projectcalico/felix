@@ -133,6 +133,8 @@ func (c *L3RouteResolver) OnWorkloadUpdate(update api.Update) (_ bool) {
 		logrus.WithField("workload", key).WithField("newCIDRs", newCIDRs).Debug("Workload update")
 	}
 
+	logrus.Warnf("CASEY: WEP update: %s / %s", oldCIDRs, newCIDRs)
+
 	if reflect.DeepEqual(oldCIDRs, newCIDRs) {
 		// No change, ignore.
 		logrus.Debug("No change to CIDRs, ignore.")
@@ -518,7 +520,7 @@ func (c *L3RouteResolver) flush() {
 			if ri.Block.NodeName != "" {
 				rt.DstNodeName = ri.Block.NodeName
 				if rt.DstNodeName == c.myNodeName {
-					logCxt.Debug(" workload route.")
+					logCxt.Debug("Local workload route.")
 					rt.Type = proto.RouteType_LOCAL_WORKLOAD
 				} else {
 					logCxt.Debug("Remote workload route.")
@@ -529,7 +531,7 @@ func (c *L3RouteResolver) flush() {
 				rt.DstNodeName = ri.Host.NodeNames[0]
 
 				if rt.DstNodeName == c.myNodeName {
-					logCxt.Debug(" host route.")
+					logCxt.Debug("Local host route.")
 					rt.Type = proto.RouteType_LOCAL_HOST
 				} else {
 					logCxt.Debug("Remote host route.")
@@ -806,6 +808,7 @@ type RouteInfo struct {
 // this CIDR was previously sent.  If IsValidRoute() returns false but WasSent is true then we need to withdraw
 // the route.
 func (r RouteInfo) IsValidRoute() bool {
+	logrus.Warnf("CASEY: Checking if valid: %#v", r)
 	return r.Pool.Type != proto.IPPoolType_NONE ||
 		r.Block.NodeName != "" ||
 		len(r.Host.NodeNames) > 0 ||
