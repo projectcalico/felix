@@ -721,6 +721,7 @@ func (r *RouteTrie) AddWEP(cidr ip.V4CIDR, nodename string) {
 
 func (r *RouteTrie) RemoveWEP(cidr ip.V4CIDR, nodename string) {
 	r.updateCIDR(cidr, func(ri *RouteInfo) {
+		logrus.Infof("CASEY: RemoveWEP from node %s: %v", nodename, ri.WEP.RefCount)
 		ri.WEP.RefCount[nodename]--
 		if ri.WEP.RefCount[nodename] == 0 {
 			delete(ri.WEP.RefCount, nodename)
@@ -728,6 +729,7 @@ func (r *RouteTrie) RemoveWEP(cidr ip.V4CIDR, nodename string) {
 		if ri.WEP.RefCount[nodename] < 0 {
 			logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a workload past 0.")
 		}
+		logrus.Infof("CASEY: removed wep from node %s: %v", nodename, ri.WEP.RefCount)
 	})
 }
 
@@ -748,8 +750,8 @@ func (r RouteTrie) updateCIDR(cidr ip.V4CIDR, updateFn func(info *RouteInfo)) bo
 	// Check if the update was a no-op.
 	if riCopy.Equals(ri) {
 		// Change was a no-op, ignore.
-		logrus.Info("CASEY: before %#v", riCopy)
-		logrus.Info("CASEY: after  %#v", ri)
+		logrus.Infof("CASEY: before %#v", riCopy)
+		logrus.Infof("CASEY: after  %#v", ri)
 		logrus.WithField("cidr", cidr).Debug("Ignoring no-op change")
 		return false
 	}
