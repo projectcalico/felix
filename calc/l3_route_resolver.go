@@ -743,7 +743,7 @@ func (r RouteTrie) updateCIDR(cidr ip.V4CIDR, updateFn func(info *RouteInfo)) bo
 	// Get the RouteInfo for the given CIDR and take a copy so we can compare.
 	ri := r.Get(cidr)
 	riCopy := ri
-	riCopy.RefCount = map[string]int{}
+	riCopy.WEP.RefCount = map[string]int{}
 	for n, c := range ri.WEP.RefCount {
 		riCopy.WEP.RefCount[n] = c
 	}
