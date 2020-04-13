@@ -64,6 +64,7 @@ type L3RouteResolver struct {
 	allPools               map[string]model.IPPool
 	workloadIDToCIDRs      map[model.WorkloadEndpointKey][]cnet.IPNet
 	useNodeResourceUpdates bool
+	routeSource            string
 }
 
 type l3rrNodeInfo struct {
@@ -75,7 +76,7 @@ func (i l3rrNodeInfo) AddrAsCIDR() ip.V4CIDR {
 	return i.Addr.AsCIDR().(ip.V4CIDR)
 }
 
-func NewL3RouteResolver(hostname string, callbacks PipelineCallbacks, useNodeResourceUpdates bool) *L3RouteResolver {
+func NewL3RouteResolver(hostname string, callbacks PipelineCallbacks, useNodeResourceUpdates bool, routeSource string) *L3RouteResolver {
 	logrus.Info("Creating L3 route resolver")
 	return &L3RouteResolver{
 		myNodeName: hostname,
@@ -88,6 +89,7 @@ func NewL3RouteResolver(hostname string, callbacks PipelineCallbacks, useNodeRes
 		allPools:               map[string]model.IPPool{},
 		workloadIDToCIDRs:      map[model.WorkloadEndpointKey][]cnet.IPNet{},
 		useNodeResourceUpdates: useNodeResourceUpdates,
+		routeSource:            routeSource,
 	}
 }
 
@@ -100,16 +102,17 @@ func (c *L3RouteResolver) RegisterWith(allUpdDispatcher, localDispatcher *dispat
 		allUpdDispatcher.Register(model.HostIPKey{}, c.OnHostIPUpdate)
 	}
 
-	// TODO: Uncomment this.
-	//allUpdDispatcher.Register(model.BlockKey{}, c.OnBlockUpdate)
 	allUpdDispatcher.Register(model.IPPoolKey{}, c.OnPoolUpdate)
 
 	// Depending on if we're using workload endpoints for routing information, we may
 	// need all WEPs, or only local WEPs.
-	routeSourceWEPs := true
-	if routeSourceWEPs {
+	logrus.WithField("routeSource", c.routeSource).Info("Registering for L3 route updates")
+	if c.routeSource == "workloadIPs" {
+		// Driven off of workload IP addressess. Register for all WEP udpates.
 		allUpdDispatcher.Register(model.WorkloadEndpointKey{}, c.OnWorkloadUpdate)
 	} else {
+		// Driven off of IPAM data. Register for blocks and local WEP updates.
+		allUpdDispatcher.Register(model.BlockKey{}, c.OnBlockUpdate)
 		localDispatcher.Register(model.WorkloadEndpointKey{}, c.OnWorkloadUpdate)
 	}
 }
@@ -536,7 +539,7 @@ func (c *L3RouteResolver) flush() {
 
 			for nodename, _ := range ri.WEP.RefCount {
 				// At least one WEP exists with this IP. It may be on this node, or a remote node.
-				// In steady state we only ever expect a single WEP for this CIDR. However there are rare
+				// In steady state we only ever expect a single WEP for this CIDR. However there are rare transient
 				// cases we must handle where we may have two WEPs with the same IP. Since this will be transient,
 				// we can always just use one entry from the map.
 				rt.DstNodeName = nodename
