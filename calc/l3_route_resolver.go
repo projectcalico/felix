@@ -748,6 +748,8 @@ func (r RouteTrie) updateCIDR(cidr ip.V4CIDR, updateFn func(info *RouteInfo)) bo
 	// Check if the update was a no-op.
 	if riCopy.Equals(ri) {
 		// Change was a no-op, ignore.
+		logrus.Info("CASEY: before %#v", riCopy)
+		logrus.Info("CASEY: after  %#v", ri)
 		logrus.WithField("cidr", cidr).Debug("Ignoring no-op change")
 		return false
 	}
