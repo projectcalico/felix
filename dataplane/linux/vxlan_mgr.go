@@ -98,8 +98,8 @@ func newVXLANManager(
 		nlHandle,
 		func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
 			deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable {
-			return routetable.New(interfacePrefixes, ipVersion, vxlan, netlinkTimeout,
-				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes)
+			return routetable.New(interfacePrefixes, true, ipVersion, vxlan, netlinkTimeout,
+				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0)
 		},
 	)
 }
@@ -214,8 +214,8 @@ func (m *vxlanManager) setNoEncapRouteTable(rt routeTable) {
 	m.noEncapRouteTable = rt
 }
 
-func (m *vxlanManager) GetRouteTables() []routeTable {
-	rts := []routeTable{m.routeTable}
+func (m *vxlanManager) GetRouteTableSyncers() []routeTableSyncer {
+	rts := []routeTableSyncer{m.routeTable}
 
 	noEncapRouteTable := m.getNoEncapRouteTable()
 	if noEncapRouteTable != nil {

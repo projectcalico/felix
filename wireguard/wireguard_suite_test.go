@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package routetable
+package wireguard_test
 
 import (
-	"github.com/projectcalico/felix/ip"
-	"net"
-	"os/exec"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+
+	"testing"
+
+	"github.com/onsi/ginkgo/reporters"
+
+	"github.com/projectcalico/libcalico-go/lib/testutils"
 )
 
-type conntrackIface interface {
-	RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP)
+func init() {
+	testutils.HookLogrusForGinkgo()
 }
 
-func addStaticARPEntry(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error {
-	cmd := exec.Command("arp",
-		"-s", cidr.Addr().String(), destMAC.String(),
-		"-i", ifaceName)
-	return cmd.Run()
+func TestRules(t *testing.T) {
+	RegisterFailHandler(Fail)
+	junitReporter := reporters.NewJUnitReporter("../report/wireguard_suite.xml")
+	RunSpecsWithDefaultAndCustomReporters(t, "Wireguard Suite", []Reporter{junitReporter})
 }
