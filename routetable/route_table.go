@@ -30,6 +30,8 @@ import (
 	"github.com/projectcalico/felix/conntrack"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
+	netlinkshim "github.com/projectcalico/felix/netlink"
+	timeshim "github.com/projectcalico/felix/time"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 
@@ -147,7 +149,7 @@ type RouteTable struct {
 	// reset on successful connection.
 	numConsistentNetlinkFailures int
 	// Current netlink handle, or nil if we need to reconnect.
-	cachedNetlinkHandle HandleIface
+	cachedNetlinkHandle netlinkshim.Netlink
 
 	// Interface update tracking.
 	reSync                bool
@@ -176,15 +178,14 @@ type RouteTable struct {
 	tableIndex int
 
 	// Testing shims, swapped with mock versions for UT
-	newNetlinkHandle  func() (HandleIface, error)
+	newNetlinkHandle  func() (netlinkshim.Netlink, error)
 	addStaticARPEntry func(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error
 	conntrack         conntrackIface
-	time              timeIface
+	time              timeshim.Time
 }
 
 func New(
-	interfaces []string,
-	inferfaceNamesArePrefixes bool,
+	interfaceRegexes []string,
 	ipVersion uint8,
 	vxlan bool,
 	netlinkTimeout time.Duration,
@@ -194,15 +195,14 @@ func New(
 	tableIndex int,
 ) *RouteTable {
 	return NewWithShims(
-		interfaces,
-		inferfaceNamesArePrefixes,
+		interfaceRegexes,
 		ipVersion,
-		NewNetlinkHandle,
+		netlinkshim.NewRealNetlink,
 		vxlan,
 		netlinkTimeout,
 		addStaticARPEntry,
 		conntrack.New(),
-		realTime{},
+		timeshim.NewRealTime(),
 		deviceRouteSourceAddress,
 		deviceRouteProtocol,
 		removeExternalRoutes,
@@ -212,15 +212,14 @@ func New(
 
 // NewWithShims is a test constructor, which allows netlink, arp and time to be replaced by shims.
 func NewWithShims(
-	interfaces []string,
-	inferfaceNamesArePrefixes bool,
+	interfaceRegexes []string,
 	ipVersion uint8,
-	newNetlinkHandle func() (HandleIface, error),
+	newNetlinkHandle func() (netlinkshim.Netlink, error),
 	vxlan bool,
 	netlinkTimeout time.Duration,
 	addStaticARPEntry func(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error,
 	conntrack conntrackIface,
-	timeShim timeIface,
+	timeShim timeshim.Time,
 	deviceRouteSourceAddress net.IP,
 	deviceRouteProtocol int,
 	removeExternalRoutes bool,
@@ -228,13 +227,11 @@ func NewWithShims(
 ) *RouteTable {
 	var regexpParts []string
 	includeNoOIF := false
-	for _, prefix := range interfaces {
-		if prefix == InterfaceNone {
+	for _, interfaceRegex := range interfaceRegexes {
+		if interfaceRegex == InterfaceNone {
 			includeNoOIF = true
-		} else if inferfaceNamesArePrefixes {
-			regexpParts = append(regexpParts, "^"+prefix+".*")
 		} else {
-			regexpParts = append(regexpParts, "^"+prefix+"$")
+			regexpParts = append(regexpParts, interfaceRegex)
 		}
 	}
 
@@ -298,15 +295,25 @@ func (r *RouteTable) onIfaceSeen(ifaceName string) {
 	r.ifaceNameToFirstSeen[ifaceName] = r.time.Now()
 }
 
+// markIfaceForUpdate marks an interface update is required. This is either a delta update from a route
+// set, update, or remove, or a full resync triggered from start-up processing, QueueResync or a previous failed update.
+func (r *RouteTable) markIfaceForUpdate(ifaceName string, resync bool) {
+	if resync {
+		// This is a full resync so flag as such.
+		r.ifaceNameToUpdateType[ifaceName] = updateTypeFullResync
+	} else if _, ok := r.ifaceNameToUpdateType[ifaceName]; !ok {
+		// This is not a full resync - set the update status if not already set (because we don't want to "downgrade"
+		// a full-resync to a delta update).
+		r.ifaceNameToUpdateType[ifaceName] = updateTypeDelta
+	}
+}
+
 // SetRoutes sets the full set of targets for the specified interface. This clears any delta changes that were
 // previously configured.
 func (r *RouteTable) SetRoutes(ifaceName string, targets []Target) {
 	// Store the routes.  Remove any delta routes since this is a full set of routes.
 	r.pendingIfaceNameToTargets[ifaceName] = targets
 	delete(r.pendingIfaceNameToDeltaTargets, ifaceName)
-	if _, ok := r.ifaceNameToUpdateType[ifaceName]; !ok {
-		r.ifaceNameToUpdateType[ifaceName] = updateTypeDelta
-	}
 }
 
 // RouteUpdate updates the route keyed off the target CIDR. These deltas will be applied to any routes set using
@@ -316,9 +323,7 @@ func (r *RouteTable) RouteUpdate(ifaceName string, target Target) {
 		r.pendingIfaceNameToDeltaTargets[ifaceName] = map[ip.CIDR]*Target{}
 	}
 	r.pendingIfaceNameToDeltaTargets[ifaceName][target.CIDR] = &target
-	if _, ok := r.ifaceNameToUpdateType[ifaceName]; !ok {
-		r.ifaceNameToUpdateType[ifaceName] = updateTypeDelta
-	}
+	r.markIfaceForUpdate(ifaceName, false)
 }
 
 // RouteRemove removes the route with the specified CIDR. These deltas will be applied to any routes set using
@@ -328,16 +333,12 @@ func (r *RouteTable) RouteRemove(ifaceName string, cidr ip.CIDR) {
 		r.pendingIfaceNameToDeltaTargets[ifaceName] = map[ip.CIDR]*Target{}
 	}
 	r.pendingIfaceNameToDeltaTargets[ifaceName][cidr] = nil
-	if _, ok := r.ifaceNameToUpdateType[ifaceName]; !ok {
-		r.ifaceNameToUpdateType[ifaceName] = updateTypeDelta
-	}
+	r.markIfaceForUpdate(ifaceName, false)
 }
 
 func (r *RouteTable) SetL2Routes(ifaceName string, targets []L2Target) {
 	r.pendingIfaceNameToL2Targets[ifaceName] = targets
-	if _, ok := r.ifaceNameToUpdateType[ifaceName]; !ok {
-		r.ifaceNameToUpdateType[ifaceName] = updateTypeDelta
-	}
+	r.markIfaceForUpdate(ifaceName, false)
 }
 
 func (r *RouteTable) QueueResync() {
@@ -345,7 +346,7 @@ func (r *RouteTable) QueueResync() {
 	r.reSync = true
 }
 
-func (r *RouteTable) getNetlinkHandle() (HandleIface, error) {
+func (r *RouteTable) getNetlinkHandle() (netlinkshim.Netlink, error) {
 	if r.cachedNetlinkHandle == nil {
 		if r.numConsistentNetlinkFailures >= maxConnFailures {
 			log.WithField("numFailures", r.numConsistentNetlinkFailures).Panic(
@@ -411,7 +412,7 @@ func (r *RouteTable) Apply() error {
 			if r.ifacePrefixRegexp.MatchString(ifaceName) {
 				r.logCxt.WithField("ifaceName", ifaceName).Debug(
 					"Resync: found calico-owned interface")
-				r.ifaceNameToUpdateType[ifaceName] = updateTypeFullResync
+				r.markIfaceForUpdate(ifaceName, true)
 				r.onIfaceSeen(ifaceName)
 			}
 		}
@@ -435,7 +436,7 @@ func (r *RouteTable) Apply() error {
 		// If we are managing no-OIF routes then add that to our dirty set.
 		if r.includeNoInterface {
 			log.Debug("Flag no OIF for re-sync")
-			r.ifaceNameToUpdateType[InterfaceNone] = updateTypeFullResync
+			r.markIfaceForUpdate(InterfaceNone, false)
 		}
 
 		r.reSync = false
@@ -486,7 +487,7 @@ ifaceLoop:
 		// The interface might be flapping or being deleted. Flag that it will require a full re-sync
 		logCxt.Warn("Failed to sync routes to interface even after retries. " +
 			"Leaving it dirty, requiring a full sync.")
-		r.ifaceNameToUpdateType[ifaceName] = updateTypeFullResync
+		r.markIfaceForUpdate(ifaceName, true)
 	}
 
 	r.cleanUpPendingConntrackDeletions()
