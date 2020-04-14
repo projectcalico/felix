@@ -30,6 +30,8 @@ import (
 	"github.com/projectcalico/felix/conntrack"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
+	timeshim "github.com/projectcalico/felix/shims/time"
+	netlinkshim "github.com/projectcalico/felix/shims/netlink"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 
@@ -147,7 +149,7 @@ type RouteTable struct {
 	// reset on successful connection.
 	numConsistentNetlinkFailures int
 	// Current netlink handle, or nil if we need to reconnect.
-	cachedNetlinkHandle HandleIface
+	cachedNetlinkHandle netlinkshim.Netlink
 
 	// Interface update tracking.
 	reSync                bool
@@ -176,10 +178,10 @@ type RouteTable struct {
 	tableIndex int
 
 	// Testing shims, swapped with mock versions for UT
-	newNetlinkHandle  func() (HandleIface, error)
+	newNetlinkHandle  func() (netlinkshim.Netlink, error)
 	addStaticARPEntry func(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error
 	conntrack         conntrackIface
-	time              timeIface
+	time              timeshim.Time
 }
 
 func New(
@@ -197,12 +199,12 @@ func New(
 		interfaces,
 		inferfaceNamesArePrefixes,
 		ipVersion,
-		NewNetlinkHandle,
+		netlinkshim.NewRealNetlink,
 		vxlan,
 		netlinkTimeout,
 		addStaticARPEntry,
 		conntrack.New(),
-		realTime{},
+		timeshim.NewRealTime(),
 		deviceRouteSourceAddress,
 		deviceRouteProtocol,
 		removeExternalRoutes,
@@ -215,12 +217,12 @@ func NewWithShims(
 	interfaces []string,
 	inferfaceNamesArePrefixes bool,
 	ipVersion uint8,
-	newNetlinkHandle func() (HandleIface, error),
+	newNetlinkHandle func() (netlinkshim.Netlink, error),
 	vxlan bool,
 	netlinkTimeout time.Duration,
 	addStaticARPEntry func(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error,
 	conntrack conntrackIface,
-	timeShim timeIface,
+	timeShim timeshim.Time,
 	deviceRouteSourceAddress net.IP,
 	deviceRouteProtocol int,
 	removeExternalRoutes bool,
@@ -345,7 +347,7 @@ func (r *RouteTable) QueueResync() {
 	r.reSync = true
 }
 
-func (r *RouteTable) getNetlinkHandle() (HandleIface, error) {
+func (r *RouteTable) getNetlinkHandle() (netlinkshim.Netlink, error) {
 	if r.cachedNetlinkHandle == nil {
 		if r.numConsistentNetlinkFailures >= maxConnFailures {
 			log.WithField("numFailures", r.numConsistentNetlinkFailures).Panic(

@@ -25,6 +25,9 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
+	netlinkshim "github.com/projectcalico/felix/shims/netlink"
+	timeshim "github.com/projectcalico/felix/shims/time"
+	wireguardshim "github.com/projectcalico/felix/shims/wireguard"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/routetable"
@@ -104,13 +107,13 @@ type Wireguard struct {
 	logCxt   *logrus.Entry
 
 	// Clients, client factories and testing shims.
-	newNetlinkClient                     func() (NetlinkClient, error)
-	newWireguardClient                   func() (WireguardClient, error)
-	cachedNetlinkClient                  NetlinkClient
-	cachedWireguardClient                WireguardClient
+	newWireguardNetlink                  func() (netlinkshim.Netlink, error)
+	newWireguardDevice                   func() (wireguardshim.Wireguard, error)
+	cachedNetlinkClient                  netlinkshim.Netlink
+	cachedWireguard                      wireguardshim.Wireguard
 	numConsistentLinkClientFailures      int
 	numConsistentWireguardClientFailures int
-	time                                 timeIface
+	time                                 timeshim.Time
 
 	// State information.
 	inSyncWireguard     bool
@@ -150,11 +153,11 @@ func New(
 	return NewWithShims(
 		hostname,
 		config,
-		routetable.NewNetlinkHandle,
-		newLinkClient,
-		newWireguardClient,
+		netlinkshim.NewRealNetlink,
+		netlinkshim.NewRealNetlink,
+		wireguardshim.NewRealWireguard,
 		netlinkTimeout,
-		newTimeIface(),
+		timeshim.NewRealTime(),
 		deviceRouteProtocol,
 		statusCallback,
 	)
@@ -164,11 +167,11 @@ func New(
 func NewWithShims(
 	hostname string,
 	config *Config,
-	newRoutetableHandle func() (routetable.HandleIface, error),
-	newNetlinkClient func() (NetlinkClient, error),
-	newWireguardClient func() (WireguardClient, error),
+	newRoutetableNetlink func() (netlinkshim.Netlink, error),
+	newWireguardNetlink func() (netlinkshim.Netlink, error),
+	newWireguardDevice func() (wireguardshim.Wireguard, error),
 	netlinkTimeout time.Duration,
-	timeShim timeIface,
+	timeShim timeshim.Time,
 	deviceRouteProtocol int,
 	statusCallback func(publicKey wgtypes.Key) error,
 ) *Wireguard {
@@ -176,7 +179,7 @@ func NewWithShims(
 	rt := routetable.NewWithShims(
 		[]string{config.InterfaceName}, false,
 		4, // ipVersion
-		newRoutetableHandle,
+		newRoutetableNetlink,
 		false, // vxlan
 		netlinkTimeout,
 		func(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error { return nil }, // addStaticARPEntry
@@ -189,12 +192,12 @@ func NewWithShims(
 	)
 
 	return &Wireguard{
-		hostname:           hostname,
-		config:             config,
-		logCxt:             logrus.WithFields(logrus.Fields{"enabled": config.Enabled, "ifaceName": config.InterfaceName}),
-		newNetlinkClient:   newNetlinkClient,
-		newWireguardClient: newWireguardClient,
-		time:               timeShim,
+		hostname:            hostname,
+		config:              config,
+		logCxt:              logrus.WithFields(logrus.Fields{"enabled": config.Enabled, "ifaceName": config.InterfaceName}),
+		newWireguardNetlink: newWireguardNetlink,
+		newWireguardDevice:  newWireguardDevice,
+		time:                timeShim,
 		nodes: map[string]*nodeData{
 			hostname: newNodeData(),
 		},
@@ -828,7 +831,7 @@ func (w *Wireguard) constructWireguardDeltaForResync() (wgtypes.Key, *wgtypes.Co
 	}
 
 	// Get the wireguard device configuration.
-	device, err := client.Device(w.config.InterfaceName)
+	device, err := client.DeviceByName(w.config.InterfaceName)
 	if err != nil {
 		w.logCxt.Errorf("error querying wireguard configuration: %v", err)
 		return zeroKey, nil, err
@@ -1194,8 +1197,8 @@ func (w *Wireguard) shouldProgramWireguardPeer(node *nodeData) bool {
 	return node.ipv4EndpointAddr != nil && node.publicKey != zeroKey && w.publicKeyToNodeNames[node.publicKey].Len() == 1
 }
 
-func (w *Wireguard) getWireguardClient() (WireguardClient, error) {
-	if w.cachedWireguardClient == nil {
+func (w *Wireguard) getWireguardClient() (wireguardshim.Wireguard, error) {
+	if w.cachedWireguard == nil {
 		if w.numConsistentWireguardClientFailures >= maxConnFailures && w.numConsistentWireguardClientFailures%wireguardClientRetryInterval != 0 {
 			// It is a valid condition that we cannot connect to the wireguard client, so just log.
 			w.logCxt.WithField("numFailures", w.numConsistentWireguardClientFailures).Debug(
@@ -1203,35 +1206,35 @@ func (w *Wireguard) getWireguardClient() (WireguardClient, error) {
 			return nil, WireguardNotSupported
 		}
 		w.logCxt.Info("Trying to connect to wireguard client")
-		client, err := w.newWireguardClient()
+		client, err := w.newWireguardDevice()
 		if err != nil {
 			w.numConsistentWireguardClientFailures++
 			w.logCxt.WithField("numFailures", w.numConsistentWireguardClientFailures).Info(
 				"Failed to connect to wireguard client: %v", err)
 			return nil, err
 		}
-		w.cachedWireguardClient = client
+		w.cachedWireguard = client
 	}
 	if w.numConsistentWireguardClientFailures > 0 {
 		w.logCxt.WithField("numFailures", w.numConsistentWireguardClientFailures).Info(
 			"Connected to linkClient after previous failures.")
 		w.numConsistentWireguardClientFailures = 0
 	}
-	return w.cachedWireguardClient, nil
+	return w.cachedWireguard, nil
 }
 
 func (w *Wireguard) closeWireguardClient() {
-	if w.cachedWireguardClient == nil {
+	if w.cachedWireguard == nil {
 		return
 	}
-	if err := w.cachedWireguardClient.Close(); err != nil {
+	if err := w.cachedWireguard.Close(); err != nil {
 		w.logCxt.WithError(err).Error("Failed to close wireguard client, ignoring.")
 	}
-	w.cachedWireguardClient = nil
+	w.cachedWireguard = nil
 }
 
 // getNetlinkClient returns a netlink client for managing device links.
-func (w *Wireguard) getNetlinkClient() (NetlinkClient, error) {
+func (w *Wireguard) getNetlinkClient() (netlinkshim.Netlink, error) {
 	if w.cachedNetlinkClient == nil {
 		// We do not expect the standard netlink client to fail, so panic after a set number of failed attempts.
 		if w.numConsistentLinkClientFailures >= maxConnFailures {
@@ -1239,7 +1242,7 @@ func (w *Wireguard) getNetlinkClient() (NetlinkClient, error) {
 				"Repeatedly failed to connect to netlink.")
 		}
 		w.logCxt.Info("Trying to connect to linkClient")
-		client, err := w.newNetlinkClient()
+		client, err := w.newWireguardNetlink()
 		if err != nil {
 			w.numConsistentLinkClientFailures++
 			w.logCxt.WithError(err).WithField("numFailures", w.numConsistentLinkClientFailures).Error(
@@ -1261,9 +1264,7 @@ func (w *Wireguard) closeNetlinkClient() {
 	if w.cachedNetlinkClient == nil {
 		return
 	}
-	if err := w.cachedNetlinkClient.Close(); err != nil {
-		w.logCxt.WithError(err).Error("Failed to close wireguard client, ignoring.")
-	}
+	w.cachedNetlinkClient.Delete()
 	w.cachedNetlinkClient = nil
 }
 
