@@ -17,15 +17,10 @@ package routetable_test
 import (
 	. "github.com/projectcalico/felix/routetable"
 
-	"errors"
 	"fmt"
 	"net"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -34,16 +29,14 @@ import (
 
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
+	mocknetlink "github.com/projectcalico/felix/netlink/mock"
 	"github.com/projectcalico/felix/testutils"
+	mocktime "github.com/projectcalico/felix/time/mock"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 
 var (
 	FelixRouteProtocol = syscall.RTPROT_BOOT
-
-	simulatedError = errors.New("dummy error")
-	notFound       = errors.New("not found")
-	alreadyExists  = errors.New("already exists")
 
 	mac1 = testutils.MustParseMAC("00:11:22:33:44:51")
 	mac2 = testutils.MustParseMAC("00:11:22:33:44:52")
@@ -54,30 +47,20 @@ var (
 )
 
 var _ = Describe("RouteTable v6", func() {
-	var dataplane *mockDataplane
-	var t *mockTime
+	var dataplane *mocknetlink.MockNetlinkDataplane
+	var t *mocktime.MockTime
 	var rt *RouteTable
 
 	BeforeEach(func() {
-		dataplane = &mockDataplane{
-			nameToLink:       map[string]netlink.Link{},
-			routeKeyToRoute:  map[string]netlink.Route{},
-			addedRouteKeys:   set.New(),
-			deletedRouteKeys: set.New(),
-			updatedRouteKeys: set.New(),
-		}
-		startTime, err := time.Parse(time.RFC3339, "2006-01-02T15:04:05Z")
-		Expect(err).NotTo(HaveOccurred())
-		t = &mockTime{
-			currentTime: startTime,
-		}
+		dataplane = mocknetlink.NewMockNetlinkDataplane()
+		t = mocktime.NewMockTime()
 		// Setting an auto-increment greater than the route cleanup delay effectively
 		// disables the grace period for these tests.
-		t.setAutoIncrement(11 * time.Second)
+		t.SetAutoIncrement(11 * time.Second)
 		rt = NewWithShims(
-			[]string{"cali"}, true,
+			[]string{"^cali.*"},
 			6,
-			dataplane.NewNetlinkHandle,
+			dataplane.NewMockNetlink,
 			false,
 			10*time.Second,
 			dataplane.AddStaticArpEntry,
@@ -96,51 +79,41 @@ var _ = Describe("RouteTable v6", func() {
 
 	It("should not remove the IPv6 link local route", func() {
 		// Route that should be left alone
-		noopLink := dataplane.addIface(4, "cali4", true, true)
+		noopLink := dataplane.AddIface(4, "cali4", true, true)
 		noopRoute := netlink.Route{
-			LinkIndex: noopLink.attrs.Index,
+			LinkIndex: noopLink.LinkAttrs.Index,
 			Dst:       mustParseCIDR("fe80::/64"),
 			Type:      syscall.RTN_UNICAST,
 			Protocol:  syscall.RTPROT_KERNEL,
 			Scope:     netlink.SCOPE_LINK,
 		}
-		rt.SetRoutes(noopLink.attrs.Name, []Target{
+		rt.SetRoutes(noopLink.LinkAttrs.Name, []Target{
 			{CIDR: ip.MustParseCIDROrIP("10.0.0.4/32"), DestMAC: mac1},
 		})
-		dataplane.addMockRoute(&noopRoute)
+		dataplane.AddMockRoute(&noopRoute)
 
 		err := rt.Apply()
 		Expect(err).ToNot(HaveOccurred())
-		Expect(dataplane.deletedRouteKeys).ToNot(HaveKey(keyForRoute(&noopRoute)))
-		Expect(dataplane.updatedRouteKeys).ToNot(HaveKey(keyForRoute(&noopRoute)))
+		Expect(dataplane.DeletedRouteKeys).ToNot(HaveKey(mocknetlink.KeyForRoute(&noopRoute)))
+		Expect(dataplane.UpdatedRouteKeys).ToNot(HaveKey(mocknetlink.KeyForRoute(&noopRoute)))
 	})
 })
 
 var _ = Describe("RouteTable", func() {
-	var dataplane *mockDataplane
-	var t *mockTime
+	var dataplane *mocknetlink.MockNetlinkDataplane
+	var t *mocktime.MockTime
 	var rt *RouteTable
 
 	BeforeEach(func() {
-		dataplane = &mockDataplane{
-			nameToLink:       map[string]netlink.Link{},
-			routeKeyToRoute:  map[string]netlink.Route{},
-			addedRouteKeys:   set.New(),
-			deletedRouteKeys: set.New(),
-			updatedRouteKeys: set.New(),
-		}
-		startTime, err := time.Parse(time.RFC3339, "2006-01-02T15:04:05Z")
-		Expect(err).NotTo(HaveOccurred())
-		t = &mockTime{
-			currentTime: startTime,
-		}
+		dataplane = mocknetlink.NewMockNetlinkDataplane()
+		t = mocktime.NewMockTime()
 		// Setting an auto-increment greater than the route cleanup delay effectively
 		// disables the grace period for these tests.
-		t.setAutoIncrement(11 * time.Second)
+		t.SetAutoIncrement(11 * time.Second)
 		rt = NewWithShims(
-			[]string{"cali"}, true,
+			[]string{"^cali.*"},
 			4,
-			dataplane.NewNetlinkHandle,
+			dataplane.NewMockNetlink,
 			false,
 			10*time.Second,
 			dataplane.AddStaticArpEntry,
@@ -158,88 +131,88 @@ var _ = Describe("RouteTable", func() {
 	})
 
 	It("should handle unexpected non-calico interface updates", func() {
-		t.setAutoIncrement(0 * time.Second)
+		t.SetAutoIncrement(0 * time.Second)
 		rt.OnIfaceStateChanged("calx", ifacemonitor.StateUp)
 		err := rt.Apply()
 		Expect(err).ToNot(HaveOccurred())
 	})
 
 	It("should handle unexpected calico interface updates", func() {
-		t.setAutoIncrement(0 * time.Second)
+		t.SetAutoIncrement(0 * time.Second)
 		rt.OnIfaceStateChanged("cali1", ifacemonitor.StateUp)
 		rt.QueueResync()
 		err := rt.Apply()
 		Expect(err).ToNot(HaveOccurred())
-		t.incrementTime(11 * time.Second)
+		t.IncrementTime(11 * time.Second)
 		rt.QueueResync()
 		err = rt.Apply()
 		Expect(err).ToNot(HaveOccurred())
 	})
 
 	Describe("with some interfaces", func() {
-		var cali1, cali3, eth0 *mockLink
+		var cali1, cali3, eth0 *mocknetlink.MockLink
 		var gatewayRoute, cali1Route, cali1Route2, cali3Route netlink.Route
 		BeforeEach(func() {
-			eth0 = dataplane.addIface(0, "eth0", true, true)
-			cali1 = dataplane.addIface(1, "cali1", true, true)
-			dataplane.addIface(2, "cali2", true, true)
-			cali3 = dataplane.addIface(3, "cali3", true, true)
+			eth0 = dataplane.AddIface(0, "eth0", true, true)
+			cali1 = dataplane.AddIface(1, "cali1", true, true)
+			dataplane.AddIface(2, "cali2", true, true)
+			cali3 = dataplane.AddIface(3, "cali3", true, true)
 			cali1Route = netlink.Route{
-				LinkIndex: cali1.attrs.Index,
+				LinkIndex: cali1.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.1/32"),
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
-			dataplane.addMockRoute(&cali1Route)
+			dataplane.AddMockRoute(&cali1Route)
 			cali3Route = netlink.Route{
-				LinkIndex: cali3.attrs.Index,
+				LinkIndex: cali3.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.3/32"),
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
-			dataplane.addMockRoute(&cali3Route)
+			dataplane.AddMockRoute(&cali3Route)
 			gatewayRoute = netlink.Route{
-				LinkIndex: eth0.attrs.Index,
+				LinkIndex: eth0.LinkAttrs.Index,
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Gw:        net.ParseIP("12.0.0.1"),
 			}
-			dataplane.addMockRoute(&gatewayRoute)
+			dataplane.AddMockRoute(&gatewayRoute)
 		})
 		It("should wait for the route cleanup delay", func() {
-			t.setAutoIncrement(0 * time.Second)
+			t.SetAutoIncrement(0 * time.Second)
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1Route, cali3Route, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
-			t.incrementTime(11 * time.Second)
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1Route, cali3Route, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
+			t.IncrementTime(11 * time.Second)
 			err = rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 		})
 		It("should wait for the route cleanup delay when resyncing", func() {
-			t.setAutoIncrement(0 * time.Second)
+			t.SetAutoIncrement(0 * time.Second)
 			rt.QueueResync()
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1Route, cali3Route, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
-			t.incrementTime(11 * time.Second)
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1Route, cali3Route, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
+			t.IncrementTime(11 * time.Second)
 			rt.QueueResync()
 			err = rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 		})
 		It("should clean up only our routes", func() {
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 		})
 		It("should delete only our conntrack entries", func() {
 			err := rt.Apply()
@@ -250,17 +223,17 @@ var _ = Describe("RouteTable", func() {
 			))
 		})
 		It("Should clear out a source address when source address is not set", func() {
-			updateLink := dataplane.addIface(5, "cali5", true, true)
+			updateLink := dataplane.AddIface(5, "cali5", true, true)
 			updateRoute := netlink.Route{
-				LinkIndex: updateLink.attrs.Index,
+				LinkIndex: updateLink.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.5/32"),
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Src:       net.ParseIP("192.168.0.1"),
 			}
-			dataplane.addMockRoute(&updateRoute)
-			rt.SetRoutes(updateLink.attrs.Name, []Target{
+			dataplane.AddMockRoute(&updateRoute)
+			rt.SetRoutes(updateLink.LinkAttrs.Name, []Target{
 				{CIDR: ip.MustParseCIDROrIP("10.0.0.5"), DestMAC: mac1},
 			})
 
@@ -269,8 +242,8 @@ var _ = Describe("RouteTable", func() {
 
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.updatedRouteKeys).To(HaveKey(keyForRoute(&updateRoute)))
-			Expect(dataplane.routeKeyToRoute[keyForRoute(&updateRoute)]).To(Equal(fixedRoute))
+			Expect(dataplane.UpdatedRouteKeys).To(HaveKey(mocknetlink.KeyForRoute(&updateRoute)))
+			Expect(dataplane.RouteKeyToRoute[mocknetlink.KeyForRoute(&updateRoute)]).To(Equal(fixedRoute))
 
 		})
 		Describe("With a device route source address set", func() {
@@ -279,9 +252,9 @@ var _ = Describe("RouteTable", func() {
 			// Modify the route table to have the device route source address set
 			BeforeEach(func() {
 				rt = NewWithShims(
-					[]string{"cali"}, true,
+					[]string{"^cali.*"},
 					4,
-					dataplane.NewNetlinkHandle,
+					dataplane.NewMockNetlink,
 					false,
 					10*time.Second,
 					dataplane.AddStaticArpEntry,
@@ -296,19 +269,19 @@ var _ = Describe("RouteTable", func() {
 			It("Should delete routes without a source address", func() {
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.deletedRouteKeys).To(HaveKey(keyForRoute(&cali3Route)))
-				Expect(dataplane.deletedRouteKeys).To(HaveKey(keyForRoute(&cali1Route)))
+				Expect(dataplane.DeletedRouteKeys).To(HaveKey(mocknetlink.KeyForRoute(&cali3Route)))
+				Expect(dataplane.DeletedRouteKeys).To(HaveKey(mocknetlink.KeyForRoute(&cali1Route)))
 			})
 			It("Should add routes with a source address", func() {
 				// Route that needs to be added
-				addLink := dataplane.addIface(6, "cali6", true, true)
-				rt.SetRoutes(addLink.attrs.Name, []Target{
+				addLink := dataplane.AddIface(6, "cali6", true, true)
+				rt.SetRoutes(addLink.LinkAttrs.Name, []Target{
 					{CIDR: ip.MustParseCIDROrIP("10.0.0.6"), DestMAC: mac1},
 				})
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.routeKeyToRoute["254-6-10.0.0.6/32"]).To(Equal(netlink.Route{
-					LinkIndex: addLink.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute["254-6-10.0.0.6/32"]).To(Equal(netlink.Route{
+					LinkIndex: addLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.6/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
@@ -318,72 +291,72 @@ var _ = Describe("RouteTable", func() {
 			})
 			It("Should not remove routes with a source address", func() {
 				// Route that should be left alone
-				noopLink := dataplane.addIface(4, "cali4", true, true)
+				noopLink := dataplane.AddIface(4, "cali4", true, true)
 				noopRoute := netlink.Route{
-					LinkIndex: noopLink.attrs.Index,
+					LinkIndex: noopLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.4/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 					Src:       deviceRouteSourceAddress,
 				}
-				rt.SetRoutes(noopLink.attrs.Name, []Target{
+				rt.SetRoutes(noopLink.LinkAttrs.Name, []Target{
 					{CIDR: ip.MustParseCIDROrIP("10.0.0.4/32"), DestMAC: mac1},
 				})
-				dataplane.addMockRoute(&noopRoute)
+				dataplane.AddMockRoute(&noopRoute)
 
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.deletedRouteKeys).ToNot(HaveKey(keyForRoute(&noopRoute)))
-				Expect(dataplane.updatedRouteKeys).ToNot(HaveKey(keyForRoute(&noopRoute)))
+				Expect(dataplane.DeletedRouteKeys).ToNot(HaveKey(mocknetlink.KeyForRoute(&noopRoute)))
+				Expect(dataplane.UpdatedRouteKeys).ToNot(HaveKey(mocknetlink.KeyForRoute(&noopRoute)))
 			})
 			It("Should update source addresses from nil to a given source", func() {
 				// Route that needs to be updated
-				updateLink := dataplane.addIface(5, "cali5", true, true)
+				updateLink := dataplane.AddIface(5, "cali5", true, true)
 				updateRoute := netlink.Route{
-					LinkIndex: updateLink.attrs.Index,
+					LinkIndex: updateLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.5/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}
-				rt.SetRoutes(updateLink.attrs.Name, []Target{
+				rt.SetRoutes(updateLink.LinkAttrs.Name, []Target{
 					{CIDR: ip.MustParseCIDROrIP("10.0.0.5"), DestMAC: mac1},
 				})
-				dataplane.addMockRoute(&updateRoute)
+				dataplane.AddMockRoute(&updateRoute)
 
 				fixedRoute := updateRoute
 				fixedRoute.Src = deviceRouteSourceAddress
 
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.updatedRouteKeys).To(HaveKey(keyForRoute(&updateRoute)))
-				Expect(dataplane.routeKeyToRoute[keyForRoute(&updateRoute)]).To(Equal(fixedRoute))
+				Expect(dataplane.UpdatedRouteKeys).To(HaveKey(mocknetlink.KeyForRoute(&updateRoute)))
+				Expect(dataplane.RouteKeyToRoute[mocknetlink.KeyForRoute(&updateRoute)]).To(Equal(fixedRoute))
 			})
 
 			It("Should update source addresses from an old source to a new one", func() {
 				// Route that needs to be updated
-				updateLink := dataplane.addIface(5, "cali5", true, true)
+				updateLink := dataplane.AddIface(5, "cali5", true, true)
 				updateRoute := netlink.Route{
-					LinkIndex: updateLink.attrs.Index,
+					LinkIndex: updateLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.5/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 					Src:       net.ParseIP("192.168.0.2"),
 				}
-				rt.SetRoutes(updateLink.attrs.Name, []Target{
+				rt.SetRoutes(updateLink.LinkAttrs.Name, []Target{
 					{CIDR: ip.MustParseCIDROrIP("10.0.0.5"), DestMAC: mac1},
 				})
-				dataplane.addMockRoute(&updateRoute)
+				dataplane.AddMockRoute(&updateRoute)
 
 				fixedRoute := updateRoute
 				fixedRoute.Src = deviceRouteSourceAddress
 
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.updatedRouteKeys).To(HaveKey(keyForRoute(&updateRoute)))
-				Expect(dataplane.routeKeyToRoute[keyForRoute(&updateRoute)]).To(Equal(fixedRoute))
+				Expect(dataplane.UpdatedRouteKeys).To(HaveKey(mocknetlink.KeyForRoute(&updateRoute)))
+				Expect(dataplane.RouteKeyToRoute[mocknetlink.KeyForRoute(&updateRoute)]).To(Equal(fixedRoute))
 			})
 		})
 
@@ -392,9 +365,9 @@ var _ = Describe("RouteTable", func() {
 			// Modify the route table to have the device route source address set
 			BeforeEach(func() {
 				rt = NewWithShims(
-					[]string{"cali"}, true,
+					[]string{"^cali.*"},
 					4,
-					dataplane.NewNetlinkHandle,
+					dataplane.NewMockNetlink,
 					false,
 					10*time.Second,
 					dataplane.AddStaticArpEntry,
@@ -409,19 +382,19 @@ var _ = Describe("RouteTable", func() {
 			It("Should delete routes without a protocol", func() {
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.deletedRouteKeys).To(HaveKey(keyForRoute(&cali3Route)))
-				Expect(dataplane.deletedRouteKeys).To(HaveKey(keyForRoute(&cali1Route)))
+				Expect(dataplane.DeletedRouteKeys).To(HaveKey(mocknetlink.KeyForRoute(&cali3Route)))
+				Expect(dataplane.DeletedRouteKeys).To(HaveKey(mocknetlink.KeyForRoute(&cali1Route)))
 			})
 			It("Should add routes with a protocol", func() {
 				// Route that needs to be added
-				addLink := dataplane.addIface(6, "cali6", true, true)
-				rt.SetRoutes(addLink.attrs.Name, []Target{
+				addLink := dataplane.AddIface(6, "cali6", true, true)
+				rt.SetRoutes(addLink.LinkAttrs.Name, []Target{
 					{CIDR: ip.MustParseCIDROrIP("10.0.0.6"), DestMAC: mac1},
 				})
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.routeKeyToRoute["254-6-10.0.0.6/32"]).To(Equal(netlink.Route{
-					LinkIndex: addLink.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute["254-6-10.0.0.6/32"]).To(Equal(netlink.Route{
+					LinkIndex: addLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.6/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  deviceRouteProtocol,
@@ -430,69 +403,69 @@ var _ = Describe("RouteTable", func() {
 			})
 			It("Should not remove routes with a protocol", func() {
 				// Route that should be left alone
-				noopLink := dataplane.addIface(4, "cali4", true, true)
+				noopLink := dataplane.AddIface(4, "cali4", true, true)
 				noopRoute := netlink.Route{
-					LinkIndex: noopLink.attrs.Index,
+					LinkIndex: noopLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.4/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  deviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}
-				rt.SetRoutes(noopLink.attrs.Name, []Target{
+				rt.SetRoutes(noopLink.LinkAttrs.Name, []Target{
 					{CIDR: ip.MustParseCIDROrIP("10.0.0.4/32"), DestMAC: mac1},
 				})
-				dataplane.addMockRoute(&noopRoute)
+				dataplane.AddMockRoute(&noopRoute)
 
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.deletedRouteKeys).ToNot(HaveKey(keyForRoute(&noopRoute)))
-				Expect(dataplane.updatedRouteKeys).ToNot(HaveKey(keyForRoute(&noopRoute)))
+				Expect(dataplane.DeletedRouteKeys).ToNot(HaveKey(mocknetlink.KeyForRoute(&noopRoute)))
+				Expect(dataplane.UpdatedRouteKeys).ToNot(HaveKey(mocknetlink.KeyForRoute(&noopRoute)))
 			})
 			It("Should update protocol from nil to a given protocol", func() {
 				// Route that needs to be updated
-				updateLink := dataplane.addIface(5, "cali5", true, true)
+				updateLink := dataplane.AddIface(5, "cali5", true, true)
 				updateRoute := netlink.Route{
-					LinkIndex: updateLink.attrs.Index,
+					LinkIndex: updateLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.5/32"),
 					Type:      syscall.RTN_UNICAST,
 					Scope:     netlink.SCOPE_LINK,
 				}
-				rt.SetRoutes(updateLink.attrs.Name, []Target{
+				rt.SetRoutes(updateLink.LinkAttrs.Name, []Target{
 					{CIDR: ip.MustParseCIDROrIP("10.0.0.5"), DestMAC: mac1},
 				})
-				dataplane.addMockRoute(&updateRoute)
+				dataplane.AddMockRoute(&updateRoute)
 
 				fixedRoute := updateRoute
 				fixedRoute.Protocol = deviceRouteProtocol
 
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.updatedRouteKeys).To(HaveKey(keyForRoute(&updateRoute)))
-				Expect(dataplane.routeKeyToRoute[keyForRoute(&updateRoute)]).To(Equal(fixedRoute))
+				Expect(dataplane.UpdatedRouteKeys).To(HaveKey(mocknetlink.KeyForRoute(&updateRoute)))
+				Expect(dataplane.RouteKeyToRoute[mocknetlink.KeyForRoute(&updateRoute)]).To(Equal(fixedRoute))
 			})
 
 			It("Should update protocol from an old protocol to a new one", func() {
 				// Route that needs to be updated
-				updateLink := dataplane.addIface(5, "cali5", true, true)
+				updateLink := dataplane.AddIface(5, "cali5", true, true)
 				updateRoute := netlink.Route{
-					LinkIndex: updateLink.attrs.Index,
+					LinkIndex: updateLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.5/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  64,
 					Scope:     netlink.SCOPE_LINK,
 				}
-				rt.SetRoutes(updateLink.attrs.Name, []Target{
+				rt.SetRoutes(updateLink.LinkAttrs.Name, []Target{
 					{CIDR: ip.MustParseCIDROrIP("10.0.0.5"), DestMAC: mac1},
 				})
-				dataplane.addMockRoute(&updateRoute)
+				dataplane.AddMockRoute(&updateRoute)
 
 				fixedRoute := updateRoute
 				fixedRoute.Protocol = deviceRouteProtocol
 
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.updatedRouteKeys).To(HaveKey(keyForRoute(&updateRoute)))
-				Expect(dataplane.routeKeyToRoute[keyForRoute(&updateRoute)]).To(Equal(fixedRoute))
+				Expect(dataplane.UpdatedRouteKeys).To(HaveKey(mocknetlink.KeyForRoute(&updateRoute)))
+				Expect(dataplane.RouteKeyToRoute[mocknetlink.KeyForRoute(&updateRoute)]).To(Equal(fixedRoute))
 			})
 		})
 
@@ -549,8 +522,8 @@ var _ = Describe("RouteTable", func() {
 				err := rt.Apply()
 				Expect(err).NotTo(HaveOccurred())
 
-				dataplane.failuresToSimulate = failNextRouteAdd
-				dataplane.persistFailures = true
+				dataplane.FailuresToSimulate = mocknetlink.FailNextRouteAdd
+				dataplane.PersistFailures = true
 				rt.RouteUpdate("cali3", Target{
 					CIDR: ip.MustParseCIDROrIP("10.20.30.40"),
 				})
@@ -558,13 +531,13 @@ var _ = Describe("RouteTable", func() {
 				Expect(err).To(HaveOccurred())
 				Expect(err).To(Equal(UpdateFailed))
 
-				dataplane.failuresToSimulate = 0
-				dataplane.persistFailures = false
+				dataplane.FailuresToSimulate = 0
+				dataplane.PersistFailures = false
 			})
 
 			It("has not programmed the route", func() {
-				Expect(dataplane.routeKeyToRoute).NotTo(ContainElement(netlink.Route{
-					LinkIndex: cali3.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute).NotTo(ContainElement(netlink.Route{
+					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
@@ -576,8 +549,8 @@ var _ = Describe("RouteTable", func() {
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
 
-				Expect(dataplane.routeKeyToRoute).To(ContainElement(netlink.Route{
-					LinkIndex: cali3.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
+					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
@@ -601,15 +574,15 @@ var _ = Describe("RouteTable", func() {
 			})
 
 			It("should have two routes for cali3", func() {
-				Expect(dataplane.routeKeyToRoute).To(ContainElement(netlink.Route{
-					LinkIndex: cali3.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
+					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
-				Expect(dataplane.routeKeyToRoute).To(ContainElement(netlink.Route{
-					LinkIndex: cali3.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
+					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.20.0/24"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
@@ -626,25 +599,23 @@ var _ = Describe("RouteTable", func() {
 				rt.RouteUpdate("cali3", Target{
 					CIDR: ip.MustParseCIDROrIP("10.0.20.0/24"),
 				})
-				dataplane.addedRouteKeys = set.New()
-				dataplane.deletedRouteKeys = set.New()
-				dataplane.updatedRouteKeys = set.New()
+				dataplane.ResetDeltas()
 
 				err := rt.Apply()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(dataplane.addedRouteKeys).To(BeEmpty())
-				Expect(dataplane.deletedRouteKeys).To(BeEmpty())
-				Expect(dataplane.updatedRouteKeys).To(BeEmpty())
+				Expect(dataplane.AddedRouteKeys).To(BeEmpty())
+				Expect(dataplane.DeletedRouteKeys).To(BeEmpty())
+				Expect(dataplane.UpdatedRouteKeys).To(BeEmpty())
 
-				Expect(dataplane.routeKeyToRoute).To(ContainElement(netlink.Route{
-					LinkIndex: cali3.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
+					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
-				Expect(dataplane.routeKeyToRoute).To(ContainElement(netlink.Route{
-					LinkIndex: cali3.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
+					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.20.0/24"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
@@ -660,25 +631,23 @@ var _ = Describe("RouteTable", func() {
 					CIDR: ip.MustParseCIDROrIP("10.20.30.40"),
 				}})
 
-				dataplane.addedRouteKeys = set.New()
-				dataplane.deletedRouteKeys = set.New()
-				dataplane.updatedRouteKeys = set.New()
+				dataplane.ResetDeltas()
 
 				err := rt.Apply()
 				Expect(err).NotTo(HaveOccurred())
-				Expect(dataplane.addedRouteKeys).To(BeEmpty())
-				Expect(dataplane.deletedRouteKeys).To(BeEmpty())
-				Expect(dataplane.updatedRouteKeys).To(BeEmpty())
+				Expect(dataplane.AddedRouteKeys).To(BeEmpty())
+				Expect(dataplane.DeletedRouteKeys).To(BeEmpty())
+				Expect(dataplane.UpdatedRouteKeys).To(BeEmpty())
 
-				Expect(dataplane.routeKeyToRoute).To(ContainElement(netlink.Route{
-					LinkIndex: cali3.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
+					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
-				Expect(dataplane.routeKeyToRoute).To(ContainElement(netlink.Route{
-					LinkIndex: cali3.attrs.Index,
+				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
+					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.20.0/24"),
 					Type:      syscall.RTN_UNICAST,
 					Protocol:  FelixRouteProtocol,
@@ -690,7 +659,7 @@ var _ = Describe("RouteTable", func() {
 		// We do the following tests in different failure (and non-failure) scenarios.  In
 		// each case, we make the failure transient so that only the first Apply() should
 		// fail.  Then, at most, the second call to Apply() should succeed.
-		for _, failFlags := range failureScenarios {
+		for _, failFlags := range mocknetlink.RoutetableFailureScenarios {
 			failFlags := failFlags
 			desc := fmt.Sprintf("with some routes added and failures: %v", failFlags)
 			Describe(desc, func() {
@@ -704,7 +673,7 @@ var _ = Describe("RouteTable", func() {
 					rt.SetRoutes("cali3", []Target{
 						{CIDR: ip.MustParseCIDROrIP("10.0.1.3/32")},
 					})
-					dataplane.failuresToSimulate = failFlags
+					dataplane.FailuresToSimulate = failFlags
 				})
 				JustBeforeEach(func() {
 					maxTries := 1
@@ -719,7 +688,7 @@ var _ = Describe("RouteTable", func() {
 							break
 						}
 					}
-					if failFlags == failNextLinkByNameNotFound {
+					if failFlags == mocknetlink.FailNextLinkByName {
 						// Special case: a "not found" error doesn't get
 						// rechecked straight away because it's expected
 						// so we have to give the RouteTable a nudge.
@@ -730,20 +699,21 @@ var _ = Describe("RouteTable", func() {
 				})
 				It("should have consumed all failures", func() {
 					// Check that all the failures we simulated were hit.
-					Expect(dataplane.failuresToSimulate).To(Equal(failNone))
+					Expect(dataplane.FailuresToSimulate).To(Equal(mocknetlink.FailNone))
 				})
 				It("should keep correct route", func() {
-					Expect(dataplane.routeKeyToRoute["254-1-10.0.0.1/32"]).To(Equal(netlink.Route{
+					Expect(dataplane.RouteKeyToRoute["254-1-10.0.0.1/32"]).To(Equal(netlink.Route{
 						LinkIndex: 1,
 						Dst:       &ip1,
 						Type:      syscall.RTN_UNICAST,
 						Protocol:  FelixRouteProtocol,
 						Scope:     netlink.SCOPE_LINK,
 					}))
-					Expect(dataplane.addedRouteKeys.Contains("254-1-10.0.0.1/32")).To(BeFalse())
+					Expect(dataplane.AddedRouteKeys.Contains("254-1-10.0.0.1/32")).To(BeFalse())
 				})
 				It("should add new route", func() {
-					Expect(dataplane.routeKeyToRoute["254-2-10.0.0.2/32"]).To(Equal(netlink.Route{
+					Expect(dataplane.RouteKeyToRoute).To(HaveKey("254-2-10.0.0.2/32"))
+					Expect(dataplane.RouteKeyToRoute["254-2-10.0.0.2/32"]).To(Equal(netlink.Route{
 						LinkIndex: 2,
 						Dst:       &ip2,
 						Type:      syscall.RTN_UNICAST,
@@ -752,30 +722,30 @@ var _ = Describe("RouteTable", func() {
 					}))
 				})
 				It("should update changed route", func() {
-					Expect(dataplane.routeKeyToRoute).To(HaveKey("254-3-10.0.1.3/32"))
-					Expect(dataplane.routeKeyToRoute["254-3-10.0.1.3/32"]).To(Equal(netlink.Route{
+					Expect(dataplane.RouteKeyToRoute).To(HaveKey("254-3-10.0.1.3/32"))
+					Expect(dataplane.RouteKeyToRoute["254-3-10.0.1.3/32"]).To(Equal(netlink.Route{
 						LinkIndex: 3,
 						Dst:       &ip13,
 						Type:      syscall.RTN_UNICAST,
 						Protocol:  FelixRouteProtocol,
 						Scope:     netlink.SCOPE_LINK,
 					}))
-					Expect(dataplane.deletedRouteKeys.Contains("254-3-10.0.0.3/32")).To(BeTrue())
+					Expect(dataplane.DeletedRouteKeys.Contains("254-3-10.0.0.3/32")).To(BeTrue())
 				})
 				It("should have expected number of routes at the end", func() {
-					Expect(len(dataplane.routeKeyToRoute)).To(Equal(4),
+					Expect(len(dataplane.RouteKeyToRoute)).To(Equal(4),
 						fmt.Sprintf("Wrong number of routes %v: %v",
-							len(dataplane.routeKeyToRoute),
-							dataplane.routeKeyToRoute))
+							len(dataplane.RouteKeyToRoute),
+							dataplane.RouteKeyToRoute))
 				})
-				if failFlags&(failNextSetSocketTimeout|
-					failNextNewNetlinkHandle|
-					failNextLinkByName|
-					failNextLinkList|
-					failNextRouteAdd|
-					failNextRouteDel|
-					failNextAddARP|
-					failNextRouteList) != 0 {
+				if failFlags&(mocknetlink.FailNextSetSocketTimeout|
+					mocknetlink.FailNextNewNetlink |
+					mocknetlink.FailNextLinkByName|
+					mocknetlink.FailNextLinkList|
+					mocknetlink.FailNextRouteAdd|
+					mocknetlink.FailNextRouteDel|
+					mocknetlink.FailNextAddARP|
+					mocknetlink.FailNextRouteList) != 0 {
 					It("should reconnect to netlink", func() {
 						Expect(dataplane.NumNewNetlinkCalls).To(Equal(2))
 					})
@@ -788,46 +758,46 @@ var _ = Describe("RouteTable", func() {
 				Describe("after an external route addition with route removal enabled", func() {
 					JustBeforeEach(func() {
 						cali1Route2 = netlink.Route{
-							LinkIndex: cali1.attrs.Index,
+							LinkIndex: cali1.LinkAttrs.Index,
 							Dst:       mustParseCIDR("10.0.0.22/32"),
 							Type:      syscall.RTN_UNICAST,
 							Scope:     netlink.SCOPE_LINK,
 						}
-						dataplane.addMockRoute(&cali1Route2)
+						dataplane.AddMockRoute(&cali1Route2)
 						err := rt.Apply()
 						Expect(err).ToNot(HaveOccurred())
 					})
 
 					It("shouldn't spot the update", func() {
-						Expect(dataplane.routeKeyToRoute).To(HaveLen(5))
-						Expect(dataplane.routeKeyToRoute).To(ContainElement(cali1Route2))
+						Expect(dataplane.RouteKeyToRoute).To(HaveLen(5))
+						Expect(dataplane.RouteKeyToRoute).To(ContainElement(cali1Route2))
 					})
 					It("after a QueueResync() should not remove the route", func() {
 						rt.QueueResync()
 						err := rt.Apply()
 						Expect(err).ToNot(HaveOccurred())
-						Expect(dataplane.routeKeyToRoute).To(HaveLen(4))
-						Expect(dataplane.routeKeyToRoute).NotTo(ContainElement(cali1Route2))
+						Expect(dataplane.RouteKeyToRoute).To(HaveLen(4))
+						Expect(dataplane.RouteKeyToRoute).NotTo(ContainElement(cali1Route2))
 					})
 				})
 
 				Describe("after an external route remove with route removal disabled", func() {
 					JustBeforeEach(func() {
-						dataplane.removeMockRoute(&cali1Route)
+						dataplane.RemoveMockRoute(&cali1Route)
 						err := rt.Apply()
 						Expect(err).ToNot(HaveOccurred())
 					})
 
 					It("shouldn't spot the update", func() {
-						Expect(dataplane.routeKeyToRoute).To(HaveLen(3))
-						Expect(dataplane.routeKeyToRoute).NotTo(ContainElement(cali1Route))
+						Expect(dataplane.RouteKeyToRoute).To(HaveLen(3))
+						Expect(dataplane.RouteKeyToRoute).NotTo(ContainElement(cali1Route))
 					})
 					It("after a QueueResync() should remove the route", func() {
 						rt.QueueResync()
 						err := rt.Apply()
 						Expect(err).ToNot(HaveOccurred())
-						Expect(dataplane.routeKeyToRoute).To(HaveLen(4))
-						Expect(dataplane.routeKeyToRoute).To(ContainElement(cali1Route))
+						Expect(dataplane.RouteKeyToRoute).To(HaveLen(4))
+						Expect(dataplane.RouteKeyToRoute).To(ContainElement(cali1Route))
 					})
 				})
 			})
@@ -835,52 +805,52 @@ var _ = Describe("RouteTable", func() {
 	})
 
 	Describe("with a down interface", func() {
-		var cali1 *mockLink
+		var cali1 *mocknetlink.MockLink
 		var cali1Route netlink.Route
 		BeforeEach(func() {
-			cali1 = dataplane.addIface(1, "cali1", false, false)
+			cali1 = dataplane.AddIface(1, "cali1", false, false)
 			cali1Route = netlink.Route{
-				LinkIndex: cali1.attrs.Index,
+				LinkIndex: cali1.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.1/32"),
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
-			dataplane.addMockRoute(&cali1Route)
+			dataplane.AddMockRoute(&cali1Route)
 		})
 		It("with no failures, it should still try to clean up the route", func() {
 			err := rt.Apply()
 			Expect(err).To(BeNil())
-			Expect(dataplane.routeKeyToRoute).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(BeEmpty())
 		})
-		for _, failure := range []failFlags{
-			failNextLinkByName,
-			failNextRouteDel,
-			failNextRouteList,
+		for _, failure := range []mocknetlink.FailFlags{
+			mocknetlink.FailNextLinkByName,
+			mocknetlink.FailNextRouteDel,
+			mocknetlink.FailNextRouteList,
 		} {
 			failure := failure
 			It(fmt.Sprintf("with a %v failure, it should give up", failure), func() {
-				dataplane.failuresToSimulate = failure
+				dataplane.FailuresToSimulate = failure
 				err := rt.Apply()
 				Expect(err).To(BeNil())
-				Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1Route))
+				Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1Route))
 			})
 			It(fmt.Sprintf("with a %v failure, it shouldn't leave the interface dirty", failure), func() {
 				// First Apply() with a failure.
-				dataplane.failuresToSimulate = failure
+				dataplane.FailuresToSimulate = failure
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
 				// All failures should have been hit.
-				Expect(dataplane.failuresToSimulate).To(BeZero())
+				Expect(dataplane.FailuresToSimulate).To(BeZero())
 				// Try another Apply(), the interface shouldn't be marked dirty
 				// so nothing should happen.
 				err = rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1Route))
+				Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1Route))
 			})
 			It(fmt.Sprintf("with a %v failure it should ignore Down updates", failure), func() {
 				// First Apply() with a failure.
-				dataplane.failuresToSimulate = failure
+				dataplane.FailuresToSimulate = failure
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
 				// Fire in the update.
@@ -889,51 +859,41 @@ var _ = Describe("RouteTable", func() {
 				// so nothing should happen.
 				err = rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1Route))
+				Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1Route))
 			})
 			It(fmt.Sprintf("with a %v failure, then an interface kick, it should sync", failure), func() {
-				dataplane.failuresToSimulate = failure
+				dataplane.FailuresToSimulate = failure
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
 
 				// Set interface up
 				rt.OnIfaceStateChanged("cali1", ifacemonitor.StateUp)
-				cali1 = dataplane.addIface(1, "cali1", true, true)
+				cali1 = dataplane.AddIface(1, "cali1", true, true)
 
 				// Now, the apply should work.
 				err = rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
-				Expect(dataplane.routeKeyToRoute).To(BeEmpty())
+				Expect(dataplane.RouteKeyToRoute).To(BeEmpty())
 			})
 		}
 	})
 })
 
 var _ = Describe("RouteTable (main table)", func() {
-	var dataplane *mockDataplane
-	var t *mockTime
+	var dataplane *mocknetlink.MockNetlinkDataplane
+	var t *mocktime.MockTime
 	var rt *RouteTable
 
 	BeforeEach(func() {
-		dataplane = &mockDataplane{
-			nameToLink:       map[string]netlink.Link{},
-			routeKeyToRoute:  map[string]netlink.Route{},
-			addedRouteKeys:   set.New(),
-			deletedRouteKeys: set.New(),
-			updatedRouteKeys: set.New(),
-		}
-		startTime, err := time.Parse(time.RFC3339, "2006-01-02T15:04:05Z")
-		Expect(err).NotTo(HaveOccurred())
-		t = &mockTime{
-			currentTime: startTime,
-		}
+		dataplane = mocknetlink.NewMockNetlinkDataplane()
+		t = mocktime.NewMockTime()
 		// Setting an auto-increment greater than the route cleanup delay effectively
 		// disables the grace period for these tests.
-		t.setAutoIncrement(11 * time.Second)
+		t.SetAutoIncrement(11 * time.Second)
 		rt = NewWithShims(
-			[]string{"cali"}, true,
+			[]string{"^cali.*"},
 			4,
-			dataplane.NewNetlinkHandle,
+			dataplane.NewMockNetlink,
 			false,
 			10*time.Second,
 			dataplane.AddStaticArpEntry,
@@ -951,97 +911,87 @@ var _ = Describe("RouteTable (main table)", func() {
 	})
 
 	Describe("with some interfaces", func() {
-		var cali1, eth0 *mockLink
+		var cali1, eth0 *mocknetlink.MockLink
 		var gatewayRoute, cali1Route, cali1RouteTable100 netlink.Route
 		BeforeEach(func() {
-			eth0 = dataplane.addIface(0, "eth0", true, true)
-			cali1 = dataplane.addIface(1, "cali1", true, true)
+			eth0 = dataplane.AddIface(0, "eth0", true, true)
+			cali1 = dataplane.AddIface(1, "cali1", true, true)
 			cali1Route = netlink.Route{
-				LinkIndex: cali1.attrs.Index,
+				LinkIndex: cali1.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.1/32"),
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
-			dataplane.addMockRoute(&cali1Route)
+			dataplane.AddMockRoute(&cali1Route)
 			cali1RouteTable100 = netlink.Route{
-				LinkIndex: cali1.attrs.Index,
+				LinkIndex: cali1.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.3/32"),
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Table:     100,
 			}
-			dataplane.addMockRoute(&cali1RouteTable100)
+			dataplane.AddMockRoute(&cali1RouteTable100)
 			gatewayRoute = netlink.Route{
-				LinkIndex: eth0.attrs.Index,
+				LinkIndex: eth0.LinkAttrs.Index,
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Gw:        net.ParseIP("12.0.0.1"),
 			}
-			dataplane.addMockRoute(&gatewayRoute)
+			dataplane.AddMockRoute(&gatewayRoute)
 		})
 		It("should wait for the route cleanup delay", func() {
-			t.setAutoIncrement(0 * time.Second)
+			t.SetAutoIncrement(0 * time.Second)
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1Route, cali1RouteTable100, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
-			t.incrementTime(11 * time.Second)
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1Route, cali1RouteTable100, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
+			t.IncrementTime(11 * time.Second)
 			err = rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1RouteTable100, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1RouteTable100, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 		})
 		It("should wait for the route cleanup delay when resyncing", func() {
-			t.setAutoIncrement(0 * time.Second)
+			t.SetAutoIncrement(0 * time.Second)
 			rt.QueueResync()
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1Route, cali1RouteTable100, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
-			t.incrementTime(11 * time.Second)
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1Route, cali1RouteTable100, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
+			t.IncrementTime(11 * time.Second)
 			rt.QueueResync()
 			err = rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1RouteTable100, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1RouteTable100, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 		})
 		It("should clean up only routes from the required table", func() {
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(cali1RouteTable100, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1RouteTable100, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 		})
 	})
 })
 
 var _ = Describe("RouteTable (table 100)", func() {
-	var dataplane *mockDataplane
-	var t *mockTime
+	var dataplane *mocknetlink.MockNetlinkDataplane
+	var t *mocktime.MockTime
 	var rt *RouteTable
 
 	BeforeEach(func() {
-		dataplane = &mockDataplane{
-			nameToLink:       map[string]netlink.Link{},
-			routeKeyToRoute:  map[string]netlink.Route{},
-			addedRouteKeys:   set.New(),
-			deletedRouteKeys: set.New(),
-			updatedRouteKeys: set.New(),
-		}
-		startTime, err := time.Parse(time.RFC3339, "2006-01-02T15:04:05Z")
-		Expect(err).NotTo(HaveOccurred())
-		t = &mockTime{
-			currentTime: startTime,
-		}
+		dataplane = mocknetlink.NewMockNetlinkDataplane()
+		t = mocktime.NewMockTime()
 		// Setting an auto-increment greater than the route cleanup delay effectively
 		// disables the grace period for these tests.
-		t.setAutoIncrement(11 * time.Second)
+		t.SetAutoIncrement(11 * time.Second)
 		rt = NewWithShims(
-			[]string{"cali", InterfaceNone}, false, // exact interface match
+			[]string{"^cali$", InterfaceNone}, // exact interface match
 			4,
-			dataplane.NewNetlinkHandle,
+			dataplane.NewMockNetlink,
 			false,
 			10*time.Second,
 			dataplane.AddStaticArpEntry,
@@ -1059,36 +1009,36 @@ var _ = Describe("RouteTable (table 100)", func() {
 	})
 
 	Describe("with some interfaces", func() {
-		var cali, eth0 *mockLink
+		var cali, eth0 *mocknetlink.MockLink
 		var gatewayRoute, caliRoute, caliRouteTable100, throwRoute netlink.Route
 		BeforeEach(func() {
-			eth0 = dataplane.addIface(0, "eth0", true, true)
-			cali = dataplane.addIface(1, "cali", true, true)
+			eth0 = dataplane.AddIface(0, "eth0", true, true)
+			cali = dataplane.AddIface(1, "cali", true, true)
 			caliRoute = netlink.Route{
-				LinkIndex: cali.attrs.Index,
+				LinkIndex: cali.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.1/32"),
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
-			dataplane.addMockRoute(&caliRoute)
+			dataplane.AddMockRoute(&caliRoute)
 			caliRouteTable100 = netlink.Route{
-				LinkIndex: cali.attrs.Index,
+				LinkIndex: cali.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.3/32"),
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Table:     100,
 			}
-			dataplane.addMockRoute(&caliRouteTable100)
+			dataplane.AddMockRoute(&caliRouteTable100)
 			gatewayRoute = netlink.Route{
-				LinkIndex: eth0.attrs.Index,
+				LinkIndex: eth0.LinkAttrs.Index,
 				Type:      syscall.RTN_UNICAST,
 				Protocol:  FelixRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Gw:        net.ParseIP("12.0.0.1"),
 			}
-			dataplane.addMockRoute(&gatewayRoute)
+			dataplane.AddMockRoute(&gatewayRoute)
 			throwRoute = netlink.Route{
 				LinkIndex: 0,
 				Dst:       mustParseCIDR("10.10.10.10/32"),
@@ -1097,39 +1047,39 @@ var _ = Describe("RouteTable (table 100)", func() {
 				Scope:     netlink.SCOPE_UNIVERSE,
 				Table:     100,
 			}
-			dataplane.addMockRoute(&throwRoute)
+			dataplane.AddMockRoute(&throwRoute)
 		})
 		It("should tidy up non-link routes immediately and wait for the route cleanup delay for interface routes", func() {
-			t.setAutoIncrement(0 * time.Second)
+			t.SetAutoIncrement(0 * time.Second)
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(caliRoute, caliRouteTable100, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
-			t.incrementTime(11 * time.Second)
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(caliRoute, caliRouteTable100, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
+			t.IncrementTime(11 * time.Second)
 			err = rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 		})
 		It("should wait for the route cleanup delay when resyncing", func() {
-			t.setAutoIncrement(0 * time.Second)
+			t.SetAutoIncrement(0 * time.Second)
 			rt.QueueResync()
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(caliRoute, caliRouteTable100, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
-			t.incrementTime(11 * time.Second)
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(caliRoute, caliRouteTable100, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
+			t.IncrementTime(11 * time.Second)
 			rt.QueueResync()
 			err = rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 		})
 		It("should clean up only routes from the required table", func() {
 			err := rt.Apply()
 			Expect(err).ToNot(HaveOccurred())
-			Expect(dataplane.routeKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute))
-			Expect(dataplane.addedRouteKeys).To(BeEmpty())
+			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute))
+			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 		})
 
 		Describe("after configuring a throw route", func() {
@@ -1143,8 +1093,8 @@ var _ = Describe("RouteTable (table 100)", func() {
 			})
 
 			It("the route should remain", func() {
-				Expect(dataplane.routeKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute, throwRoute))
-				Expect(dataplane.addedRouteKeys).To(BeEmpty())
+				Expect(dataplane.RouteKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute, throwRoute))
+				Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 			})
 		})
 
@@ -1162,8 +1112,8 @@ var _ = Describe("RouteTable (table 100)", func() {
 			})
 
 			It("the route should be removed", func() {
-				Expect(dataplane.routeKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute))
-				Expect(dataplane.addedRouteKeys).To(BeEmpty())
+				Expect(dataplane.RouteKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute))
+				Expect(dataplane.AddedRouteKeys).To(BeEmpty())
 			})
 		})
 
@@ -1184,7 +1134,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 			})
 
 			It("the blackhole route should remain", func() {
-				Expect(dataplane.routeKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute, netlink.Route{
+				Expect(dataplane.RouteKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute, netlink.Route{
 					LinkIndex: 0,
 					Dst:       mustParseCIDR("10.10.10.10/32"),
 					Type:      syscall.RTN_BLACKHOLE,
@@ -1192,8 +1142,8 @@ var _ = Describe("RouteTable (table 100)", func() {
 					Scope:     netlink.SCOPE_UNIVERSE,
 					Table:     100,
 				}))
-				Expect(dataplane.addedRouteKeys.Contains("100-0-10.10.10.10/32")).To(BeTrue())
-				Expect(dataplane.deletedRouteKeys.Contains("100-0-10.10.10.10/32")).To(BeTrue())
+				Expect(dataplane.AddedRouteKeys.Contains("100-0-10.10.10.10/32")).To(BeTrue())
+				Expect(dataplane.DeletedRouteKeys.Contains("100-0-10.10.10.10/32")).To(BeTrue())
 			})
 		})
 
@@ -1214,7 +1164,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 			})
 
 			It("the prohibit route should remain", func() {
-				Expect(dataplane.routeKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute, netlink.Route{
+				Expect(dataplane.RouteKeyToRoute).To(ConsistOf(caliRoute, gatewayRoute, netlink.Route{
 					LinkIndex: 0,
 					Dst:       mustParseCIDR("10.10.10.10/32"),
 					Type:      syscall.RTN_PROHIBIT,
@@ -1222,8 +1172,8 @@ var _ = Describe("RouteTable (table 100)", func() {
 					Scope:     netlink.SCOPE_UNIVERSE,
 					Table:     100,
 				}))
-				Expect(dataplane.addedRouteKeys.Contains("100-0-10.10.10.10/32")).To(BeTrue())
-				Expect(dataplane.deletedRouteKeys.Contains("100-0-10.10.10.10/32")).To(BeTrue())
+				Expect(dataplane.AddedRouteKeys.Contains("100-0-10.10.10.10/32")).To(BeTrue())
+				Expect(dataplane.DeletedRouteKeys.Contains("100-0-10.10.10.10/32")).To(BeTrue())
 			})
 		})
 	})
@@ -1240,22 +1190,12 @@ var _ = Describe("Tests to verify netlink interface", func() {
 var _ = Describe("Tests to verify ip version is policed", func() {
 	It("Should panic with an invalid IP version", func() {
 		Expect(func() {
-			dataplane := &mockDataplane{
-				nameToLink:       map[string]netlink.Link{},
-				routeKeyToRoute:  map[string]netlink.Route{},
-				addedRouteKeys:   set.New(),
-				deletedRouteKeys: set.New(),
-				updatedRouteKeys: set.New(),
-			}
-			startTime, err := time.Parse(time.RFC3339, "2006-01-02T15:04:05Z")
-			Expect(err).NotTo(HaveOccurred())
-			t := &mockTime{
-				currentTime: startTime,
-			}
+			dataplane := mocknetlink.NewMockNetlinkDataplane()
+			t := mocktime.NewMockTime()
 			_ = NewWithShims(
-				[]string{"cali", InterfaceNone}, false,
+				[]string{"^cali$", InterfaceNone},
 				5, // invalid IP version
-				dataplane.NewNetlinkHandle,
+				dataplane.NewMockNetlink,
 				false,
 				10*time.Second,
 				dataplane.AddStaticArpEntry,
@@ -1274,328 +1214,4 @@ func mustParseCIDR(cidr string) *net.IPNet {
 	_, c, err := net.ParseCIDR(cidr)
 	Expect(err).NotTo(HaveOccurred())
 	return c
-}
-
-type failFlags uint32
-
-const (
-	failNextLinkList failFlags = 1 << iota
-	failNextLinkByName
-	failNextLinkByNameNotFound
-	failNextRouteList
-	failNextRouteAdd
-	failNextRouteDel
-	failNextAddARP
-	failNextNewNetlinkHandle
-	failNextSetSocketTimeout
-	failNone failFlags = 0
-)
-
-var failureScenarios = []failFlags{
-	failNone,
-	failNextLinkList,
-	failNextLinkByName,
-	failNextLinkByNameNotFound,
-	failNextRouteList,
-	failNextRouteAdd,
-	failNextRouteDel,
-	failNextAddARP,
-	failNextNewNetlinkHandle,
-	failNextSetSocketTimeout,
-}
-
-func (f failFlags) String() string {
-	parts := []string{}
-	if f&failNextLinkList != 0 {
-		parts = append(parts, "failNextLinkList")
-	}
-	if f&failNextLinkByName != 0 {
-		parts = append(parts, "failNextLinkByName")
-	}
-	if f&failNextLinkByNameNotFound != 0 {
-		parts = append(parts, "failNextLinkByNameNotFound")
-	}
-	if f&failNextRouteList != 0 {
-		parts = append(parts, "failNextRouteList")
-	}
-	if f&failNextRouteAdd != 0 {
-		parts = append(parts, "failNextRouteAdd")
-	}
-	if f&failNextRouteDel != 0 {
-		parts = append(parts, "failNextRouteDel")
-	}
-	if f&failNextAddARP != 0 {
-		parts = append(parts, "failNextAddARP")
-	}
-	if f&failNextNewNetlinkHandle != 0 {
-		parts = append(parts, "failNextNewNetlinkHandle")
-	}
-	if f&failNextSetSocketTimeout != 0 {
-		parts = append(parts, "failNextSetSocketTimeout")
-	}
-	if f == 0 {
-		parts = append(parts, "failNone")
-	}
-	return strings.Join(parts, "|")
-}
-
-type mockDataplane struct {
-	nameToLink       map[string]netlink.Link
-	routeKeyToRoute  map[string]netlink.Route
-	addedRouteKeys   set.Set
-	deletedRouteKeys set.Set
-	updatedRouteKeys set.Set
-
-	NumNewNetlinkCalls int
-	NetlinkOpen        bool
-
-	PersistentlyFailToConnect bool
-
-	persistFailures    bool
-	failuresToSimulate failFlags
-
-	mutex                   sync.Mutex
-	deletedConntrackEntries []net.IP
-	ConntrackSleep          time.Duration
-}
-
-func (d *mockDataplane) addIface(idx int, name string, up bool, running bool) *mockLink {
-	flags := net.Flags(0)
-	var rawFlags uint32
-	if up {
-		flags |= net.FlagUp
-		rawFlags |= syscall.IFF_UP
-	}
-	if running {
-		rawFlags |= syscall.IFF_RUNNING
-	}
-	link := &mockLink{
-		attrs: netlink.LinkAttrs{
-			Name:     name,
-			Flags:    flags,
-			RawFlags: rawFlags,
-			Index:    idx,
-		},
-	}
-	d.nameToLink[name] = link
-	return link
-}
-
-func (d *mockDataplane) shouldFail(flag failFlags) bool {
-	flagPresent := d.failuresToSimulate&flag != 0
-	if !d.persistFailures {
-		d.failuresToSimulate &^= flag
-	}
-	if flagPresent {
-		log.WithField("flag", flag).Warn("Mock dataplane: triggering failure")
-	}
-	return flagPresent
-}
-
-func (d *mockDataplane) NewNetlinkHandle() (HandleIface, error) {
-	d.NumNewNetlinkCalls++
-	if d.PersistentlyFailToConnect || d.shouldFail(failNextNewNetlinkHandle) {
-		return nil, simulatedError
-	}
-	Expect(d.NetlinkOpen).To(BeFalse())
-	d.NetlinkOpen = true
-	return d, nil
-}
-
-func (d *mockDataplane) Delete() {
-	Expect(d.NetlinkOpen).To(BeTrue())
-	d.NetlinkOpen = false
-}
-
-func (d *mockDataplane) SetSocketTimeout(to time.Duration) error {
-	Expect(d.NetlinkOpen).To(BeTrue())
-	if d.shouldFail(failNextSetSocketTimeout) {
-		return simulatedError
-	}
-	return nil
-}
-
-func (d *mockDataplane) LinkList() ([]netlink.Link, error) {
-	Expect(d.NetlinkOpen).To(BeTrue())
-	if d.shouldFail(failNextLinkList) {
-		return nil, simulatedError
-	}
-	var links []netlink.Link
-	for _, link := range d.nameToLink {
-		links = append(links, link)
-	}
-	return links, nil
-}
-
-func (d *mockDataplane) LinkByName(name string) (netlink.Link, error) {
-	Expect(d.NetlinkOpen).To(BeTrue())
-	if d.shouldFail(failNextLinkByNameNotFound) {
-		return nil, notFound
-	}
-	if d.shouldFail(failNextLinkByName) {
-		return nil, simulatedError
-	}
-	if link, ok := d.nameToLink[name]; ok {
-		return link, nil
-	} else {
-		return nil, notFound
-	}
-}
-
-func (d *mockDataplane) RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error) {
-	Expect(d.NetlinkOpen).To(BeTrue())
-	if d.shouldFail(failNextRouteList) {
-		return nil, simulatedError
-	}
-	var routes []netlink.Route
-	for _, route := range d.routeKeyToRoute {
-		if filter != nil && filterMask&netlink.RT_FILTER_OIF != 0 && route.LinkIndex != filter.LinkIndex {
-			// Filtering by interface and link indices do not match.
-			continue
-		}
-		if (filter == nil || filterMask&netlink.RT_FILTER_TABLE == 0) && route.Table != unix.RT_TABLE_MAIN && route.Table != 0 {
-			// Not filtering by table and does not match main table.
-			continue
-		}
-		if filter != nil && filterMask&netlink.RT_FILTER_TABLE != 0 && route.Table != filter.Table {
-			// Filtering by table and table indices do not match.
-			continue
-		}
-		if route.Table == 0 {
-			// Mimic the kernel - the route table will be filled in.
-			route.Table = unix.RT_TABLE_MAIN
-		}
-		routes = append(routes, route)
-	}
-	return routes, nil
-}
-
-func (d *mockDataplane) addMockRoute(route *netlink.Route) {
-	key := keyForRoute(route)
-	r := *route
-	if r.Table == unix.RT_TABLE_MAIN {
-		// Store the main table with index 0 for simplicity with comparisons.
-		r.Table = 0
-	}
-	d.routeKeyToRoute[key] = r
-}
-
-func (d *mockDataplane) removeMockRoute(route *netlink.Route) {
-	key := keyForRoute(route)
-	delete(d.routeKeyToRoute, key)
-}
-
-func (d *mockDataplane) RouteAdd(route *netlink.Route) error {
-	Expect(d.NetlinkOpen).To(BeTrue())
-	if d.shouldFail(failNextRouteAdd) {
-		return simulatedError
-	}
-	key := keyForRoute(route)
-	log.WithField("routeKey", key).Info("Mock dataplane: RouteAdd called")
-	d.addedRouteKeys.Add(key)
-	if _, ok := d.routeKeyToRoute[key]; ok {
-		return alreadyExists
-	} else {
-		r := *route
-		if r.Table == unix.RT_TABLE_MAIN {
-			// Store main table routes with 0 index for simplicity of comparison.
-			r.Table = 0
-		}
-		d.routeKeyToRoute[key] = r
-		return nil
-	}
-}
-
-func (d *mockDataplane) RouteDel(route *netlink.Route) error {
-	Expect(d.NetlinkOpen).To(BeTrue())
-	if d.shouldFail(failNextRouteDel) {
-		return simulatedError
-	}
-	key := keyForRoute(route)
-	log.WithField("routeKey", key).Info("Mock dataplane: RouteDel called")
-	d.deletedRouteKeys.Add(key)
-	// Route was deleted, but is planned on being readded
-	if _, ok := d.routeKeyToRoute[key]; ok {
-		delete(d.routeKeyToRoute, key)
-		d.updatedRouteKeys.Add(key)
-		return nil
-	} else {
-		return nil
-	}
-}
-
-func (d *mockDataplane) AddStaticArpEntry(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error {
-	if d.shouldFail(failNextAddARP) {
-		return simulatedError
-	}
-	log.WithFields(log.Fields{
-		"cidr":      cidr,
-		"destMac":   destMAC,
-		"ifaceName": ifaceName,
-	}).Info("Mock dataplane: adding ARP entry")
-	return nil
-}
-
-func (d *mockDataplane) RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP) {
-	log.WithFields(log.Fields{
-		"ipVersion": ipVersion,
-		"ipAddr":    ipAddr,
-		"sleepTime": d.ConntrackSleep,
-	}).Info("Mock dataplane: Removing conntrack flows")
-	d.mutex.Lock()
-	d.deletedConntrackEntries = append(d.deletedConntrackEntries, ipAddr)
-	d.mutex.Unlock()
-	time.Sleep(d.ConntrackSleep)
-}
-
-func (d *mockDataplane) GetDeletedConntrackEntries() []net.IP {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	cpy := make([]net.IP, len(d.deletedConntrackEntries))
-	copy(cpy, d.deletedConntrackEntries)
-	return cpy
-}
-
-func keyForRoute(route *netlink.Route) string {
-	table := route.Table
-	if table == 0 {
-		table = unix.RT_TABLE_MAIN
-	}
-	key := fmt.Sprintf("%v-%v-%v", table, route.LinkIndex, route.Dst)
-	log.WithField("routeKey", key).Debug("Calculated route key")
-	return key
-}
-
-type mockLink struct {
-	attrs netlink.LinkAttrs
-}
-
-func (l *mockLink) Attrs() *netlink.LinkAttrs {
-	return &l.attrs
-}
-
-func (l *mockLink) Type() string {
-	return "not-implemented"
-}
-
-type mockTime struct {
-	currentTime   time.Time
-	autoIncrement time.Duration
-}
-
-func (m *mockTime) Now() time.Time {
-	t := m.currentTime
-	m.incrementTime(m.autoIncrement)
-	return t
-}
-func (m *mockTime) Since(t time.Time) time.Duration {
-	return m.Now().Sub(t)
-}
-
-func (m *mockTime) setAutoIncrement(t time.Duration) {
-	m.autoIncrement = t
-}
-
-func (m *mockTime) incrementTime(t time.Duration) {
-	m.currentTime = m.currentTime.Add(t)
 }
