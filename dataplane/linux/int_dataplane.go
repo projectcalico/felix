@@ -374,8 +374,8 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	dp.ipSets = append(dp.ipSets, ipSetsV4)
 
 	if config.RulesConfig.VXLANEnabled {
-		routeTableVXLAN := routetable.New([]string{"vxlan.calico"}, 4, true, config.NetlinkTimeout, config.DeviceRouteSourceAddress,
-			config.DeviceRouteProtocol, true)
+		routeTableVXLAN := routetable.New([]string{"^vxlan.calico.*"}, 4, true, config.NetlinkTimeout,
+			config.DeviceRouteSourceAddress, config.DeviceRouteProtocol, true, 0)
 
 		vxlanManager := newVXLANManager(
 			ipSetsV4,
@@ -571,8 +571,12 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		}
 	}
 
-	routeTableV4 := routetable.New(config.RulesConfig.WorkloadIfacePrefixes, 4, false, config.NetlinkTimeout,
-		config.DeviceRouteSourceAddress, config.DeviceRouteProtocol, config.RemoveExternalRoutes)
+	interfaceRegexes := make([]string, len(config.RulesConfig.WorkloadIfacePrefixes))
+	for i, r := range config.RulesConfig.WorkloadIfacePrefixes {
+		interfaceRegexes[i] = "^" + r + ".*"
+	}
+	routeTableV4 := routetable.New(interfaceRegexes, 4, false, config.NetlinkTimeout,
+		config.DeviceRouteSourceAddress, config.DeviceRouteProtocol, config.RemoveExternalRoutes, 0)
 
 	epManager := newEndpointManager(
 		rawTableV4,
@@ -638,7 +642,9 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		dp.iptablesMangleTables = append(dp.iptablesMangleTables, mangleTableV6)
 		dp.iptablesFilterTables = append(dp.iptablesFilterTables, filterTableV6)
 
-		routeTableV6 := routetable.New(config.RulesConfig.WorkloadIfacePrefixes, 6, false, config.NetlinkTimeout, config.DeviceRouteSourceAddress, config.DeviceRouteProtocol, config.RemoveExternalRoutes)
+		routeTableV6 := routetable.New(
+			interfaceRegexes, 6, false, config.NetlinkTimeout,
+			config.DeviceRouteSourceAddress, config.DeviceRouteProtocol, config.RemoveExternalRoutes, 0)
 
 		if !config.BPFEnabled {
 			dp.RegisterManager(newIPSetsManager(ipSetsV6, config.MaxIPSetSize, callbacks))
