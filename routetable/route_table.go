@@ -788,6 +788,9 @@ func (r *RouteTable) fullSyncRoutesForLink(
 			if expectedTargetFound && expectedTarget.RouteType() != route.Type {
 				routeProblems = append(routeProblems, "incorrect type")
 			}
+			if route.Gw.Equal(expectedTarget.GW.AsNetIP()) {
+				routeProblems = append(routeProblems, "incorrect gateway")
+			}
 		}
 		if len(routeProblems) == 0 {
 			alreadyCorrectCIDRs.Add(dest)
