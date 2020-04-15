@@ -870,7 +870,7 @@ func (r *RouteTable) deltaUpdateRoutesForLink(
 		return ConnectFailed
 	}
 
-	// Delete routes followed by creates.
+	// Delete routes first.
 	updatesFailed := false
 	for cidr, target := range deletedCIDRsToTarget {
 		route := r.createL3Route(linkAttrs, target)
@@ -884,7 +884,7 @@ func (r *RouteTable) deltaUpdateRoutesForLink(
 		}
 	}
 
-	// Delete routes followed by creates.
+	// Now add routes.
 	for cidr, target := range createdCIDRsToTarget {
 		route := r.createL3Route(linkAttrs, target)
 
