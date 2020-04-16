@@ -75,6 +75,8 @@ type TargetType string
 const (
 	TargetTypeVXLAN     TargetType = "vxlan"
 	TargetTypeNoEncap   TargetType = "noencap"
+
+	// The following target types should be used with InterfaceNone.
 	TargetTypeBlackhole TargetType = "blackhole"
 	TargetTypeProhibit  TargetType = "prohibit"
 	TargetTypeThrow     TargetType = "throw"
@@ -633,7 +635,6 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool) error {
 		r.ifaceNameToTargets[ifaceName] = updatedCIDRsToTarget
 	}
 
-	//
 	// Don't remove any IPv6 link local entry.
 	if r.ipVersion == 6 {
 		delete(deletedCIDRsToTarget, ipV6LinkLocalCIDR)
