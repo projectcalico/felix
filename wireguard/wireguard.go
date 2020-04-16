@@ -25,9 +25,8 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
-	netlinkshim "github.com/projectcalico/felix/shims/netlink"
-	timeshim "github.com/projectcalico/felix/shims/time"
-	wireguardshim "github.com/projectcalico/felix/shims/wireguard"
+	netlinkshim "github.com/projectcalico/felix/netlink"
+	timeshim "github.com/projectcalico/felix/time"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/routetable"
@@ -108,9 +107,9 @@ type Wireguard struct {
 
 	// Clients, client factories and testing shims.
 	newWireguardNetlink                  func() (netlinkshim.Netlink, error)
-	newWireguardDevice                   func() (wireguardshim.Wireguard, error)
+	newWireguardDevice                   func() (netlinkshim.Wireguard, error)
 	cachedNetlinkClient                  netlinkshim.Netlink
-	cachedWireguard                      wireguardshim.Wireguard
+	cachedWireguard                      netlinkshim.Wireguard
 	numConsistentLinkClientFailures      int
 	numConsistentWireguardClientFailures int
 	time                                 timeshim.Time
@@ -155,7 +154,7 @@ func New(
 		config,
 		netlinkshim.NewRealNetlink,
 		netlinkshim.NewRealNetlink,
-		wireguardshim.NewRealWireguard,
+		netlinkshim.NewRealWireguard,
 		netlinkTimeout,
 		timeshim.NewRealTime(),
 		deviceRouteProtocol,
@@ -169,7 +168,7 @@ func NewWithShims(
 	config *Config,
 	newRoutetableNetlink func() (netlinkshim.Netlink, error),
 	newWireguardNetlink func() (netlinkshim.Netlink, error),
-	newWireguardDevice func() (wireguardshim.Wireguard, error),
+	newWireguardDevice func() (netlinkshim.Wireguard, error),
 	netlinkTimeout time.Duration,
 	timeShim timeshim.Time,
 	deviceRouteProtocol int,
@@ -177,7 +176,7 @@ func NewWithShims(
 ) *Wireguard {
 	// Create routetable. We provide dummy callbacks for ARP and conntrack processing.
 	rt := routetable.NewWithShims(
-		[]string{config.InterfaceName}, false,
+		[]string{"^" + config.InterfaceName + "$"},
 		4, // ipVersion
 		newRoutetableNetlink,
 		false, // vxlan
@@ -1197,7 +1196,7 @@ func (w *Wireguard) shouldProgramWireguardPeer(node *nodeData) bool {
 	return node.ipv4EndpointAddr != nil && node.publicKey != zeroKey && w.publicKeyToNodeNames[node.publicKey].Len() == 1
 }
 
-func (w *Wireguard) getWireguardClient() (wireguardshim.Wireguard, error) {
+func (w *Wireguard) getWireguardClient() (netlinkshim.Wireguard, error) {
 	if w.cachedWireguard == nil {
 		if w.numConsistentWireguardClientFailures >= maxConnFailures && w.numConsistentWireguardClientFailures%wireguardClientRetryInterval != 0 {
 			// It is a valid condition that we cannot connect to the wireguard client, so just log.

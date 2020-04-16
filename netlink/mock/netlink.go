@@ -65,6 +65,9 @@ const (
 	FailNextRuleList
 	FailNextRuleAdd
 	FailNextRuleDel
+	FailNextWireguardClose
+	FailNextWireguardDeviceByName
+	FailNextWireguardConfigureDevice
 	FailNone FailFlags = 0
 )
 
@@ -139,6 +142,15 @@ func (f FailFlags) String() string {
 	}
 	if f&FailNextRuleDel != 0 {
 		parts = append(parts, "FailNextRuleDel")
+	}
+	if f&FailNextWireguardClose != 0 {
+		parts = append(parts, "FailNextWireguardClose")
+	}
+	if f&FailNextWireguardDeviceByName != 0 {
+		parts = append(parts, "FailNextWireguardDeviceByName")
+	}
+	if f&FailNextWireguardConfigureDevice != 0 {
+		parts = append(parts, "FailNextWireguardConfigureDevice")
 	}
 	if f == 0 {
 		parts = append(parts, "FailNone")

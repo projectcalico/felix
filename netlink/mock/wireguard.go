@@ -12,7 +12,7 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
 	"github.com/projectcalico/libcalico-go/lib/set"
-	wireguardshim "github.com/projectcalico/felix/shims/wireguard"
+	netlinkshim "github.com/projectcalico/felix/netlink"
 )
 
 func NewMockWireguard() *MockWireguard {
@@ -25,7 +25,7 @@ func NewMockWireguard() *MockWireguard {
 	}
 }
 
-var _ wireguardshim.Wireguard = NewMockWireguard()
+var _ netlinkshim.Wireguard = NewMockWireguard()
 
 type MockWireguard struct {
 	nameToLink map[string]netlink.Link
@@ -83,7 +83,7 @@ func (d *MockWireguard) shouldFail(flag FailFlags) bool {
 
 func (d *MockWireguard) NewWireguardClient() (*MockWireguard, error) {
 	d.NumNewNetlinkCalls++
-	if d.PersistentlyFailToConnect || d.shouldFail(FailNextNewNetlinkHandle) {
+	if d.PersistentlyFailToConnect || d.shouldFail(FailNextNewNetlink) {
 		return nil, SimulatedError
 	}
 	Expect(d.NetlinkOpen).To(BeFalse())
@@ -97,7 +97,7 @@ func (d *MockWireguard) Close() error {
 
 	Expect(d.NetlinkOpen).To(BeTrue())
 	d.NetlinkOpen = false
-	if d.shouldFail(FailNextClose) {
+	if d.shouldFail(FailNextWireguardClose) {
 		return SimulatedError
 	}
 
@@ -121,7 +121,7 @@ func (d *MockWireguard) ConfigureDevice(name string, cfg wgtypes.Config) error {
 	defer d.mutex.Unlock()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
-	if d.shouldFail(FailNextConfigureWireguardDevice) {
+	if d.shouldFail(FailNextWireguardConfigureDevice) {
 		return SimulatedError
 	}
 
