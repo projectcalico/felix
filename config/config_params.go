@@ -135,6 +135,11 @@ type Config struct {
 	TyphaReadTimeout    time.Duration `config:"seconds;30;local"`
 	TyphaWriteTimeout   time.Duration `config:"seconds;10;local"`
 
+	// Configure where Felix gets its routing information.
+	// - workloadIPs: use workload endpoints to construct routes.
+	// - calicoIPAM: use IPAM data to contruct routes.
+	RouteSource string `config:"oneof(WorkloadIPs,CalicoIPAM);CalicoIPAM"`
+
 	// Client-side TLS config for Felix's communication with Typha.  If any of these are
 	// specified, they _all_ must be - except that either TyphaCN or TyphaURISAN may be left
 	// unset.  Felix will then initiate a secure (TLS) connection to Typha.  Typha must present
