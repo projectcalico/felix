@@ -788,7 +788,9 @@ func (r *RouteTable) fullSyncRoutesForLink(
 			if expectedTargetFound && expectedTarget.RouteType() != route.Type {
 				routeProblems = append(routeProblems, "incorrect type")
 			}
-			if route.Gw.Equal(expectedTarget.GW.AsNetIP()) {
+			if (route.Gw == nil && expectedTarget.GW != nil) ||
+				(route.Gw != nil && expectedTarget.GW == nil) ||
+				(route.Gw != nil && expectedTarget.GW != nil  && !route.Gw.Equal(expectedTarget.GW.AsNetIP())) {
 				routeProblems = append(routeProblems, "incorrect gateway")
 			}
 		}
