@@ -726,8 +726,8 @@ func (r *RouteTrie) RemoveWEP(cidr ip.V4CIDR, nodename string) {
 		if ri.WEP.RefCount[nodename] < 0 {
 			logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a workload past 0.")
 		}
-		if len(ri.WEP) == 0 {
-			ri.WEP = nil
+		if len(ri.WEP.RefCount) == 0 {
+			ri.WEP.RefCount = nil
 		}
 	})
 }
@@ -820,7 +820,7 @@ func (r RouteInfo) IsValidRoute() bool {
 // explicitly copy them so that they are not shared between the copies.
 func (r RouteInfo) Copy() RouteInfo {
 	cp := r
-	if len(r.WEP) != 0 {
+	if len(r.WEP.RefCount) != 0 {
 		cp.WEP.RefCount = map[string]int{}
 		for n, c := range r.WEP.RefCount {
 			cp.WEP.RefCount[n] = c
