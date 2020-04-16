@@ -198,6 +198,17 @@ var localWlEp2NoProfiles = WorkloadEndpoint{
 		mustParseNet("fc00:fe11::3/128")},
 }
 
+var remoteWlEp1 = WorkloadEndpoint{
+	State:      "active",
+	Name:       "remote-wep-1",
+	Mac:        mustParseMac("01:02:03:04:05:06"),
+	ProfileIDs: []string{"prof-1", "prof-2", "prof-missing"},
+	IPv4Nets:   []net.IPNet{mustParseNet("10.0.0.5/32")},
+	Labels: map[string]string{
+		"id": "rem-ep-1",
+	},
+}
+
 var hostEpWithName = HostEndpoint{
 	Name:       "eth1",
 	ProfileIDs: []string{"prof-1", "prof-2", "prof-missing"},
@@ -622,6 +633,8 @@ var ipPoolWithVXLAN = IPPool{
 	VXLANMode:  encap.Always,
 	Masquerade: true,
 }
+
+var workloadIPs = "WorkloadIPs"
 
 var ipPoolWithVXLANSlash32 = IPPool{
 	CIDR:       mustParseNet("10.0.0.0/32"),
