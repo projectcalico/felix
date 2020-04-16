@@ -16,6 +16,7 @@ package calc
 
 import (
 	"fmt"
+	"log"
 	"reflect"
 	"sort"
 
@@ -537,13 +538,13 @@ func (c *L3RouteResolver) flush() {
 				}
 			}
 
-			for nodename, _ := range ri.WEP.RefCount {
+			if len(ri.WEP.NodeNames) > 0 {
 				// At least one WEP exists with this IP. It may be on this node, or a remote node.
 				// In steady state we only ever expect a single WEP for this CIDR. However there are rare transient
 				// cases we must handle where we may have two WEPs with the same IP. Since this will be transient,
-				// we can always just use one entry from the map.
-				rt.DstNodeName = nodename
-				if nodename == c.myNodeName {
+				// we can always just use the first entry.
+				rt.DstNodeName = ri.WEP.NodeNames[0]
+				if ri.WEP.NodeNames[0] == c.myNodeName {
 					rt.Type = proto.RouteType_LOCAL_WORKLOAD
 					rt.LocalWorkload = true
 				} else {
@@ -714,20 +715,48 @@ func (r *RouteTrie) AddWEP(cidr ip.V4CIDR, nodename string) {
 			ri.WEP.RefCount = map[string]int{}
 		}
 		ri.WEP.RefCount[nodename]++
+
+		// Groom the nodename slice.
+		ri.WEP.NodeNames = []string{}
+		for nodename, _ := range ri.WEP.RefCount {
+			ri.WEP.NodeNames = append(ri.WEP.NodeNames, nodename)
+		}
+		sort.Strings(ri.WEP.NodeNames)
 	})
 }
 
 func (r *RouteTrie) RemoveWEP(cidr ip.V4CIDR, nodename string) {
+	removeElement := func(s []string, e string) {
+		// Find element index
+		var i int
+		var v string
+		var found bool
+		for i, v = range s {
+			if v == e {
+				found = true
+				break
+			}
+		}
+		if !found {
+			log.Fatalf("Unable to find element %s in %s", e, s)
+		}
+
+		// Remove it.
+		s = append(s[:i], s[i+1:]...)
+	}
+
 	r.updateCIDR(cidr, func(ri *RouteInfo) {
 		ri.WEP.RefCount[nodename]--
 		if ri.WEP.RefCount[nodename] == 0 {
 			delete(ri.WEP.RefCount, nodename)
+			removeElement(ri.WEP.NodeNames, nodename)
 		}
 		if ri.WEP.RefCount[nodename] < 0 {
 			logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a workload past 0.")
 		}
 		if len(ri.WEP.RefCount) == 0 {
 			ri.WEP.RefCount = nil
+			ri.WEP.NodeNames = nil
 		}
 	})
 }
@@ -798,6 +827,9 @@ type RouteInfo struct {
 		// to bad data (two WEPs with the same CIDR) so we do ref counting.
 		// The RefCount is tracked per-node, to properly handle remote weps.
 		RefCount map[string]int
+
+		// NodeNames contains a sorted list of nodenames in use for this WEP / CIDR.
+		NodeNames []string
 	}
 
 	// WasSent is set to true when the route is sent downstream.
