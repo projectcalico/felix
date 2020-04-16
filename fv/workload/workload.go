@@ -93,7 +93,8 @@ func Run(c *infrastructure.Felix, name, profile, ip, ports, protocol string) (w 
 func run(c *infrastructure.Felix, name, profile, ip, ports, protocol string) (w *Workload, err error) {
 	workloadIdx++
 	n := fmt.Sprintf("%s-idx%v", name, workloadIdx)
-	interfaceName := conversion.VethNameForWorkload(profile, n)
+	converter := conversion.NewWorkloadEndpointConverter()
+	interfaceName := converter.VethNameForWorkload(profile, n)
 	if c.IP == ip {
 		interfaceName = ""
 	}
