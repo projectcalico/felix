@@ -107,7 +107,7 @@ func (c *L3RouteResolver) RegisterWith(allUpdDispatcher, localDispatcher *dispat
 	// Depending on if we're using workload endpoints for routing information, we may
 	// need all WEPs, or only local WEPs.
 	logrus.WithField("routeSource", c.routeSource).Info("Registering for L3 route updates")
-	if c.routeSource == "workloadIPs" {
+	if c.routeSource == "WorkloadIPs" {
 		// Driven off of workload IP addressess. Register for all WEP udpates.
 		allUpdDispatcher.Register(model.WorkloadEndpointKey{}, c.OnWorkloadUpdate)
 	} else {
@@ -726,6 +726,9 @@ func (r *RouteTrie) RemoveWEP(cidr ip.V4CIDR, nodename string) {
 		if ri.WEP.RefCount[nodename] < 0 {
 			logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a workload past 0.")
 		}
+		if len(ri.WEP) == 0 {
+			ri.WEP = nil
+		}
 	})
 }
 
@@ -817,9 +820,11 @@ func (r RouteInfo) IsValidRoute() bool {
 // explicitly copy them so that they are not shared between the copies.
 func (r RouteInfo) Copy() RouteInfo {
 	cp := r
-	cp.WEP.RefCount = map[string]int{}
-	for n, c := range r.WEP.RefCount {
-		cp.WEP.RefCount[n] = c
+	if len(r.WEP) != 0 {
+		cp.WEP.RefCount = map[string]int{}
+		for n, c := range r.WEP.RefCount {
+			cp.WEP.RefCount[n] = c
+		}
 	}
 	return cp
 }
