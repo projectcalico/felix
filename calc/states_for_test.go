@@ -1030,6 +1030,37 @@ var routeUpdateRemoteHost2 = proto.RouteUpdate{
 	DstNodeIp:   remoteHost2IP.String(),
 }
 
+// Minimal VXLAN set-up using WorkloadIPs for routing information rather than using
+// IPAM blocks.
+var vxlanWithWorkloadIPs = empty.withKVUpdates(
+	KVPair{Key: GlobalConfigKey{Name: "RouteSource"}, Value: &workloadIPs},
+	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLAN},
+	KVPair{Key: remoteIPAMBlockKey, Value: &remoteIPAMBlock},
+	KVPair{Key: remoteHostIPKey, Value: &remoteHostIP},
+	KVPair{Key: remoteHostVXLANTunnelConfigKey, Value: remoteHostVXLANTunnelIP},
+	KVPair{Key: remoteWlEpKey1, Value: &remoteWlEp1},
+).withName("VXLAN (RouteSource=WorkloadIPs").withVTEPs(
+	// VTEP for the remote node.
+	proto.VXLANTunnelEndpointUpdate{
+		Node:           remoteHostname,
+		Mac:            "66:3e:ca:a4:db:65",
+		Ipv4Addr:       remoteHostVXLANTunnelIP,
+		ParentDeviceIp: remoteHostIP.String(),
+	},
+).withRoutes(
+	routeUpdateIPPoolVXLAN,
+	routeUpdateRemoteHost,
+	// Single route for the wep.
+	proto.RouteUpdate{
+		Type:        proto.RouteType_REMOTE_WORKLOAD,
+		IpPoolType:  proto.IPPoolType_VXLAN,
+		Dst:         "10.0.0.5/32",
+		DstNodeName: remoteHostname,
+		DstNodeIp:   remoteHostIP.String(),
+		NatOutgoing: true,
+	},
+)
+
 // Minimal VXLAN set-up, all the data needed for a remote VTEP, a pool and a block.
 var vxlanWithBlock = empty.withKVUpdates(
 	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLAN},
@@ -1630,6 +1661,22 @@ func (l StateList) UsesNodeResources() bool {
 		}
 	}
 	return false
+}
+
+// RouteSource returns the route source to use for the test, based on the states in the test.
+// If the states include a Felix configuration update to set the route source, then it is used.
+// Otherwise, default to CalicoIPAM
+func (l StateList) RouteSource() string {
+	for _, s := range l {
+		for _, kv := range s.DatastoreState {
+			if resourceKey, ok := kv.Key.(GlobalConfigKey); ok && resourceKey.Name == "RouteSource" {
+				if kv.Value != nil {
+					return *kv.Value.(*string)
+				}
+			}
+		}
+	}
+	return "CalicoIPAM"
 }
 
 // identity is a test expander that returns the test unaltered.
