@@ -64,6 +64,7 @@ type L3RouteResolver struct {
 	blockToRoutes          map[string]set.Set
 	allPools               map[string]model.IPPool
 	workloadIDToCIDRs      map[model.WorkloadEndpointKey][]cnet.IPNet
+	nodeToCIDRs            map[string]set.Set
 	useNodeResourceUpdates bool
 	routeSource            string
 }
@@ -87,6 +88,7 @@ func NewL3RouteResolver(hostname string, callbacks PipelineCallbacks, useNodeRes
 
 		nodeNameToNodeInfo:     map[string]l3rrNodeInfo{},
 		blockToRoutes:          map[string]set.Set{},
+		nodeToCIDRs:            map[string]set.Set{},
 		allPools:               map[string]model.IPPool{},
 		workloadIDToCIDRs:      map[model.WorkloadEndpointKey][]cnet.IPNet{},
 		useNodeResourceUpdates: useNodeResourceUpdates,
@@ -150,11 +152,23 @@ func (c *L3RouteResolver) OnWorkloadUpdate(update api.Update) (_ bool) {
 		c.trie.RemoveWEP(ip.CIDRFromCalicoNet(oldCIDR).(ip.V4CIDR), key.Hostname)
 	}
 
+	cidrsForNode, ok := c.nodeToCIDRs[key.Hostname]
+	if !ok {
+		cidrsForNode = set.New()
+		c.nodeToCIDRs[key.Hostname] = cidrsForNode
+	}
+
 	if len(newCIDRs) > 0 {
 		// Only store an entry if there are some CIDRs.
 		c.workloadIDToCIDRs[key] = newCIDRs
+		for _, cidr := range newCIDRs {
+			cidrsForNode.Add(cidr.String())
+		}
 	} else {
 		delete(c.workloadIDToCIDRs, key)
+		for _, cidr := range oldCIDRs {
+			cidrsForNode.Discard(cidr.String())
+		}
 	}
 
 	return
@@ -342,6 +356,19 @@ func (c *L3RouteResolver) onNodeUpdate(nodeName string, newNodeInfo *l3rrNodeInf
 					logrus.WithField("route", r).Debug("Update to our subnet invalidated route")
 					c.trie.MarkCIDRDirty(r.dst)
 				}
+			})
+		}
+	} else {
+		// Get all the CIDRs impacted by this node.
+		cidrSet, ok := c.nodeToCIDRs[nodeName]
+		if ok {
+			// There are CIDRs associated with this node. Since the node has changed,
+			// we need to mark each one as dirty, since the routes may need to be reprogrammed.
+			// For example, if the node IP changes.
+			cidrSet.Iter(func(item interface{}) error {
+				cidr, _ := ip.CIDRFromString(item.(string))
+				c.trie.MarkCIDRDirty(cidr.(ip.V4CIDR))
+				return nil
 			})
 		}
 	}
@@ -856,6 +883,10 @@ func (r RouteInfo) Copy() RouteInfo {
 		cp.WEP.RefCount = map[string]int{}
 		for n, c := range r.WEP.RefCount {
 			cp.WEP.RefCount[n] = c
+		}
+		cp.WEP.NodeNames = []string{}
+		for _, n := range cp.WEP.NodeNames {
+			cp.WEP.NodeNames = append(cp.WEP.NodeNames, n)
 		}
 	}
 	return cp
