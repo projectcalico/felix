@@ -16,7 +16,6 @@ package calc
 
 import (
 	"fmt"
-	"log"
 	"reflect"
 	"sort"
 
@@ -568,13 +567,13 @@ func (c *L3RouteResolver) flush() {
 				}
 			}
 
-			if len(ri.WEP.NodeNames) > 0 {
+			if len(ri.WEPs) > 0 {
 				// At least one WEP exists with this IP. It may be on this node, or a remote node.
 				// In steady state we only ever expect a single WEP for this CIDR. However there are rare transient
 				// cases we must handle where we may have two WEPs with the same IP. Since this will be transient,
 				// we can always just use the first entry.
-				rt.DstNodeName = ri.WEP.NodeNames[0]
-				if ri.WEP.NodeNames[0] == c.myNodeName {
+				rt.DstNodeName = ri.WEPs[0].NodeName
+				if ri.WEPs[0].NodeName == c.myNodeName {
 					rt.Type = proto.RouteType_LOCAL_WORKLOAD
 					rt.LocalWorkload = true
 				} else {
@@ -741,53 +740,49 @@ func (r *RouteTrie) RemoveHost(cidr ip.V4CIDR, nodeName string) {
 
 func (r *RouteTrie) AddWEP(cidr ip.V4CIDR, nodename string) {
 	r.updateCIDR(cidr, func(ri *RouteInfo) {
-		if ri.WEP.RefCount == nil {
-			ri.WEP.RefCount = map[string]int{}
+		// Find the WEP in the list for this nodename,
+		// if it exists. If it doesn't, we'll add it below.
+		for i := range ri.WEPs {
+			if ri.WEPs[i].NodeName == nodename {
+				// Found an existing WEP. Just increment the RefCount
+				// and return.
+				ri.WEPs[i].RefCount++
+				return
+			}
 		}
-		ri.WEP.RefCount[nodename]++
 
-		// Groom the nodename slice.
-		ri.WEP.NodeNames = []string{}
-		for nodename := range ri.WEP.RefCount {
-			ri.WEP.NodeNames = append(ri.WEP.NodeNames, nodename)
-		}
-		sort.Strings(ri.WEP.NodeNames)
+		// If it doesn't already exist, add it to the slice and
+		// sort the slice based on nodename to make sure we are not dependent
+		// on event ordering.
+		wep := WEP{NodeName: nodename, RefCount: 1}
+		ri.WEPs = append(ri.WEPs, wep)
+		sort.Slice(ri.WEPs, func(i, j int) bool {
+			return ri.WEPs[i].NodeName < ri.WEPs[j].NodeName
+		})
 	})
 }
 
 func (r *RouteTrie) RemoveWEP(cidr ip.V4CIDR, nodename string) {
-	removeElement := func(s []string, e string) []string {
-		// Find element index
-		var i int
-		var v string
-		var found bool
-		for i, v = range s {
-			if v == e {
-				found = true
-				break
+	r.updateCIDR(cidr, func(ri *RouteInfo) {
+		for i := range ri.WEPs {
+			if ri.WEPs[i].NodeName == nodename {
+				// Decref the WEP.
+				ri.WEPs[i].RefCount--
+				if ri.WEPs[i].RefCount < 0 {
+					logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a workload past 0.")
+				} else if ri.WEPs[i].RefCount == 0 {
+					// Remove it from the list.
+					ri.WEPs = append(ri.WEPs[:i], ri.WEPs[i+1:]...)
+				}
+				if len(ri.WEPs) == 0 {
+					ri.WEPs = nil
+				}
+				return
 			}
 		}
-		if !found {
-			log.Fatalf("Unable to find element %s in %s", e, s)
-		}
 
-		// Remove it.
-		return append(s[:i], s[i+1:]...)
-	}
-
-	r.updateCIDR(cidr, func(ri *RouteInfo) {
-		ri.WEP.RefCount[nodename]--
-		if ri.WEP.RefCount[nodename] == 0 {
-			delete(ri.WEP.RefCount, nodename)
-			ri.WEP.NodeNames = removeElement(ri.WEP.NodeNames, nodename)
-		}
-		if ri.WEP.RefCount[nodename] < 0 {
-			logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a workload past 0.")
-		}
-		if len(ri.WEP.RefCount) == 0 {
-			ri.WEP.RefCount = nil
-			ri.WEP.NodeNames = nil
-		}
+		// Unable to find the requested WEP.
+		logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a workload that doesn't exist.")
 	})
 }
 
@@ -851,19 +846,20 @@ type RouteInfo struct {
 		NodeNames []string // set if this CIDR _is_ a node's own IP.
 	}
 
-	// WEP contains information extracted from the workload endpoints.
-	WEP struct {
-		// Count of WEPs that have this CIDR.  Normally, this will be 0 or 1 but Felix has to be tolerant
-		// to bad data (two WEPs with the same CIDR) so we do ref counting.
-		// The RefCount is tracked per-node, to properly handle remote weps.
-		RefCount map[string]int
-
-		// NodeNames contains a sorted list of nodenames in use for this WEP / CIDR.
-		NodeNames []string
-	}
+	// WEPs contains information extracted from workload endpoints.
+	WEPs []WEP
 
 	// WasSent is set to true when the route is sent downstream.
 	WasSent bool
+}
+
+type WEP struct {
+	// Count of WEPs that have this CIDR.  Normally, this will be 0 or 1 but Felix has to be tolerant
+	// to bad data (two WEPs with the same CIDR) so we do ref counting.
+	RefCount int
+
+	// NodeName contains the nodename for this WEP / CIDR.
+	NodeName string
 }
 
 // IsValidRoute returns true if the RouteInfo contains some information about a CIDR, i.e. if this route
@@ -875,20 +871,15 @@ func (r RouteInfo) IsValidRoute() bool {
 		r.Block.NodeName != "" ||
 		len(r.Host.NodeNames) > 0 ||
 		r.Pool.NATOutgoing ||
-		len(r.WEP.RefCount) > 0
+		len(r.WEPs) > 0
 }
 
 // Copy returns a copy of the RouteInfo. Since some fields are pointers, we need to
 // explicitly copy them so that they are not shared between the copies.
 func (r RouteInfo) Copy() RouteInfo {
 	cp := r
-	if len(r.WEP.RefCount) != 0 {
-		cp.WEP.RefCount = map[string]int{}
-		for n, c := range r.WEP.RefCount {
-			cp.WEP.RefCount[n] = c
-		}
-		cp.WEP.NodeNames = []string{}
-		cp.WEP.NodeNames = append(cp.WEP.NodeNames, cp.WEP.NodeNames...)
+	if len(r.WEPs) != 0 {
+		cp.WEPs = append(cp.WEPs, r.WEPs...)
 	}
 	return cp
 }
