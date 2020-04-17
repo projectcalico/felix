@@ -73,8 +73,8 @@ const (
 type TargetType string
 
 const (
-	TargetTypeVXLAN     TargetType = "vxlan"
-	TargetTypeNoEncap   TargetType = "noencap"
+	TargetTypeVXLAN   TargetType = "vxlan"
+	TargetTypeNoEncap TargetType = "noencap"
 
 	// The following target types should be used with InterfaceNone.
 	TargetTypeBlackhole TargetType = "blackhole"
@@ -791,7 +791,7 @@ func (r *RouteTable) fullSyncRoutesForLink(
 			}
 			if (route.Gw == nil && expectedTarget.GW != nil) ||
 				(route.Gw != nil && expectedTarget.GW == nil) ||
-				(route.Gw != nil && expectedTarget.GW != nil  && !route.Gw.Equal(expectedTarget.GW.AsNetIP())) {
+				(route.Gw != nil && expectedTarget.GW != nil && !route.Gw.Equal(expectedTarget.GW.AsNetIP())) {
 				routeProblems = append(routeProblems, "incorrect gateway")
 			}
 		}

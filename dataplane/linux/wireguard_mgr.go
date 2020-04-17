@@ -26,15 +26,15 @@ import (
 
 // wireguardManager manages the dataplane resources that are used for wireguard encrypted traffic. This includes:
 // -  Routing rule to route to the wireguard routing table
+// -  Route table and rules specifically to handle routing to the wireguard interface, or to return to default routing
+//    (depending on whether the remote nod supports wireguard)
+// -  Wireguard interface lifecycle
+// -  Wireguard peer configuration
 //
-//
-// It programs the relevant iptables chains (via the iptables.Table objects) along with
-// per-endpoint routes (via the RouteTable).
-//
-// Since calculating the dispatch chains is fairly expensive, the main OnUpdate method
-// simply records the pending state of each interface and defers the actual calculation
-// to CompleteDeferredWork().  This is also the basis of our failure handling; updates
-// that fail are left in the pending state so they can be retried later.
+// The wireguard component implements the routetable interface and so dataplane programming is triggered through calls
+// to the Apply method, with period resyncs occuring after calls to QueueResync. Calls from the main OnUpdate method
+// call through to the various update methods on the wireguard module which simply record state without actually
+// programming.
 type wireguardManager struct {
 	// Our dependencies.
 	wireguardRouteTable *wireguard.Wireguard
@@ -74,14 +74,20 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		cidr := ip.MustParseCIDROrIP(msg.Dst)
 		if cidr != nil {
 			m.wireguardRouteTable.EndpointAllowedCIDRRemove(cidr)
+		} else {
+			log.Error("error parsing RouteRemove CIDR", msg.Dst)
 		}
 	case *proto.WireguardEndpointUpdate:
 		log.WithField("msg", msg).Debug("WireguardEndpointUpdate update")
 		key, err := wgtypes.ParseKey(msg.PublicKey)
 		if err != nil {
-			log.WithError(err).Error("error parsing wireguard public key")
+			log.WithError(err).Error("error parsing wireguard public key %s for node %s", msg.PublicKey, msg.Hostname)
 		}
-		m.wireguardRouteTable.EndpointWireguardUpdate(msg.Hostname, key, ip.FromString(msg.InterfaceAddr))
+		ifaceAddr := ip.FromString(msg.InterfaceAddr)
+		if ifaceAddr == nil && msg.InterfaceAddr != "" {
+			log.WithError(err).Error("error parsing wireguard public key %s for node %s", msg.InterfaceAddr, msg.Hostname)
+		}
+		m.wireguardRouteTable.EndpointWireguardUpdate(msg.Hostname, key, ifaceAddr)
 	case *proto.WireguardEndpointRemove:
 		log.WithField("msg", msg).Debug("WireguardEndpointRemove update")
 		m.wireguardRouteTable.EndpointWireguardUpdate(msg.Hostname, wgtypes.Key{}, nil)

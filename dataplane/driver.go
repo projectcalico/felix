@@ -71,7 +71,7 @@ func StartDataplaneDriver(configParams *config.Config,
 				log.WithFields(log.Fields{
 					"Name":     "felix-iptables",
 					"MarkMask": configParams.IptablesMarkMask,
-				}).Panic("Failed to allocate a mark bit for IPsec, not enough mark bits available.")
+				}).Panic("Failed to allocate a mark bit for wireguard, not enough mark bits available.")
 			}
 		}
 
