@@ -339,8 +339,12 @@ var baseTests = []StateList{
 	},
 	{
 		// Test L3 route resolver in node resource mode using WorkloadIPs as the route source.
-		// Since we get routing information from WEPs and no IPAM, we don't expect any remote workload routes.
-		vxlanWithWorkloadIPs,
+		// This test starts with a single remote workload, then moves to two remote workloads with the same
+		// IP address on different nodes, and then back to a single workload.
+		vxlanWithWEPIPs,
+		vxlanWithWEPIPsAndWEP,
+		vxlanWithWEPIPsAndWEPDuplicate,
+		vxlanWithWEPIPsAndWEP,
 	},
 	{
 		// Test corner case where the IP pool and block share a /32.
