@@ -366,7 +366,10 @@ func (c *L3RouteResolver) onNodeUpdate(nodeName string, newNodeInfo *l3rrNodeInf
 			// we need to mark each one as dirty, since the routes may need to be reprogrammed.
 			// For example, if the node IP changes.
 			cidrSet.Iter(func(item interface{}) error {
-				cidr, _ := ip.CIDRFromString(item.(string))
+				cidr, err := ip.CIDRFromString(item.(string))
+				if err != nil {
+					logrus.WithError(err).Fatal("Invalid CIDR")
+				}
 				c.trie.MarkCIDRDirty(cidr.(ip.V4CIDR))
 				return nil
 			})
@@ -745,7 +748,7 @@ func (r *RouteTrie) AddWEP(cidr ip.V4CIDR, nodename string) {
 
 		// Groom the nodename slice.
 		ri.WEP.NodeNames = []string{}
-		for nodename, _ := range ri.WEP.RefCount {
+		for nodename := range ri.WEP.RefCount {
 			ri.WEP.NodeNames = append(ri.WEP.NodeNames, nodename)
 		}
 		sort.Strings(ri.WEP.NodeNames)
@@ -753,7 +756,7 @@ func (r *RouteTrie) AddWEP(cidr ip.V4CIDR, nodename string) {
 }
 
 func (r *RouteTrie) RemoveWEP(cidr ip.V4CIDR, nodename string) {
-	removeElement := func(s []string, e string) {
+	removeElement := func(s []string, e string) []string {
 		// Find element index
 		var i int
 		var v string
@@ -769,14 +772,14 @@ func (r *RouteTrie) RemoveWEP(cidr ip.V4CIDR, nodename string) {
 		}
 
 		// Remove it.
-		s = append(s[:i], s[i+1:]...)
+		return append(s[:i], s[i+1:]...)
 	}
 
 	r.updateCIDR(cidr, func(ri *RouteInfo) {
 		ri.WEP.RefCount[nodename]--
 		if ri.WEP.RefCount[nodename] == 0 {
 			delete(ri.WEP.RefCount, nodename)
-			removeElement(ri.WEP.NodeNames, nodename)
+			ri.WEP.NodeNames = removeElement(ri.WEP.NodeNames, nodename)
 		}
 		if ri.WEP.RefCount[nodename] < 0 {
 			logrus.WithField("cidr", cidr).Panic("BUG: Asked to decref a workload past 0.")
@@ -885,9 +888,7 @@ func (r RouteInfo) Copy() RouteInfo {
 			cp.WEP.RefCount[n] = c
 		}
 		cp.WEP.NodeNames = []string{}
-		for _, n := range cp.WEP.NodeNames {
-			cp.WEP.NodeNames = append(cp.WEP.NodeNames, n)
-		}
+		cp.WEP.NodeNames = append(cp.WEP.NodeNames, cp.WEP.NodeNames...)
 	}
 	return cp
 }
