@@ -57,10 +57,15 @@ var (
 // Canned workload endpoints.
 
 var localWlEpKey1 = WorkloadEndpointKey{Hostname: localHostname, OrchestratorID: "orch", WorkloadID: "wl1", EndpointID: "ep1"}
-var remoteWlEpKey1 = WorkloadEndpointKey{Hostname: remoteHostname, OrchestratorID: "orch", WorkloadID: "wl1", EndpointID: "ep1"}
 var localWlEp1Id = "orch/wl1/ep1"
 var localWlEpKey2 = WorkloadEndpointKey{Hostname: localHostname, OrchestratorID: "orch", WorkloadID: "wl2", EndpointID: "ep2"}
 var localWlEp2Id = "orch/wl2/ep2"
+
+// A remote workload endpoint
+var remoteWlEpKey1 = WorkloadEndpointKey{Hostname: remoteHostname, OrchestratorID: "orch", WorkloadID: "wl1", EndpointID: "ep1"}
+
+// Same as remoteWlEpKey1 but on a different host.
+var remoteWlEpKey2 = WorkloadEndpointKey{Hostname: remoteHostname2, OrchestratorID: "orch", WorkloadID: "wl1", EndpointID: "ep1"}
 
 var localWlEp1 = WorkloadEndpoint{
 	State:      "active",
