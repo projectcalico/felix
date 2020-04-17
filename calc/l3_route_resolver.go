@@ -579,7 +579,6 @@ func (c *L3RouteResolver) flush() {
 				} else {
 					rt.Type = proto.RouteType_REMOTE_WORKLOAD
 				}
-				break
 			}
 		}
 
