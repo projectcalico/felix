@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+
 	"golang.org/x/sys/unix"
 
 	. "github.com/onsi/gomega"
@@ -38,9 +40,11 @@ func NewMockNetlinkDataplane() *MockNetlinkDataplane {
 var _ netlinkshim.Netlink = NewMockNetlinkDataplane()
 
 var (
-	SimulatedError = errors.New("dummy error")
-	NotFound       = errors.New("not found")
-	AlreadyExists  = errors.New("already exists")
+	SimulatedError        = errors.New("dummy error")
+	NotFoundError         = errors.New("not found")
+	FileDoesNotExistError = errors.New("file does not exist")
+	AlreadyExistsError    = errors.New("already exists")
+	NotSupportedError     = errors.New("operation not supported")
 )
 
 type FailFlags uint32
@@ -56,6 +60,7 @@ const (
 	FailNextNewNetlink
 	FailNextSetSocketTimeout
 	FailNextLinkAdd
+	FailNextLinkAddNotSupported
 	FailNextLinkDel
 	FailNextLinkSetMTU
 	FailNextLinkSetUp
@@ -65,6 +70,11 @@ const (
 	FailNextRuleList
 	FailNextRuleAdd
 	FailNextRuleDel
+	FailNextNewWireguard
+	FailNextNewWireguardNotSupported
+	FailNextWireguardClose
+	FailNextWireguardDeviceByName
+	FailNextWireguardConfigureDevice
 	FailNone FailFlags = 0
 )
 
@@ -113,6 +123,9 @@ func (f FailFlags) String() string {
 	if f&FailNextLinkAdd != 0 {
 		parts = append(parts, "FailNextLinkAdd")
 	}
+	if f&FailNextLinkAddNotSupported != 0 {
+		parts = append(parts, "FailNextLinkAddNotSupported")
+	}
 	if f&FailNextLinkDel != 0 {
 		parts = append(parts, "FailNextLinkDel")
 	}
@@ -140,6 +153,21 @@ func (f FailFlags) String() string {
 	if f&FailNextRuleDel != 0 {
 		parts = append(parts, "FailNextRuleDel")
 	}
+	if f&FailNextNewWireguard != 0 {
+		parts = append(parts, "FailNextNewWireguard")
+	}
+	if f&FailNextNewWireguardNotSupported != 0 {
+		parts = append(parts, "FailNextNewWireguardNotSupported")
+	}
+	if f&FailNextWireguardClose != 0 {
+		parts = append(parts, "FailNextWireguardClose")
+	}
+	if f&FailNextWireguardDeviceByName != 0 {
+		parts = append(parts, "FailNextWireguardDeviceByName")
+	}
+	if f&FailNextWireguardConfigureDevice != 0 {
+		parts = append(parts, "FailNextWireguardConfigureDevice")
+	}
 	if f == 0 {
 		parts = append(parts, "FailNone")
 	}
@@ -158,8 +186,11 @@ type MockNetlinkDataplane struct {
 	DeletedRouteKeys set.Set
 	UpdatedRouteKeys set.Set
 
-	NumNewNetlinkCalls int
-	NetlinkOpen        bool
+	NumNewNetlinkCalls   int
+	NetlinkOpen          bool
+	NumNewWireguardCalls int
+	WireguardOpen        bool
+	NumLinkAddCalls      int
 
 	PersistentlyFailToConnect bool
 
@@ -179,6 +210,16 @@ func (d *MockNetlinkDataplane) ResetDeltas() {
 	d.AddedRouteKeys = set.New()
 	d.DeletedRouteKeys = set.New()
 	d.UpdatedRouteKeys = set.New()
+}
+
+// ----- Mock dataplane management functions for test code -----
+
+func (d *MockNetlinkDataplane) GetDeletedConntrackEntries() []net.IP {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	cpy := make([]net.IP, len(d.deletedConntrackEntries))
+	copy(cpy, d.deletedConntrackEntries)
+	return cpy
 }
 
 func (d *MockNetlinkDataplane) AddIface(idx int, name string, up bool, running bool) *MockLink {
@@ -203,17 +244,6 @@ func (d *MockNetlinkDataplane) AddIface(idx int, name string, up bool, running b
 	return link
 }
 
-func (d *MockNetlinkDataplane) shouldFail(flag FailFlags) bool {
-	flagPresent := d.FailuresToSimulate&flag != 0
-	if !d.PersistFailures {
-		d.FailuresToSimulate &^= flag
-	}
-	if flagPresent {
-		log.WithField("flag", flag).Warn("Mock dataplane: triggering failure")
-	}
-	return flagPresent
-}
-
 func (d *MockNetlinkDataplane) NewMockNetlink() (netlinkshim.Netlink, error) {
 	d.NumNewNetlinkCalls++
 	if d.PersistentlyFailToConnect || d.shouldFail(FailNextNewNetlink) {
@@ -223,6 +253,8 @@ func (d *MockNetlinkDataplane) NewMockNetlink() (netlinkshim.Netlink, error) {
 	d.NetlinkOpen = true
 	return d, nil
 }
+
+// ----- Netlink API -----
 
 func (d *MockNetlinkDataplane) Delete() {
 	Expect(d.NetlinkOpen).To(BeTrue())
@@ -252,7 +284,7 @@ func (d *MockNetlinkDataplane) LinkList() ([]netlink.Link, error) {
 func (d *MockNetlinkDataplane) LinkByName(name string) (netlink.Link, error) {
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextLinkByNameNotFound) {
-		return nil, NotFound
+		return nil, NotFoundError
 	}
 	if d.shouldFail(FailNextLinkByName) {
 		return nil, SimulatedError
@@ -260,23 +292,29 @@ func (d *MockNetlinkDataplane) LinkByName(name string) (netlink.Link, error) {
 	if link, ok := d.nameToLink[name]; ok {
 		return link, nil
 	}
-	return nil, NotFound
+	return nil, NotFoundError
 }
 
 func (d *MockNetlinkDataplane) LinkAdd(link netlink.Link) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
+	d.NumLinkAddCalls++
+
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextLinkAdd) {
 		return SimulatedError
 	}
-
-	if _, ok := d.nameToLink[link.Attrs().Name]; ok {
-		return AlreadyExists
+	if d.shouldFail(FailNextLinkAddNotSupported) {
+		return NotSupportedError
 	}
+	if _, ok := d.nameToLink[link.Attrs().Name]; ok {
+		return AlreadyExistsError
+	}
+	attrs := *link.Attrs()
+	attrs.Index = 100 + d.NumLinkAddCalls
 	d.nameToLink[link.Attrs().Name] = &MockLink{
-		LinkAttrs: *link.Attrs(),
+		LinkAttrs: attrs,
 		LinkType:  link.Type(),
 	}
 	d.AddedLinks.Add(link.Attrs().Name)
@@ -293,7 +331,7 @@ func (d *MockNetlinkDataplane) LinkDel(link netlink.Link) error {
 	}
 
 	if _, ok := d.nameToLink[link.Attrs().Name]; !ok {
-		return NotFound
+		return NotFoundError
 	}
 
 	delete(d.nameToLink, link.Attrs().Name)
@@ -314,7 +352,7 @@ func (d *MockNetlinkDataplane) LinkSetMTU(link netlink.Link, mtu int) error {
 		d.nameToLink[link.Attrs().Name] = link
 		return nil
 	}
-	return NotFound
+	return NotFoundError
 }
 
 func (d *MockNetlinkDataplane) LinkSetUp(link netlink.Link) error {
@@ -331,7 +369,7 @@ func (d *MockNetlinkDataplane) LinkSetUp(link netlink.Link) error {
 		d.nameToLink[link.Attrs().Name] = link
 		return nil
 	}
-	return NotFound
+	return NotFoundError
 }
 
 func (d *MockNetlinkDataplane) AddrList(link netlink.Link, family int) ([]netlink.Addr, error) {
@@ -345,7 +383,7 @@ func (d *MockNetlinkDataplane) AddrList(link netlink.Link, family int) ([]netlin
 	if link, ok := d.nameToLink[link.Attrs().Name]; ok {
 		return link.Addrs, nil
 	}
-	return nil, NotFound
+	return nil, NotFoundError
 }
 
 func (d *MockNetlinkDataplane) AddrAdd(link netlink.Link, addr *netlink.Addr) error {
@@ -360,7 +398,7 @@ func (d *MockNetlinkDataplane) AddrAdd(link netlink.Link, addr *netlink.Addr) er
 	if link, ok := d.nameToLink[link.Attrs().Name]; ok {
 		for _, linkaddr := range link.Addrs {
 			if linkaddr.Equal(*addr) {
-				return AlreadyExists
+				return AlreadyExistsError
 			}
 		}
 		d.AddedAddrs.Add(addr.IPNet.String())
@@ -369,7 +407,7 @@ func (d *MockNetlinkDataplane) AddrAdd(link netlink.Link, addr *netlink.Addr) er
 		return nil
 	}
 
-	return NotFound
+	return NotFoundError
 }
 
 func (d *MockNetlinkDataplane) AddrDel(link netlink.Link, addr *netlink.Addr) error {
@@ -492,7 +530,7 @@ func (d *MockNetlinkDataplane) RouteAdd(route *netlink.Route) error {
 	log.WithField("routeKey", key).Info("Mock dataplane: RouteAdd called")
 	d.AddedRouteKeys.Add(key)
 	if _, ok := d.RouteKeyToRoute[key]; ok {
-		return AlreadyExists
+		return AlreadyExistsError
 	} else {
 		r := *route
 		if r.Table == unix.RT_TABLE_MAIN {
@@ -522,6 +560,8 @@ func (d *MockNetlinkDataplane) RouteDel(route *netlink.Route) error {
 	}
 }
 
+// ----- Routetable specific ARP and Conntrack functions -----
+
 func (d *MockNetlinkDataplane) AddStaticArpEntry(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error {
 	if d.shouldFail(FailNextAddARP) {
 		return SimulatedError
@@ -546,12 +586,17 @@ func (d *MockNetlinkDataplane) RemoveConntrackFlows(ipVersion uint8, ipAddr net.
 	time.Sleep(d.ConntrackSleep)
 }
 
-func (d *MockNetlinkDataplane) GetDeletedConntrackEntries() []net.IP {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	cpy := make([]net.IP, len(d.deletedConntrackEntries))
-	copy(cpy, d.deletedConntrackEntries)
-	return cpy
+// ----- Internals -----
+
+func (d *MockNetlinkDataplane) shouldFail(flag FailFlags) bool {
+	flagPresent := d.FailuresToSimulate&flag != 0
+	if !d.PersistFailures {
+		d.FailuresToSimulate &^= flag
+	}
+	if flagPresent {
+		log.WithField("flag", flag).Warn("Mock dataplane: triggering failure")
+	}
+	return flagPresent
 }
 
 func KeyForRoute(route *netlink.Route) string {
@@ -568,6 +613,12 @@ type MockLink struct {
 	LinkAttrs netlink.LinkAttrs
 	Addrs     []netlink.Addr
 	LinkType  string
+
+	wireguardPrivateKey   wgtypes.Key
+	wireguardPublicKey    wgtypes.Key
+	wireguardListenPort   int
+	wireguardFirewallMark int
+	wireguardPeers        map[wgtypes.Key]wgtypes.Peer
 }
 
 func (l *MockLink) Attrs() *netlink.LinkAttrs {
