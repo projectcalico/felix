@@ -567,7 +567,8 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool) error {
 		}
 	}
 
-	// Any entry that we delete and that we don't expect a route for we should remove the conntrack entry.
+	// Any deleted route that is not being replaced by a route with the same CIDR should have the corresponding
+	// conntrack entry removed.
 	defer func() {
 		cidrsToTarget := r.ifaceNameToTargets[ifaceName]
 		for _, route := range routesToDelete {
