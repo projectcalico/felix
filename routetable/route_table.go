@@ -73,8 +73,8 @@ const (
 type TargetType string
 
 const (
-	TargetTypeVXLAN     TargetType = "vxlan"
-	TargetTypeNoEncap   TargetType = "noencap"
+	TargetTypeVXLAN   TargetType = "vxlan"
+	TargetTypeNoEncap TargetType = "noencap"
 
 	// The following target types should be used with InterfaceNone.
 	TargetTypeBlackhole TargetType = "blackhole"
@@ -162,7 +162,6 @@ type RouteTable struct {
 	ifaceNameToTargets             map[string]map[ip.CIDR]Target
 	ifaceNameToL2Targets           map[string][]L2Target
 	ifaceNameToFirstSeen           map[string]time.Time
-	pendingIfaceNameToTargets      map[string][]Target
 	pendingIfaceNameToDeltaTargets map[string]map[ip.CIDR]*Target
 	pendingIfaceNameToL2Targets    map[string][]L2Target
 
@@ -258,7 +257,6 @@ func NewWithShims(
 		ifaceNameToTargets:             map[string]map[ip.CIDR]Target{},
 		ifaceNameToL2Targets:           map[string][]L2Target{},
 		ifaceNameToFirstSeen:           map[string]time.Time{},
-		pendingIfaceNameToTargets:      map[string][]Target{},
 		pendingIfaceNameToDeltaTargets: map[string]map[ip.CIDR]*Target{},
 		pendingIfaceNameToL2Targets:    map[string][]L2Target{},
 		reSync:                         true,
@@ -310,34 +308,68 @@ func (r *RouteTable) markIfaceForUpdate(ifaceName string, resync bool) {
 	}
 }
 
-// setDeltaTarget sets a pending delta target update.
-func (r *RouteTable) setDeltaTarget(ifaceName string, cidr ip.CIDR, target *Target) {
-	if r.pendingIfaceNameToDeltaTargets[ifaceName] == nil {
-		r.pendingIfaceNameToDeltaTargets[ifaceName] = map[ip.CIDR]*Target{}
-	}
-	r.pendingIfaceNameToDeltaTargets[ifaceName][cidr] = target
-	r.markIfaceForUpdate(ifaceName, false)
-}
-
-// SetRoutes sets the full set of targets for the specified interface. This clears any delta changes that were
-// previously configured.
+// SetRoutes sets the full set of targets for the specified interface. This recalculates the deltas from the current
+// set of programmed routes.
 func (r *RouteTable) SetRoutes(ifaceName string, targets []Target) {
+	currentCIDRsToTarget := r.ifaceNameToTargets[ifaceName]
+	deltas := map[ip.CIDR]*Target{}
+
+	// Delete all of the existing targets.
+	for cidr, _ := range currentCIDRsToTarget {
+		deltas[cidr] = nil
+	}
+
+	// Add the new targets.
+	for _, target := range targets {
+		if current, ok := currentCIDRsToTarget[target.CIDR]; ok && current.Equal(target) {
+			// Entry is unchanged.  Remove from the deltas.
+			log.Debugf("Expected target unchanged for CIDR: %v", target.CIDR)
+			delete(deltas, target.CIDR)
+		} else {
+			// Entry has either been modified or been created. If modified then we'll keep the delete followed by a
+			// create.
+			log.Debugf("New target for CIDR: %v", target.CIDR)
+			deltas[target.CIDR] = &target
+		}
+	}
+
 	// Store the routes.  Remove any delta routes since this is a full set of routes.
-	r.pendingIfaceNameToTargets[ifaceName] = targets
-	delete(r.pendingIfaceNameToDeltaTargets, ifaceName)
+	r.pendingIfaceNameToDeltaTargets[ifaceName] = deltas
 	r.markIfaceForUpdate(ifaceName, false)
 }
 
 // RouteUpdate updates the route keyed off the target CIDR. These deltas will be applied to any routes set using
 // SetRoute.
 func (r *RouteTable) RouteUpdate(ifaceName string, target Target) {
-	r.setDeltaTarget(ifaceName, target.CIDR, &target)
+	if r.pendingIfaceNameToDeltaTargets[ifaceName] == nil {
+		r.pendingIfaceNameToDeltaTargets[ifaceName] = map[ip.CIDR]*Target{}
+	}
+	if current, ok := r.ifaceNameToTargets[ifaceName][target.CIDR]; ok && current.Equal(target) {
+		// Target unchanged from current programmed route, remove deltas.
+		r.logCxt.Debugf("Target unchanged for CIDR %s", target.CIDR)
+		delete(r.pendingIfaceNameToDeltaTargets[ifaceName], target.CIDR)
+	} else {
+		// Target new or changed, save delta.
+		r.pendingIfaceNameToDeltaTargets[ifaceName][target.CIDR] = &target
+		r.markIfaceForUpdate(ifaceName, false)
+	}
 }
 
 // RouteRemove removes the route with the specified CIDR. These deltas will be applied to any routes set using
 // SetRoute.
 func (r *RouteTable) RouteRemove(ifaceName string, cidr ip.CIDR) {
-	r.setDeltaTarget(ifaceName, cidr, nil)
+	if r.pendingIfaceNameToDeltaTargets[ifaceName] == nil {
+		r.pendingIfaceNameToDeltaTargets[ifaceName] = map[ip.CIDR]*Target{}
+	}
+	if _, ok := r.ifaceNameToTargets[ifaceName][cidr]; !ok {
+		// Target not programmed, remote deltas.
+		r.logCxt.Debugf("Target is not programmed for CIDR %s", cidr)
+		delete(r.pendingIfaceNameToDeltaTargets[ifaceName], cidr)
+	} else {
+		// Target programmed, set delta for deletion.
+		r.pendingIfaceNameToDeltaTargets[ifaceName][cidr] = nil
+		r.markIfaceForUpdate(ifaceName, false)
+	}
 }
 
 func (r *RouteTable) SetL2Routes(ifaceName string, targets []L2Target) {
@@ -507,37 +539,6 @@ ifaceLoop:
 	return nil
 }
 
-func (r *RouteTable) ensureL2Dataplane(linkAttrs *netlink.LinkAttrs, target L2Target) error {
-	// For each L2 entry we need to program, program it.
-	// Add a static ARP entry.
-	a := &netlink.Neigh{
-		LinkIndex:    linkAttrs.Index,
-		State:        netlink.NUD_PERMANENT,
-		Type:         syscall.RTN_UNICAST,
-		IP:           target.GW.AsNetIP(),
-		HardwareAddr: target.VTEPMAC,
-	}
-	if err := netlink.NeighSet(a); err != nil {
-		return err
-	}
-	log.WithField("entry", a).Debug("Programmed ARP")
-
-	// Add a FDB entry for this neighbor.
-	n := &netlink.Neigh{
-		LinkIndex:    linkAttrs.Index,
-		State:        netlink.NUD_PERMANENT,
-		Family:       syscall.AF_BRIDGE,
-		Flags:        netlink.NTF_SELF,
-		IP:           target.IP.AsNetIP(),
-		HardwareAddr: target.VTEPMAC,
-	}
-	if err := netlink.NeighSet(n); err != nil {
-		return err
-	}
-	log.WithField("entry", n).Debug("Programmed FDB")
-	return nil
-}
-
 func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool) error {
 	startTime := time.Now()
 	defer func() {
@@ -546,128 +547,142 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool) error {
 	logCxt := r.logCxt.WithField("ifaceName", ifaceName)
 	logCxt.Debug("Syncing interface routes")
 
-	// If this is a modify or delete, grab a copy of the existing targets so we can clean up
-	// conntrack entries even if the routes have been removed.  We'll remove any still-required
-	// CIDRs from this set below.  We don't apply the grace period to this calculation because
-	// it only removes routes that the datamodel previously said were there and then were
-	// removed.  In that case, we know we're up to date.n
+	// If necessary perform a full resync. This will return a set of routes that need deleting and will update the
+	// deltas to fix any discrepancies with the expected configuration. If this errors, we still apply the deltas
+	// first because this allows us to tidy up configuration for interfaces that no longer have any routes associated
+	// with them.
+	var routesToDelete []netlink.Route
+	var resyncErr error
+	if fullSync {
+		// Performing a full re-sync.  Start by applying the deltas so that we don't delete routes that are required.
+		logCxt.Debug("Reconcile against kernel programming")
+		_, _ = r.applyRouteDeltas(ifaceName)
 
-	// Determine the set of deleted, created and current targets
-	currentCIDRsToTarget := r.ifaceNameToTargets[ifaceName]
-	deletedCIDRsToTarget := map[ip.CIDR]Target{}
-	createdCIDRsTarget := map[ip.CIDR]Target{}
-	updatedCIDRsToTarget := currentCIDRsToTarget
-
-	// Start with any complete target snapshots.
-	if newTargets, ok := r.pendingIfaceNameToTargets[ifaceName]; ok {
-		// Reset the expected CIDRs and construct from the new set.
-		updatedCIDRsToTarget = map[ip.CIDR]Target{}
-		logCxt.Debug("Have updated targets.")
-
-		for cidr, target := range currentCIDRsToTarget {
-			deletedCIDRsToTarget[cidr] = target
+		// Now do the resync - this will update our deltas again based on what is not programmed (it's a little bit
+		// circuitous, but simplifies the code paths for resync and delta processing).
+		if routesToDelete, resyncErr = r.fullResyncRoutesForLink(logCxt, ifaceName); resyncErr != nil && resyncErr != IfaceGrace {
+			// If we hit anything other than an interface-in-grace error, exit now.
+			r.logCxt.WithError(resyncErr).Info("Hit error doing kernel reconciliation")
+			return r.filterErrorByIfaceState(ifaceName, resyncErr, UpdateFailed)
 		}
-		for _, target := range newTargets {
-			if current, ok := currentCIDRsToTarget[target.CIDR]; ok && current.Equal(target) {
-				// Entry is unchanged.  Remove from the deleted CIDRs.
-				log.Debugf("Expected target unchanged for CIDR: %v", target.CIDR)
-				delete(deletedCIDRsToTarget, target.CIDR)
-			} else {
-				// Entry has either been modified or been created. If modified then we'll keep the delete followed by a
-				// create.
-				log.Debugf("New target for CIDR: %v", target.CIDR)
-				createdCIDRsTarget[target.CIDR] = target
-			}
-			updatedCIDRsToTarget[target.CIDR] = target
-		}
-
-		// Processed the snapshots so remove them.
-		delete(r.pendingIfaceNameToTargets, ifaceName)
 	}
 
-	if updatedCIDRsToTarget == nil {
-		// Police against there being no existing targets, but handling a route update.
-		updatedCIDRsToTarget = map[ip.CIDR]Target{}
-	}
-
-	// Now apply deltas.
-	if deltaTargets, ok := r.pendingIfaceNameToDeltaTargets[ifaceName]; ok {
-		logCxt.Debug("Have delta targets.")
-
-		for cidr, target := range deltaTargets {
-			if current, ok := currentCIDRsToTarget[cidr]; ok {
-				if target == nil {
-					// Delta deletes a current entry. Make sure we delete the current entry and remove any entry to
-					// create one.
-					log.Debugf("Deleting target for CIDR: %v", cidr)
-					deletedCIDRsToTarget[cidr] = current
-					delete(createdCIDRsTarget, cidr)
-					delete(updatedCIDRsToTarget, cidr)
-				} else if target.Equal(current) {
-					// Delta leaves the current entry unchanged, so remove any deleted and created entry that may exist.
-					log.Debugf("Update leaves target unchanged for CIDR: %v", cidr)
-					delete(deletedCIDRsToTarget, cidr)
-					delete(createdCIDRsTarget, cidr)
-					updatedCIDRsToTarget[cidr] = *target
-				} else {
-					// Delta changes existing entry.  Delete existing entry and create new entry.
-					log.Debugf("Update changed target for CIDR: %v", cidr)
-					deletedCIDRsToTarget[cidr] = current
-					createdCIDRsTarget[cidr] = *target
-					updatedCIDRsToTarget[cidr] = *target
-				}
-			} else if target != nil {
-				// Delta adds a new entry.
-				log.Debugf("Added new CIDR: %v", cidr)
-				createdCIDRsTarget[cidr] = *target
-				updatedCIDRsToTarget[cidr] = *target
-			}
-		}
-
-		// Processed the deltas so remove them.
-		delete(r.pendingIfaceNameToDeltaTargets, ifaceName)
-	}
-
-	// If there are no more expected targets for this interface then remove from the cache.
-	if len(updatedCIDRsToTarget) == 0 {
-		delete(r.ifaceNameToTargets, ifaceName)
-	} else {
-		r.ifaceNameToTargets[ifaceName] = updatedCIDRsToTarget
-	}
-
-	// Don't remove any IPv6 link local entry.
-	if r.ipVersion == 6 {
-		delete(deletedCIDRsToTarget, ipV6LinkLocalCIDR)
-	}
-
-	// Any entry that we delete, we should remove the corresponding conntrack entries.
+	// Any entry that we delete and that we don't expect a route for we should remove the conntrack entry.
 	defer func() {
-		for cidr := range deletedCIDRsToTarget {
-			r.startConntrackDeletion(cidr.Addr())
+		cidrsToTarget := r.ifaceNameToTargets[ifaceName]
+		for _, route := range routesToDelete {
+			if cidr := ip.CIDRFromIPNet(route.Dst); cidr == nil {
+				// No parseable CIDR destination in route.
+			} else if _, ok := cidrsToTarget[cidr]; !ok {
+				// Route is deleted and CIDR should not be routable anymore - remove conntrack entries.
+				r.startConntrackDeletion(cidr.Addr())
+			}
 		}
 	}()
+
+	// Update the cached values from the deltas and get the set of targets to create and delete.
+	targetsToCreate, targetsToDelete := r.applyRouteDeltas(ifaceName)
 
 	// Try to get the link.  This may fail if it's been deleted out from under us.
 	linkAttrs, err := r.getLinkAttributes(ifaceName)
 	if err != nil {
 		return err
 	}
+	nl, err := r.getNetlink()
+	if err != nil {
+		logCxt.Debug("Failed to connect to netlink")
+		return ConnectFailed
+	}
 
-	if !fullSync {
-		// If we aren't doing a full re-sync then attempt to apply deltas to the route table.
-		logCxt.Debug("Perform a delta route sync")
-		if err := r.deltaUpdateRoutesForLink(logCxt, linkAttrs, ifaceName, deletedCIDRsToTarget, createdCIDRsTarget); err != UpdateFailed {
-			return err
+	// Add the target deletes to the set of routes to delete (we do this first so that we only have one set of deletion
+	// data that we use to tidy up routes and conntrack entries).
+	for _, target := range targetsToDelete {
+		routesToDelete = append(routesToDelete, r.createL3Route(linkAttrs, target))
+	}
+
+	// Delete the combined set of routes.
+	updatesFailed := false
+	for _, route := range routesToDelete {
+		if err := nl.RouteDel(&route); err != nil {
+			logCxt.WithError(err).Warn("Failed to delete route")
+			updatesFailed = true
 		}
 	}
 
-	// We are either scheduled to do a full resync, or a previous update failed. In either case, attempt a full
-	// resync of state.
-	logCxt.Debugf("Perform a full route sync: %v %v", updatedCIDRsToTarget, deletedCIDRsToTarget)
-	return r.fullSyncRoutesForLink(logCxt, linkAttrs, ifaceName, updatedCIDRsToTarget, deletedCIDRsToTarget)
+	// Now add target routes.
+	for _, target := range targetsToCreate {
+		route := r.createL3Route(linkAttrs, target)
+
+		// In case this IP is being re-used, wait for any previous conntrack entry
+		// to be cleaned up.  (No-op if there are no pending deletes.)
+		r.waitForPendingConntrackDeletion(target.CIDR.Addr())
+		if err := nl.RouteAdd(&route); err != nil {
+			logCxt.WithError(err).Warn("Failed to add route")
+			updatesFailed = true
+		}
+		if r.ipVersion == 4 && target.DestMAC != nil {
+			// TODO(smc) clean up/sync old ARP entries
+			err := r.addStaticARPEntry(target.CIDR, target.DestMAC, ifaceName)
+			if err != nil {
+				logCxt.WithError(err).Warn("Failed to set ARP entry")
+				updatesFailed = true
+			}
+		}
+	}
+
+	if updatesFailed {
+		r.closeNetlink() // Defensive: force a netlink reconnection next time.
+
+		// Recheck whether the interface exists so we don't produce spammy logs during
+		// interface removal.
+		return r.filterErrorByIfaceState(ifaceName, UpdateFailed, UpdateFailed)
+	}
+
+	// Return any un-handled re-sync error.
+	return resyncErr
+}
+
+func (r *RouteTable) applyRouteDeltas(ifaceName string) (targetsToCreate, targetsToDelete []Target) {
+	// Determine the set of deleted, created and current targets
+	cidrsToTarget := r.ifaceNameToTargets[ifaceName]
+	if cidrsToTarget == nil {
+		// Police against there being no existing targets, but handling a route update.
+		cidrsToTarget = map[ip.CIDR]Target{}
+	}
+
+	// Now apply deltas to our cache and track targets to delete and create.
+	deltaTargets := r.pendingIfaceNameToDeltaTargets[ifaceName]
+	for cidr, target := range deltaTargets {
+		if current, ok := cidrsToTarget[cidr]; ok {
+			// Previous entry exists, so need to delete it. Note that the SetRoute, RouteAdd and RouteRemove will not
+			// add deltas for unchanged targets, so we don't need to check for target equivalency here.
+			log.Debugf("Deleted or updated CIDR: %v", cidr)
+			targetsToDelete = append(targetsToDelete, current)
+			delete(cidrsToTarget, cidr)
+		}
+		if target != nil {
+			// Delta adds a new entry.
+			log.Debugf("Added or updated CIDR: %v", cidr)
+			targetsToCreate = append(targetsToCreate, *target)
+			cidrsToTarget[cidr] = *target
+		}
+	}
+
+	// Processed the deltas so remove them.
+	delete(r.pendingIfaceNameToDeltaTargets, ifaceName)
+
+	// If there are no more expected targets for this interface then remove from the cache.
+	if len(cidrsToTarget) == 0 {
+		delete(r.ifaceNameToTargets, ifaceName)
+	} else {
+		r.ifaceNameToTargets[ifaceName] = cidrsToTarget
+	}
+
+	return
 }
 
 func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) netlink.Route {
+	log.Debugf("Create L3 route for: %#v", target)
 	var linkIndex int
 	if linkAttrs != nil {
 		linkIndex = linkAttrs.Index
@@ -699,16 +714,20 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 	return route
 }
 
-// fullSyncRoutesForLink performs a full resync of the routes by first listing current routes and correlating against
-// the expected set.
-func (r *RouteTable) fullSyncRoutesForLink(
-	logCxt *log.Entry, linkAttrs *netlink.LinkAttrs, ifaceName string,
-	expectedCIDRsToTarget, deleted map[ip.CIDR]Target,
-) error {
+// fullResyncRoutesForLink performs a full resync of the routes by first listing current routes and correlating against
+// the expected set. After correlation, it will create a set of routes to delete and update the delta routes to add
+// back any missing routes.
+func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string) ([]netlink.Route, error) {
+	// Get the netlink client and the link attributes
 	nl, err := r.getNetlink()
 	if err != nil {
 		logCxt.Debug("Failed to connect to netlink")
-		return ConnectFailed
+		return nil, ConnectFailed
+	}
+	// Try to get the link.  This may fail if it's been deleted out from under us.
+	linkAttrs, err := r.getLinkAttributes(ifaceName)
+	if err != nil {
+		return nil, err
 	}
 
 	// In order to allow Calico to run without Felix in an emergency, the CNI plugin pre-adds
@@ -733,7 +752,7 @@ func (r *RouteTable) fullSyncRoutesForLink(
 		// Link attributes might be nil for the special "no-OIF" interface name.
 		routeFilter.LinkIndex = linkAttrs.Index
 	}
-	oldRoutes, err := nl.RouteListFiltered(r.netlinkFamily, routeFilter, routeFilterFlags)
+	programmedRoutes, err := nl.RouteListFiltered(r.netlinkFamily, routeFilter, routeFilterFlags)
 	if err != nil {
 		// Filter the error so that we don't spam errors if the interface is being torn
 		// down.
@@ -744,11 +763,10 @@ func (r *RouteTable) fullSyncRoutesForLink(
 		} else {
 			logCxt.WithError(err).Info("Failed to list routes; interface down/gone.")
 		}
-		return filteredErr
+		return nil, filteredErr
 	}
 
-	// Track any CIDRs in the route table that should not have been programmed and are not covered by the set of
-	// deleted CIDRs.
+	// Track any CIDRs in the route table that should not have been programmed.
 	oldCIDRs := set.New()
 	defer oldCIDRs.Iter(func(item interface{}) error {
 		// Remove any conntrack entries that should no longer be there.
@@ -757,10 +775,16 @@ func (r *RouteTable) fullSyncRoutesForLink(
 		return nil
 	})
 
+	var routesToDelete []netlink.Route
+	expectedTargets := r.ifaceNameToTargets[ifaceName]
+	pendingDeltaTargets := r.pendingIfaceNameToDeltaTargets[ifaceName]
+	if pendingDeltaTargets == nil {
+		pendingDeltaTargets = map[ip.CIDR]*Target{}
+		r.pendingIfaceNameToDeltaTargets[ifaceName] = pendingDeltaTargets
+	}
 	alreadyCorrectCIDRs := set.New()
-	updatesFailed := false
 	leaveDirty := false
-	for _, route := range oldRoutes {
+	for _, route := range programmedRoutes {
 		logCxt.Debugf("Processing route: %v %v %v", route.Table, route.LinkIndex, route.Dst)
 		var dest ip.CIDR
 		if route.Dst != nil {
@@ -773,13 +797,14 @@ func (r *RouteTable) fullSyncRoutesForLink(
 			continue
 		}
 
-		expectedTarget, expectedTargetFound := expectedCIDRsToTarget[dest]
+		expectedTarget, expectedTargetFound := expectedTargets[dest]
 		routeExpected := expectedTargetFound || (r.ipVersion == 6 && dest == ipV6LinkLocalCIDR)
 		var routeProblems []string
 		if !routeExpected {
 			routeProblems = append(routeProblems, "unexpected route")
 		}
 		if !r.deviceRouteSourceAddress.Equal(route.Src) {
+			//TODO(rlb): What about ipv6 link local?  Should we remove, if so, how does it get added back?
 			routeProblems = append(routeProblems, "incorrect source address")
 		}
 		if dest != ipV6LinkLocalCIDR {
@@ -791,132 +816,54 @@ func (r *RouteTable) fullSyncRoutesForLink(
 			}
 			if (route.Gw == nil && expectedTarget.GW != nil) ||
 				(route.Gw != nil && expectedTarget.GW == nil) ||
-				(route.Gw != nil && expectedTarget.GW != nil  && !route.Gw.Equal(expectedTarget.GW.AsNetIP())) {
+				(route.Gw != nil && expectedTarget.GW != nil && !route.Gw.Equal(expectedTarget.GW.AsNetIP())) {
 				routeProblems = append(routeProblems, "incorrect gateway")
 			}
 		}
 		if len(routeProblems) == 0 {
+			logCxt.Debug("Route is correct")
 			alreadyCorrectCIDRs.Add(dest)
 			continue
 		}
-		gracePeriodApplies := ifaceInGracePeriod && !routeExpected && !r.vxlan
-		if gracePeriodApplies {
+		if ifaceInGracePeriod && !routeExpected && !r.vxlan {
 			// Don't remove unexpected routes from interfaces created recently. VXLAN routes don't have a grace period.
 			logCxt.Info("Syncing routes: found unexpected route; ignoring due to grace period.")
 			leaveDirty = true
 			continue
 		}
-		logCxt = logCxt.WithField("routeProblems", routeProblems)
-		logCxt.Info("Syncing routes: removing old route.")
-		if err := nl.RouteDel(&route); err != nil {
-			// Probably a race with the interface being deleted.
-			logCxt.WithError(err).Info("Route deletion failed, assuming someone got there first.")
-			updatesFailed = true
-		}
-		if !routeExpected && dest != nil {
-			if _, ok := deleted[dest]; !ok {
-				// Collect any old route CIDRs that we find in the dataplane so we can remove their conntrack entries
-				// later. Entries in the deleted set are handled elsewhere.
-				oldCIDRs.Add(dest)
-			}
-		}
-	}
-	for cidr, target := range expectedCIDRsToTarget {
-		if !alreadyCorrectCIDRs.Contains(cidr) {
-			logCxt := logCxt.WithField("targetCIDR", cidr)
-			logCxt.Info("Syncing routes: adding new route.")
-			route := r.createL3Route(linkAttrs, target)
-
-			// In case this IP is being re-used, wait for any previous conntrack entry
-			// to be cleaned up.  (No-op if there are no pending deletes.)
-			r.waitForPendingConntrackDeletion(cidr.Addr())
-			if err := nl.RouteAdd(&route); err != nil {
-				logCxt.WithError(err).Warn("Failed to add route")
-				updatesFailed = true
-			}
-		}
-		if r.ipVersion == 4 && target.DestMAC != nil {
-			// TODO(smc) clean up/sync old ARP entries
-			err := r.addStaticARPEntry(cidr, target.DestMAC, ifaceName)
-			if err != nil {
-				logCxt.WithError(err).Warn("Failed to set ARP entry")
-				updatesFailed = true
-			}
-		}
+		logCxt.WithField("routeProblems", routeProblems).Info("Remove old route")
+		routesToDelete = append(routesToDelete, route)
 	}
 
-	if updatesFailed {
-		r.closeNetlink() // Defensive: force a netlink reconnection next time.
+	// Now loop through the expected CIDRs to Target. Remove any that we did not find, and add them back into our
+	// delta updates (unless the entry is superceded by another update).
+	for cidr, target := range expectedTargets {
+		if alreadyCorrectCIDRs.Contains(cidr) {
+			continue
+		}
+		logCxt := logCxt.WithField("cidr", cidr)
+		logCxt.Info("Deleting from expected targets")
+		delete(expectedTargets, cidr)
 
-		// Recheck whether the interface exists so we don't produce spammy logs during
-		// interface removal.
-		return r.filterErrorByIfaceState(ifaceName, UpdateFailed, UpdateFailed)
+		// If we do not have an update that supercedes this entry, then add it back in as an update so that we add
+		// the route.
+		if pendingTarget, ok := pendingDeltaTargets[cidr]; !ok {
+			logCxt.Info("No pending target update, adding back in as an update")
+			pendingDeltaTargets[cidr] = &target
+		} else if pendingTarget == nil {
+			logCxt.Info("Pending target deletion, removing delete update")
+			delete(pendingDeltaTargets, cidr)
+		} else {
+			logCxt.Info("Pending target update, no changes to deltas required")
+		}
 	}
 
 	if leaveDirty {
 		// Superfluous routes on a recently created interface.  We'll recheck later.
-		return IfaceGrace
+		return routesToDelete, IfaceGrace
 	}
 
-	return nil
-}
-
-// deltaUpdateRoutesForLink performs deltas to the routing configuration. This does not perform a full resync, so
-// handles more routes per interface better.
-func (r *RouteTable) deltaUpdateRoutesForLink(
-	logCxt *log.Entry, linkAttrs *netlink.LinkAttrs, ifaceName string,
-	deletedCIDRsToTarget, createdCIDRsToTarget map[ip.CIDR]Target,
-) error {
-	nl, err := r.getNetlink()
-	if err != nil {
-		logCxt.Debug("Failed to connect to netlink")
-		return ConnectFailed
-	}
-
-	// Delete routes first.
-	updatesFailed := false
-	for cidr, target := range deletedCIDRsToTarget {
-		route := r.createL3Route(linkAttrs, target)
-
-		// In case this IP is being re-used, wait for any previous conntrack entry
-		// to be cleaned up.  (No-op if there are no pending deletes.)
-		r.waitForPendingConntrackDeletion(cidr.Addr())
-		if err := nl.RouteDel(&route); err != nil {
-			logCxt.WithError(err).Warn("Failed to delete route")
-			updatesFailed = true
-		}
-	}
-
-	// Now add routes.
-	for cidr, target := range createdCIDRsToTarget {
-		route := r.createL3Route(linkAttrs, target)
-
-		// In case this IP is being re-used, wait for any previous conntrack entry
-		// to be cleaned up.  (No-op if there are no pending deletes.)
-		r.waitForPendingConntrackDeletion(cidr.Addr())
-		if err := nl.RouteAdd(&route); err != nil {
-			logCxt.WithError(err).Warn("Failed to add route")
-			updatesFailed = true
-		}
-		if r.ipVersion == 4 && target.DestMAC != nil {
-			// TODO(smc) clean up/sync old ARP entries
-			err := r.addStaticARPEntry(cidr, target.DestMAC, ifaceName)
-			if err != nil {
-				logCxt.WithError(err).Warn("Failed to set ARP entry")
-				updatesFailed = true
-			}
-		}
-	}
-
-	if updatesFailed {
-		r.closeNetlink() // Defensive: force a netlink reconnection next time.
-
-		// Recheck whether the interface exists so we don't produce spammy logs during
-		// interface removal.
-		return r.filterErrorByIfaceState(ifaceName, UpdateFailed, UpdateFailed)
-	}
-
-	return nil
+	return routesToDelete, nil
 }
 
 func (r *RouteTable) syncL2RoutesForLink(ifaceName string) error {
@@ -998,6 +945,37 @@ func (r *RouteTable) syncL2RoutesForLink(ifaceName string) error {
 		return r.filterErrorByIfaceState(ifaceName, UpdateFailed, UpdateFailed)
 	}
 
+	return nil
+}
+
+func (r *RouteTable) ensureL2Dataplane(linkAttrs *netlink.LinkAttrs, target L2Target) error {
+	// For each L2 entry we need to program, program it.
+	// Add a static ARP entry.
+	a := &netlink.Neigh{
+		LinkIndex:    linkAttrs.Index,
+		State:        netlink.NUD_PERMANENT,
+		Type:         syscall.RTN_UNICAST,
+		IP:           target.GW.AsNetIP(),
+		HardwareAddr: target.VTEPMAC,
+	}
+	if err := netlink.NeighSet(a); err != nil {
+		return err
+	}
+	log.WithField("entry", a).Debug("Programmed ARP")
+
+	// Add a FDB entry for this neighbor.
+	n := &netlink.Neigh{
+		LinkIndex:    linkAttrs.Index,
+		State:        netlink.NUD_PERMANENT,
+		Family:       syscall.AF_BRIDGE,
+		Flags:        netlink.NTF_SELF,
+		IP:           target.IP.AsNetIP(),
+		HardwareAddr: target.VTEPMAC,
+	}
+	if err := netlink.NeighSet(n); err != nil {
+		return err
+	}
+	log.WithField("entry", n).Debug("Programmed FDB")
 	return nil
 }
 
