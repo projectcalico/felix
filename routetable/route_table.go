@@ -315,7 +315,7 @@ func (r *RouteTable) SetRoutes(ifaceName string, targets []Target) {
 	deltas := map[ip.CIDR]*Target{}
 
 	// Delete all of the existing targets.
-	for cidr, _ := range currentCIDRsToTarget {
+	for cidr := range currentCIDRsToTarget {
 		deltas[cidr] = nil
 	}
 
