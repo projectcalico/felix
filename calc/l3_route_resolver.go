@@ -63,7 +63,6 @@ type L3RouteResolver struct {
 	blockToRoutes          map[string]set.Set
 	allPools               map[string]model.IPPool
 	workloadIDToCIDRs      map[model.WorkloadEndpointKey][]cnet.IPNet
-	nodeToCIDRs            map[string]set.Set
 	useNodeResourceUpdates bool
 	routeSource            string
 }
@@ -87,7 +86,6 @@ func NewL3RouteResolver(hostname string, callbacks PipelineCallbacks, useNodeRes
 
 		nodeNameToNodeInfo:     map[string]l3rrNodeInfo{},
 		blockToRoutes:          map[string]set.Set{},
-		nodeToCIDRs:            map[string]set.Set{},
 		allPools:               map[string]model.IPPool{},
 		workloadIDToCIDRs:      map[model.WorkloadEndpointKey][]cnet.IPNet{},
 		useNodeResourceUpdates: useNodeResourceUpdates,
@@ -149,12 +147,6 @@ func (c *L3RouteResolver) OnWorkloadUpdate(update api.Update) (_ bool) {
 	// Decref the old.
 	for _, oldCIDR := range oldCIDRs {
 		c.trie.RemoveWEP(ip.CIDRFromCalicoNet(oldCIDR).(ip.V4CIDR), key.Hostname)
-	}
-
-	cidrsForNode, ok := c.nodeToCIDRs[key.Hostname]
-	if !ok {
-		cidrsForNode = set.New()
-		c.nodeToCIDRs[key.Hostname] = cidrsForNode
 	}
 
 	if len(newCIDRs) > 0 {
@@ -357,22 +349,6 @@ func (c *L3RouteResolver) onNodeUpdate(nodeName string, newNodeInfo *l3rrNodeInf
 				}
 			})
 		}
-	} else {
-		// Get all the CIDRs impacted by this node.
-		cidrSet, ok := c.nodeToCIDRs[nodeName]
-		if ok {
-			// There are CIDRs associated with this node. Since the node has changed,
-			// we need to mark each one as dirty, since the routes may need to be reprogrammed.
-			// For example, if the node IP changes.
-			cidrSet.Iter(func(item interface{}) error {
-				cidr, err := ip.CIDRFromString(item.(string))
-				if err != nil {
-					logrus.WithError(err).Fatal("Invalid CIDR")
-				}
-				c.trie.MarkCIDRDirty(cidr.(ip.V4CIDR))
-				return nil
-			})
-		}
 	}
 
 	if nodeExisted {
@@ -388,6 +364,7 @@ func (c *L3RouteResolver) onNodeUpdate(nodeName string, newNodeInfo *l3rrNodeInf
 }
 
 func (c *L3RouteResolver) markAllNodeRoutesDirty(nodeName string) {
+	// TODO: Remove need to iterate all routes here.
 	c.visitAllRoutes(func(route nodenameRoute) {
 		if route.nodeName != nodeName {
 			return
@@ -397,12 +374,24 @@ func (c *L3RouteResolver) markAllNodeRoutesDirty(nodeName string) {
 }
 
 func (c *L3RouteResolver) visitAllRoutes(v func(route nodenameRoute)) {
-	for _, routes := range c.blockToRoutes {
-		routes.Iter(func(item interface{}) error {
-			v(item.(nodenameRoute))
-			return nil
-		})
-	}
+	c.trie.t.Visit(func(cidr ip.V4CIDR, data interface{}) bool {
+		// Construct a nodenameRoute to pass to the visiting function.
+		ri := c.trie.t.Get(cidr).(RouteInfo)
+		nnr := nodenameRoute{dst: cidr}
+		if len(ri.WEPs) > 0 {
+			// From a WEP.
+			nnr.nodeName = ri.WEPs[0].NodeName
+		} else if ri.Block.NodeName != "" {
+			// From IPAM.
+			nnr.nodeName = ri.Block.NodeName
+		} else {
+			// No host associated with route.
+			return true
+		}
+
+		v(nnr)
+		return true
+	})
 }
 
 // OnPoolUpdate gets called whenever an IP pool changes.
