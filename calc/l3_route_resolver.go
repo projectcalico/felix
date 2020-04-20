@@ -878,7 +878,8 @@ func (r RouteInfo) IsValidRoute() bool {
 func (r RouteInfo) Copy() RouteInfo {
 	cp := r
 	if len(r.WEPs) != 0 {
-		cp.WEPs = append(cp.WEPs, r.WEPs...)
+		cp.WEPs = make([]WEP, len(r.WEPs))
+		copy(cp.WEPs, r.WEPs)
 	}
 	return cp
 }
