@@ -56,9 +56,7 @@ const (
 
 type noOpConnTrack struct{}
 
-func (*noOpConnTrack) RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP) {
-	return
-}
+func (*noOpConnTrack) RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP) {}
 
 type nodeData struct {
 	ipv4EndpointAddr      ip.Addr

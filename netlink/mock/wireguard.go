@@ -92,7 +92,7 @@ func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) 
 		link.wireguardPrivateKey = *cfg.PrivateKey
 		link.wireguardPublicKey = link.wireguardPrivateKey.PublicKey()
 	}
-	if cfg.ReplacePeers == true || len(cfg.Peers) > 0 {
+	if cfg.ReplacePeers || len(cfg.Peers) > 0 {
 		existing := link.wireguardPeers
 		if cfg.ReplacePeers || link.wireguardPeers == nil {
 			link.wireguardPeers = map[wgtypes.Key]wgtypes.Peer{}

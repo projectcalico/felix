@@ -27,7 +27,7 @@ import (
 // wireguardManager manages the dataplane resources that are used for wireguard encrypted traffic. This includes:
 // -  Routing rule to route to the wireguard routing table
 // -  Route table and rules specifically to handle routing to the wireguard interface, or to return to default routing
-//    (depending on whether the remote nod supports wireguard)
+//    (depending on whether the remote node supports wireguard)
 // -  Wireguard interface lifecycle
 // -  Wireguard peer configuration
 //
@@ -81,11 +81,11 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		log.WithField("msg", msg).Debug("WireguardEndpointUpdate update")
 		key, err := wgtypes.ParseKey(msg.PublicKey)
 		if err != nil {
-			log.WithError(err).Error("error parsing wireguard public key %s for node %s", msg.PublicKey, msg.Hostname)
+			log.WithError(err).Errorf("error parsing wireguard public key %s for node %s", msg.PublicKey, msg.Hostname)
 		}
 		ifaceAddr := ip.FromString(msg.InterfaceAddr)
 		if ifaceAddr == nil && msg.InterfaceAddr != "" {
-			log.WithError(err).Error("error parsing wireguard public key %s for node %s", msg.InterfaceAddr, msg.Hostname)
+			log.WithError(err).Errorf("error parsing wireguard public key %s for node %s", msg.InterfaceAddr, msg.Hostname)
 		}
 		m.wireguardRouteTable.EndpointWireguardUpdate(msg.Hostname, key, ifaceAddr)
 	case *proto.WireguardEndpointRemove:
