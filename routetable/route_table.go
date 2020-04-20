@@ -804,11 +804,10 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 		if !routeExpected {
 			routeProblems = append(routeProblems, "unexpected route")
 		}
-		if !r.deviceRouteSourceAddress.Equal(route.Src) {
-			//TODO(rlb): What about ipv6 link local?  Should we remove, if so, how does it get added back?
-			routeProblems = append(routeProblems, "incorrect source address")
-		}
 		if dest != ipV6LinkLocalCIDR {
+			if !r.deviceRouteSourceAddress.Equal(route.Src) {
+				routeProblems = append(routeProblems, "incorrect source address")
+			}
 			if r.deviceRouteProtocol != route.Protocol {
 				routeProblems = append(routeProblems, "incorrect protocol")
 			}
