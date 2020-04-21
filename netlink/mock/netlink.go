@@ -186,6 +186,7 @@ type MockNetlinkDataplane struct {
 	NumNewWireguardCalls int
 	WireguardOpen        bool
 	NumLinkAddCalls      int
+	NumLinkDeleteCalls      int
 
 	PersistentlyFailToConnect bool
 
@@ -230,6 +231,10 @@ func (d *MockNetlinkDataplane) AddIface(idx int, name string, up bool, running b
 	if running {
 		rawFlags |= syscall.IFF_RUNNING
 	}
+	t := "unknown"
+	if strings.Contains(name, "wireguard") {
+		t = "wireguard"
+	}
 	link := &MockLink{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:     name,
@@ -237,6 +242,7 @@ func (d *MockNetlinkDataplane) AddIface(idx int, name string, up bool, running b
 			RawFlags: rawFlags,
 			Index:    idx,
 		},
+		LinkType: t,
 	}
 	d.nameToLink[name] = link
 	return link
@@ -322,6 +328,8 @@ func (d *MockNetlinkDataplane) LinkAdd(link netlink.Link) error {
 func (d *MockNetlinkDataplane) LinkDel(link netlink.Link) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+
+	d.NumLinkDeleteCalls++
 
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextLinkDel) {
