@@ -17,8 +17,6 @@ package wireguard
 import (
 	"errors"
 	"net"
-	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -45,9 +43,11 @@ const (
 )
 
 var (
-	UpdateFailed          = errors.New("netlink update operation failed")
-	WireguardNotSupported = errors.New("wireguard not supported")
-	wrongInterfaceTypeErr = errors.New("incorrect interface type for wireguard")
+	ErrUpdateFailed       = errors.New("netlink update operation failed")
+	ErrNotSupported       = errors.New("wireguard not supported")
+
+	// Internal types
+	errWrongInterfaceType = errors.New("incorrect interface type for wireguard")
 	zeroKey               = wgtypes.Key{}
 )
 
@@ -471,7 +471,7 @@ func (w *Wireguard) Apply() (err error) {
 	if !w.inSyncLink {
 		w.logCxt.Debug("Ensure wireguard link is created and up")
 		operUp, err := w.ensureLink(netlinkClient)
-		if isWireguardNotSupported(err) {
+		if netlinkshim.IsNotSupported(err) {
 			w.logCxt.Info("Wireguard is not supported - send zero-key status")
 			w.ourPublicKey = &zeroKey
 			return err
@@ -488,7 +488,7 @@ func (w *Wireguard) Apply() (err error) {
 
 	// Get the wireguard client. This may not always be possible.
 	wireguardClient, err := w.getWireguardClient()
-	if err == WireguardNotSupported {
+	if err == ErrNotSupported {
 		w.logCxt.Info("Wireguard is not supported - send zero-key status")
 		w.ourPublicKey = &zeroKey
 		return err
@@ -535,7 +535,7 @@ func (w *Wireguard) Apply() (err error) {
 		// Update wireguard so that we are in-sync.
 		if w.inSyncWireguard {
 			// Wireguard configuration is in-sync, perform a delta update. First do the delete that was constructed
-			// earlier, then construct and apply the update. Flag as not in-sync until we have finised processing.
+			// earlier, then construct and apply the update. Flag as not in-sync until we have finished processing.
 			if errWireguard = w.applyWireguardConfig(wireguardClient, wireguardPeerDelete); errWireguard != nil {
 				w.logCxt.WithError(errWireguard).Info("Failed to delete wireguard peers")
 				return
@@ -581,7 +581,7 @@ func (w *Wireguard) Apply() (err error) {
 
 	// Return an error if we hit one - doesn't really matter which error we return though.
 	if errLink != nil || errWireguard != nil || errRoutes != nil {
-		return UpdateFailed
+		return ErrUpdateFailed
 	}
 
 	// Once the wireguard and routing configuration is in place we can add the routing rule to start using the new
@@ -1073,7 +1073,7 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 // ensureLink checks that the wireguard link is configured correctly. Returns true if the link is oper up.
 func (w *Wireguard) ensureLink(netlinkClient netlinkshim.Netlink) (bool, error) {
 	link, err := netlink.LinkByName(w.config.InterfaceName)
-	if isNotExist(err) {
+	if netlinkshim.IsNotExist(err) {
 		// Create the wireguard device.
 		w.logCxt.Info("Wireguard device needs to be created")
 		attr := netlink.NewLinkAttrs()
@@ -1102,7 +1102,7 @@ func (w *Wireguard) ensureLink(netlinkClient netlinkshim.Netlink) (bool, error) 
 
 	if link.Type() != wireguardType {
 		w.logCxt.Errorf("interface %s is of type %s, not wireguard", w.config.InterfaceName, link.Type())
-		return false, wrongInterfaceTypeErr
+		return false, errWrongInterfaceType
 	}
 
 	// If necessary, update the MTU and admin status of the device.
@@ -1141,7 +1141,7 @@ func (w *Wireguard) ensureNoLink(netlinkClient netlinkshim.Netlink) error {
 			return err
 		}
 		w.logCxt.Info("Deleted wireguard device")
-	} else if isNotExist(err) {
+	} else if netlinkshim.IsNotExist(err) {
 		w.logCxt.Debug("Wireguard is disabled and does not exist")
 	} else if err != nil {
 		w.logCxt.Errorf("unable to determine if wireguard device exists: %v", err)
@@ -1212,7 +1212,7 @@ func (w *Wireguard) ensureRouteRule(netlinkClient netlinkshim.Netlink) error {
 	rule.Table = w.config.RoutingTableIndex
 	rule.Mark = w.config.FirewallMark
 
-	if err := netlinkClient.RuleAdd(rule); err != nil && !isExist(err) {
+	if err := netlinkClient.RuleAdd(rule); err != nil && !netlinkshim.IsExist(err) {
 		w.logCxt.WithError(err).Error("Unable to create wireguard routing rule")
 		w.closeNetlinkClient()
 		return err
@@ -1230,7 +1230,7 @@ func (w *Wireguard) ensureNoRouteRule(netlinkClient netlinkshim.Netlink) error {
 	rule.Table = w.config.RoutingTableIndex
 	rule.Mark = w.config.FirewallMark
 
-	if err := netlinkClient.RuleDel(rule); err != nil && !isNotExist(err) {
+	if err := netlinkClient.RuleDel(rule); err != nil && !netlinkshim.IsNotExist(err) {
 		w.logCxt.WithError(err).Error("Unable to delete wireguard routing rule")
 		w.closeNetlinkClient()
 		return err
@@ -1264,7 +1264,7 @@ func (w *Wireguard) ensureDisabled(netlinkClient netlinkshim.Netlink) error {
 	wg.Wait()
 
 	if errRule != nil || errLink != nil || errRoutes != nil {
-		return UpdateFailed
+		return ErrUpdateFailed
 	}
 	return nil
 }
@@ -1285,7 +1285,7 @@ func (w *Wireguard) getWireguardClient() (netlinkshim.Wireguard, error) {
 			// It is a valid condition that we cannot connect to the wireguard client, so just log.
 			w.logCxt.WithField("numFailures", w.numConsistentWireguardClientFailures).Debug(
 				"Repeatedly failed to connect to wireguard client.")
-			return nil, WireguardNotSupported
+			return nil, ErrNotSupported
 		}
 		w.logCxt.Info("Trying to connect to wireguard client")
 		client, err := w.newWireguardDevice()
@@ -1377,19 +1377,4 @@ func getFirstItem(s set.Set) interface{} {
 		return set.StopIteration
 	})
 	return i
-}
-
-func isWireguardNotSupported(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "operation not supported")
-}
-
-func isExist(err error) bool {
-	return os.IsExist(err) || strings.Contains(err.Error(), "already exists")
-}
-
-func isNotExist(err error) bool {
-	return os.IsNotExist(err) || strings.Contains(err.Error(), "not found")
 }
