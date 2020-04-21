@@ -82,6 +82,14 @@ var _ = Describe("Wireguard (enabled)", func() {
 	It("should be constructable", func() {
 		Expect(wg).ToNot(BeNil())
 	})
+
+	It("should handle creation of the wireguard link", func() {
+		Expect(wg).ToNot(BeNil())
+		err := wg.Apply()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
+		Expect(wgDataplane.AddedLinks).To(HaveKey("wireguard.cali"))
+	})
 })
 
 var _ = Describe("Wireguard (disabled)", func() {
@@ -122,5 +130,14 @@ var _ = Describe("Wireguard (disabled)", func() {
 
 	It("should be constructable", func() {
 		Expect(wg).ToNot(BeNil())
+	})
+
+	It("should handle deletion of the wireguard link", func() {
+		Expect(wg).ToNot(BeNil())
+		wgDataplane.AddIface(1, "wireguard.cali", true, true)
+		err := wg.Apply()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(wgDataplane.NumLinkDeleteCalls).To(Equal(1))
+		Expect(wgDataplane.DeletedLinks).To(HaveKey("wireguard.cali"))
 	})
 })
