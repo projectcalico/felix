@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	v3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
@@ -238,6 +239,8 @@ type Config struct {
 	DebugDisableLogDropping         bool          `config:"bool;false"`
 	DebugSimulateCalcGraphHangAfter time.Duration `config:"seconds;0"`
 	DebugSimulateDataplaneHangAfter time.Duration `config:"seconds;0"`
+
+	RouteTableRange v3.RouteTableRange `config:"route-table-range;1-250;die-on-fail"`
 
 	// State tracking.
 
@@ -621,6 +624,8 @@ func loadParams() {
 				Msg: "invalid string"}
 		case "cidr-list":
 			param = &CIDRListParam{}
+		case "route-table-range":
+			param = &RouteTableRangeParam{}
 		default:
 			log.Panicf("Unknown type of parameter: %v", kind)
 		}
