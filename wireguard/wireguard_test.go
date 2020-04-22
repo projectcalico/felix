@@ -170,7 +170,7 @@ var _ = Describe("Wireguard (enabled)", func() {
 				Expect(s.key).To(Equal(key.PublicKey()))
 			})
 
-			It("after endpoint update with correct key should program the interface address and not send andother status update", func() {
+			It("after endpoint update with correct key should program the interface address and not send another status update", func() {
 				link := wgDataplane.NameToLink["wireguard.cali"]
 				Expect(link.WireguardPrivateKey).NotTo(Equal(zeroKey))
 				Expect(s.numCallbacks).To(Equal(1))
@@ -207,6 +207,34 @@ var _ = Describe("Wireguard (enabled)", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(wgDataplane.NumLinkAddCalls).To(Equal(0))
 		Expect(wgDataplane.WireguardOpen).To(BeTrue())
+	})
+
+	It("should update listen port and firewall mark but maintain correct key", func() {
+		key, err := wgtypes.GeneratePrivateKey()
+		Expect(err).NotTo(HaveOccurred())
+		wgDataplane.AddIface(10, "wireguard.cali", true, true)
+		wgDataplane.NameToLink["wireguard.cali"].WireguardPrivateKey = key
+		wgDataplane.NameToLink["wireguard.cali"].WireguardPublicKey = key.PublicKey()
+		wgDataplane.NameToLink["wireguard.cali"].WireguardListenPort = 1010
+		wgDataplane.NameToLink["wireguard.cali"].WireguardFirewallMark = 11
+
+		ipv4 := ip.FromString("1.2.3.4")
+		wg.EndpointWireguardUpdate("my-host", key, ipv4)
+
+		err = wg.Apply()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(wgDataplane.NumLinkAddCalls).To(Equal(0))
+		Expect(wgDataplane.WireguardOpen).To(BeTrue())
+
+		link := wgDataplane.NameToLink["wireguard.cali"]
+		Expect(link.Addrs).To(HaveLen(1))
+		Expect(link.Addrs[0].IP).To(Equal(ipv4.AsNetIP()))
+		Expect(wgDataplane.WireguardOpen).To(BeTrue())
+		Expect(link.WireguardFirewallMark).To(Equal(10))
+		Expect(link.WireguardListenPort).To(Equal(1000))
+		Expect(link.WireguardPrivateKey).To(Equal(key))
+		Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
+		Expect(s.numCallbacks).To(Equal(1))
 	})
 })
 
