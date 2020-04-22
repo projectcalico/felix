@@ -225,6 +225,9 @@ func (w *Wireguard) OnIfaceStateChanged(ifaceName string, state ifacemonitor.Sta
 		w.logCxt.Debug("Interface up, marking for route sync")
 		w.ifaceUp = false
 	}
+
+	// Notify the wireguard routetable module.
+	w.routetable.OnIfaceStateChanged(ifaceName, state)
 }
 
 func (w *Wireguard) EndpointUpdate(name string, ipv4Addr ip.Addr) {
@@ -571,7 +574,7 @@ func (w *Wireguard) Apply() (err error) {
 				node.programmedInWireguard = true
 			} else {
 				w.logCxt.Debugf("Flag node %s as not programmed", name)
-				node.programmedInWireguard = true
+				node.programmedInWireguard = false
 			}
 		}
 	}()
@@ -1044,12 +1047,12 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 			w.logCxt.Debugf("Peer key already handled: node %s; key %v", name, node.publicKey)
 			continue
 		}
-		if w.shouldProgramWireguardPeer(node) {
+		if !w.shouldProgramWireguardPeer(node) {
 			w.logCxt.Debugf("Peer should not be programmed: node %s", name)
 			continue
 		}
 
-		w.logCxt.Infof("Add peer to wireguard: node %s; key %v", name, node.publicKey)
+		w.logCxt.Infof("Add peer to wireguard: node %s; key %v; ip: %v", name, node.publicKey, node.ipv4EndpointAddr)
 		wireguardUpdate.Peers = append(wireguardUpdate.Peers, wgtypes.PeerConfig{
 			PublicKey: node.publicKey,
 			Endpoint: &net.UDPAddr{
@@ -1072,7 +1075,7 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 
 // ensureLink checks that the wireguard link is configured correctly. Returns true if the link is oper up.
 func (w *Wireguard) ensureLink(netlinkClient netlinkshim.Netlink) (bool, error) {
-	link, err := netlink.LinkByName(w.config.InterfaceName)
+	link, err := netlinkClient.LinkByName(w.config.InterfaceName)
 	if netlinkshim.IsNotExist(err) {
 		// Create the wireguard device.
 		w.logCxt.Info("Wireguard device needs to be created")
@@ -1115,7 +1118,7 @@ func (w *Wireguard) ensureLink(netlinkClient netlinkshim.Netlink) (bool, error) 
 			w.logCxt.WithError(err).Warn("failed to set tunnel device MTU")
 			return false, err
 		}
-		w.logCxt.Info("Updated tunnel MTU")
+		w.logCxt.Info("Updated wireguard device MTU")
 	}
 	if attrs.Flags&net.FlagUp == 0 {
 		w.logCxt.WithField("flags", attrs.Flags).Info("Wireguard interface wasn't admin up, enabling it")
@@ -1124,10 +1127,15 @@ func (w *Wireguard) ensureLink(netlinkClient netlinkshim.Netlink) (bool, error) 
 			return false, err
 		}
 		w.logCxt.Info("Set wireguard admin up")
+
+		if link, err = netlinkClient.LinkByName(w.config.InterfaceName); err != nil {
+			w.logCxt.WithError(err).Warn("failed to get link device after creating link")
+			return false, err
+		}
 	}
 
 	// Track whether the interface is oper up or not. We halt programming when it is down.
-	return attrs.OperState == netlink.OperUp, nil
+	return link.Attrs().Flags&net.FlagUp != 0, nil
 }
 
 // ensureNoLink checks that the wireguard link is not present.
