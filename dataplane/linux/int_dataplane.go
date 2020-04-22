@@ -97,6 +97,7 @@ var (
 	})
 
 	processStartTime time.Time
+	zeroKey = wgtypes.Key{}
 )
 
 func init() {
@@ -614,7 +615,11 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	// because it may need to tidy up some of the routing rules when disabled.
 	cryptoRouteTableWireguard := wireguard.New(config.Hostname, &config.Wireguard, config.NetlinkTimeout,
 		config.DeviceRouteProtocol, func(publicKey wgtypes.Key) error {
-			dp.fromDataplane <- &proto.WireguardStatusUpdate{PublicKey: publicKey.String()}
+			if publicKey == zeroKey {
+				dp.fromDataplane <- &proto.WireguardStatusUpdate{PublicKey: ""}
+			} else {
+				dp.fromDataplane <- &proto.WireguardStatusUpdate{PublicKey: publicKey.String()}
+			}
 			return nil
 		})
 	dp.wireguardManager = newWireguardManager(cryptoRouteTableWireguard)
