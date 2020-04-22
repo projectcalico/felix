@@ -97,7 +97,7 @@ var (
 	})
 
 	processStartTime time.Time
-	zeroKey = wgtypes.Key{}
+	zeroKey          = wgtypes.Key{}
 )
 
 func init() {
