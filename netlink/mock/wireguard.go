@@ -1,6 +1,7 @@
 package mock
 
 import (
+	"github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
@@ -18,7 +19,7 @@ func (d *MockNetlinkDataplane) NewMockWireguard() (netlinkshim.Wireguard, error)
 	if d.shouldFail(FailNextNewWireguardNotSupported) {
 		return nil, NotSupportedError
 	}
-	Expect(d.NetlinkOpen).To(BeFalse())
+	Expect(d.WireguardOpen).To(BeFalse())
 	d.WireguardOpen = true
 	return d, nil
 }
@@ -41,12 +42,13 @@ func (d *MockNetlinkDataplane) Close() error {
 func (d *MockNetlinkDataplane) DeviceByName(name string) (*wgtypes.Device, error) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer ginkgo.GinkgoRecover()
 
 	Expect(d.WireguardOpen).To(BeTrue())
 	if d.shouldFail(FailNextWireguardDeviceByName) {
 		return nil, SimulatedError
 	}
-	link, ok := d.nameToLink[name]
+	link, ok := d.NameToLink[name]
 	if !ok {
 		return nil, NotFoundError
 	}
@@ -72,12 +74,13 @@ func (d *MockNetlinkDataplane) DeviceByName(name string) (*wgtypes.Device, error
 func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer ginkgo.GinkgoRecover()
 
 	Expect(d.WireguardOpen).To(BeTrue())
 	if d.shouldFail(FailNextWireguardConfigureDevice) {
 		return SimulatedError
 	}
-	link, ok := d.nameToLink[name]
+	link, ok := d.NameToLink[name]
 	if !ok {
 		return NotFoundError
 	}

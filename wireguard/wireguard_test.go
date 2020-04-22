@@ -15,6 +15,7 @@
 package wireguard_test
 
 import (
+	"github.com/projectcalico/felix/ifacemonitor"
 	. "github.com/projectcalico/felix/wireguard"
 
 	"time"
@@ -67,7 +68,7 @@ var _ = Describe("Wireguard (enabled)", func() {
 				RoutingRulePriority: 99,
 				RoutingTableIndex:   99,
 				InterfaceName:       "wireguard.cali",
-				MTU:                 1042,
+				MTU:                 2000,
 			},
 			rtDataplane.NewMockNetlink,
 			wgDataplane.NewMockNetlink,
@@ -83,12 +84,54 @@ var _ = Describe("Wireguard (enabled)", func() {
 		Expect(wg).ToNot(BeNil())
 	})
 
-	It("should handle creation of the wireguard link", func() {
-		Expect(wg).ToNot(BeNil())
+	Describe("should handle creation of the wireguard link", func() {
+		BeforeEach(func() {
+			err := wg.Apply()
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should configure the link but wait for link to be active", func() {
+			Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
+			Expect(wgDataplane.AddedLinks).To(HaveKey("wireguard.cali"))
+			Expect(wgDataplane.NameToLink["wireguard.cali"].LinkType).To(Equal("wireguard"))
+			Expect(wgDataplane.NameToLink["wireguard.cali"].LinkAttrs.MTU).To(Equal(2000))
+			Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
+			Expect(wgDataplane.WireguardOpen).To(BeFalse())
+		})
+
+		It("another apply will no-op until link is active", func() {
+			// Apply, but still not iface update
+			err := wg.Apply()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
+			Expect(wgDataplane.WireguardOpen).To(BeFalse())
+		})
+
+		It("no op after a link down callback", func() {
+			// Iface update indicating down.
+			wg.OnIfaceStateChanged("wireguard.cali", ifacemonitor.StateUp)
+			err := wg.Apply()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
+			Expect(wgDataplane.WireguardOpen).To(BeFalse())
+		})
+
+		It("should configure wireguard after a link up callback", func() {
+			wgDataplane.SetIface("wireguard.cali", true, true)
+			wg.OnIfaceStateChanged("wireguard.cali", ifacemonitor.StateUp)
+			err := wg.Apply()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
+			Expect(wgDataplane.WireguardOpen).To(BeTrue())
+		})
+	})
+
+	It("should handle setup of wireguard if link activates immediately", func() {
+		wgDataplane.ImmediateLinkUp = true
 		err := wg.Apply()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
-		Expect(wgDataplane.AddedLinks).To(HaveKey("wireguard.cali"))
+		Expect(wgDataplane.WireguardOpen).To(BeTrue())
 	})
 })
 

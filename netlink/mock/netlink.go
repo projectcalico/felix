@@ -24,7 +24,7 @@ import (
 
 func NewMockNetlinkDataplane() *MockNetlinkDataplane {
 	dp := &MockNetlinkDataplane{
-		nameToLink:      map[string]*MockLink{},
+		NameToLink:      map[string]*MockLink{},
 		RouteKeyToRoute: map[string]netlink.Route{},
 	}
 	dp.ResetDeltas()
@@ -170,7 +170,7 @@ func (f FailFlags) String() string {
 }
 
 type MockNetlinkDataplane struct {
-	nameToLink   map[string]*MockLink
+	NameToLink   map[string]*MockLink
 	AddedLinks   set.Set
 	DeletedLinks set.Set
 	AddedAddrs   set.Set
@@ -187,6 +187,7 @@ type MockNetlinkDataplane struct {
 	WireguardOpen        bool
 	NumLinkAddCalls      int
 	NumLinkDeleteCalls      int
+	ImmediateLinkUp      bool
 
 	PersistentlyFailToConnect bool
 
@@ -209,6 +210,10 @@ func (d *MockNetlinkDataplane) ResetDeltas() {
 	d.DeletedRouteKeys = set.New()
 	d.UpdatedRouteKeys = set.New()
 	d.addedArpEntries = set.New()
+	d.NumLinkAddCalls = 0
+	d.NumLinkDeleteCalls = 0
+	d.NumNewNetlinkCalls = 0
+	d.NumNewWireguardCalls = 0
 }
 
 // ----- Mock dataplane management functions for test code -----
@@ -222,15 +227,6 @@ func (d *MockNetlinkDataplane) GetDeletedConntrackEntries() []net.IP {
 }
 
 func (d *MockNetlinkDataplane) AddIface(idx int, name string, up bool, running bool) *MockLink {
-	flags := net.Flags(0)
-	var rawFlags uint32
-	if up {
-		flags |= net.FlagUp
-		rawFlags |= syscall.IFF_UP
-	}
-	if running {
-		rawFlags |= syscall.IFF_RUNNING
-	}
 	t := "unknown"
 	if strings.Contains(name, "wireguard") {
 		t = "wireguard"
@@ -238,14 +234,31 @@ func (d *MockNetlinkDataplane) AddIface(idx int, name string, up bool, running b
 	link := &MockLink{
 		LinkAttrs: netlink.LinkAttrs{
 			Name:     name,
-			Flags:    flags,
-			RawFlags: rawFlags,
 			Index:    idx,
 		},
 		LinkType: t,
 	}
-	d.nameToLink[name] = link
+	d.NameToLink[name] = link
+	d.SetIface(name, up, running)
 	return link
+}
+
+func (d *MockNetlinkDataplane) SetIface(name string, up bool, running bool) {
+	link, ok := d.NameToLink[name]
+	Expect(ok).To(BeTrue())
+	if up {
+		link.LinkAttrs.Flags |= net.FlagUp
+		link.LinkAttrs.RawFlags |= syscall.IFF_UP
+	} else {
+		link.LinkAttrs.Flags &^= net.FlagUp
+		link.LinkAttrs.RawFlags &^= syscall.IFF_UP
+	}
+	if running {
+		link.LinkAttrs.RawFlags |= syscall.IFF_RUNNING
+	} else {
+		link.LinkAttrs.RawFlags &^= syscall.IFF_RUNNING
+	}
+
 }
 
 func (d *MockNetlinkDataplane) NewMockNetlink() (netlinkshim.Netlink, error) {
@@ -279,7 +292,7 @@ func (d *MockNetlinkDataplane) LinkList() ([]netlink.Link, error) {
 		return nil, SimulatedError
 	}
 	var links []netlink.Link
-	for _, link := range d.nameToLink {
+	for _, link := range d.NameToLink {
 		links = append(links, link)
 	}
 	return links, nil
@@ -293,7 +306,7 @@ func (d *MockNetlinkDataplane) LinkByName(name string) (netlink.Link, error) {
 	if d.shouldFail(FailNextLinkByName) {
 		return nil, SimulatedError
 	}
-	if link, ok := d.nameToLink[name]; ok {
+	if link, ok := d.NameToLink[name]; ok {
 		return link, nil
 	}
 	return nil, NotFoundError
@@ -312,12 +325,12 @@ func (d *MockNetlinkDataplane) LinkAdd(link netlink.Link) error {
 	if d.shouldFail(FailNextLinkAddNotSupported) {
 		return NotSupportedError
 	}
-	if _, ok := d.nameToLink[link.Attrs().Name]; ok {
+	if _, ok := d.NameToLink[link.Attrs().Name]; ok {
 		return AlreadyExistsError
 	}
 	attrs := *link.Attrs()
 	attrs.Index = 100 + d.NumLinkAddCalls
-	d.nameToLink[link.Attrs().Name] = &MockLink{
+	d.NameToLink[link.Attrs().Name] = &MockLink{
 		LinkAttrs: attrs,
 		LinkType:  link.Type(),
 	}
@@ -336,11 +349,11 @@ func (d *MockNetlinkDataplane) LinkDel(link netlink.Link) error {
 		return SimulatedError
 	}
 
-	if _, ok := d.nameToLink[link.Attrs().Name]; !ok {
+	if _, ok := d.NameToLink[link.Attrs().Name]; !ok {
 		return NotFoundError
 	}
 
-	delete(d.nameToLink, link.Attrs().Name)
+	delete(d.NameToLink, link.Attrs().Name)
 	d.DeletedLinks.Add(link.Attrs().Name)
 	return nil
 }
@@ -353,9 +366,9 @@ func (d *MockNetlinkDataplane) LinkSetMTU(link netlink.Link, mtu int) error {
 	if d.shouldFail(FailNextLinkSetMTU) {
 		return SimulatedError
 	}
-	if link, ok := d.nameToLink[link.Attrs().Name]; ok {
-		link.Attrs().MTU = mtu
-		d.nameToLink[link.Attrs().Name] = link
+	if link, ok := d.NameToLink[link.Attrs().Name]; ok {
+		link.LinkAttrs.MTU = mtu
+		d.NameToLink[link.Attrs().Name] = link
 		return nil
 	}
 	return NotFoundError
@@ -369,10 +382,12 @@ func (d *MockNetlinkDataplane) LinkSetUp(link netlink.Link) error {
 	if d.shouldFail(FailNextLinkSetUp) {
 		return SimulatedError
 	}
-	if link, ok := d.nameToLink[link.Attrs().Name]; ok {
-		link.Attrs().Flags |= net.FlagUp
-		link.Attrs().RawFlags |= syscall.IFF_RUNNING
-		d.nameToLink[link.Attrs().Name] = link
+	if link, ok := d.NameToLink[link.Attrs().Name]; ok {
+		if d.ImmediateLinkUp {
+			link.LinkAttrs.Flags |= net.FlagUp
+		}
+		link.LinkAttrs.RawFlags |= syscall.IFF_RUNNING
+		d.NameToLink[link.Attrs().Name] = link
 		return nil
 	}
 	return NotFoundError
@@ -386,7 +401,7 @@ func (d *MockNetlinkDataplane) AddrList(link netlink.Link, family int) ([]netlin
 	if d.shouldFail(FailNextAddrList) {
 		return nil, SimulatedError
 	}
-	if link, ok := d.nameToLink[link.Attrs().Name]; ok {
+	if link, ok := d.NameToLink[link.Attrs().Name]; ok {
 		return link.Addrs, nil
 	}
 	return nil, NotFoundError
@@ -401,7 +416,7 @@ func (d *MockNetlinkDataplane) AddrAdd(link netlink.Link, addr *netlink.Addr) er
 	if d.shouldFail(FailNextAddrAdd) {
 		return SimulatedError
 	}
-	if link, ok := d.nameToLink[link.Attrs().Name]; ok {
+	if link, ok := d.NameToLink[link.Attrs().Name]; ok {
 		for _, linkaddr := range link.Addrs {
 			if linkaddr.Equal(*addr) {
 				return AlreadyExistsError
@@ -409,7 +424,7 @@ func (d *MockNetlinkDataplane) AddrAdd(link netlink.Link, addr *netlink.Addr) er
 		}
 		d.AddedAddrs.Add(addr.IPNet.String())
 		link.Addrs = append(link.Addrs, *addr)
-		d.nameToLink[link.Attrs().Name] = link
+		d.NameToLink[link.Attrs().Name] = link
 		return nil
 	}
 
@@ -425,7 +440,7 @@ func (d *MockNetlinkDataplane) AddrDel(link netlink.Link, addr *netlink.Addr) er
 	if d.shouldFail(FailNextAddrDel) {
 		return SimulatedError
 	}
-	if link, ok := d.nameToLink[link.Attrs().Name]; ok {
+	if link, ok := d.NameToLink[link.Attrs().Name]; ok {
 		newIdx := 0
 		for idx, linkaddr := range link.Addrs {
 			if linkaddr.Equal(*addr) {
@@ -436,7 +451,7 @@ func (d *MockNetlinkDataplane) AddrDel(link netlink.Link, addr *netlink.Addr) er
 		}
 		Expect(newIdx).To(Equal(len(link.Addrs) - 1))
 		link.Addrs = link.Addrs[:newIdx]
-		d.nameToLink[link.Attrs().Name] = link
+		d.NameToLink[link.Attrs().Name] = link
 		d.DeletedAddrs.Add(addr.IPNet.String())
 		return nil
 	}
