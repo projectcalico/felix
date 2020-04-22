@@ -186,7 +186,7 @@ type MockNetlinkDataplane struct {
 	NumNewWireguardCalls int
 	WireguardOpen        bool
 	NumLinkAddCalls      int
-	NumLinkDeleteCalls      int
+	NumLinkDeleteCalls   int
 	ImmediateLinkUp      bool
 
 	PersistentlyFailToConnect bool
@@ -233,8 +233,8 @@ func (d *MockNetlinkDataplane) AddIface(idx int, name string, up bool, running b
 	}
 	link := &MockLink{
 		LinkAttrs: netlink.LinkAttrs{
-			Name:     name,
-			Index:    idx,
+			Name:  name,
+			Index: idx,
 		},
 		LinkType: t,
 	}
@@ -640,11 +640,11 @@ type MockLink struct {
 	Addrs     []netlink.Addr
 	LinkType  string
 
-	wireguardPrivateKey   wgtypes.Key
-	wireguardPublicKey    wgtypes.Key
-	wireguardListenPort   int
-	wireguardFirewallMark int
-	wireguardPeers        map[wgtypes.Key]wgtypes.Peer
+	WireguardPrivateKey   wgtypes.Key
+	WireguardPublicKey    wgtypes.Key
+	WireguardListenPort   int
+	WireguardFirewallMark int
+	WireguardPeers        map[wgtypes.Key]wgtypes.Peer
 }
 
 func (l *MockLink) Attrs() *netlink.LinkAttrs {

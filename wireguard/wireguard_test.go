@@ -15,7 +15,6 @@
 package wireguard_test
 
 import (
-	"github.com/projectcalico/felix/ifacemonitor"
 	. "github.com/projectcalico/felix/wireguard"
 
 	"time"
@@ -23,24 +22,35 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
+	log "github.com/sirupsen/logrus"
+
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
+	"github.com/projectcalico/felix/ifacemonitor"
+	"github.com/projectcalico/felix/ip"
 	mocknetlink "github.com/projectcalico/felix/netlink/mock"
 	mocktime "github.com/projectcalico/felix/time/mock"
+)
+
+var (
+	zeroKey = wgtypes.Key{}
 )
 
 type mockStatus struct {
 	numCallbacks int
 	err          error
-	key          *wgtypes.Key
+	key          wgtypes.Key
 }
 
 func (m *mockStatus) status(publicKey wgtypes.Key) error {
+	log.Debugf("Status update with public key: %s", publicKey)
 	m.numCallbacks++
 	if m.err != nil {
 		return m.err
 	}
-	m.key = &publicKey
+	m.key = publicKey
+
+	log.Debugf("Num callbacks: %d", m.numCallbacks)
 	return nil
 }
 
@@ -48,13 +58,14 @@ var _ = Describe("Wireguard (enabled)", func() {
 	var wgDataplane *mocknetlink.MockNetlinkDataplane
 	var rtDataplane *mocknetlink.MockNetlinkDataplane
 	var t *mocktime.MockTime
-	var s mockStatus
+	var s *mockStatus
 	var wg *Wireguard
 
 	BeforeEach(func() {
 		wgDataplane = mocknetlink.NewMockNetlinkDataplane()
 		rtDataplane = mocknetlink.NewMockNetlinkDataplane()
 		t = mocktime.NewMockTime()
+		s = &mockStatus{}
 		// Setting an auto-increment greater than the route cleanup delay effectively
 		// disables the grace period for these tests.
 		t.SetAutoIncrement(11 * time.Second)
@@ -64,7 +75,7 @@ var _ = Describe("Wireguard (enabled)", func() {
 			&Config{
 				Enabled:             true,
 				ListeningPort:       1000,
-				FirewallMark:        1,
+				FirewallMark:        10,
 				RoutingRulePriority: 99,
 				RoutingTableIndex:   99,
 				InterfaceName:       "wireguard.cali",
@@ -116,21 +127,85 @@ var _ = Describe("Wireguard (enabled)", func() {
 			Expect(wgDataplane.WireguardOpen).To(BeFalse())
 		})
 
-		It("should configure wireguard after a link up callback", func() {
-			wgDataplane.SetIface("wireguard.cali", true, true)
-			wg.OnIfaceStateChanged("wireguard.cali", ifacemonitor.StateUp)
-			err := wg.Apply()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
-			Expect(wgDataplane.WireguardOpen).To(BeTrue())
+		Describe("handle link up", func() {
+			BeforeEach(func() {
+				wgDataplane.SetIface("wireguard.cali", true, true)
+				wg.OnIfaceStateChanged("wireguard.cali", ifacemonitor.StateUp)
+				err := wg.Apply()
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			It("should create wireguard client and create private key", func() {
+				Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
+				Expect(wgDataplane.WireguardOpen).To(BeTrue())
+				link := wgDataplane.NameToLink["wireguard.cali"]
+				Expect(link.WireguardFirewallMark).To(Equal(10))
+				Expect(link.WireguardListenPort).To(Equal(1000))
+				Expect(link.WireguardPrivateKey).NotTo(Equal(zeroKey))
+				Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
+				Expect(s.numCallbacks).To(Equal(1))
+				Expect(s.key).To(Equal(link.WireguardPublicKey))
+			})
+
+			It("after endpoint update with incorrect key should program the interface address and resend same key as status", func() {
+				link := wgDataplane.NameToLink["wireguard.cali"]
+				Expect(link.WireguardPrivateKey).NotTo(Equal(zeroKey))
+				Expect(s.numCallbacks).To(Equal(1))
+				key := link.WireguardPrivateKey
+				Expect(s.key).To(Equal(key.PublicKey()))
+
+				ipv4 := ip.FromString("1.2.3.4")
+				wg.EndpointWireguardUpdate("my-host", zeroKey, ipv4)
+				err := wg.Apply()
+				Expect(err).NotTo(HaveOccurred())
+				link = wgDataplane.NameToLink["wireguard.cali"]
+				Expect(link.Addrs).To(HaveLen(1))
+				Expect(link.Addrs[0].IP).To(Equal(ipv4.AsNetIP()))
+				Expect(wgDataplane.WireguardOpen).To(BeTrue())
+				Expect(link.WireguardFirewallMark).To(Equal(10))
+				Expect(link.WireguardListenPort).To(Equal(1000))
+				Expect(link.WireguardPrivateKey).To(Equal(key))
+				Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
+				Expect(s.numCallbacks).To(Equal(2))
+				Expect(s.key).To(Equal(key.PublicKey()))
+			})
+
+			It("after endpoint update with correct key should program the interface address and not send andother status update", func() {
+				link := wgDataplane.NameToLink["wireguard.cali"]
+				Expect(link.WireguardPrivateKey).NotTo(Equal(zeroKey))
+				Expect(s.numCallbacks).To(Equal(1))
+				key := link.WireguardPrivateKey
+
+				ipv4 := ip.FromString("1.2.3.4")
+				wg.EndpointWireguardUpdate("my-host", key.PublicKey(), ipv4)
+				err := wg.Apply()
+				Expect(err).NotTo(HaveOccurred())
+				link = wgDataplane.NameToLink["wireguard.cali"]
+				Expect(link.Addrs).To(HaveLen(1))
+				Expect(link.Addrs[0].IP).To(Equal(ipv4.AsNetIP()))
+				Expect(wgDataplane.WireguardOpen).To(BeTrue())
+				Expect(link.WireguardFirewallMark).To(Equal(10))
+				Expect(link.WireguardListenPort).To(Equal(1000))
+				Expect(link.WireguardPrivateKey).To(Equal(key))
+				Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
+				Expect(s.numCallbacks).To(Equal(1))
+			})
 		})
 	})
 
-	It("should handle setup of wireguard if link activates immediately", func() {
+	It("should create wireguard client if link activates immediately", func() {
 		wgDataplane.ImmediateLinkUp = true
 		err := wg.Apply()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(wgDataplane.NumLinkAddCalls).To(Equal(1))
+		Expect(wgDataplane.WireguardOpen).To(BeTrue())
+	})
+
+	It("should create wireguard client and not attempt to create the link if link is already up", func() {
+		wgDataplane.AddIface(10, "wireguard.cali", true, true)
+		err := wg.Apply()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(wgDataplane.NumLinkAddCalls).To(Equal(0))
 		Expect(wgDataplane.WireguardOpen).To(BeTrue())
 	})
 })

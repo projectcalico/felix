@@ -59,12 +59,12 @@ func (d *MockNetlinkDataplane) DeviceByName(name string) (*wgtypes.Device, error
 	device := &wgtypes.Device{
 		Name:         name,
 		Type:         wgtypes.LinuxKernel,
-		PrivateKey:   link.wireguardPrivateKey,
-		PublicKey:    link.wireguardPublicKey,
-		ListenPort:   link.wireguardListenPort,
-		FirewallMark: link.wireguardFirewallMark,
+		PrivateKey:   link.WireguardPrivateKey,
+		PublicKey:    link.WireguardPublicKey,
+		ListenPort:   link.WireguardListenPort,
+		FirewallMark: link.WireguardFirewallMark,
 	}
-	for _, peer := range link.wireguardPeers {
+	for _, peer := range link.WireguardPeers {
 		device.Peers = append(device.Peers, peer)
 	}
 
@@ -86,19 +86,19 @@ func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) 
 	}
 
 	if cfg.FirewallMark != nil {
-		link.wireguardFirewallMark = *cfg.FirewallMark
+		link.WireguardFirewallMark = *cfg.FirewallMark
 	}
 	if cfg.ListenPort != nil {
-		link.wireguardListenPort = *cfg.ListenPort
+		link.WireguardListenPort = *cfg.ListenPort
 	}
 	if cfg.PrivateKey != nil {
-		link.wireguardPrivateKey = *cfg.PrivateKey
-		link.wireguardPublicKey = link.wireguardPrivateKey.PublicKey()
+		link.WireguardPrivateKey = *cfg.PrivateKey
+		link.WireguardPublicKey = link.WireguardPrivateKey.PublicKey()
 	}
 	if cfg.ReplacePeers || len(cfg.Peers) > 0 {
-		existing := link.wireguardPeers
-		if cfg.ReplacePeers || link.wireguardPeers == nil {
-			link.wireguardPeers = map[wgtypes.Key]wgtypes.Peer{}
+		existing := link.WireguardPeers
+		if cfg.ReplacePeers || link.WireguardPeers == nil {
+			link.WireguardPeers = map[wgtypes.Key]wgtypes.Peer{}
 		}
 		for _, peerCfg := range cfg.Peers {
 			Expect(peerCfg.PublicKey).NotTo(Equal(wgtypes.Key{}))
@@ -114,7 +114,7 @@ func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) 
 				delete(existing, peerCfg.PublicKey)
 				continue
 			}
-			peer := link.wireguardPeers[peerCfg.PublicKey]
+			peer := link.WireguardPeers[peerCfg.PublicKey]
 			if peerCfg.Endpoint != nil {
 				peer.Endpoint = peerCfg.Endpoint
 			}
