@@ -741,9 +741,11 @@ func (w *Wireguard) updateCacheFromPeerUpdates(conflictingKeys set.Set) {
 
 // updateRouteTable updates the route table from the node updates.
 func (w *Wireguard) updateRouteTableFromPeerUpdates() {
+	// Do all deletes first. Then adds or updates separarately. This ensures a CIDR that has been deleted from one node
+	// and added to another will not add first then delete (which will remove the route, since the route table does not
+	// care about destination node).
 	for name, update := range w.peerUpdates {
-		w.logCxt.Debugf("Updating routing for node %s", name)
-		node := w.getPeer(name)
+		w.logCxt.Debugf("Deleting routes for node %s", name)
 
 		// Delete routes that are no longer required in routing.
 		update.allowedCidrsDeleted.Iter(func(item interface{}) error {
@@ -752,6 +754,13 @@ func (w *Wireguard) updateRouteTableFromPeerUpdates() {
 			w.routetable.RouteRemove(w.config.InterfaceName, cidr)
 			return nil
 		})
+	}
+
+	// Now do the adds or updates. The routetable component will take care of routes that don't actually change and
+	// effectively no-op the delta.
+	for name, update := range w.peerUpdates {
+		w.logCxt.Debugf("Add/update routing for node %s", name)
+		node := w.getPeer(name)
 
 		// If the node routing to wireguard does not match with whether we should route then we need to do a full
 		// route update, otherwise do an incremental update.
