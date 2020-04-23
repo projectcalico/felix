@@ -105,6 +105,11 @@ func StartDataplaneDriver(configParams *config.Config,
 			"endpointMarkNonCali": markEndpointNonCaliEndpoint,
 		}).Info("Calculated iptables mark bits")
 
+		// Create a routing table manager. There are certain components that should take specific indices in the range
+		// to simplify table tidy-up.
+		routeTableIndexAllocator := idalloc.NewIndexAllocator(configParams.RouteTableRange)
+		wireguardTableIndex := routeTableIndexAllocator.GrabIndex()
+
 		dpConfig := intdataplane.Config{
 			Hostname: configParams.FelixHostname,
 			IfaceMonitorConfig: ifacemonitor.Config{
@@ -168,7 +173,7 @@ func StartDataplaneDriver(configParams *config.Config,
 				ListeningPort:       configParams.WireguardListeningPort,
 				FirewallMark:        int(markWireguard),
 				RoutingRulePriority: configParams.WireguardRoutingRulePriority,
-				RoutingTableIndex:   configParams.WireguardRoutingTableIndex,
+				RoutingTableIndex:   wireguardTableIndex,
 				InterfaceName:       configParams.WireguardInterfaceName,
 				MTU:                 configParams.WireguardMTU,
 			},
@@ -221,7 +226,7 @@ func StartDataplaneDriver(configParams *config.Config,
 			XDPEnabled:                         configParams.XDPEnabled,
 			XDPAllowGeneric:                    configParams.GenericXDPEnabled,
 			BPFConntrackTimeouts:               conntrack.DefaultTimeouts(), // FIXME make timeouts configurable
-			RouteTableManager:                  idalloc.NewIndexAllocator(configParams.RouteTableRange),
+			RouteTableManager:                  routeTableIndexAllocator,
 
 			KubeClientSet: k8sClientSet,
 		}

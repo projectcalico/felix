@@ -16,18 +16,17 @@ package wireguard_test
 
 import (
 	. "github.com/projectcalico/felix/wireguard"
-	"github.com/vishvananda/netlink"
-	"syscall"
 
 	"fmt"
 	"net"
+	"syscall"
 	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
 	log "github.com/sirupsen/logrus"
-
+	"github.com/vishvananda/netlink"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
 	"github.com/projectcalico/felix/ifacemonitor"
@@ -37,12 +36,12 @@ import (
 )
 
 var (
-	zeroKey = wgtypes.Key{}
-	ifaceName = "wireguard-if"
-	hostname = "my-host"
-	peer1 = "peer1"
-	peer2 = "peer2"
-	peer3 = "peer3"
+	zeroKey            = wgtypes.Key{}
+	ifaceName          = "wireguard-if"
+	hostname           = "my-host"
+	peer1              = "peer1"
+	peer2              = "peer2"
+	peer3              = "peer3"
 	FelixRouteProtocol = syscall.RTPROT_BOOT
 )
 
@@ -316,7 +315,7 @@ var _ = Describe("Enable wireguard", func() {
 					BeforeEach(func() {
 						// Update the mock routing table dataplane so that it knows about the wireguard interface.
 						rtDataplane.NameToLink[ifaceName] = link
-						
+
 						cidr_local = ip.MustParseCIDROrIP("192.180.0.0/30")
 						cidr_1a = ip.MustParseCIDROrIP("192.168.1.0/24")
 						cidr_1b = ip.MustParseCIDROrIP("192.168.2.0/24")
@@ -373,7 +372,7 @@ var _ = Describe("Enable wireguard", func() {
 							Type:      syscall.RTN_UNICAST,
 							Protocol:  FelixRouteProtocol,
 							Scope:     netlink.SCOPE_LINK,
-							Table: tableIndex,
+							Table:     tableIndex,
 						}))
 						Expect(rtDataplane.RouteKeyToRoute[routekey_1b]).To(Equal(netlink.Route{
 							LinkIndex: link.LinkAttrs.Index,
@@ -381,7 +380,7 @@ var _ = Describe("Enable wireguard", func() {
 							Type:      syscall.RTN_UNICAST,
 							Protocol:  FelixRouteProtocol,
 							Scope:     netlink.SCOPE_LINK,
-							Table: tableIndex,
+							Table:     tableIndex,
 						}))
 						Expect(rtDataplane.RouteKeyToRoute[routekey_2]).To(Equal(netlink.Route{
 							LinkIndex: link.LinkAttrs.Index,
@@ -389,14 +388,14 @@ var _ = Describe("Enable wireguard", func() {
 							Type:      syscall.RTN_UNICAST,
 							Protocol:  FelixRouteProtocol,
 							Scope:     netlink.SCOPE_LINK,
-							Table: tableIndex,
+							Table:     tableIndex,
 						}))
 						Expect(rtDataplane.RouteKeyToRoute[routekey_3]).To(Equal(netlink.Route{
-							Dst:       &ipnet_3,
-							Type:      syscall.RTN_THROW,
-							Protocol:  FelixRouteProtocol,
-							Scope:     netlink.SCOPE_UNIVERSE,
-							Table: tableIndex,
+							Dst:      &ipnet_3,
+							Type:     syscall.RTN_THROW,
+							Protocol: FelixRouteProtocol,
+							Scope:    netlink.SCOPE_UNIVERSE,
+							Table:    tableIndex,
 						}))
 					})
 
@@ -440,11 +439,11 @@ var _ = Describe("Enable wireguard", func() {
 							Expect(rtDataplane.DeletedRouteKeys).To(HaveKey(routekey_2))
 							Expect(rtDataplane.AddedRouteKeys).To(HaveKey(new_routekey_2))
 							Expect(rtDataplane.RouteKeyToRoute[new_routekey_2]).To(Equal(netlink.Route{
-								Dst:       &ipnet_2,
-								Type:      syscall.RTN_THROW,
-								Protocol:  FelixRouteProtocol,
-								Scope:     netlink.SCOPE_UNIVERSE,
-								Table: tableIndex,
+								Dst:      &ipnet_2,
+								Type:     syscall.RTN_THROW,
+								Protocol: FelixRouteProtocol,
+								Scope:    netlink.SCOPE_UNIVERSE,
+								Table:    tableIndex,
 							}))
 						})
 					})

@@ -69,4 +69,4 @@ replace (
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.0.0-20191016112829-06bb3c9d77c9
 )
 
-replace github.com/projectcalico/libcalico-go => github.com/neiljerram/libcalico-go v1.0.0-beta-rc3.0.20200421140851-c5e5c36b1d56
+replace github.com/projectcalico/libcalico-go => github.com/realgaurav/libcalico-go v1.7.2-0.20200423170759-c62e0b0079e8
