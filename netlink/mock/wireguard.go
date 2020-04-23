@@ -1,14 +1,16 @@
 package mock
 
 import (
+	"sort"
+
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/sirupsen/logrus"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+
 	"github.com/projectcalico/felix/ip"
 	netlinkshim "github.com/projectcalico/felix/netlink"
 	"github.com/projectcalico/libcalico-go/lib/set"
-	"github.com/sirupsen/logrus"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-	"sort"
 )
 
 // ----- Mock dataplane management functions for test code -----

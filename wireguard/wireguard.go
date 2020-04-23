@@ -1027,8 +1027,8 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 
 		w.logCxt.Infof("Add peer to wireguard: node %s; key %v; ip: %v", name, node.publicKey, node.ipv4EndpointAddr)
 		wireguardUpdate.Peers = append(wireguardUpdate.Peers, wgtypes.PeerConfig{
-			PublicKey: node.publicKey,
-			Endpoint: w.endpointUDPAddr(node.ipv4EndpointAddr.AsNetIP()),
+			PublicKey:  node.publicKey,
+			Endpoint:   w.endpointUDPAddr(node.ipv4EndpointAddr.AsNetIP()),
 			AllowedIPs: node.allowedCidrsForWireguard(),
 		})
 		wireguardUpdateRequired = true
@@ -1353,7 +1353,7 @@ func (w *Wireguard) endpointUDPAddr(ip net.IP) *net.UDPAddr {
 		return nil
 	}
 	return &net.UDPAddr{
-		IP: ip,
+		IP:   ip,
 		Port: w.config.ListeningPort,
 	}
 }
