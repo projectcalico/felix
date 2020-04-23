@@ -115,14 +115,14 @@ type Wireguard struct {
 	time                                 timeshim.Time
 
 	// State information.
-	inSyncWireguard      bool
-	inSyncLink           bool
-	inSyncInterfaceAddr  bool
-	inSyncKey            bool
-	inSyncRouteRule      bool
-	ifaceUp              bool
-	ourPublicKey         *wgtypes.Key
-	ourIPv4InterfaceAddr ip.Addr
+	inSyncWireguard                    bool
+	inSyncLink                         bool
+	inSyncInterfaceAddr                bool
+	inSyncRouteRule                    bool
+	ifaceUp                            bool
+	ourPublicKey                       *wgtypes.Key
+	ourIPv4InterfaceAddr               ip.Addr
+	ourPublicKeyAgreesWithDataplaneMsg bool
 
 	// Current configuration
 	// - all peerData information
@@ -350,7 +350,7 @@ func (w *Wireguard) EndpointWireguardUpdate(name string, publicKey wgtypes.Key, 
 			// Public key does not match that stored. Flag as not in-sync, we will update the value from the dataplane
 			// and publish.
 			w.logCxt.Debug("Stored public key does not match key queried from dataplane")
-			w.inSyncKey = false
+			w.ourPublicKeyAgreesWithDataplaneMsg = false
 		}
 		if w.ourIPv4InterfaceAddr != ipv4InterfaceAddr {
 			w.logCxt.Debug("Local interface addr updated")
@@ -405,10 +405,7 @@ func (w *Wireguard) QueueResync() {
 
 	// Flag for resync to ensure everything is still configured correctly.
 	// No need to resync the key. This will happen if the dataplane resync detects an inconsistency.
-	w.inSyncWireguard = false
-	w.inSyncLink = false
-	w.inSyncRouteRule = false
-	w.inSyncInterfaceAddr = false
+	w.setAllInSync(false)
 
 	// Flag the routetable for resync.
 	w.routetable.QueueResync()
@@ -418,7 +415,7 @@ func (w *Wireguard) Apply() (err error) {
 	// If the key is not in-sync and is known then send as a status update.
 	defer func() {
 		// If we need to send the key then send on the callback method.
-		if !w.inSyncKey && w.ourPublicKey != nil {
+		if !w.ourPublicKeyAgreesWithDataplaneMsg && w.ourPublicKey != nil {
 			w.logCxt.Infof("Public key out of sync or updated: %s", *w.ourPublicKey)
 			if errKey := w.statusCallback(*w.ourPublicKey); errKey != nil {
 				err = errKey
@@ -426,7 +423,7 @@ func (w *Wireguard) Apply() (err error) {
 			}
 
 			// We have sent the key status update.
-			w.inSyncKey = true
+			w.ourPublicKeyAgreesWithDataplaneMsg = true
 		}
 	}()
 
@@ -449,8 +446,8 @@ func (w *Wireguard) Apply() (err error) {
 			// Zero out the public key.
 			w.ourPublicKey = &zeroKey
 			w.inSyncWireguard = true
-			return nil
 		}
+		return nil
 	}
 
 	// --- Wireguard is enabled ---
@@ -480,9 +477,12 @@ func (w *Wireguard) Apply() (err error) {
 		w.logCxt.Debug("Ensure wireguard link is created and up")
 		linkUp, err := w.ensureLink(netlinkClient)
 		if netlinkshim.IsNotSupported(err) {
+			// Wireguard is not supported, set everything to "in-sync" since there is not a lot of point doing anything
+			// else. We don't return an error in this case, instead we'll retry every resync period.
 			w.logCxt.Info("Wireguard is not supported - publishing no public key")
 			w.ourPublicKey = &zeroKey
-			return err
+			w.setAllInSync(true)
+			return nil
 		} else if err != nil {
 			// Error configuring link, pass up the stack.
 			w.logCxt.WithError(err).Info("Unable to create wireguard link, retrying...")
@@ -568,7 +568,7 @@ func (w *Wireguard) Apply() (err error) {
 				// Store and flag our key is not in sync so that a status update will be sent.
 				w.logCxt.Infof("Public key has been updated to %s, send status notification", publicKey)
 				w.ourPublicKey = &publicKey
-				w.inSyncKey = false
+				w.ourPublicKeyAgreesWithDataplaneMsg = false
 			}
 		}
 		w.inSyncWireguard = true
@@ -758,10 +758,10 @@ func (w *Wireguard) updateRouteTableFromPeerUpdates() {
 		var updateSet set.Set
 		shouldRouteToWireguard := w.shouldRouteToWireguard(node)
 		if node.routingToWireguard != shouldRouteToWireguard {
-			w.logCxt.Debug("Wireguard routing has changed - need to update full set of CIDRs")
+			w.logCxt.Debugf("Wireguard routing has changed from %v to %v - need to update full set of CIDRs", node.routingToWireguard, shouldRouteToWireguard)
 			updateSet = node.cidrs
 		} else {
-			w.logCxt.Debug("Wireguard routing has not changed - need to update added CIDRs")
+			w.logCxt.Debugf("Wireguard routing has not changed from %v - only need to update added CIDRs", node.routingToWireguard)
 			updateSet = update.allowedCidrsAdded
 		}
 
@@ -1223,22 +1223,27 @@ func (w *Wireguard) ensureDisabled(netlinkClient netlinkshim.Netlink) error {
 	var errRule, errLink, errRoutes error
 	wg := sync.WaitGroup{}
 
-	wg.Add(3)
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		errRule = w.ensureNoRouteRule(netlinkClient)
 	}()
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		errLink = w.ensureNoLink(netlinkClient)
 	}()
-	go func() {
-		defer wg.Done()
-		// The routetable configuration will be empty since we will not send updates, so applying this will remove the
-		// old routes if so configured.
-		errRoutes = w.routetable.Apply()
-	}()
-	wg.Wait()
+	if w.config.RoutingTableIndex > 0 {
+		// Only attempt automatic cleanup of the routing table if it is not the default table.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// The routetable configuration will be empty since we will not send updates, so applying this will remove the
+			// old routes if so configured.
+			errRoutes = w.routetable.Apply()
+		}()
+		wg.Wait()
+	}
 
 	if errRule != nil || errLink != nil || errRoutes != nil {
 		return ErrUpdateFailed
@@ -1253,6 +1258,7 @@ func (w *Wireguard) shouldRouteToWireguard(node *peerData) bool {
 func (w *Wireguard) shouldProgramWireguardPeer(node *peerData) bool {
 	// The wireguard peer should be programmed when both the IPv4 address and public key are known *and* when there
 	// is only a single node owning that public key.
+	w.logCxt.Debugf("shouldProgramWireguardPeer? %v; %v; %v", node.ipv4EndpointAddr, node.publicKey, w.publicKeyToNodeNames[node.publicKey])
 	return node.ipv4EndpointAddr != nil && node.publicKey != zeroKey && w.publicKeyToNodeNames[node.publicKey].Len() == 1
 }
 
@@ -1356,6 +1362,14 @@ func (w *Wireguard) endpointUDPAddr(ip net.IP) *net.UDPAddr {
 		IP:   ip,
 		Port: w.config.ListeningPort,
 	}
+}
+
+// setAllInSync updates all of the internal "in-sync" markers.
+func (w *Wireguard) setAllInSync(inSync bool) {
+	w.inSyncWireguard = inSync
+	w.inSyncLink = inSync
+	w.inSyncInterfaceAddr = inSync
+	w.inSyncRouteRule  = inSync
 }
 
 func getFirstItem(s set.Set) interface{} {
