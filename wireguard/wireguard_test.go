@@ -17,6 +17,7 @@ package wireguard_test
 import (
 	. "github.com/projectcalico/felix/wireguard"
 
+	"net"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -35,6 +36,12 @@ import (
 var (
 	zeroKey = wgtypes.Key{}
 )
+
+func mustGeneratePrivateKey() wgtypes.Key {
+	key, err := wgtypes.GeneratePrivateKey()
+	Expect(err).ToNot(HaveOccurred())
+	return key
+}
 
 type mockStatus struct {
 	numCallbacks int
@@ -190,6 +197,87 @@ var _ = Describe("Wireguard (enabled)", func() {
 				Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
 				Expect(s.numCallbacks).To(Equal(1))
 			})
+
+			Describe("should handle two wireguard peers with different public keys", func() {
+				var ipv4_1, ipv4_2 ip.Addr
+				var key_1, key_2 wgtypes.Key
+				var link *mocknetlink.MockLink
+				BeforeEach(func() {
+					Expect(s.numCallbacks).To(Equal(1))
+					wg.EndpointWireguardUpdate("my-host", s.key, nil)
+					ipv4_1 = ip.FromString("1.2.3.5")
+					key_1 = mustGeneratePrivateKey()
+					wg.EndpointWireguardUpdate("peer1", key_1, nil)
+					wg.EndpointUpdate("peer1", ipv4_1)
+					ipv4_2 = ip.FromString("1.2.3.6")
+					key_2 = mustGeneratePrivateKey()
+					wg.EndpointWireguardUpdate("peer2", key_2, nil)
+					wg.EndpointUpdate("peer2", ipv4_2)
+					err := wg.Apply()
+					Expect(err).NotTo(HaveOccurred())
+					link = wgDataplane.NameToLink["wireguard.cali"]
+					Expect(link).ToNot(BeNil())
+					Expect(wgDataplane.WireguardOpen).To(BeTrue())
+					Expect(link.WireguardFirewallMark).To(Equal(10))
+					Expect(link.WireguardListenPort).To(Equal(1000))
+					Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
+					Expect(wgDataplane.NumRuleDelCalls).To(Equal(0))
+					Expect(wgDataplane.NumRuleAddCalls).To(Equal(1))
+				})
+
+				It("should have both peers configured", func() {
+					Expect(link.WireguardPeers).To(HaveLen(2))
+					Expect(link.WireguardPeers).To(HaveKey(key_1))
+					Expect(link.WireguardPeers).To(HaveKey(key_2))
+					Expect(link.WireguardPeers[key_1]).To(Equal(wgtypes.Peer{
+						PublicKey: key_1,
+						Endpoint: &net.UDPAddr{
+							IP: ipv4_1.AsNetIP(),
+							Port: 1000,
+						},
+					}))
+					Expect(link.WireguardPeers[key_2]).To(Equal(wgtypes.Peer{
+						PublicKey: key_2,
+						Endpoint: &net.UDPAddr{
+							IP: ipv4_2.AsNetIP(),
+							Port: 1000,
+						},
+					}))
+				})
+
+				It("should remove both peers if public keys updated to conflict", func() {
+					wg.EndpointWireguardUpdate("peer2", key_1, nil)
+					err := wg.Apply()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(link.WireguardPeers).To(HaveLen(0))
+					Expect(wgDataplane.NumRuleAddCalls).To(Equal(1))
+				})
+
+				It("should add both peers if conflicting public keys updated to no longer conflict", func() {
+					wg.EndpointWireguardUpdate("peer2", key_1, nil)
+					err := wg.Apply()
+					wg.EndpointWireguardUpdate("peer2", key_2, nil)
+					err = wg.Apply()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(link.WireguardPeers).To(HaveKey(key_1))
+					Expect(link.WireguardPeers).To(HaveKey(key_2))
+					Expect(link.WireguardPeers[key_1]).To(Equal(wgtypes.Peer{
+						PublicKey: key_1,
+						Endpoint: &net.UDPAddr{
+							IP: ipv4_1.AsNetIP(),
+							Port: 1000,
+						},
+					}))
+					Expect(link.WireguardPeers[key_2]).To(Equal(wgtypes.Peer{
+						PublicKey: key_2,
+						Endpoint: &net.UDPAddr{
+							IP: ipv4_2.AsNetIP(),
+							Port: 1000,
+						},
+					}))
+					Expect(wgDataplane.NumRuleAddCalls).To(Equal(1))
+				})
+			})
 		})
 	})
 
@@ -213,10 +301,12 @@ var _ = Describe("Wireguard (enabled)", func() {
 		key, err := wgtypes.GeneratePrivateKey()
 		Expect(err).NotTo(HaveOccurred())
 		wgDataplane.AddIface(10, "wireguard.cali", true, true)
-		wgDataplane.NameToLink["wireguard.cali"].WireguardPrivateKey = key
-		wgDataplane.NameToLink["wireguard.cali"].WireguardPublicKey = key.PublicKey()
-		wgDataplane.NameToLink["wireguard.cali"].WireguardListenPort = 1010
-		wgDataplane.NameToLink["wireguard.cali"].WireguardFirewallMark = 11
+		link := wgDataplane.NameToLink["wireguard.cali"]
+		Expect(link).ToNot(BeNil())
+		link.WireguardPrivateKey = key
+		link.WireguardPublicKey = key.PublicKey()
+		link.WireguardListenPort = 1010
+		link.WireguardFirewallMark = 11
 
 		ipv4 := ip.FromString("1.2.3.4")
 		wg.EndpointWireguardUpdate("my-host", key, ipv4)
@@ -226,7 +316,8 @@ var _ = Describe("Wireguard (enabled)", func() {
 		Expect(wgDataplane.NumLinkAddCalls).To(Equal(0))
 		Expect(wgDataplane.WireguardOpen).To(BeTrue())
 
-		link := wgDataplane.NameToLink["wireguard.cali"]
+		link = wgDataplane.NameToLink["wireguard.cali"]
+		Expect(link).ToNot(BeNil())
 		Expect(link.Addrs).To(HaveLen(1))
 		Expect(link.Addrs[0].IP).To(Equal(ipv4.AsNetIP()))
 		Expect(wgDataplane.WireguardOpen).To(BeTrue())
