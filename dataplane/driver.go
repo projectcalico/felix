@@ -108,7 +108,18 @@ func StartDataplaneDriver(configParams *config.Config,
 		// Create a routing table manager. There are certain components that should take specific indices in the range
 		// to simplify table tidy-up.
 		routeTableIndexAllocator := idalloc.NewIndexAllocator(configParams.RouteTableRange)
-		wireguardTableIndex := routeTableIndexAllocator.GrabIndex()
+
+		var wireguardEnabled bool
+		var wireguardTableIndex int
+		if configParams.WireguardEnabled {
+			if idx, err := routeTableIndexAllocator.GrabIndex(); err == nil {
+				log.Debugf("Assigned wireguard table index: %d", idx)
+				wireguardEnabled = true
+				wireguardTableIndex = idx
+			} else {
+				log.WithError(err).Warning("Unable to assign table index for wireguard - disabling wireguard on this node")
+			}
+		}
 
 		dpConfig := intdataplane.Config{
 			Hostname: configParams.FelixHostname,
@@ -169,7 +180,7 @@ func StartDataplaneDriver(configParams *config.Config,
 				BPFEnabled:                         configParams.BPFEnabled,
 			},
 			Wireguard: wireguard.Config{
-				Enabled:             configParams.WireguardEnabled,
+				Enabled:             wireguardEnabled,
 				ListeningPort:       configParams.WireguardListeningPort,
 				FirewallMark:        int(markWireguard),
 				RoutingRulePriority: configParams.WireguardRoutingRulePriority,
