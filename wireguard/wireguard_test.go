@@ -49,15 +49,15 @@ var (
 	ipv4_peer2 = ip.FromString("1.2.3.6")
 	ipv4_peer3 = ip.FromString("10.10.20.20")
 
-	cidr_local       = ip.MustParseCIDROrIP("192.180.0.0/30")
-	cidr_1           = ip.MustParseCIDROrIP("192.168.1.0/24")
-	cidr_2           = ip.MustParseCIDROrIP("192.168.2.0/24")
-	cidr_3           = ip.MustParseCIDROrIP("192.168.3.0/24")
-	cidr_4           = ip.MustParseCIDROrIP("192.168.4.0/26")
-	ipnet_1          = cidr_1.ToIPNet()
-	ipnet_2          = cidr_2.ToIPNet()
-	ipnet_3          = cidr_3.ToIPNet()
-	ipnet_4          = cidr_4.ToIPNet()
+	cidr_local = ip.MustParseCIDROrIP("192.180.0.0/30")
+	cidr_1     = ip.MustParseCIDROrIP("192.168.1.0/24")
+	cidr_2     = ip.MustParseCIDROrIP("192.168.2.0/24")
+	cidr_3     = ip.MustParseCIDROrIP("192.168.3.0/24")
+	cidr_4     = ip.MustParseCIDROrIP("192.168.4.0/26")
+	ipnet_1    = cidr_1.ToIPNet()
+	ipnet_2    = cidr_2.ToIPNet()
+	ipnet_3    = cidr_3.ToIPNet()
+	ipnet_4    = cidr_4.ToIPNet()
 	//routekey_1_throw = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_1)
 	//routekey_2_throw = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_2)
 	routekey_3_throw = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_3)
@@ -494,11 +494,11 @@ var _ = Describe("Enable wireguard", func() {
 								Expect(rtDataplane.AddedRouteKeys).To(HaveKey(routekey_4))
 								Expect(rtDataplane.RouteKeyToRoute[routekey_4]).To(Equal(netlink.Route{
 									LinkIndex: link.LinkAttrs.Index,
-									Dst:      &ipnet_4,
-									Type:     syscall.RTN_UNICAST,
-									Protocol: FelixRouteProtocol,
-									Scope:    netlink.SCOPE_LINK,
-									Table:    tableIndex,
+									Dst:       &ipnet_4,
+									Type:      syscall.RTN_UNICAST,
+									Protocol:  FelixRouteProtocol,
+									Scope:     netlink.SCOPE_LINK,
+									Table:     tableIndex,
 								}))
 							})
 						})
