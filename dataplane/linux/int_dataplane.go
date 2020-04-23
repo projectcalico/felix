@@ -23,6 +23,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+
 	"github.com/projectcalico/felix/bpf/state"
 	"github.com/projectcalico/felix/bpf/tc"
 
@@ -52,6 +54,7 @@ import (
 	"github.com/projectcalico/felix/routetable"
 	"github.com/projectcalico/felix/rules"
 	"github.com/projectcalico/felix/throttle"
+	"github.com/projectcalico/felix/wireguard"
 )
 
 const (
@@ -94,6 +97,7 @@ var (
 	})
 
 	processStartTime time.Time
+	zeroKey          = wgtypes.Key{}
 )
 
 func init() {
@@ -129,6 +133,8 @@ type Config struct {
 	IptablesLockTimeout            time.Duration
 	IptablesLockProbeInterval      time.Duration
 	XDPRefreshInterval             time.Duration
+
+	Wireguard wireguard.Config
 
 	NetlinkTimeout time.Duration
 
@@ -209,6 +215,8 @@ type InternalDataplane struct {
 	ipSets               []*ipsets.IPSets
 
 	ipipManager *ipipManager
+
+	wireguardManager *wireguardManager
 
 	ifaceMonitor     *ifacemonitor.InterfaceMonitor
 	ifaceUpdates     chan *ifaceUpdate
@@ -602,6 +610,21 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		dp.ipipManager = newIPIPManager(ipSetsV4, config.MaxIPSetSize, config.ExternalNodesCidrs)
 		dp.RegisterManager(dp.ipipManager) // IPv4-only
 	}
+
+	// Add a manager for wireguard configuration. This is added irrespective of whether wireguard is actually enabled
+	// because it may need to tidy up some of the routing rules when disabled.
+	cryptoRouteTableWireguard := wireguard.New(config.Hostname, &config.Wireguard, config.NetlinkTimeout,
+		config.DeviceRouteProtocol, func(publicKey wgtypes.Key) error {
+			if publicKey == zeroKey {
+				dp.fromDataplane <- &proto.WireguardStatusUpdate{PublicKey: ""}
+			} else {
+				dp.fromDataplane <- &proto.WireguardStatusUpdate{PublicKey: publicKey.String()}
+			}
+			return nil
+		})
+	dp.wireguardManager = newWireguardManager(cryptoRouteTableWireguard)
+	dp.RegisterManager(dp.wireguardManager) // IPv4-only
+
 	if config.IPv6Enabled {
 		mangleTableV6 := iptables.NewTable(
 			"mangle",
@@ -711,13 +734,13 @@ type Manager interface {
 
 type ManagerWithRouteTables interface {
 	Manager
-	GetRouteTables() []routeTable
+	GetRouteTableSyncers() []routeTableSyncer
 }
 
-func (d *InternalDataplane) routeTables() []routeTable {
-	var rts []routeTable
+func (d *InternalDataplane) routeTableSyncers() []routeTableSyncer {
+	var rts []routeTableSyncer
 	for _, mrts := range d.managersWithRouteTables {
-		rts = append(rts, mrts.GetRouteTables()...)
+		rts = append(rts, mrts.GetRouteTableSyncers()...)
 	}
 
 	return rts
@@ -1078,7 +1101,7 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 		}
 
 		for _, mgr := range d.managersWithRouteTables {
-			for _, routeTable := range mgr.GetRouteTables() {
+			for _, routeTable := range mgr.GetRouteTableSyncers() {
 				routeTable.OnIfaceStateChanged(ifaceUpdate.Name, ifaceUpdate.State)
 			}
 		}
@@ -1236,6 +1259,12 @@ func (d *InternalDataplane) configureKernel() {
 			log.WithError(err).Error("Failed to set unprivileged_bpf_disabled sysctl")
 		}
 	}
+	if d.config.Wireguard.Enabled {
+		// wireguard module is available in linux kernel >= 5.6
+		mpwg := newModProbe(moduleWireguard, newRealCmd)
+		out, err = mpwg.Exec()
+		log.WithError(err).WithField("output", out).Infof("attempted to modprobe %s", moduleWireguard)
+	}
 }
 
 func (d *InternalDataplane) recordMsgStat(msg interface{}) {
@@ -1294,7 +1323,7 @@ func (d *InternalDataplane) apply() {
 
 	if d.forceRouteRefresh {
 		// Refresh timer popped.
-		for _, r := range d.routeTables() {
+		for _, r := range d.routeTableSyncers() {
 			// Queue a resync on the next Apply().
 			r.QueueResync()
 		}
@@ -1325,9 +1354,9 @@ func (d *InternalDataplane) apply() {
 	// Update the routing table in parallel with the other updates.  We'll wait for it to finish
 	// before we return.
 	var routesWG sync.WaitGroup
-	for _, r := range d.routeTables() {
+	for _, r := range d.routeTableSyncers() {
 		routesWG.Add(1)
-		go func(r routeTable) {
+		go func(r routeTableSyncer) {
 			err := r.Apply()
 			if err != nil {
 				log.Warn("Failed to synchronize routing table, will retry...")
