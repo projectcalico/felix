@@ -1378,7 +1378,7 @@ func (w *Wireguard) setAllInSync(inSync bool) {
 	w.inSyncWireguard = inSync
 	w.inSyncLink = inSync
 	w.inSyncInterfaceAddr = inSync
-	w.inSyncRouteRule  = inSync
+	w.inSyncRouteRule = inSync
 }
 
 func getFirstItem(s set.Set) interface{} {
