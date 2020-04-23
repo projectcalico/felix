@@ -13,10 +13,34 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 
+var WireguardFailureScenarios = []FailFlags{
+	FailNone,
+	FailNextLinkAdd,
+	FailNextLinkAddNotSupported,
+	FailNextLinkDel,
+	FailNextLinkSetMTU,
+	FailNextLinkSetUp,
+	FailNextLinkByName,
+	FailNextLinkByNameNotFound,
+	FailNextRouteList,
+	FailNextRouteAdd,
+	FailNextRouteDel,
+	FailNextAddARP,
+	FailNextNewNetlink,
+	FailNextSetSocketTimeout,
+	FailNextRuleAdd,
+	FailNextRuleDel,
+	FailNextNewWireguard,
+	FailNextNewWireguardNotSupported,
+	FailNextWireguardClose,
+	FailNextWireguardDeviceByName,
+	FailNextWireguardConfigureDevice,
+}
+
 // ----- Mock dataplane management functions for test code -----
 
 func (d *MockNetlinkDataplane) NewMockWireguard() (netlinkshim.Wireguard, error) {
-	d.NumNewNetlinkCalls++
+	d.NumNewWireguardCalls++
 	if d.PersistentlyFailToConnect || d.shouldFail(FailNextNewWireguard) {
 		return nil, SimulatedError
 	}
