@@ -3,12 +3,11 @@ package mock
 import (
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/sirupsen/logrus"
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
-	"net"
-
+	"github.com/projectcalico/felix/ip"
 	netlinkshim "github.com/projectcalico/felix/netlink"
 	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/sirupsen/logrus"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 // ----- Mock dataplane management functions for test code -----
@@ -133,15 +132,19 @@ func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) 
 
 			// Construct the set of allowed IPs and then transfer to the slice for storage.
 			allowedIPs := set.New()
-			if !peerCfg.ReplaceAllowedIPs && len(peer.AllowedIPs) > 0 {
-				allowedIPs.AddAll(peer.AllowedIPs)
+			if !peerCfg.ReplaceAllowedIPs {
+				for _, ipnet := range peer.AllowedIPs {
+					allowedIPs.Add(ip.CIDRFromIPNet(&ipnet))
+				}
 			}
 			if len(peerCfg.AllowedIPs) > 0 {
-				allowedIPs.AddAll(peerCfg.AllowedIPs)
+				for _, ipnet := range peerCfg.AllowedIPs {
+					allowedIPs.Add(ip.CIDRFromIPNet(&ipnet))
+				}
 			}
 			peer.AllowedIPs = nil
 			allowedIPs.Iter(func(item interface{}) error {
-				peer.AllowedIPs = append(peer.AllowedIPs, item.(net.IPNet))
+				peer.AllowedIPs = append(peer.AllowedIPs, item.(ip.CIDR).ToIPNet())
 				return nil
 			})
 
