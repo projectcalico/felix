@@ -8,6 +8,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 	"github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	"sort"
 )
 
 // ----- Mock dataplane management functions for test code -----
@@ -130,23 +131,31 @@ func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) 
 				peer.PersistentKeepaliveInterval = *peerCfg.PersistentKeepaliveInterval
 			}
 
-			// Construct the set of allowed IPs and then transfer to the slice for storage.
+			// Construct the set of allowed IPs and then transfer to the slice for storage. We sort these so our tests
+			// can be deterministic.
 			allowedIPs := set.New()
 			if !peerCfg.ReplaceAllowedIPs {
 				for _, ipnet := range peer.AllowedIPs {
-					allowedIPs.Add(ip.CIDRFromIPNet(&ipnet))
+					allowedIPs.Add(ipnet.String())
 				}
 			}
 			if len(peerCfg.AllowedIPs) > 0 {
 				for _, ipnet := range peerCfg.AllowedIPs {
-					allowedIPs.Add(ip.CIDRFromIPNet(&ipnet))
+					allowedIPs.Add(ipnet.String())
 				}
 			}
-			peer.AllowedIPs = nil
+
+			var allowedIPStr []string
 			allowedIPs.Iter(func(item interface{}) error {
-				peer.AllowedIPs = append(peer.AllowedIPs, item.(ip.CIDR).ToIPNet())
+				allowedIPStr = append(allowedIPStr, item.(string))
 				return nil
 			})
+			sort.Strings(allowedIPStr)
+
+			peer.AllowedIPs = nil
+			for _, ipstr := range allowedIPStr {
+				peer.AllowedIPs = append(peer.AllowedIPs, ip.MustParseCIDROrIP(ipstr).ToIPNet())
+			}
 
 			// Store the peer.
 			link.WireguardPeers[peerCfg.PublicKey] = peer

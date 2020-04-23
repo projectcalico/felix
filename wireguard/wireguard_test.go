@@ -339,6 +339,27 @@ var _ = Describe("Enable wireguard", func() {
 						Expect(err).NotTo(HaveOccurred())
 					})
 
+					It("should have wireguard routes for peer1 and peer2", func() {
+						Expect(link.WireguardPeers).To(HaveKey(key_1))
+						Expect(link.WireguardPeers).To(HaveKey(key_2))
+						Expect(link.WireguardPeers[key_1]).To(Equal(wgtypes.Peer{
+							PublicKey: key_1,
+							Endpoint: &net.UDPAddr{
+								IP:   ipv4_1.AsNetIP(),
+								Port: 1000,
+							},
+							AllowedIPs: []net.IPNet{ipnet_1a, ipnet_1b},
+						}))
+						Expect(link.WireguardPeers[key_2]).To(Equal(wgtypes.Peer{
+							PublicKey: key_2,
+							Endpoint: &net.UDPAddr{
+								IP:   ipv4_2.AsNetIP(),
+								Port: 1000,
+							},
+							AllowedIPs: []net.IPNet{ipnet_2},
+						}))
+					})
+
 					It("should route to wireguard for peer1 and peer2 routes, but not peer3 routes", func() {
 						Expect(rtDataplane.AddedRouteKeys).To(HaveLen(4))
 						Expect(rtDataplane.DeletedRouteKeys).To(BeEmpty())
@@ -379,7 +400,6 @@ var _ = Describe("Enable wireguard", func() {
 						}))
 					})
 
-
 					Describe("move a route from peer1 to peer2 and a route from peer2 to peer3", func() {
 						var new_routekey_2 string
 						BeforeEach(func() {
@@ -391,6 +411,27 @@ var _ = Describe("Enable wireguard", func() {
 							err := wg.Apply()
 							Expect(err).NotTo(HaveOccurred())
 							new_routekey_2 = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_2)
+						})
+
+						It("should have wireguard routes for peer1 and peer2", func() {
+							Expect(link.WireguardPeers).To(HaveKey(key_1))
+							Expect(link.WireguardPeers).To(HaveKey(key_2))
+							Expect(link.WireguardPeers[key_1]).To(Equal(wgtypes.Peer{
+								PublicKey: key_1,
+								Endpoint: &net.UDPAddr{
+									IP:   ipv4_1.AsNetIP(),
+									Port: 1000,
+								},
+								AllowedIPs: []net.IPNet{ipnet_1a},
+							}))
+							Expect(link.WireguardPeers[key_2]).To(Equal(wgtypes.Peer{
+								PublicKey: key_2,
+								Endpoint: &net.UDPAddr{
+									IP:   ipv4_2.AsNetIP(),
+									Port: 1000,
+								},
+								AllowedIPs: []net.IPNet{ipnet_1b},
+							}))
 						})
 
 						It("should reprogram the route to the non-wireguard peer only", func() {
