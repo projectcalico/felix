@@ -43,6 +43,25 @@ var (
 	peer2              = "peer2"
 	peer3              = "peer3"
 	FelixRouteProtocol = syscall.RTPROT_BOOT
+	tableIndex         = 99
+
+	ipv4_peer1 = ip.FromString("1.2.3.5")
+	ipv4_peer2 = ip.FromString("1.2.3.6")
+	ipv4_peer3 = ip.FromString("10.10.20.20")
+
+	cidr_local       = ip.MustParseCIDROrIP("192.180.0.0/30")
+	cidr_1           = ip.MustParseCIDROrIP("192.168.1.0/24")
+	cidr_2           = ip.MustParseCIDROrIP("192.168.2.0/24")
+	cidr_3           = ip.MustParseCIDROrIP("192.168.3.0/24")
+	cidr_4           = ip.MustParseCIDROrIP("192.170.10.0/26")
+	ipnet_1          = cidr_1.ToIPNet()
+	ipnet_2          = cidr_2.ToIPNet()
+	ipnet_3          = cidr_3.ToIPNet()
+	ipnet_4          = cidr_4.ToIPNet()
+	//routekey_1_throw = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_1)
+	//routekey_2_throw = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_2)
+	routekey_3_throw = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_3)
+	routekey_4_throw = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_4)
 )
 
 func mustGeneratePrivateKey() wgtypes.Key {
@@ -75,7 +94,6 @@ var _ = Describe("Enable wireguard", func() {
 	var t *mocktime.MockTime
 	var s *mockStatus
 	var wg *Wireguard
-	tableIndex := 99
 
 	BeforeEach(func() {
 		wgDataplane = mocknetlink.NewMockNetlinkDataplane()
@@ -208,20 +226,17 @@ var _ = Describe("Enable wireguard", func() {
 			})
 
 			Describe("create two wireguard peers with different public keys", func() {
-				var ipv4_1, ipv4_2 ip.Addr
-				var key_1, key_2 wgtypes.Key
+				var key_peer1, key_peer2 wgtypes.Key
 				var link *mocknetlink.MockLink
 				BeforeEach(func() {
 					Expect(s.numCallbacks).To(Equal(1))
 					wg.EndpointWireguardUpdate(hostname, s.key, nil)
-					ipv4_1 = ip.FromString("1.2.3.5")
-					key_1 = mustGeneratePrivateKey()
-					wg.EndpointWireguardUpdate(peer1, key_1, nil)
-					wg.EndpointUpdate(peer1, ipv4_1)
-					ipv4_2 = ip.FromString("1.2.3.6")
-					key_2 = mustGeneratePrivateKey()
-					wg.EndpointWireguardUpdate(peer2, key_2, nil)
-					wg.EndpointUpdate(peer2, ipv4_2)
+					key_peer1 = mustGeneratePrivateKey()
+					wg.EndpointWireguardUpdate(peer1, key_peer1, nil)
+					wg.EndpointUpdate(peer1, ipv4_peer1)
+					key_peer2 = mustGeneratePrivateKey()
+					wg.EndpointWireguardUpdate(peer2, key_peer2, nil)
+					wg.EndpointUpdate(peer2, ipv4_peer2)
 					err := wg.Apply()
 					Expect(err).NotTo(HaveOccurred())
 					link = wgDataplane.NameToLink[ifaceName]
@@ -233,26 +248,26 @@ var _ = Describe("Enable wireguard", func() {
 
 				It("should have both peers configured", func() {
 					Expect(link.WireguardPeers).To(HaveLen(2))
-					Expect(link.WireguardPeers).To(HaveKey(key_1))
-					Expect(link.WireguardPeers).To(HaveKey(key_2))
-					Expect(link.WireguardPeers[key_1]).To(Equal(wgtypes.Peer{
-						PublicKey: key_1,
+					Expect(link.WireguardPeers).To(HaveKey(key_peer1))
+					Expect(link.WireguardPeers).To(HaveKey(key_peer2))
+					Expect(link.WireguardPeers[key_peer1]).To(Equal(wgtypes.Peer{
+						PublicKey: key_peer1,
 						Endpoint: &net.UDPAddr{
-							IP:   ipv4_1.AsNetIP(),
+							IP:   ipv4_peer1.AsNetIP(),
 							Port: 1000,
 						},
 					}))
-					Expect(link.WireguardPeers[key_2]).To(Equal(wgtypes.Peer{
-						PublicKey: key_2,
+					Expect(link.WireguardPeers[key_peer2]).To(Equal(wgtypes.Peer{
+						PublicKey: key_peer2,
 						Endpoint: &net.UDPAddr{
-							IP:   ipv4_2.AsNetIP(),
+							IP:   ipv4_peer2.AsNetIP(),
 							Port: 1000,
 						},
 					}))
 				})
 
 				It("should remove both peers if public keys updated to conflict", func() {
-					wg.EndpointWireguardUpdate(peer2, key_1, nil)
+					wg.EndpointWireguardUpdate(peer2, key_peer1, nil)
 					err := wg.Apply()
 					Expect(err).NotTo(HaveOccurred())
 					Expect(link.WireguardPeers).To(HaveLen(0))
@@ -260,24 +275,24 @@ var _ = Describe("Enable wireguard", func() {
 				})
 
 				It("should add both peers if conflicting public keys updated to no longer conflict", func() {
-					wg.EndpointWireguardUpdate(peer2, key_1, nil)
+					wg.EndpointWireguardUpdate(peer2, key_peer1, nil)
 					err := wg.Apply()
-					wg.EndpointWireguardUpdate(peer2, key_2, nil)
+					wg.EndpointWireguardUpdate(peer2, key_peer2, nil)
 					err = wg.Apply()
 					Expect(err).NotTo(HaveOccurred())
-					Expect(link.WireguardPeers).To(HaveKey(key_1))
-					Expect(link.WireguardPeers).To(HaveKey(key_2))
-					Expect(link.WireguardPeers[key_1]).To(Equal(wgtypes.Peer{
-						PublicKey: key_1,
+					Expect(link.WireguardPeers).To(HaveKey(key_peer1))
+					Expect(link.WireguardPeers).To(HaveKey(key_peer2))
+					Expect(link.WireguardPeers[key_peer1]).To(Equal(wgtypes.Peer{
+						PublicKey: key_peer1,
 						Endpoint: &net.UDPAddr{
-							IP:   ipv4_1.AsNetIP(),
+							IP:   ipv4_peer1.AsNetIP(),
 							Port: 1000,
 						},
 					}))
-					Expect(link.WireguardPeers[key_2]).To(Equal(wgtypes.Peer{
-						PublicKey: key_2,
+					Expect(link.WireguardPeers[key_peer2]).To(Equal(wgtypes.Peer{
+						PublicKey: key_peer2,
 						Endpoint: &net.UDPAddr{
-							IP:   ipv4_2.AsNetIP(),
+							IP:   ipv4_peer2.AsNetIP(),
 							Port: 1000,
 						},
 					}))
@@ -289,18 +304,16 @@ var _ = Describe("Enable wireguard", func() {
 				})
 
 				Describe("create a non-wireguard peer", func() {
-					var ipv4_3 ip.Addr
 					BeforeEach(func() {
-						ipv4_3 = ip.FromString("10.10.20.20")
-						wg.EndpointUpdate(peer3, ipv4_3)
+						wg.EndpointUpdate(peer3, ipv4_peer3)
 						err := wg.Apply()
 						Expect(err).NotTo(HaveOccurred())
 					})
 
 					It("should not create wireguard configuration for the peer", func() {
 						Expect(link.WireguardPeers).To(HaveLen(2))
-						Expect(link.WireguardPeers).To(HaveKey(key_1))
-						Expect(link.WireguardPeers).To(HaveKey(key_2))
+						Expect(link.WireguardPeers).To(HaveKey(key_peer1))
+						Expect(link.WireguardPeers).To(HaveKey(key_peer2))
 					})
 
 					It("should contain no routes", func() {
@@ -309,74 +322,54 @@ var _ = Describe("Enable wireguard", func() {
 				})
 
 				Describe("create routes for each peer", func() {
-					var cidr_local, cidr_1a, cidr_1b, cidr_2, cidr_3 ip.CIDR
-					var ipnet_1a, ipnet_1b, ipnet_2, ipnet_3 net.IPNet
-					var routekey_1a, routekey_1b, routekey_2, routekey_3 string
+					var routekey_1, routekey_2, routekey_3 string
 					BeforeEach(func() {
 						// Update the mock routing table dataplane so that it knows about the wireguard interface.
 						rtDataplane.NameToLink[ifaceName] = link
-
-						cidr_local = ip.MustParseCIDROrIP("192.180.0.0/30")
-						cidr_1a = ip.MustParseCIDROrIP("192.168.1.0/24")
-						cidr_1b = ip.MustParseCIDROrIP("192.168.2.0/24")
-						cidr_2 = ip.MustParseCIDROrIP("192.168.3.0/24")
-						cidr_3 = ip.MustParseCIDROrIP("192.170.10.0/26")
-						ipnet_1a = cidr_1a.ToIPNet()
-						ipnet_1b = cidr_1b.ToIPNet()
-						ipnet_2 = cidr_2.ToIPNet()
-						ipnet_3 = cidr_3.ToIPNet()
-						wg.EndpointAllowedCIDRAdd(hostname, cidr_local)
-						wg.EndpointAllowedCIDRAdd(peer1, cidr_1a)
-						wg.EndpointAllowedCIDRAdd(peer1, cidr_1b)
-						wg.EndpointAllowedCIDRAdd(peer2, cidr_2)
-						wg.EndpointAllowedCIDRAdd(peer3, cidr_3)
-						routekey_1a = fmt.Sprintf("%d-%d-%s", tableIndex, link.LinkAttrs.Index, cidr_1a)
-						routekey_1b = fmt.Sprintf("%d-%d-%s", tableIndex, link.LinkAttrs.Index, cidr_1b)
+						routekey_1 = fmt.Sprintf("%d-%d-%s", tableIndex, link.LinkAttrs.Index, cidr_1)
 						routekey_2 = fmt.Sprintf("%d-%d-%s", tableIndex, link.LinkAttrs.Index, cidr_2)
-						routekey_3 = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_3)
+						routekey_3 = fmt.Sprintf("%d-%d-%s", tableIndex, link.LinkAttrs.Index, cidr_3)
+
+						wg.EndpointAllowedCIDRAdd(hostname, cidr_local)
+						wg.EndpointAllowedCIDRAdd(peer1, cidr_1)
+						wg.EndpointAllowedCIDRAdd(peer1, cidr_2)
+						wg.EndpointAllowedCIDRAdd(peer2, cidr_3)
+						wg.EndpointAllowedCIDRAdd(peer3, cidr_4)
 						err := wg.Apply()
 						Expect(err).NotTo(HaveOccurred())
 					})
 
 					It("should have wireguard routes for peer1 and peer2", func() {
-						Expect(link.WireguardPeers).To(HaveKey(key_1))
-						Expect(link.WireguardPeers).To(HaveKey(key_2))
-						Expect(link.WireguardPeers[key_1]).To(Equal(wgtypes.Peer{
-							PublicKey: key_1,
+						Expect(link.WireguardPeers).To(HaveKey(key_peer1))
+						Expect(link.WireguardPeers).To(HaveKey(key_peer2))
+						Expect(link.WireguardPeers[key_peer1]).To(Equal(wgtypes.Peer{
+							PublicKey: key_peer1,
 							Endpoint: &net.UDPAddr{
-								IP:   ipv4_1.AsNetIP(),
+								IP:   ipv4_peer1.AsNetIP(),
 								Port: 1000,
 							},
-							AllowedIPs: []net.IPNet{ipnet_1a, ipnet_1b},
+							AllowedIPs: []net.IPNet{ipnet_1, ipnet_2},
 						}))
-						Expect(link.WireguardPeers[key_2]).To(Equal(wgtypes.Peer{
-							PublicKey: key_2,
+						Expect(link.WireguardPeers[key_peer2]).To(Equal(wgtypes.Peer{
+							PublicKey: key_peer2,
 							Endpoint: &net.UDPAddr{
-								IP:   ipv4_2.AsNetIP(),
+								IP:   ipv4_peer2.AsNetIP(),
 								Port: 1000,
 							},
-							AllowedIPs: []net.IPNet{ipnet_2},
+							AllowedIPs: []net.IPNet{ipnet_3},
 						}))
 					})
 
 					It("should route to wireguard for peer1 and peer2 routes, but not peer3 routes", func() {
 						Expect(rtDataplane.AddedRouteKeys).To(HaveLen(4))
 						Expect(rtDataplane.DeletedRouteKeys).To(BeEmpty())
-						Expect(rtDataplane.AddedRouteKeys).To(HaveKey(routekey_1a))
-						Expect(rtDataplane.AddedRouteKeys).To(HaveKey(routekey_1b))
+						Expect(rtDataplane.AddedRouteKeys).To(HaveKey(routekey_1))
 						Expect(rtDataplane.AddedRouteKeys).To(HaveKey(routekey_2))
 						Expect(rtDataplane.AddedRouteKeys).To(HaveKey(routekey_3))
-						Expect(rtDataplane.RouteKeyToRoute[routekey_1a]).To(Equal(netlink.Route{
+						Expect(rtDataplane.AddedRouteKeys).To(HaveKey(routekey_4_throw))
+						Expect(rtDataplane.RouteKeyToRoute[routekey_1]).To(Equal(netlink.Route{
 							LinkIndex: link.LinkAttrs.Index,
-							Dst:       &ipnet_1a,
-							Type:      syscall.RTN_UNICAST,
-							Protocol:  FelixRouteProtocol,
-							Scope:     netlink.SCOPE_LINK,
-							Table:     tableIndex,
-						}))
-						Expect(rtDataplane.RouteKeyToRoute[routekey_1b]).To(Equal(netlink.Route{
-							LinkIndex: link.LinkAttrs.Index,
-							Dst:       &ipnet_1b,
+							Dst:       &ipnet_1,
 							Type:      syscall.RTN_UNICAST,
 							Protocol:  FelixRouteProtocol,
 							Scope:     netlink.SCOPE_LINK,
@@ -391,7 +384,15 @@ var _ = Describe("Enable wireguard", func() {
 							Table:     tableIndex,
 						}))
 						Expect(rtDataplane.RouteKeyToRoute[routekey_3]).To(Equal(netlink.Route{
-							Dst:      &ipnet_3,
+							LinkIndex: link.LinkAttrs.Index,
+							Dst:       &ipnet_3,
+							Type:      syscall.RTN_UNICAST,
+							Protocol:  FelixRouteProtocol,
+							Scope:     netlink.SCOPE_LINK,
+							Table:     tableIndex,
+						}))
+						Expect(rtDataplane.RouteKeyToRoute[routekey_4_throw]).To(Equal(netlink.Route{
+							Dst:      &ipnet_4,
 							Type:     syscall.RTN_THROW,
 							Protocol: FelixRouteProtocol,
 							Scope:    netlink.SCOPE_UNIVERSE,
@@ -400,46 +401,44 @@ var _ = Describe("Enable wireguard", func() {
 					})
 
 					Describe("move a route from peer1 to peer2 and a route from peer2 to peer3", func() {
-						var new_routekey_2 string
 						BeforeEach(func() {
-							wg.EndpointAllowedCIDRRemove(cidr_1b)
-							wg.EndpointAllowedCIDRAdd(peer2, cidr_1b)
 							wg.EndpointAllowedCIDRRemove(cidr_2)
-							wg.EndpointAllowedCIDRAdd(peer3, cidr_2)
+							wg.EndpointAllowedCIDRAdd(peer2, cidr_2)
+							wg.EndpointAllowedCIDRRemove(cidr_3)
+							wg.EndpointAllowedCIDRAdd(peer3, cidr_3)
 							rtDataplane.ResetDeltas()
 							err := wg.Apply()
 							Expect(err).NotTo(HaveOccurred())
-							new_routekey_2 = fmt.Sprintf("%d-%d-%s", tableIndex, 0, cidr_2)
 						})
 
 						It("should have wireguard routes for peer1 and peer2", func() {
-							Expect(link.WireguardPeers).To(HaveKey(key_1))
-							Expect(link.WireguardPeers).To(HaveKey(key_2))
-							Expect(link.WireguardPeers[key_1]).To(Equal(wgtypes.Peer{
-								PublicKey: key_1,
+							Expect(link.WireguardPeers).To(HaveKey(key_peer1))
+							Expect(link.WireguardPeers).To(HaveKey(key_peer2))
+							Expect(link.WireguardPeers[key_peer1]).To(Equal(wgtypes.Peer{
+								PublicKey: key_peer1,
 								Endpoint: &net.UDPAddr{
-									IP:   ipv4_1.AsNetIP(),
+									IP:   ipv4_peer1.AsNetIP(),
 									Port: 1000,
 								},
-								AllowedIPs: []net.IPNet{ipnet_1a},
+								AllowedIPs: []net.IPNet{ipnet_1},
 							}))
-							Expect(link.WireguardPeers[key_2]).To(Equal(wgtypes.Peer{
-								PublicKey: key_2,
+							Expect(link.WireguardPeers[key_peer2]).To(Equal(wgtypes.Peer{
+								PublicKey: key_peer2,
 								Endpoint: &net.UDPAddr{
-									IP:   ipv4_2.AsNetIP(),
+									IP:   ipv4_peer2.AsNetIP(),
 									Port: 1000,
 								},
-								AllowedIPs: []net.IPNet{ipnet_1b},
+								AllowedIPs: []net.IPNet{ipnet_2},
 							}))
 						})
 
 						It("should reprogram the route to the non-wireguard peer only", func() {
 							Expect(rtDataplane.AddedRouteKeys).To(HaveLen(1))
 							Expect(rtDataplane.DeletedRouteKeys).To(HaveLen(1))
-							Expect(rtDataplane.DeletedRouteKeys).To(HaveKey(routekey_2))
-							Expect(rtDataplane.AddedRouteKeys).To(HaveKey(new_routekey_2))
-							Expect(rtDataplane.RouteKeyToRoute[new_routekey_2]).To(Equal(netlink.Route{
-								Dst:      &ipnet_2,
+							Expect(rtDataplane.DeletedRouteKeys).To(HaveKey(routekey_3))
+							Expect(rtDataplane.AddedRouteKeys).To(HaveKey(routekey_3_throw))
+							Expect(rtDataplane.RouteKeyToRoute[routekey_3_throw]).To(Equal(netlink.Route{
+								Dst:      &ipnet_3,
 								Type:     syscall.RTN_THROW,
 								Protocol: FelixRouteProtocol,
 								Scope:    netlink.SCOPE_UNIVERSE,
