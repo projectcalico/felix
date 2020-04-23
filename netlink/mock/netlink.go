@@ -188,6 +188,8 @@ type MockNetlinkDataplane struct {
 	NumLinkAddCalls      int
 	NumLinkDeleteCalls   int
 	ImmediateLinkUp      bool
+	NumRuleAddCalls      int
+	NumRuleDelCalls      int
 
 	PersistentlyFailToConnect bool
 
@@ -476,6 +478,7 @@ func (d *MockNetlinkDataplane) RuleAdd(rule *netlink.Rule) error {
 	defer d.mutex.Unlock()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
+	d.NumRuleAddCalls++
 	if d.shouldFail(FailNextRuleAdd) {
 		return SimulatedError
 	}
@@ -488,6 +491,7 @@ func (d *MockNetlinkDataplane) RuleDel(rule *netlink.Rule) error {
 	defer d.mutex.Unlock()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
+	d.NumRuleDelCalls++
 	if d.shouldFail(FailNextRuleDel) {
 		return SimulatedError
 	}

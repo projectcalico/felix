@@ -3,7 +3,9 @@ package mock
 import (
 	"github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	"net"
 
 	netlinkshim "github.com/projectcalico/felix/netlink"
 	"github.com/projectcalico/libcalico-go/lib/set"
@@ -96,31 +98,40 @@ func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) 
 		link.WireguardPublicKey = link.WireguardPrivateKey.PublicKey()
 	}
 	if cfg.ReplacePeers || len(cfg.Peers) > 0 {
+		logrus.Debug("Update peers for wireguard link")
 		existing := link.WireguardPeers
 		if cfg.ReplacePeers || link.WireguardPeers == nil {
+			logrus.Debug("Reset internal peers map")
 			link.WireguardPeers = map[wgtypes.Key]wgtypes.Peer{}
 		}
 		for _, peerCfg := range cfg.Peers {
 			Expect(peerCfg.PublicKey).NotTo(Equal(wgtypes.Key{}))
 			if peerCfg.UpdateOnly {
-				if _, ok := existing[peerCfg.PublicKey]; !ok {
-					return NotFoundError
-				}
+				_, ok := existing[peerCfg.PublicKey]
+				Expect(ok).To(BeTrue())
 			}
 			if peerCfg.Remove {
-				if _, ok := existing[peerCfg.PublicKey]; !ok {
-					return NotFoundError
-				}
+				_, ok := existing[peerCfg.PublicKey]
+				Expect(ok).To(BeTrue())
 				delete(existing, peerCfg.PublicKey)
 				continue
 			}
+
+			// Get the current peer settings so we can apply the deltas.
 			peer := link.WireguardPeers[peerCfg.PublicKey]
+
+			// Store the public key (this may be zero if the peer ff not exist).
+			peer.PublicKey = peerCfg.PublicKey
+
+			// Apply updates.
 			if peerCfg.Endpoint != nil {
 				peer.Endpoint = peerCfg.Endpoint
 			}
 			if peerCfg.PersistentKeepaliveInterval != nil {
 				peer.PersistentKeepaliveInterval = *peerCfg.PersistentKeepaliveInterval
 			}
+
+			// Construct the set of allowed IPs and then transfer to the slice for storage.
 			allowedIPs := set.New()
 			if !peerCfg.ReplaceAllowedIPs && len(peer.AllowedIPs) > 0 {
 				allowedIPs.AddAll(peer.AllowedIPs)
@@ -128,6 +139,14 @@ func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) 
 			if len(peerCfg.AllowedIPs) > 0 {
 				allowedIPs.AddAll(peerCfg.AllowedIPs)
 			}
+			peer.AllowedIPs = nil
+			allowedIPs.Iter(func(item interface{}) error {
+				peer.AllowedIPs = append(peer.AllowedIPs, item.(net.IPNet))
+				return nil
+			})
+
+			// Store the peer.
+			link.WireguardPeers[peerCfg.PublicKey] = peer
 		}
 	}
 
