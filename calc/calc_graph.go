@@ -297,7 +297,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 	hostIPPassthru := NewDataplanePassthru(callbacks)
 	hostIPPassthru.RegisterWith(allUpdDispatcher)
 
-	if conf.BPFEnabled || conf.VXLANEnabled {
+	if conf.BPFEnabled || conf.VXLANEnabled || conf.WireguardEnabled {
 		// Calculate simple node-ownership routes.
 		//        ...
 		//     Dispatcher (all updates)
