@@ -554,6 +554,107 @@ var _ = Describe("Enable wireguard", func() {
 		Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
 		Expect(s.numCallbacks).To(Equal(1))
 	})
+
+	Describe("wiregued initially not supported", func() {
+		BeforeEach(func() {
+			// Set the fail flags.
+			wgDataplane.FailuresToSimulate = mocknetlink.FailNextLinkAddNotSupported
+
+			// Set the wireguard interface ip address
+			wg.EndpointWireguardUpdate(hostname, zeroKey, ipv4_peer1)
+
+			// No error should occur
+			err := wg.Apply()
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should not create the wireguard interface", func() {
+			link := wgDataplane.NameToLink[ifaceName]
+			Expect(link).To(BeNil())
+		})
+
+		It("should not create the wireguard interface after another apply", func() {
+			err := wg.Apply()
+			Expect(err).NotTo(HaveOccurred())
+			link := wgDataplane.NameToLink[ifaceName]
+			Expect(link).To(BeNil())
+		})
+
+		It("should create the wireguard interface after a resync", func() {
+			wg.QueueResync()
+			err := wg.Apply()
+			Expect(err).NotTo(HaveOccurred())
+			link := wgDataplane.NameToLink[ifaceName]
+			Expect(link).ToNot(BeNil())
+		})
+	})
+
+	for _, testFailFlags := range []mocknetlink.FailFlags{
+		mocknetlink.FailNextNewNetlink, mocknetlink.FailNextLinkAdd, mocknetlink.FailNextLinkByName,
+		mocknetlink.FailNextAddrList, mocknetlink.FailNextAddrAdd, mocknetlink.FailNextAddrDel,
+		mocknetlink.FailNextLinkSetUp, mocknetlink.FailNextLinkSetMTU,
+	} {
+		failFlags := testFailFlags
+		desc := fmt.Sprintf("multiple nodes with routes and failed link management (%v)", failFlags)
+
+		Describe(desc, func() {
+			var savedErr error
+
+			apply := func() error {
+				// We expect at most one error for each test (since we only fail one netlink call at a time). Once
+				// we've hit an error, we should expect no more.
+				if savedErr != nil {
+					log.Debug("Previous failed - invoke apply")
+					return wg.Apply()
+				}
+				if savedErr = wg.Apply(); savedErr != nil {
+					log.Debug("No previous failure - invoke apply")
+					return wg.Apply()
+				}
+				return nil
+			}
+
+			BeforeEach(func() {
+				// Set the fail flags.
+				wgDataplane.FailuresToSimulate = failFlags
+
+				// Set the wireguard interface ip address
+				wg.EndpointWireguardUpdate(hostname, zeroKey, ipv4_peer1)
+				err := apply()
+				Expect(err).NotTo(HaveOccurred())
+
+				// Set the interface to be up
+				wgDataplane.SetIface(ifaceName, true, true)
+				wg.OnIfaceStateChanged(ifaceName, ifacemonitor.StateUp)
+				err = apply()
+				Expect(err).NotTo(HaveOccurred())
+
+				// Change the wireguard interface ip address
+				wg.EndpointWireguardUpdate(hostname, zeroKey, ipv4_peer2)
+				err = apply()
+				Expect(err).NotTo(HaveOccurred())
+
+				// A single error should have occurred.
+				Expect(savedErr).To(HaveOccurred())
+			})
+
+			It("should only see one error irrespective of the first failure", func() {
+				link := wgDataplane.NameToLink[ifaceName]
+				Expect(link).ToNot(BeNil())
+				Expect(link.LinkType).To(Equal("wireguard"))
+				Expect(link.LinkAttrs.MTU).To(Equal(2000))
+				Expect(link.Addrs).To(HaveLen(1))
+				Expect(link.Addrs[0].IP).To(Equal(ipv4_peer2.AsNetIP()))
+
+				// All of these netlink failures will trigger an attempt to get a new client.
+				if failFlags&mocknetlink.FailNextNewNetlink == 0 {
+					Expect(wgDataplane.NumNewNetlinkCalls).To(Equal(1))
+				} else {
+					Expect(wgDataplane.NumNewNetlinkCalls).To(Equal(2))
+				}
+			})
+		})
+	}
 })
 
 var _ = Describe("Wireguard (disabled)", func() {
