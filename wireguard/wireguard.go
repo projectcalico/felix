@@ -1205,6 +1205,7 @@ func (w *Wireguard) ensureRouteRule(netlinkClient netlinkshim.Netlink) error {
 	rule.Priority = w.config.RoutingRulePriority
 	rule.Table = w.config.RoutingTableIndex
 	rule.Mark = w.config.FirewallMark
+	rule.Invert = true
 
 	if err := netlinkClient.RuleAdd(rule); err != nil && !netlinkshim.IsExist(err) {
 		w.logCxt.WithError(err).Error("Unable to create wireguard routing rule")
@@ -1223,6 +1224,7 @@ func (w *Wireguard) ensureNoRouteRule(netlinkClient netlinkshim.Netlink) error {
 	rule.Priority = w.config.RoutingRulePriority
 	rule.Table = w.config.RoutingTableIndex
 	rule.Mark = w.config.FirewallMark
+	rule.Invert = true
 
 	if err := netlinkClient.RuleDel(rule); err != nil && !netlinkshim.IsNotExist(err) {
 		w.logCxt.WithError(err).Error("Unable to delete wireguard routing rule")
