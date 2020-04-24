@@ -77,6 +77,8 @@ type passthruCallbacks interface {
 	OnServiceAccountRemove(proto.ServiceAccountID)
 	OnNamespaceUpdate(*proto.NamespaceUpdate)
 	OnNamespaceRemove(proto.NamespaceID)
+	OnWireguardUpdate(string, *model.Wireguard)
+	OnWireguardRemove(string)
 }
 
 type routeCallbacks interface {

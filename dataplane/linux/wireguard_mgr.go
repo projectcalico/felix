@@ -62,7 +62,7 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 	case *proto.RouteUpdate:
 		log.WithField("msg", msg).Debug("RouteUpdate update")
 		if msg.Type != proto.RouteType_REMOTE_WORKLOAD {
-			log.Debug("RouteUpdate is not a node workload update, ignoring")
+			log.Debug("RouteUpdate is not a peer workload update, ignoring")
 			return
 		}
 		cidr := ip.MustParseCIDROrIP(msg.Dst)
@@ -90,7 +90,7 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		m.wireguardRouteTable.EndpointWireguardUpdate(msg.Hostname, key, ifaceAddr)
 	case *proto.WireguardEndpointRemove:
 		log.WithField("msg", msg).Debug("WireguardEndpointRemove update")
-		m.wireguardRouteTable.EndpointWireguardUpdate(msg.Hostname, wgtypes.Key{}, nil)
+		m.wireguardRouteTable.EndpointWireguardRemove(msg.Hostname)
 	}
 }
 

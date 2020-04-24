@@ -177,7 +177,7 @@ func NewWithShims(
 ) *Wireguard {
 	// Create routetable. We provide dummy callbacks for ARP and conntrack processing.
 	rt := routetable.NewWithShims(
-		[]string{"^" + config.InterfaceName + "$"},
+		[]string{"^" + config.InterfaceName + "$", routetable.InterfaceNone},
 		4, // ipVersion
 		newRoutetableNetlink,
 		false, // vxlan
@@ -194,7 +194,7 @@ func NewWithShims(
 	return &Wireguard{
 		hostname:              hostname,
 		config:                config,
-		logCxt:                logrus.WithFields(logrus.Fields{"enabled": config.Enabled, "ifaceName": config.InterfaceName}),
+		logCxt:                logrus.WithFields(logrus.Fields{"enabled": config.Enabled, "wgIfaceName": config.InterfaceName}),
 		newWireguardNetlink:   newWireguardNetlink,
 		newWireguardDevice:    newWireguardDevice,
 		time:                  timeShim,
@@ -210,7 +210,7 @@ func NewWithShims(
 
 func (w *Wireguard) OnIfaceStateChanged(ifaceName string, state ifacemonitor.State) {
 	if w.config.InterfaceName != ifaceName {
-		w.logCxt.Debug("Ignoring interface state change, not the wireguard interface.")
+		w.logCxt.WithField("ifaceName", ifaceName).Debug("Ignoring interface state change, not the wireguard interface.")
 		return
 	}
 	switch state {
@@ -376,6 +376,16 @@ func (w *Wireguard) EndpointWireguardUpdate(name string, publicKey wgtypes.Key, 
 		update.publicKey = &publicKey
 	}
 	w.setPeerUpdate(name, update)
+}
+
+func (w *Wireguard) EndpointWireguardRemove(name string) {
+	w.logCxt.Debugf("EndpointWireguardRemove: name=%s", name)
+	if !w.config.Enabled {
+		w.logCxt.Debug("Not enabled - ignoring")
+		return
+	}
+	//TODO(rlb): Need better tracking of update/remove from the various sub-configs.
+	w.EndpointWireguardUpdate(name, zeroKey, nil)
 }
 
 func (w *Wireguard) getPeer(name string) *peerData {
@@ -745,11 +755,9 @@ func (w *Wireguard) updateRouteTableFromPeerUpdates() {
 	// and added to another will not add first then delete (which will remove the route, since the route table does not
 	// care about destination node).
 	for name, update := range w.peerUpdates {
-		w.logCxt.Debugf("Deleting routes for node %s", name)
-
 		// Delete routes that are no longer required in routing.
 		update.allowedCidrsDeleted.Iter(func(item interface{}) error {
-			w.logCxt.Debugf("Removing CIDR %s from routetable", item)
+			w.logCxt.Debugf("Removing CIDR %s (node %s) from routetable", item, name)
 			cidr := item.(ip.CIDR)
 			w.routetable.RouteRemove(w.config.InterfaceName, cidr)
 			return nil
@@ -759,7 +767,7 @@ func (w *Wireguard) updateRouteTableFromPeerUpdates() {
 	// Now do the adds or updates. The routetable component will take care of routes that don't actually change and
 	// effectively no-op the delta.
 	for name, update := range w.peerUpdates {
-		w.logCxt.Debugf("Add/update routing for node %s", name)
+		w.logCxt.Debugf("Add/update routing for peer %s", name)
 		node := w.getPeer(name)
 
 		// If the node routing to wireguard does not match with whether we should route then we need to do a full
