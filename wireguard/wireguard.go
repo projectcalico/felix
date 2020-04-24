@@ -17,6 +17,7 @@ package wireguard
 import (
 	"errors"
 	"net"
+	"reflect"
 	"sync"
 	"time"
 
@@ -1201,37 +1202,71 @@ func (w *Wireguard) ensureLinkAddressV4(netlinkClient netlinkshim.Netlink) error
 
 func (w *Wireguard) ensureRouteRule(netlinkClient netlinkshim.Netlink) error {
 	// Add rule attributes.
-	rule := netlink.NewRule()
-	rule.Priority = w.config.RoutingRulePriority
-	rule.Table = w.config.RoutingTableIndex
-	rule.Mark = w.config.FirewallMark
-	rule.Invert = true
+	newrule := netlink.NewRule()
+	newrule.Priority = w.config.RoutingRulePriority
+	newrule.Table = w.config.RoutingTableIndex
+	newrule.Mark = w.config.FirewallMark
+	newrule.Invert = true
 
-	if err := netlinkClient.RuleAdd(rule); err != nil && !netlinkshim.IsExist(err) {
+	// Get the programmed rules.
+	rules, err := netlinkClient.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return err
+	}
+
+	var found bool
+	for _, rule := range rules {
+		if rule.Table == w.config.RoutingTableIndex {
+			w.logCxt.Debugf("Found rule to table %d", w.config.RoutingTableIndex)
+			if reflect.DeepEqual(rule, *newrule) {
+				w.logCxt.Debugf("Rule matches required rule")
+				found = true
+				continue
+			}
+
+			// Rule does not match expected, delete it.
+			if err := netlinkClient.RuleDel(&rule); err != nil {
+				w.logCxt.WithError(err).Error("Unable to delete wireguard routing rule")
+				w.closeNetlinkClient()
+				return err
+			}
+		}
+	}
+
+	if found {
+		return nil
+	}
+
+	// Add the missing rule.
+	if err := netlinkClient.RuleAdd(newrule); err != nil {
 		w.logCxt.WithError(err).Error("Unable to create wireguard routing rule")
 		w.closeNetlinkClient()
 		return err
 	} else {
-		w.logCxt.Debugf("Added rule: %#v", rule)
+		w.logCxt.Debugf("Added rule: %#v", newrule)
 	}
 
 	return nil
 }
 
 func (w *Wireguard) ensureNoRouteRule(netlinkClient netlinkshim.Netlink) error {
-	// Add rule attributes.
-	rule := netlink.NewRule()
-	rule.Priority = w.config.RoutingRulePriority
-	rule.Table = w.config.RoutingTableIndex
-	rule.Mark = w.config.FirewallMark
-	rule.Invert = true
-
-	if err := netlinkClient.RuleDel(rule); err != nil && !netlinkshim.IsNotExist(err) {
-		w.logCxt.WithError(err).Error("Unable to delete wireguard routing rule")
-		w.closeNetlinkClient()
+	// Get the programmed rules.
+	rules, err := netlinkClient.RuleList(netlink.FAMILY_V4)
+	if err != nil {
 		return err
-	} else {
-		w.logCxt.Debugf("Deleted rule: %s", rule)
+	}
+
+	for _, rule := range rules {
+		if rule.Table == w.config.RoutingTableIndex {
+			w.logCxt.Debugf("Found rule to table %d", w.config.RoutingTableIndex)
+
+			// Rule does not match expected, delete it.
+			if err := netlinkClient.RuleDel(&rule); err != nil {
+				w.logCxt.WithError(err).Error("Unable to delete wireguard routing rule")
+				w.closeNetlinkClient()
+				return err
+			}
+		}
 	}
 
 	return nil

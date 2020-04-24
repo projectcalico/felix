@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -26,6 +27,20 @@ func NewMockNetlinkDataplane() *MockNetlinkDataplane {
 	dp := &MockNetlinkDataplane{
 		NameToLink:      map[string]*MockLink{},
 		RouteKeyToRoute: map[string]netlink.Route{},
+		Rules: []netlink.Rule{
+			{
+				Priority: 0,
+				Table:    255,
+			},
+			{
+				Priority: 32766,
+				Table:    254,
+			},
+			{
+				Priority: 32767,
+				Table:    253,
+			},
+		},
 	}
 	dp.ResetDeltas()
 	return dp
@@ -176,6 +191,10 @@ type MockNetlinkDataplane struct {
 	AddedAddrs   set.Set
 	DeletedAddrs set.Set
 
+	Rules        []netlink.Rule
+	AddedRules   []netlink.Rule
+	DeletedRules []netlink.Rule
+
 	RouteKeyToRoute  map[string]netlink.Route
 	AddedRouteKeys   set.Set
 	DeletedRouteKeys set.Set
@@ -216,6 +235,8 @@ func (d *MockNetlinkDataplane) ResetDeltas() {
 	d.NumLinkDeleteCalls = 0
 	d.NumNewNetlinkCalls = 0
 	d.NumNewWireguardCalls = 0
+	d.AddedRules = nil
+	d.DeletedRules = nil
 }
 
 // ----- Mock dataplane management functions for test code -----
@@ -470,7 +491,7 @@ func (d *MockNetlinkDataplane) RuleList(family int) ([]netlink.Rule, error) {
 		return nil, SimulatedError
 	}
 
-	return nil, nil
+	return d.Rules, nil
 }
 
 func (d *MockNetlinkDataplane) RuleAdd(rule *netlink.Rule) error {
@@ -483,6 +504,14 @@ func (d *MockNetlinkDataplane) RuleAdd(rule *netlink.Rule) error {
 		return SimulatedError
 	}
 
+	for _, existing := range d.Rules {
+		if existing.Priority == rule.Priority && existing.Table == rule.Table &&
+			existing.Mark == rule.Mark && existing.Mask == rule.Mask {
+			return AlreadyExistsError
+		}
+	}
+	d.Rules = append(d.Rules, *rule)
+	d.AddedRules = append(d.AddedRules, *rule)
 	return nil
 }
 
@@ -495,6 +524,23 @@ func (d *MockNetlinkDataplane) RuleDel(rule *netlink.Rule) error {
 	if d.shouldFail(FailNextRuleDel) {
 		return SimulatedError
 	}
+
+	var offset int
+	for idx, existing := range d.Rules {
+		log.Debugf("Compare rule %#v against %#v", existing, *rule)
+		if reflect.DeepEqual(existing, *rule) {
+			offset++
+			continue
+		}
+		if offset > 0 {
+			d.Rules[idx-offset] = d.Rules[idx]
+		}
+	}
+	if offset == 0 {
+		return NotFoundError
+	}
+	d.Rules = d.Rules[:len(d.Rules)-offset]
+	d.DeletedRules = append(d.DeletedRules, *rule)
 
 	return nil
 }

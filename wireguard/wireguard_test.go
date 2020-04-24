@@ -44,6 +44,8 @@ var (
 	peer3              = "peer3"
 	FelixRouteProtocol = syscall.RTPROT_BOOT
 	tableIndex         = 99
+	rulePriority       = 98
+	firewallMark       = 10
 
 	ipv4_peer1 = ip.FromString("1.2.3.5")
 	ipv4_peer2 = ip.FromString("1.2.3.6")
@@ -109,8 +111,8 @@ var _ = Describe("Enable wireguard", func() {
 			&Config{
 				Enabled:             true,
 				ListeningPort:       1000,
-				FirewallMark:        10,
-				RoutingRulePriority: 99,
+				FirewallMark:        firewallMark,
+				RoutingRulePriority: rulePriority,
 				RoutingTableIndex:   tableIndex,
 				InterfaceName:       ifaceName,
 				MTU:                 2000,
@@ -130,9 +132,16 @@ var _ = Describe("Enable wireguard", func() {
 	})
 
 	Describe("create the wireguard link", func() {
+		var correctRule *netlink.Rule
 		BeforeEach(func() {
 			err := wg.Apply()
 			Expect(err).NotTo(HaveOccurred())
+
+			correctRule = netlink.NewRule()
+			correctRule.Priority = rulePriority
+			correctRule.Table = tableIndex
+			correctRule.Mark = firewallMark
+			correctRule.Invert = true
 		})
 
 		It("should configure the link but wait for link to be active", func() {
@@ -179,6 +188,57 @@ var _ = Describe("Enable wireguard", func() {
 				Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
 				Expect(s.numCallbacks).To(Equal(1))
 				Expect(s.key).To(Equal(link.WireguardPublicKey))
+			})
+
+			It("should create rule", func() {
+				Expect(wgDataplane.AddedRules).To(HaveLen(1))
+				Expect(wgDataplane.DeletedRules).To(HaveLen(0))
+				Expect(wgDataplane.AddedRules[0]).To(Equal(*correctRule))
+			})
+
+			It("should leave the valid rule in place during resync", func() {
+				wgDataplane.ResetDeltas()
+				err := wg.Apply()
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(wgDataplane.AddedRules).To(HaveLen(0))
+				Expect(wgDataplane.DeletedRules).To(HaveLen(0))
+			})
+
+			It("should not re-add a deleted rule until resync", func() {
+				err := wgDataplane.RuleDel(correctRule)
+				Expect(err).ToNot(HaveOccurred())
+				wgDataplane.ResetDeltas()
+				err = wg.Apply()
+				Expect(err).ToNot(HaveOccurred())
+				Expect(wgDataplane.AddedRules).To(HaveLen(0))
+				Expect(wgDataplane.DeletedRules).To(HaveLen(0))
+
+				wg.QueueResync()
+				err = wg.Apply()
+				Expect(err).ToNot(HaveOccurred())
+				Expect(wgDataplane.AddedRules).To(HaveLen(1))
+				Expect(wgDataplane.DeletedRules).To(HaveLen(0))
+				Expect(wgDataplane.AddedRules[0]).To(Equal(*correctRule))
+			})
+
+			It("should delete invalid rules jumping to the wireguard table", func() {
+				incorrectRule := netlink.NewRule()
+				incorrectRule.Priority = rulePriority + 10
+				incorrectRule.Table = tableIndex
+				incorrectRule.Mark = firewallMark + 10
+				incorrectRule.Invert = false
+				err := wgDataplane.RuleAdd(incorrectRule)
+				Expect(err).ToNot(HaveOccurred())
+				wgDataplane.ResetDeltas()
+
+				wg.QueueResync()
+				err = wg.Apply()
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(wgDataplane.AddedRules).To(HaveLen(0))
+				Expect(wgDataplane.DeletedRules).To(HaveLen(1))
+				Expect(wgDataplane.DeletedRules[0]).To(Equal(*incorrectRule))
 			})
 
 			It("after endpoint update with incorrect key should program the interface address and resend same key as status", func() {
@@ -555,7 +615,7 @@ var _ = Describe("Enable wireguard", func() {
 		Expect(s.numCallbacks).To(Equal(1))
 	})
 
-	Describe("wiregued initially not supported", func() {
+	Describe("wireguard initially not supported", func() {
 		BeforeEach(func() {
 			// Set the fail flags.
 			wgDataplane.FailuresToSimulate = mocknetlink.FailNextLinkAddNotSupported
@@ -678,8 +738,8 @@ var _ = Describe("Wireguard (disabled)", func() {
 				Enabled:             false,
 				ListeningPort:       1000,
 				FirewallMark:        1,
-				RoutingRulePriority: 99,
-				RoutingTableIndex:   99,
+				RoutingRulePriority: rulePriority,
+				RoutingTableIndex:   tableIndex,
 				InterfaceName:       ifaceName,
 				MTU:                 1042,
 			},
