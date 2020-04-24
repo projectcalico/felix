@@ -206,7 +206,7 @@ CALI_CONFIGURABLE_DEFINE(tunnel_mtu, 0x55544d54) /* be 0x55544d54 = ASCII(TMTU) 
 #define CALI_MAP_TC_EXT_PIN(pin)
 #endif
 
-#define map_symbol(name, ver) name##_##ver
+#define map_symbol(name, ver) name##ver
 
 #define MAP_LOOKUP_FN(name, ver) \
 static CALI_BPF_INLINE void * name##_lookup_elem(const void* key)	\
@@ -226,7 +226,7 @@ static CALI_BPF_INLINE int name##_delete_elem(const void* key)	\
 	return bpf_map_delete_elem(&map_symbol(name, ver), key);	\
 }
 
-#define CALI_MAP(name, ver,  map_type, key_type, val_type, size, flags, pin) 		\
+#define __CALI_MAP(name, ver,  map_type, key_type, val_type, size, flags, pin) 		\
 struct bpf_map_def_extended __attribute__((section("maps"))) map_symbol(name, ver) = {	\
 	.type = map_type,								\
 	.key_size = sizeof(key_type),							\
@@ -239,5 +239,12 @@ struct bpf_map_def_extended __attribute__((section("maps"))) map_symbol(name, ve
 	MAP_LOOKUP_FN(name, ver)							\
 	MAP_UPDATE_FN(name, ver)							\
 	MAP_DELETE_FN(name, ver)
+
+#define CALI_MAP(name, ver, map_type, key_type, val_type, size, flags, pin) 	\
+		__CALI_MAP(name, _##ver, map_type, key_type, val_type, size, flags, pin)
+
+#define CALI_MAP_V1(name, map_type, key_type, val_type, size, flags, pin) 	\
+		__CALI_MAP(name,, map_type, key_type, val_type, size, flags, pin)
+
 
 #endif /* __CALI_BPF_H__ */
