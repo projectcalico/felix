@@ -105,10 +105,10 @@ type Config struct {
 
 	// Wireguard configuration
 	WireguardEnabled             bool   `config:"bool;false"`
-	WireguardListeningPort       int    `config:"int;51902"`
+	WireguardListeningPort       int    `config:"int;51820"`
 	WireguardRoutingRulePriority int    `config:"int;99"`
 	WireguardInterfaceName       string `config:"iface-param;wireguard.cali;non-zero"`
-	WireguardMTU                 int    `config:"int;1410;non-zero"`
+	WireguardMTU                 int    `config:"int;1420;non-zero"`
 
 	BPFEnabled                         bool           `config:"bool;false"`
 	BPFDisableUnprivileged             bool           `config:"bool;true"`
