@@ -78,10 +78,10 @@ func (h *DataplanePassthru) OnUpdate(update api.Update) (filterOut bool) {
 		}
 	case model.WireguardKey:
 		if update.Value == nil {
-			log.WithField("update", update).Debug("Passing-through IPPool deletion")
+			log.WithField("update", update).Debug("Passing-through Wireguard deletion")
 			h.callbacks.OnWireguardRemove(key.NodeName)
 		} else {
-			log.WithField("update", update).Debug("Passing-through IPPool update")
+			log.WithField("update", update).Debug("Passing-through Wireguard update")
 			wg := update.Value.(*model.Wireguard)
 			h.callbacks.OnWireguardUpdate(key.NodeName, wg)
 		}
