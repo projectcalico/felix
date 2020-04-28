@@ -778,7 +778,7 @@ func loadConfigFromDatastore(
 	globalConfig = make(map[string]string)
 	var ready bool
 	err = getAndMergeConfig(
-		ctx, client, globalConfig, nil,
+		ctx, client, globalConfig,
 		apiv3.KindClusterInformation, "default",
 		updateprocessors.NewClusterInfoUpdateProcessor(),
 		&ready,
@@ -792,7 +792,7 @@ func loadConfigFromDatastore(
 		return
 	}
 	err = getAndMergeConfig(
-		ctx, client, globalConfig, nil,
+		ctx, client, globalConfig,
 		apiv3.KindFelixConfiguration, "default",
 		updateprocessors.NewFelixConfigUpdateProcessor(),
 		&ready,
@@ -801,7 +801,7 @@ func loadConfigFromDatastore(
 		return
 	}
 	err = getAndMergeConfig(
-		ctx, client, hostConfig, nil,
+		ctx, client, hostConfig,
 		apiv3.KindFelixConfiguration, "node."+hostname,
 		updateprocessors.NewFelixConfigUpdateProcessor(),
 		&ready,
@@ -810,7 +810,7 @@ func loadConfigFromDatastore(
 		return
 	}
 	err = getAndMergeConfig(
-		ctx, client, hostConfig, map[string]string{"WireguardEnabled": "false"},
+		ctx, client, hostConfig,
 		apiv3.KindNode, hostname,
 		updateprocessors.NewFelixNodeUpdateProcessor(),
 		&ready,
@@ -830,7 +830,6 @@ func loadConfigFromDatastore(
 // queried resource doesn't exist.
 func getAndMergeConfig(
 	ctx context.Context, client bapi.Client, config map[string]string,
-	configOverrideIfResNotExist map[string]string,
 	kind string, name string,
 	configConverter watchersyncer.SyncerUpdateProcessor,
 	ready *bool,
@@ -846,10 +845,6 @@ func getAndMergeConfig(
 		switch err.(type) {
 		case cerrors.ErrorResourceDoesNotExist:
 			logCxt.Info("No config of this type")
-			for k, v := range configOverrideIfResNotExist {
-				logCxt.Debugf("Overriding config, setting %s = %s", k, v)
-				config[k] = v
-			}
 			return nil
 		default:
 			logCxt.WithError(err).Info("Failed to load config from datastore")
