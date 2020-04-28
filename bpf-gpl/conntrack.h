@@ -246,20 +246,26 @@ create:
 	CALI_DEBUG("NEW src_to_dst->ifindex %d\n", src_to_dst->ifindex);
 	dst_to_src->ifindex = CT_INVALID_IFINDEX;
 
-	int src_wl;
-
-	/* whitelist src if from workload */
-	src_wl = CALI_F_TO_HOST;
-	/* whitelist src if DNAT + tunnel on host ingress -> will be forwarded */
-	src_wl |= CALI_F_FROM_HEP && ctx->nat_tun_src;
-
-	if (src_wl) {
+	if (CALI_F_FROM_WEP) {
 		src_to_dst->whitelisted = 1;
 		CALI_DEBUG("CT-ALL Whitelisted source side\n");
-	} else {
+	} else if (CALI_F_TO_WEP) {
 		dst_to_src->whitelisted = 1;
 		CALI_DEBUG("CT-ALL Whitelisted dest side\n");
+	} else if (CALI_F_FROM_HEP && ctx->nat_tun_src) {
+		/* Whitelist both we are the node that receives NP traffic and
+		 * does forward to another node through the tunnel.
+		 *
+		 * XXX Unless we do HEP policy, we need to pass the traffic, but
+		 * XXX we also need to go through the CT entries to do the
+		 * XXX translation.
+		 */
+		src_to_dst->whitelisted = 1;
+		dst_to_src->whitelisted = 1;
+	} else {
+		/* HEP */
 	}
+
 	int err = cali_v4_ct_update_elem(k, &ct_value, 0);
 	CALI_VERB("CT-ALL Create result: %d.\n", err);
 	return err;
