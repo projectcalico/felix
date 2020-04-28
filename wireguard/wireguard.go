@@ -50,7 +50,6 @@ var (
 	// Internal types
 	errWrongInterfaceType = errors.New("incorrect interface type for wireguard")
 
-	//TODO(rlb) Don't use zero key, use nil (and pointers or strings).
 	zeroKey = wgtypes.Key{}
 )
 
@@ -917,7 +916,6 @@ func (w *Wireguard) constructWireguardDeltaFromPeerUpdates(conflictingKeys set.S
 				if updatePeer {
 					logCxt.Debugf("Peer needs updating")
 					wireguardUpdate.Peers = append(wireguardUpdate.Peers, wgpeer)
-					//RLBpeer.programmedInWireguard = true
 				}
 			} else if peer.programmedInWireguard {
 				// This peer is programmed in wireguard and it should not be. Add a delta delete.
@@ -926,7 +924,6 @@ func (w *Wireguard) constructWireguardDeltaFromPeerUpdates(conflictingKeys set.S
 					Remove:    true,
 					PublicKey: peer.publicKey,
 				})
-				//RLBpeer.programmedInWireguard = false
 			}
 		}
 
@@ -952,7 +949,6 @@ func (w *Wireguard) constructWireguardDeltaFromPeerUpdates(conflictingKeys set.S
 						Remove:    true,
 						PublicKey: peer.publicKey,
 					})
-					//RLBpeer.programmedInWireguard = false
 				} else {
 					// The peer is not programmed and should be.  Add a delta create.
 					w.logCxt.Debug("Not programmed in wireguard, needs to be added now")
@@ -961,7 +957,6 @@ func (w *Wireguard) constructWireguardDeltaFromPeerUpdates(conflictingKeys set.S
 						Endpoint:   w.endpointUDPAddr(peer.ipv4EndpointAddr.AsNetIP()),
 						AllowedIPs: peer.allowedCidrsForWireguard(),
 					})
-					//RLBpeer.programmedInWireguard = true
 				}
 				return nil
 			})
@@ -1040,17 +1035,16 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 		configuredCidrs := device.Peers[peerIdx].AllowedIPs
 		configuredAddr := device.Peers[peerIdx].Endpoint
 		replaceCidrs := false
-		if len(configuredCidrs) == node.cidrs.Len() {
-			// Same number of allowed IPs configured and cached.  Check for discrepancies.
-			w.logCxt.Debug("Number of CIDRs matches")
-			for _, netCidr := range configuredCidrs {
-				cidr := ip.CIDRFromIPNet(&netCidr)
-				if !node.cidrs.Contains(cidr) {
-					// Need to delete an entry, so just replace
-					w.logCxt.Debugf("Unexpected CIDR configured: %s", cidr)
-					replaceCidrs = true
-					break
-				}
+
+		// Need to check programmed CIDRs against expected to see if any need deleting.
+		w.logCxt.Debug("Check programmed CIDRs for required deletions")
+		for _, netCidr := range configuredCidrs {
+			cidr := ip.CIDRFromIPNet(&netCidr)
+			if !node.cidrs.Contains(cidr) {
+				// Need to delete an entry, so just replace
+				w.logCxt.Debugf("Unexpected CIDR configured: %s", cidr)
+				replaceCidrs = true
+				break
 			}
 		}
 

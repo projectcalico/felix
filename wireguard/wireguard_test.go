@@ -44,17 +44,22 @@ var (
 	peer1              = "peer1"
 	peer2              = "peer2"
 	peer3              = "peer3"
+	peer4              = "peer4"
 	FelixRouteProtocol = syscall.RTPROT_BOOT
 	tableIndex         = 99
 	rulePriority       = 98
 	firewallMark       = 10
+	listeningPort      = 1000
+	mtu                = 2000
 
 	ipv4_int1 = ip.FromString("192.168.0.0")
 	ipv4_int2 = ip.FromString("192.168.10.0")
 
+	ipv4_host  = ip.FromString("1.2.3.0")
 	ipv4_peer1 = ip.FromString("1.2.3.5")
 	ipv4_peer2 = ip.FromString("1.2.3.6")
 	ipv4_peer3 = ip.FromString("10.10.20.20")
+	ipv4_peer4 = ip.FromString("10.10.20.30")
 
 	cidr_local = ip.MustParseCIDROrIP("192.180.0.0/30")
 	cidr_1     = ip.MustParseCIDROrIP("192.168.1.0/24")
@@ -151,12 +156,12 @@ var _ = Describe("Enable wireguard", func() {
 			hostname,
 			&Config{
 				Enabled:             true,
-				ListeningPort:       1000,
+				ListeningPort:       listeningPort,
 				FirewallMark:        firewallMark,
 				RoutingRulePriority: rulePriority,
 				RoutingTableIndex:   tableIndex,
 				InterfaceName:       ifaceName,
-				MTU:                 2000,
+				MTU:                 mtu,
 			},
 			rtDataplane.NewMockNetlink,
 			wgDataplane.NewMockNetlink,
@@ -246,7 +251,7 @@ var _ = Describe("Enable wireguard", func() {
 				Expect(wgDataplane.WireguardOpen).To(BeTrue())
 				link := wgDataplane.NameToLink[ifaceName]
 				Expect(link.WireguardFirewallMark).To(Equal(10))
-				Expect(link.WireguardListenPort).To(Equal(1000))
+				Expect(link.WireguardListenPort).To(Equal(listeningPort))
 				Expect(link.WireguardPrivateKey).NotTo(Equal(zeroKey))
 				Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
 				Expect(s.numCallbacks).To(Equal(1))
@@ -320,7 +325,7 @@ var _ = Describe("Enable wireguard", func() {
 				Expect(link.Addrs[0].IP).To(Equal(ipv4.AsNetIP()))
 				Expect(wgDataplane.WireguardOpen).To(BeTrue())
 				Expect(link.WireguardFirewallMark).To(Equal(10))
-				Expect(link.WireguardListenPort).To(Equal(1000))
+				Expect(link.WireguardListenPort).To(Equal(listeningPort))
 				Expect(link.WireguardPrivateKey).To(Equal(key))
 				Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
 				Expect(s.numCallbacks).To(Equal(2))
@@ -342,7 +347,7 @@ var _ = Describe("Enable wireguard", func() {
 				Expect(link.Addrs[0].IP).To(Equal(ipv4.AsNetIP()))
 				Expect(wgDataplane.WireguardOpen).To(BeTrue())
 				Expect(link.WireguardFirewallMark).To(Equal(10))
-				Expect(link.WireguardListenPort).To(Equal(1000))
+				Expect(link.WireguardListenPort).To(Equal(listeningPort))
 				Expect(link.WireguardPrivateKey).To(Equal(key))
 				Expect(link.WireguardPrivateKey.PublicKey()).To(Equal(link.WireguardPublicKey))
 				Expect(s.numCallbacks).To(Equal(1))
@@ -403,6 +408,26 @@ var _ = Describe("Enable wireguard", func() {
 					Expect(wgDataplane.WireguardConfigUpdated).To(BeFalse())
 				})
 
+				It("should have no updates for backing out an endpoint update", func() {
+					wgDataplane.ResetDeltas()
+					rtDataplane.ResetDeltas()
+					wg.EndpointUpdate(peer1, ipv4_peer2)
+					wg.EndpointUpdate(peer1, ipv4_peer1)
+					err := wg.Apply()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(wgDataplane.WireguardConfigUpdated).To(BeFalse())
+				})
+
+				It("should have no updates for backing out a peer key update", func() {
+					wgDataplane.ResetDeltas()
+					rtDataplane.ResetDeltas()
+					wg.EndpointWireguardUpdate(peer1, key_peer2, nil)
+					wg.EndpointWireguardUpdate(peer1, key_peer1, nil)
+					err := wg.Apply()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(wgDataplane.WireguardConfigUpdated).To(BeFalse())
+				})
+
 				It("should have no updates if adding and deleting peer config before applying", func() {
 					wgDataplane.ResetDeltas()
 					rtDataplane.ResetDeltas()
@@ -417,8 +442,28 @@ var _ = Describe("Enable wireguard", func() {
 					Expect(wgDataplane.WireguardConfigUpdated).To(BeFalse())
 				})
 
+				It("should trigger another status message if deleting the local Wireguard config", func() {
+					wgDataplane.ResetDeltas()
+					rtDataplane.ResetDeltas()
+					Expect(s.numCallbacks).To(Equal(1))
+					wg.EndpointWireguardRemove(hostname)
+					err := wg.Apply()
+					Expect(err).NotTo(HaveOccurred())
+					Expect(s.numCallbacks).To(Equal(2))
+				})
+
 				Describe("public key updated to conflict on two peers", func() {
+					var wgPeers map[wgtypes.Key]wgtypes.Peer
+
 					BeforeEach(func() {
+						link = wgDataplane.NameToLink[ifaceName]
+
+						// Take a copy of the current peer configuration for one of the tests.
+						wgPeers = make(map[wgtypes.Key]wgtypes.Peer)
+						for k, p := range link.WireguardPeers {
+							wgPeers[k] = p
+						}
+
 						wg.EndpointWireguardUpdate(peer2, key_peer1, nil)
 						err := wg.Apply()
 						Expect(err).NotTo(HaveOccurred())
@@ -427,6 +472,20 @@ var _ = Describe("Enable wireguard", func() {
 					It("should remove both peers", func() {
 						Expect(link.WireguardPeers).To(HaveLen(0))
 						Expect(wgDataplane.NumRuleAddCalls).To(Equal(1))
+					})
+
+					It("should handle a resync if the peer is added back in out-of-band", func() {
+						link.WireguardPeers = wgPeers
+						link.WireguardListenPort = listeningPort + 1
+						link.WireguardFirewallMark = firewallMark + 1
+						link.LinkAttrs.MTU = mtu + 1
+						wg.QueueResync()
+						err := wg.Apply()
+						Expect(err).NotTo(HaveOccurred())
+
+						Expect(link.WireguardListenPort).To(Equal(listeningPort))
+						Expect(link.WireguardFirewallMark).To(Equal(firewallMark))
+						Expect(link.WireguardPeers).To(HaveLen(0))
 					})
 
 					It("should add both peers when conflicting public keys updated to no longer conflict", func() {
@@ -1007,6 +1066,88 @@ var _ = Describe("Enable wireguard", func() {
 			})
 		})
 	}
+
+	It("should handle a resync", func() {
+		key_peer1 := mustGeneratePrivateKey().PublicKey()
+		key_peer2 := mustGeneratePrivateKey().PublicKey()
+		key_peer3 := mustGeneratePrivateKey().PublicKey()
+		key_peer4 := mustGeneratePrivateKey().PublicKey()
+
+		wg.EndpointUpdate(hostname, ipv4_host)
+		wg.EndpointUpdate(peer1, ipv4_peer1)
+		wg.EndpointUpdate(peer2, ipv4_peer2)
+		wg.EndpointUpdate(peer3, ipv4_peer3)
+		wg.EndpointUpdate(peer4, ipv4_peer4)
+		wg.EndpointWireguardUpdate(peer1, key_peer1, nil)
+		wg.EndpointWireguardUpdate(peer2, key_peer2, nil)
+		wg.EndpointWireguardUpdate(peer3, key_peer3, nil)
+		wg.EndpointWireguardUpdate(peer4, key_peer3, nil) // Peer 3 and 4 declaring same public key
+		wg.EndpointAllowedCIDRAdd(peer1, cidr_1)
+		wg.EndpointAllowedCIDRAdd(peer2, cidr_2)
+		wg.EndpointAllowedCIDRAdd(peer3, cidr_3)
+		wg.EndpointAllowedCIDRAdd(peer4, cidr_4)
+
+		wgDataplane.AddIface(1, ifaceName, true, true)
+		link := wgDataplane.NameToLink[ifaceName]
+		Expect(link).NotTo(BeNil())
+		link.WireguardPeers = map[wgtypes.Key]wgtypes.Peer{
+			key_peer1: {
+				PublicKey: key_peer1,
+				Endpoint: &net.UDPAddr{
+					IP:   ipv4_peer1.AsNetIP(),
+					Port: listeningPort + 1,
+				},
+				AllowedIPs: []net.IPNet{}, // Need to add an entry (no deletes)
+			},
+			key_peer2: {
+				PublicKey: key_peer2,
+				Endpoint:  nil,
+				AllowedIPs: []net.IPNet{
+					cidr_2.ToIPNet(),
+					cidr_3.ToIPNet(), // Need to delete an entry.
+				},
+			},
+			key_peer3: {
+				PublicKey:  key_peer3,
+				Endpoint:   &net.UDPAddr{},
+				AllowedIPs: []net.IPNet{},
+			},
+			key_peer4: {
+				PublicKey: key_peer4,
+				Endpoint:  &net.UDPAddr{},
+				AllowedIPs: []net.IPNet{
+					cidr_4.ToIPNet(),
+				},
+			},
+		}
+
+		// Apply the update.
+		err := wg.Apply()
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect peer1 and peer2 to be updated and peer3 and peer4 to be deleted.
+		link = wgDataplane.NameToLink[ifaceName]
+		Expect(link).NotTo(BeNil())
+		Expect(link.WireguardPeers).To(HaveLen(2))
+		Expect(link.WireguardPeers).To(HaveKey(key_peer1))
+		Expect(link.WireguardPeers).To(HaveKey(key_peer2))
+		Expect(link.WireguardPeers[key_peer1]).To(Equal(wgtypes.Peer{
+			PublicKey: key_peer1,
+			Endpoint: &net.UDPAddr{
+				IP:   ipv4_peer1.AsNetIP(),
+				Port: listeningPort,
+			},
+			AllowedIPs: []net.IPNet{cidr_1.ToIPNet()},
+		}))
+		Expect(link.WireguardPeers[key_peer2]).To(Equal(wgtypes.Peer{
+			PublicKey: key_peer2,
+			Endpoint: &net.UDPAddr{
+				IP:   ipv4_peer2.AsNetIP(),
+				Port: listeningPort,
+			},
+			AllowedIPs: []net.IPNet{cidr_2.ToIPNet()},
+		}))
+	})
 })
 
 var _ = Describe("Wireguard (disabled)", func() {
@@ -1096,7 +1237,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 
 	for _, testFailFlags := range []mocknetlink.FailFlags{
 		mocknetlink.FailNextNewNetlink, mocknetlink.FailNextLinkDel, mocknetlink.FailNextLinkByName,
-		mocknetlink.FailNextRuleList, mocknetlink.FailNextRuleDel,
+		mocknetlink.FailNextRuleList, mocknetlink.FailNextRuleDel, mocknetlink.FailNextRouteList,
 	} {
 		failFlags := testFailFlags
 		desc := fmt.Sprintf("failed netlink management (%v)", failFlags)
@@ -1105,42 +1246,77 @@ var _ = Describe("Wireguard (disabled)", func() {
 			BeforeEach(func() {
 				// Create an interface to delete.
 				wgDataplane.AddIface(1, ifaceName, true, true)
-
-				// Expect just one apply to fail.
-				apply := newApplyWithErrors(wg, 1)
+				rtDataplane.AddIface(1, ifaceName, true, true)
 
 				// Create a rule to route to the wireguard table.
 				wgDataplane.Rules = []netlink.Rule{
+					{
+						Priority: 0,
+						Table:    255,
+					},
 					{
 						Table:  tableIndex,
 						Mark:   firewallMark,
 						Invert: true,
 					},
+					{
+						Priority: 32766,
+						Table:    254,
+					},
+					{
+						Priority: 32767,
+						Table:    253,
+					},
 				}
 
 				// Set the fail flags and reset errors.
-				wgDataplane.FailuresToSimulate = failFlags
+				if failFlags&mocknetlink.FailNextRouteList != 0 {
+					rtDataplane.FailuresToSimulate = failFlags
+					rtDataplane.PersistFailures = true
+				} else {
+					wgDataplane.FailuresToSimulate = failFlags
+				}
 
 				// Apply the settings - this should remove wireguard config.
-				err := apply.Apply()
-				Expect(err).NotTo(HaveOccurred())
+				err := wg.Apply()
+				Expect(err).To(HaveOccurred())
 
-				// A single error should have occurred.
-				Expect(apply.LastError()).To(HaveOccurred())
+				// The error should now resolve itself.
+				rtDataplane.PersistFailures = false
+				err = wg.Apply()
+				Expect(err).NotTo(HaveOccurred())
 			})
 
 			It("delete the link", func() {
 				link := wgDataplane.NameToLink[ifaceName]
 				Expect(link).To(BeNil())
 
-				// All of these netlink failures will trigger an attempt to get a new netlink client.
-				Expect(wgDataplane.NumNewNetlinkCalls).To(Equal(2))
+				// These errors will trigger netlink reconnection. The routetable retries multiple times, so just assert
+				// there is >0 reconnections.
+				if failFlags&mocknetlink.FailNextRouteList != 0 {
+					Expect(rtDataplane.NumNewNetlinkCalls).To(BeNumerically(">", 1))
+				} else {
+					Expect(wgDataplane.NumNewNetlinkCalls).To(BeNumerically(">", 1))
+				}
 			})
 
 			It("should delete the ip rule", func() {
 				Expect(wgDataplane.NumRuleDelCalls).ToNot(Equal(0))
 				Expect(wgDataplane.NumRuleAddCalls).To(Equal(0))
-				Expect(wgDataplane.Rules).To(HaveLen(0))
+				Expect(wgDataplane.Rules).To(Equal([]netlink.Rule{
+					{
+						Priority: 0,
+						Table:    255,
+					},
+					{
+						Priority: 32766,
+						Table:    254,
+					},
+					{
+						Priority: 32767,
+						Table:    253,
+					},
+				}))
 			})
 		})
 	}
