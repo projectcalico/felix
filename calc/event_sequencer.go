@@ -632,12 +632,12 @@ func (buf *EventSequencer) Flush() {
 
 	// Flush (rare) cluster-wide updates.  There's no particular ordering to these so we might
 	// as well do deletions first to minimise occupancy.
+	buf.flushHostWireguardDeletes()
+	buf.flushHostWireguardUpdates()
 	buf.flushHostIPDeletes()
 	buf.flushHostIPUpdates()
 	buf.flushIPPoolDeletes()
 	buf.flushIPPoolUpdates()
-	buf.flushHostWireguardDeletes()
-	buf.flushHostWireguardUpdates()
 }
 
 func (buf *EventSequencer) flushRemovedIPSets() {

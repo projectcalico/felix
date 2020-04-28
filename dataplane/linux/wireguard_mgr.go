@@ -85,7 +85,7 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		}
 		ifaceAddr := ip.FromString(msg.InterfaceAddr)
 		if ifaceAddr == nil && msg.InterfaceAddr != "" {
-			log.WithError(err).Errorf("error parsing wireguard public key %s for node %s", msg.InterfaceAddr, msg.Hostname)
+			log.WithError(err).Errorf("error parsing wireguard interface address %s for node %s", msg.InterfaceAddr, msg.Hostname)
 		}
 		m.wireguardRouteTable.EndpointWireguardUpdate(msg.Hostname, key, ifaceAddr)
 	case *proto.WireguardEndpointRemove:

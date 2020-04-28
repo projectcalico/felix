@@ -3,8 +3,9 @@ package mock
 import (
 	"sort"
 
-	"github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
 	"github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 
+/*
 var WireguardFailureScenarios = []FailFlags{
 	FailNone,
 	FailNextLinkAdd,
@@ -36,10 +38,15 @@ var WireguardFailureScenarios = []FailFlags{
 	FailNextWireguardDeviceByName,
 	FailNextWireguardConfigureDevice,
 }
+*/
 
 // ----- Mock dataplane management functions for test code -----
 
 func (d *MockNetlinkDataplane) NewMockWireguard() (netlinkshim.Wireguard, error) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	d.NumNewWireguardCalls++
 	if d.PersistentlyFailToConnect || d.shouldFail(FailNextNewWireguard) {
 		return nil, SimulatedError
@@ -57,6 +64,7 @@ func (d *MockNetlinkDataplane) NewMockWireguard() (netlinkshim.Wireguard, error)
 func (d *MockNetlinkDataplane) Close() error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	Expect(d.WireguardOpen).To(BeTrue())
 	d.WireguardOpen = false
@@ -70,7 +78,7 @@ func (d *MockNetlinkDataplane) Close() error {
 func (d *MockNetlinkDataplane) DeviceByName(name string) (*wgtypes.Device, error) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
-	defer ginkgo.GinkgoRecover()
+	defer GinkgoRecover()
 
 	Expect(d.WireguardOpen).To(BeTrue())
 	if d.shouldFail(FailNextWireguardDeviceByName) {
@@ -102,7 +110,7 @@ func (d *MockNetlinkDataplane) DeviceByName(name string) (*wgtypes.Device, error
 func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
-	defer ginkgo.GinkgoRecover()
+	defer GinkgoRecover()
 
 	Expect(d.WireguardOpen).To(BeTrue())
 	if d.shouldFail(FailNextWireguardConfigureDevice) {
@@ -115,13 +123,16 @@ func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) 
 
 	if cfg.FirewallMark != nil {
 		link.WireguardFirewallMark = *cfg.FirewallMark
+		d.WireguardConfigUpdated = true
 	}
 	if cfg.ListenPort != nil {
 		link.WireguardListenPort = *cfg.ListenPort
+		d.WireguardConfigUpdated = true
 	}
 	if cfg.PrivateKey != nil {
 		link.WireguardPrivateKey = *cfg.PrivateKey
 		link.WireguardPublicKey = link.WireguardPrivateKey.PublicKey()
+		d.WireguardConfigUpdated = true
 	}
 	if cfg.ReplacePeers || len(cfg.Peers) > 0 {
 		logrus.Debug("Update peers for wireguard link")
@@ -131,6 +142,7 @@ func (d *MockNetlinkDataplane) ConfigureDevice(name string, cfg wgtypes.Config) 
 			link.WireguardPeers = map[wgtypes.Key]wgtypes.Peer{}
 		}
 		for _, peerCfg := range cfg.Peers {
+			d.WireguardConfigUpdated = true
 			Expect(peerCfg.PublicKey).NotTo(Equal(wgtypes.Key{}))
 			if peerCfg.UpdateOnly {
 				_, ok := existing[peerCfg.PublicKey]

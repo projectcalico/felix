@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
-	"golang.org/x/sys/unix"
-
+	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
@@ -200,15 +200,16 @@ type MockNetlinkDataplane struct {
 	DeletedRouteKeys set.Set
 	UpdatedRouteKeys set.Set
 
-	NumNewNetlinkCalls   int
-	NetlinkOpen          bool
-	NumNewWireguardCalls int
-	WireguardOpen        bool
-	NumLinkAddCalls      int
-	NumLinkDeleteCalls   int
-	ImmediateLinkUp      bool
-	NumRuleAddCalls      int
-	NumRuleDelCalls      int
+	NumNewNetlinkCalls     int
+	NetlinkOpen            bool
+	NumNewWireguardCalls   int
+	WireguardOpen          bool
+	NumLinkAddCalls        int
+	NumLinkDeleteCalls     int
+	ImmediateLinkUp        bool
+	NumRuleAddCalls        int
+	NumRuleDelCalls        int
+	WireguardConfigUpdated bool
 
 	PersistentlyFailToConnect bool
 
@@ -237,6 +238,7 @@ func (d *MockNetlinkDataplane) ResetDeltas() {
 	d.NumNewWireguardCalls = 0
 	d.AddedRules = nil
 	d.DeletedRules = nil
+	d.WireguardConfigUpdated = false
 }
 
 // ----- Mock dataplane management functions for test code -----
@@ -244,6 +246,8 @@ func (d *MockNetlinkDataplane) ResetDeltas() {
 func (d *MockNetlinkDataplane) GetDeletedConntrackEntries() []net.IP {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	cpy := make([]net.IP, len(d.deletedConntrackEntries))
 	copy(cpy, d.deletedConntrackEntries)
 	return cpy
@@ -285,6 +289,10 @@ func (d *MockNetlinkDataplane) SetIface(name string, up bool, running bool) {
 }
 
 func (d *MockNetlinkDataplane) NewMockNetlink() (netlinkshim.Netlink, error) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	d.NumNewNetlinkCalls++
 	if d.PersistentlyFailToConnect || d.shouldFail(FailNextNewNetlink) {
 		return nil, SimulatedError
@@ -297,11 +305,19 @@ func (d *MockNetlinkDataplane) NewMockNetlink() (netlinkshim.Netlink, error) {
 // ----- Netlink API -----
 
 func (d *MockNetlinkDataplane) Delete() {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	Expect(d.NetlinkOpen).To(BeTrue())
 	d.NetlinkOpen = false
 }
 
 func (d *MockNetlinkDataplane) SetSocketTimeout(to time.Duration) error {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextSetSocketTimeout) {
 		return SimulatedError
@@ -310,6 +326,10 @@ func (d *MockNetlinkDataplane) SetSocketTimeout(to time.Duration) error {
 }
 
 func (d *MockNetlinkDataplane) LinkList() ([]netlink.Link, error) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextLinkList) {
 		return nil, SimulatedError
@@ -322,6 +342,10 @@ func (d *MockNetlinkDataplane) LinkList() ([]netlink.Link, error) {
 }
 
 func (d *MockNetlinkDataplane) LinkByName(name string) (netlink.Link, error) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextLinkByNameNotFound) {
 		return nil, NotFoundError
@@ -338,6 +362,7 @@ func (d *MockNetlinkDataplane) LinkByName(name string) (netlink.Link, error) {
 func (d *MockNetlinkDataplane) LinkAdd(link netlink.Link) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	d.NumLinkAddCalls++
 
@@ -364,6 +389,7 @@ func (d *MockNetlinkDataplane) LinkAdd(link netlink.Link) error {
 func (d *MockNetlinkDataplane) LinkDel(link netlink.Link) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	d.NumLinkDeleteCalls++
 
@@ -384,6 +410,7 @@ func (d *MockNetlinkDataplane) LinkDel(link netlink.Link) error {
 func (d *MockNetlinkDataplane) LinkSetMTU(link netlink.Link, mtu int) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextLinkSetMTU) {
@@ -400,6 +427,7 @@ func (d *MockNetlinkDataplane) LinkSetMTU(link netlink.Link, mtu int) error {
 func (d *MockNetlinkDataplane) LinkSetUp(link netlink.Link) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextLinkSetUp) {
@@ -419,6 +447,7 @@ func (d *MockNetlinkDataplane) LinkSetUp(link netlink.Link) error {
 func (d *MockNetlinkDataplane) AddrList(link netlink.Link, family int) ([]netlink.Addr, error) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextAddrList) {
@@ -433,6 +462,7 @@ func (d *MockNetlinkDataplane) AddrList(link netlink.Link, family int) ([]netlin
 func (d *MockNetlinkDataplane) AddrAdd(link netlink.Link, addr *netlink.Addr) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	Expect(addr).NotTo(BeNil())
 	Expect(d.NetlinkOpen).To(BeTrue())
@@ -457,6 +487,7 @@ func (d *MockNetlinkDataplane) AddrAdd(link netlink.Link, addr *netlink.Addr) er
 func (d *MockNetlinkDataplane) AddrDel(link netlink.Link, addr *netlink.Addr) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	Expect(addr).NotTo(BeNil())
 	Expect(d.NetlinkOpen).To(BeTrue())
@@ -485,6 +516,7 @@ func (d *MockNetlinkDataplane) AddrDel(link netlink.Link, addr *netlink.Addr) er
 func (d *MockNetlinkDataplane) RuleList(family int) ([]netlink.Rule, error) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextRuleList) {
@@ -497,6 +529,7 @@ func (d *MockNetlinkDataplane) RuleList(family int) ([]netlink.Rule, error) {
 func (d *MockNetlinkDataplane) RuleAdd(rule *netlink.Rule) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
 	d.NumRuleAddCalls++
@@ -518,6 +551,7 @@ func (d *MockNetlinkDataplane) RuleAdd(rule *netlink.Rule) error {
 func (d *MockNetlinkDataplane) RuleDel(rule *netlink.Rule) error {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+	defer GinkgoRecover()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
 	d.NumRuleDelCalls++
@@ -546,6 +580,10 @@ func (d *MockNetlinkDataplane) RuleDel(rule *netlink.Rule) error {
 }
 
 func (d *MockNetlinkDataplane) RouteListFiltered(family int, filter *netlink.Route, filterMask uint64) ([]netlink.Route, error) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextRouteList) {
 		return nil, SimulatedError
@@ -593,6 +631,10 @@ func (d *MockNetlinkDataplane) RemoveMockRoute(route *netlink.Route) {
 }
 
 func (d *MockNetlinkDataplane) RouteAdd(route *netlink.Route) error {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextRouteAdd) {
 		return SimulatedError
@@ -614,6 +656,10 @@ func (d *MockNetlinkDataplane) RouteAdd(route *netlink.Route) error {
 }
 
 func (d *MockNetlinkDataplane) RouteDel(route *netlink.Route) error {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	Expect(d.NetlinkOpen).To(BeTrue())
 	if d.shouldFail(FailNextRouteDel) {
 		return SimulatedError
@@ -634,6 +680,10 @@ func (d *MockNetlinkDataplane) RouteDel(route *netlink.Route) error {
 // ----- Routetable specific ARP and Conntrack functions -----
 
 func (d *MockNetlinkDataplane) AddStaticArpEntry(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	defer GinkgoRecover()
+
 	if d.shouldFail(FailNextAddARP) {
 		return SimulatedError
 	}
@@ -651,14 +701,15 @@ func (d *MockNetlinkDataplane) HasStaticArpEntry(cidr ip.CIDR, destMAC net.Hardw
 }
 
 func (d *MockNetlinkDataplane) RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
 	log.WithFields(log.Fields{
 		"ipVersion": ipVersion,
 		"ipAddr":    ipAddr,
 		"sleepTime": d.ConntrackSleep,
 	}).Info("Mock dataplane: Removing conntrack flows")
-	d.mutex.Lock()
 	d.deletedConntrackEntries = append(d.deletedConntrackEntries, ipAddr)
-	d.mutex.Unlock()
 	time.Sleep(d.ConntrackSleep)
 }
 
