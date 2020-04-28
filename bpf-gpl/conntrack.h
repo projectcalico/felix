@@ -246,20 +246,26 @@ create:
 	CALI_DEBUG("NEW src_to_dst->ifindex %d\n", src_to_dst->ifindex);
 	dst_to_src->ifindex = CT_INVALID_IFINDEX;
 
-	int src_wl;
-
-	/* whitelist src if from workload */
-	src_wl = CALI_F_TO_HOST;
-	/* whitelist src if DNAT + tunnel on host ingress -> will be forwarded */
-	src_wl |= CALI_F_FROM_HEP && ctx->nat_tun_src;
-
-	if (src_wl) {
+	if (CALI_F_FROM_WEP) {
 		src_to_dst->whitelisted = 1;
 		CALI_DEBUG("CT-ALL Whitelisted source side\n");
-	} else {
+	} else if (CALI_F_TO_WEP) {
 		dst_to_src->whitelisted = 1;
 		CALI_DEBUG("CT-ALL Whitelisted dest side\n");
+	} else if (CALI_F_FROM_HEP && ctx->nat_tun_src) {
+		/* Whitelist both we are the node that receives NP traffic and
+		 * does forward to another node through the tunnel.
+		 *
+		 * XXX Unless we do HEP policy, we need to pass the traffic, but
+		 * XXX we also need to go through the CT entries to do the
+		 * XXX translation.
+		 */
+		src_to_dst->whitelisted = 1;
+		dst_to_src->whitelisted = 1;
+	} else {
+		/* HEP */
 	}
+
 	int err = cali_v4_ct_update_elem(k, &ct_value, 0);
 	CALI_VERB("CT-ALL Create result: %d.\n", err);
 	return err;
@@ -493,7 +499,9 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct ct_ctx
 		CALI_CT_VERB("packet rst = %d\n", tcp_header->rst);
 	}
 
-	struct calico_ct_result result = {};
+	struct calico_ct_result result = {
+		.rc = CALI_CT_NEW, /* it is zero, but make it explicit in the code */
+	};
 
 	if (tcp_header && tcp_header->syn && !tcp_header->ack) {
 		// SYN should always go through policy.
@@ -693,7 +701,7 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct ct_ctx
 		}
 	}
 
-	if (CALI_F_TO_HOST && !ctx->nat_tun_src) {
+	if (CALI_F_FROM_WEP) {
 		/* Source of the packet is the endpoint, so check the src whitelist. */
 		if (src_to_dst->whitelisted) {
 			CALI_CT_VERB("Packet whitelisted by this workload's policy.\n");
@@ -706,9 +714,7 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct ct_ctx
 			CALI_CT_DEBUG("Packet not allowed by ingress/egress whitelist flags (TH).\n");
 			result.rc = tcp_header ? CALI_CT_INVALID : CALI_CT_NEW;
 		}
-	} else if (ret_from_tun) {
-		CALI_DEBUG("Packet returned from tunnel %x\n", be32_to_host(ctx->nat_tun_src));
-	} else {
+	} if (CALI_F_TO_WEP) {
 		/* Dest of the packet is the workload, so check the dest whitelist. */
 		if (dst_to_src->whitelisted) {
 			// Packet was whitelisted by the policy attached to this endpoint.
@@ -722,6 +728,10 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct ct_ctx
 			CALI_CT_DEBUG("Packet not allowed by ingress/egress whitelist flags (FH).\n");
 			result.rc = tcp_header ? CALI_CT_INVALID : CALI_CT_NEW;
 		}
+	} else if (ret_from_tun) {
+		CALI_DEBUG("Packet returned from tunnel %x\n", be32_to_host(ctx->nat_tun_src));
+	} else {
+		/* HEP - no tunnel */
 	}
 
 	if (tcp_header && !related) {
