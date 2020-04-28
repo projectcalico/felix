@@ -847,7 +847,7 @@ func getAndMergeConfig(
 		case cerrors.ErrorResourceDoesNotExist:
 			logCxt.Info("No config of this type")
 			for k, v := range configOverrideIfResNotExist {
-				logCxt.Debug("Overriding config, setting %s = %s", k, v)
+				logCxt.Debugf("Overriding config, setting %s = %s", k, v)
 				config[k] = v
 			}
 			return nil
