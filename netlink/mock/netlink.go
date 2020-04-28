@@ -701,15 +701,14 @@ func (d *MockNetlinkDataplane) HasStaticArpEntry(cidr ip.CIDR, destMAC net.Hardw
 }
 
 func (d *MockNetlinkDataplane) RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-
 	log.WithFields(log.Fields{
 		"ipVersion": ipVersion,
 		"ipAddr":    ipAddr,
 		"sleepTime": d.ConntrackSleep,
 	}).Info("Mock dataplane: Removing conntrack flows")
+	d.mutex.Lock()
 	d.deletedConntrackEntries = append(d.deletedConntrackEntries, ipAddr)
+	d.mutex.Unlock()
 	time.Sleep(d.ConntrackSleep)
 }
 
