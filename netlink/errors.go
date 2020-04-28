@@ -3,6 +3,8 @@ package netlink
 import (
 	"os"
 	"strings"
+
+	"github.com/vishvananda/netlink"
 )
 
 func IsNotSupported(err error) bool {
@@ -23,5 +25,11 @@ func IsNotExist(err error) bool {
 	if err == nil {
 		return false
 	}
-	return os.IsNotExist(err) || strings.Contains(err.Error(), "not found")
+	if os.IsNotExist(err) {
+		return true
+	}
+	if _, ok := err.(netlink.LinkNotFoundError); ok {
+		return true
+	}
+	return strings.Contains(err.Error(), "not found")
 }

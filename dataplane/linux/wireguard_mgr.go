@@ -19,9 +19,8 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
 	"github.com/projectcalico/felix/ip"
-	"github.com/projectcalico/felix/wireguard"
-
 	"github.com/projectcalico/felix/proto"
+	"github.com/projectcalico/felix/wireguard"
 )
 
 // wireguardManager manages the dataplane resources that are used for wireguard encrypted traffic. This includes:
@@ -85,6 +84,8 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		}
 		ifaceAddr := ip.FromString(msg.InterfaceAddr)
 		if ifaceAddr == nil && msg.InterfaceAddr != "" {
+			// Unable to parse the wireguard interface address. We can still enable wireguard without this, so treat as
+			// an update with no interface address.
 			log.WithError(err).Errorf("error parsing wireguard interface address %s for node %s", msg.InterfaceAddr, msg.Hostname)
 		}
 		m.wireguardRouteTable.EndpointWireguardUpdate(msg.Hostname, key, ifaceAddr)

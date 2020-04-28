@@ -15,10 +15,9 @@
 package wireguard_test
 
 import (
-	"errors"
-
 	. "github.com/projectcalico/felix/wireguard"
 
+	"errors"
 	"fmt"
 	"net"
 	"syscall"
