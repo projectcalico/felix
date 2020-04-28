@@ -825,9 +825,6 @@ func loadConfigFromDatastore(
 // getAndMergeConfig gets the v3 resource configuration extracts the separate config values
 // (where each configuration value is stored in a field of the v3 resource Spec) and merges into
 // the supplied map, as required by our v1-style configuration loader.
-//
-// configOverrideIfResNotExist allows setting configuration value if the
-// queried resource doesn't exist.
 func getAndMergeConfig(
 	ctx context.Context, client bapi.Client, config map[string]string,
 	kind string, name string,
@@ -1058,20 +1055,17 @@ func (fc *DataplaneConnector) reconcileWireguardStatUpdate(dpPubKey string) erro
 func (fc *DataplaneConnector) handleWireguardStatUpdateFromDataplane() {
 	var current *proto.WireguardStatusUpdate
 	var ticker *jitter.Ticker
+	var retryC <-chan time.Time
 
 	for {
-		if current == nil {
-			// Block until we get an update
-			current = <-fc.wireguardStatUpdateFromDataplane
+		// Block until we either get an update or it's time to retry a failed update.
+		select {
+		case current = <-fc.wireguardStatUpdateFromDataplane:
 			log.Debugf("Wireguard status update from dataplane driver: %s", current.PublicKey)
-		} else {
-			// Block until we either get an update or it's time to retry a failed update.
-			select {
-			case current = <-fc.wireguardStatUpdateFromDataplane:
-				log.Debugf("Wireguard status update from dataplane driver: %s", current.PublicKey)
-			case <-ticker.C:
-				log.Debug("retrying failed Wireguard status update")
-			}
+		case <-retryC:
+			log.Debug("retrying failed Wireguard status update")
+		}
+		if ticker != nil {
 			ticker.Stop()
 		}
 
@@ -1079,9 +1073,12 @@ func (fc *DataplaneConnector) handleWireguardStatUpdateFromDataplane() {
 		err := fc.reconcileWireguardStatUpdate(current.PublicKey)
 		if err == nil {
 			current = nil
+			retryC = nil
+			ticker = nil
 		} else {
 			// retry reconciling between 2-4 seconds.
 			ticker = jitter.NewTicker(2*time.Second, 2*time.Second)
+			retryC = ticker.C
 		}
 	}
 }

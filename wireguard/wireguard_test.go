@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -608,6 +608,27 @@ var _ = Describe("Enable wireguard", func() {
 								Protocol: FelixRouteProtocol,
 								Scope:    netlink.SCOPE_UNIVERSE,
 								Table:    tableIndex,
+							}))
+						})
+
+						It("should remove a route from the peer", func() {
+							wgDataplane.ResetDeltas()
+							rtDataplane.ResetDeltas()
+							wg.EndpointAllowedCIDRRemove(cidr_1)
+							err := wg.Apply()
+							Expect(err).NotTo(HaveOccurred())
+							Expect(rtDataplane.AddedRouteKeys).To(HaveLen(0))
+							Expect(rtDataplane.DeletedRouteKeys).To(HaveLen(1))
+							Expect(rtDataplane.DeletedRouteKeys).To(HaveKey(routekey_1))
+							Expect(wgDataplane.WireguardConfigUpdated).To(BeTrue())
+							Expect(link.WireguardPeers).To(HaveKey(key_peer1))
+							Expect(link.WireguardPeers[key_peer1]).To(Equal(wgtypes.Peer{
+								PublicKey: key_peer1,
+								Endpoint: &net.UDPAddr{
+									IP:   ipv4_peer1.AsNetIP(),
+									Port: 1000,
+								},
+								AllowedIPs: []net.IPNet{ipnet_2},
 							}))
 						})
 

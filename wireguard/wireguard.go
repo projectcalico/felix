@@ -106,11 +106,11 @@ type Wireguard struct {
 	logCxt   *logrus.Entry
 
 	// Clients, client factories and testing shims.
-	newWireguardNetlink                  func() (netlinkshim.Netlink, error)
-	newWireguardDevice                   func() (netlinkshim.Wireguard, error)
+	newNetlinkClient                     func() (netlinkshim.Netlink, error)
+	newWireguardClient                   func() (netlinkshim.Wireguard, error)
 	cachedNetlinkClient                  netlinkshim.Netlink
-	cachedWireguard                      netlinkshim.Wireguard
-	numConsistentLinkClientFailures      int
+	cachedWireguardClient                netlinkshim.Wireguard
+	numConsistentNetlinkClientFailures   int
 	numConsistentWireguardClientFailures int
 	time                                 timeshim.Time
 
@@ -196,8 +196,8 @@ func NewWithShims(
 		hostname:              hostname,
 		config:                config,
 		logCxt:                logrus.WithFields(logrus.Fields{"enabled": config.Enabled, "wgIfaceName": config.InterfaceName}),
-		newWireguardNetlink:   newWireguardNetlink,
-		newWireguardDevice:    newWireguardDevice,
+		newNetlinkClient:      newWireguardNetlink,
+		newWireguardClient:    newWireguardDevice,
 		time:                  timeShim,
 		peers:                 map[string]*peerData{},
 		cidrToNodeName:        map[ip.CIDR]string{},
@@ -222,7 +222,7 @@ func (w *Wireguard) OnIfaceStateChanged(ifaceName string, state ifacemonitor.Sta
 			w.inSyncWireguard = false
 		}
 	case ifacemonitor.StateDown:
-		w.logCxt.Debug("Interface up, marking for route sync")
+		w.logCxt.Debug("Interface down")
 		w.ifaceUp = false
 	}
 
@@ -398,28 +398,6 @@ func (w *Wireguard) EndpointWireguardRemove(name string) {
 	w.setPeerUpdate(name, update)
 }
 
-func (w *Wireguard) getOrInitPeer(name string) *peerData {
-	if n := w.peers[name]; n != nil {
-		return n
-	}
-	return newPeerData()
-}
-
-func (w *Wireguard) setPeer(name string, node *peerData) {
-	w.peers[name] = node
-}
-
-func (w *Wireguard) getOrInitPeerUpdate(name string) *peerUpdateData {
-	if nu := w.peerUpdates[name]; nu != nil {
-		return nu
-	}
-	return newPeerUpdateData()
-}
-
-func (w *Wireguard) setPeerUpdate(name string, update *peerUpdateData) {
-	w.peerUpdates[name] = update
-}
-
 func (w *Wireguard) QueueResync() {
 	w.logCxt.Info("Queueing a resync of wireguard configuration")
 
@@ -514,6 +492,7 @@ func (w *Wireguard) Apply() (err error) {
 		// or we'll need to do a full resync, in either case no need to keep the deltas.  Don't do this immediately because
 		// we may need them to calculate the wireguard config delta.
 		w.peerUpdates = map[string]*peerUpdateData{}
+		w.cidrToNodeNameUpdates = map[ip.CIDR]string{}
 	}()
 
 	// If necessary ensure the wireguard device is configured. If this errors or if it is not yet oper up then no point
@@ -525,9 +504,7 @@ func (w *Wireguard) Apply() (err error) {
 			// Wireguard is not supported, set everything to "in-sync" since there is not a lot of point doing anything
 			// else. We don't return an error in this case, instead we'll retry every resync period.
 			w.logCxt.Info("Wireguard is not supported - publishing no public key")
-			w.ourPublicKey = &zeroKey
-			w.setAllInSync(true)
-			w.wireguardNotSupported = true
+			w.setNotSupported()
 			return nil
 		} else if err != nil {
 			// Error configuring link, pass up the stack. Close the netlink client as a precaution.
@@ -545,12 +522,10 @@ func (w *Wireguard) Apply() (err error) {
 	wireguardClient, err := w.getWireguardClient()
 	if netlinkshim.IsNotSupported(err) {
 		w.logCxt.Info("Wireguard is not supported - send zero-key status")
-		w.ourPublicKey = &zeroKey
-		w.setAllInSync(true)
-		w.wireguardNotSupported = true
+		w.setNotSupported()
 		return nil
 	} else if err != nil {
-		w.logCxt.Errorf("error obtaining wireguard client: %v", err)
+		w.logCxt.WithError(err).Error("error obtaining wireguard client")
 		return ErrUpdateFailed
 	}
 
@@ -660,6 +635,40 @@ func (w *Wireguard) Apply() (err error) {
 	return nil
 }
 
+// setNotSupported is called when we determine wireguard is not supported.
+func (w *Wireguard) setNotSupported() {
+	// Publish a zero-key back to the calc graph.
+	w.ourPublicKey = &zeroKey
+
+	// Indicate that we are now fully in-sync to prevent further queries/updates to the dataplane (until next resync).
+	w.setAllInSync(true)
+
+	// And flag wireguard is not supported to short circuit some of the Apply processing.
+	w.wireguardNotSupported = true
+}
+
+func (w *Wireguard) getOrInitPeer(name string) *peerData {
+	if n := w.peers[name]; n != nil {
+		return n
+	}
+	return newPeerData()
+}
+
+func (w *Wireguard) setPeer(name string, node *peerData) {
+	w.peers[name] = node
+}
+
+func (w *Wireguard) getOrInitPeerUpdate(name string) *peerUpdateData {
+	if nu := w.peerUpdates[name]; nu != nil {
+		return nu
+	}
+	return newPeerUpdateData()
+}
+
+func (w *Wireguard) setPeerUpdate(name string, update *peerUpdateData) {
+	w.peerUpdates[name] = update
+}
+
 // handlePeerAndRouteDeletionFromPeerUpdates handles wireguard peer deletion preparation:
 // -  Updates routing table to remove routes for permantently deleted peers
 // -  Creates a wireguard config update for deleted peers, or for peers whose public key has changed (which for
@@ -682,12 +691,13 @@ func (w *Wireguard) handlePeerAndRouteDeletionFromPeerUpdates(conflictingKeys se
 			w.logCxt.Infof("Node %s is deleted, remove associated routes and wireguard peer", name)
 			delete(w.peers, name)
 
-			// Delete all of the node routes for the peerData. Note that we always update the routing table routes using
-			// delta updates even during a full resync. The routetable component takes care of its own kernel-cache
-			// synchronization.
+			// Delete all of the node routes for the peerData and remove CIDR->node association. Note that we always
+			// update the routing table routes using delta updates even during a full resync. The routetable component
+			// takes care of its own kernel-cache synchronization.
 			node.cidrs.Iter(func(item interface{}) error {
 				cidr := item.(ip.CIDR)
 				w.routetable.RouteRemove(w.config.InterfaceName, cidr)
+				delete(w.cidrToNodeName, cidr)
 				w.logCxt.Debugf("Deleting route for %s", cidr)
 				return nil
 			})
@@ -767,14 +777,18 @@ func (w *Wireguard) updateCacheFromPeerUpdates(conflictingKeys set.Set) {
 			updated = true
 		}
 		update.allowedCidrsDeleted.Iter(func(item interface{}) error {
-			w.logCxt.Debugf("Discarding CIDR %s", item)
-			node.cidrs.Discard(item)
+			cidr := item.(ip.CIDR)
+			w.logCxt.Debugf("Discarding CIDR %s", cidr)
+			node.cidrs.Discard(cidr)
+			delete(w.cidrToNodeName, cidr)
 			updated = true
 			return nil
 		})
 		update.allowedCidrsAdded.Iter(func(item interface{}) error {
-			w.logCxt.Debugf("Adding CIDR %s", item)
-			node.cidrs.Add(item)
+			cidr := item.(ip.CIDR)
+			w.logCxt.Debugf("Adding CIDR %s", cidr)
+			node.cidrs.Add(cidr)
+			w.cidrToNodeName[cidr] = name
 			updated = true
 			return nil
 		})
@@ -1379,7 +1393,7 @@ func (w *Wireguard) shouldProgramWireguardPeer(name string, node *peerData) bool
 
 // getWireguardClient returns a wireguard client for managing wireguard devices.
 func (w *Wireguard) getWireguardClient() (netlinkshim.Wireguard, error) {
-	if w.cachedWireguard == nil {
+	if w.cachedWireguardClient == nil {
 		if w.numConsistentWireguardClientFailures >= maxConnFailures && w.numConsistentWireguardClientFailures%wireguardClientRetryInterval != 0 {
 			// It is a valid condition that we cannot connect to the wireguard client, so just log.
 			w.logCxt.WithField("numFailures", w.numConsistentWireguardClientFailures).Debug(
@@ -1387,57 +1401,57 @@ func (w *Wireguard) getWireguardClient() (netlinkshim.Wireguard, error) {
 			return nil, ErrNotSupportedTooManyFailures
 		}
 		w.logCxt.Info("Trying to connect to wireguard client")
-		client, err := w.newWireguardDevice()
+		client, err := w.newWireguardClient()
 		if err != nil {
 			w.numConsistentWireguardClientFailures++
 			w.logCxt.WithError(err).WithField("numFailures", w.numConsistentWireguardClientFailures).Info(
 				"Failed to connect to wireguard client")
 			return nil, err
 		}
-		w.cachedWireguard = client
+		w.cachedWireguardClient = client
 	}
 	if w.numConsistentWireguardClientFailures > 0 {
 		w.logCxt.WithField("numFailures", w.numConsistentWireguardClientFailures).Info(
 			"Connected to linkClient after previous failures.")
 		w.numConsistentWireguardClientFailures = 0
 	}
-	return w.cachedWireguard, nil
+	return w.cachedWireguardClient, nil
 }
 
 // closeWireguardClient closes the current wireguard client. This forces a wireguard client reconnect next call to
 // getWireguardClient.
 func (w *Wireguard) closeWireguardClient() {
-	if w.cachedWireguard == nil {
+	if w.cachedWireguardClient == nil {
 		return
 	}
-	if err := w.cachedWireguard.Close(); err != nil {
+	if err := w.cachedWireguardClient.Close(); err != nil {
 		w.logCxt.WithError(err).Error("Failed to close wireguard client, ignoring.")
 	}
-	w.cachedWireguard = nil
+	w.cachedWireguardClient = nil
 }
 
 // getNetlinkClient returns a netlink client for managing device links.
 func (w *Wireguard) getNetlinkClient() (netlinkshim.Netlink, error) {
 	if w.cachedNetlinkClient == nil {
 		// We do not expect the standard netlink client to fail, so panic after a set number of failed attempts.
-		if w.numConsistentLinkClientFailures >= maxConnFailures {
-			w.logCxt.WithField("numFailures", w.numConsistentLinkClientFailures).Panic(
+		if w.numConsistentNetlinkClientFailures >= maxConnFailures {
+			w.logCxt.WithField("numFailures", w.numConsistentNetlinkClientFailures).Panic(
 				"Repeatedly failed to connect to netlink.")
 		}
 		w.logCxt.Info("Trying to connect to linkClient")
-		client, err := w.newWireguardNetlink()
+		client, err := w.newNetlinkClient()
 		if err != nil {
-			w.numConsistentLinkClientFailures++
-			w.logCxt.WithError(err).WithField("numFailures", w.numConsistentLinkClientFailures).Error(
+			w.numConsistentNetlinkClientFailures++
+			w.logCxt.WithError(err).WithField("numFailures", w.numConsistentNetlinkClientFailures).Error(
 				"Failed to connect to linkClient")
 			return nil, err
 		}
 		w.cachedNetlinkClient = client
 	}
-	if w.numConsistentLinkClientFailures > 0 {
-		w.logCxt.WithField("numFailures", w.numConsistentLinkClientFailures).Info(
+	if w.numConsistentNetlinkClientFailures > 0 {
+		w.logCxt.WithField("numFailures", w.numConsistentNetlinkClientFailures).Info(
 			"Connected to linkClient after previous failures.")
-		w.numConsistentLinkClientFailures = 0
+		w.numConsistentNetlinkClientFailures = 0
 	}
 	return w.cachedNetlinkClient, nil
 }
