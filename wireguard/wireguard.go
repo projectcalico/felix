@@ -16,6 +16,7 @@ package wireguard
 
 import (
 	"errors"
+	"github.com/projectcalico/felix/routerule"
 	"net"
 	"reflect"
 	"sync"
@@ -137,8 +138,9 @@ type Wireguard struct {
 	peerUpdates           map[string]*peerUpdateData
 	cidrToNodeNameUpdates map[ip.CIDR]string
 
-	// Wireguard routing table
+	// Wireguard routing table and rule managers
 	routetable *routetable.RouteTable
+	routerule  *routerule.RouteRules
 
 	// Callback function used to notify of public key updates for the local peerData
 	statusCallback func(publicKey wgtypes.Key) error
@@ -191,6 +193,21 @@ func NewWithShims(
 		true, //removeExternalRoutes
 		config.RoutingTableIndex,
 	)
+	// Create routerule.
+	rr, err := routerule.NewWithShims(
+		4, // ipVersion
+		config.RoutingRulePriority,
+		set.From(config.RoutingTableIndex),
+		routerule.RulesMatchSrcFWMarkTable,
+		routerule.RulesMatchSrcFWMarkTable,
+		netlinkTimeout,
+		func() (routerule.HandleIface, error) {
+			return newWireguardNetlink()
+		},
+	)
+	if err != nil {
+		logrus.WithError(err).Panic("Unexpected error creating rule manager")
+	}
 
 	return &Wireguard{
 		hostname:              hostname,
@@ -205,6 +222,7 @@ func NewWithShims(
 		peerUpdates:           map[string]*peerUpdateData{},
 		cidrToNodeNameUpdates: map[ip.CIDR]string{},
 		routetable:            rt,
+		routerule:             rr,
 		statusCallback:        statusCallback,
 	}
 }
