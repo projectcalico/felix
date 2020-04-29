@@ -29,6 +29,7 @@ import (
 	. "github.com/projectcalico/felix/bpf/asm"
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/proto"
+	"github.com/projectcalico/felix/rules"
 )
 
 type Builder struct {
@@ -83,6 +84,8 @@ var (
 	stateOffPolResult      int16 = 16
 	stateOffSrcPort        int16 = 20
 	stateOffDstPort        int16 = 22
+	stateOffICMPType       int16 = 22
+	stateOffICMPCode       int16 = 23
 	_                            = stateOffDstPort
 	stateOffPostNATDstPort int16 = 24
 	stateOffIPProto        int16 = 26
@@ -205,6 +208,30 @@ func (p *Builder) setUpIPSetKey(ipsetID uint64, keyOffset, ipOffset, portOffset 
 	p.b.StoreStack32(R1, keyOffset+ipsKeyID+4)
 }
 
+func validateNet (rule *proto.Rule) (*proto.Rule) {
+	ruleCopy := rule
+	var filteredAll bool
+	ruleCopy.SrcNet, filteredAll = rules.FilterNets(rule.SrcNet, uint8(rule.IpVersion))
+	if filteredAll {
+		return nil
+	}
+        ruleCopy.NotSrcNet, filteredAll = rules.FilterNets(rule.NotSrcNet, uint8(rule.IpVersion))
+        if filteredAll {
+                return nil
+        }
+
+        ruleCopy.DstNet, filteredAll = rules.FilterNets(rule.DstNet, uint8(rule.IpVersion))
+        if filteredAll {
+                return nil
+        }
+
+        ruleCopy.NotDstNet, filteredAll = rules.FilterNets(rule.NotDstNet, uint8(rule.IpVersion))
+        if filteredAll {
+                return nil
+        }
+	return ruleCopy
+}
+
 func (p *Builder) writeRules(rules [][][]*proto.Rule) {
 	for polOrProfIdx, polsOrProfs := range rules {
 		endOfTierLabel := fmt.Sprint("end_of_tier_", polOrProfIdx)
@@ -213,9 +240,12 @@ func (p *Builder) writeRules(rules [][][]*proto.Rule) {
 		for polIdx, pol := range polsOrProfs {
 			log.Debugf("Start of policy/profile %d", polIdx)
 			for ruleIdx, rule := range pol {
-				log.Debugf("Start of rule %d", ruleIdx)
-				p.writeRule(rule, endOfTierLabel)
-				log.Debugf("End of rule %d", ruleIdx)
+				rule = validateNet (rule)
+				if rule != nil {
+					log.Debugf("Start of rule %d", ruleIdx)
+					p.writeRule(rule, endOfTierLabel)
+					log.Debugf("End of rule %d", ruleIdx)
+				}
 			}
 			log.Debugf("End of policy/profile %d", polIdx)
 		}
@@ -236,7 +266,11 @@ const (
 )
 
 func (p *Builder) writeRule(rule *proto.Rule, passLabel string) {
-	// TODO IP version
+	if rule.IpVersion != 0 && rule.IpVersion != 4 {
+		log.Debugf ("Skipping rule it is for a different IP version.")
+		return
+	}
+
 	p.writeStartOfRule()
 
 	if rule.Protocol != nil {
@@ -302,7 +336,26 @@ func (p *Builder) writeRule(rule *proto.Rule, passLabel string) {
 		p.writePortsMatch(true, legDest, rule.NotDstPorts, rule.NotDstNamedPortIpSetIds)
 	}
 
-	// TODO ICMP
+	if rule.Icmp != nil {
+		log.WithField("icmpv4", rule.Icmp).Debugf("ICMP type/code match")
+		switch icmp := rule.Icmp.(type) {
+		case *proto.Rule_IcmpTypeCode:
+			p.writeICMPTypeMatch(false, uint8(icmp.IcmpTypeCode.Type))
+			p.writeICMPCodeMatch(false, uint8(icmp.IcmpTypeCode.Code))
+		case *proto.Rule_IcmpType:
+			p.writeICMPTypeMatch(false, uint8(icmp.IcmpType))
+		}
+	}
+	if rule.NotIcmp != nil {
+		log.WithField("icmpv4", rule.Icmp).Debugf("Not ICMP type/code match")
+		switch icmp := rule.NotIcmp.(type) {
+		case *proto.Rule_NotIcmpTypeCode:
+			p.writeICMPTypeMatch(true, uint8(icmp.NotIcmpTypeCode.Type))
+			p.writeICMPCodeMatch(true, uint8(icmp.NotIcmpTypeCode.Code))
+		case *proto.Rule_NotIcmpType:
+			p.writeICMPTypeMatch(true, uint8(icmp.NotIcmpType))
+		}
+	}
 
 	p.writeEndOfRule(rule, passLabel)
 	p.ruleID++
@@ -335,6 +388,23 @@ func (p *Builder) writeProtoMatch(negate bool, protocol *proto.Protocol) {
 	}
 }
 
+func (p *Builder) writeICMPTypeMatch (negate bool,icmpType uint8) {
+	p.b.Load8(R1,R9, stateOffICMPType)
+	if negate {
+		p.b.JumpEqImm64(R1, int32(icmpType), p.endOfRuleLabel())
+	} else {
+		p.b.JumpNEImm64(R1, int32(icmpType), p.endOfRuleLabel())
+	}
+}
+
+func (p *Builder) writeICMPCodeMatch (negate bool,icmpCode uint8) {
+	p.b.Load8(R1,R9, stateOffICMPCode)
+	if negate {
+		p.b.JumpEqImm64(R1, int32(icmpCode), p.endOfRuleLabel())
+	} else {
+		p.b.JumpNEImm64(R1, int32(icmpCode), p.endOfRuleLabel())
+	}
+}
 func (p *Builder) writeCIDRSMatch(negate bool, leg matchLeg, cidrs []string) {
 	var offset int16
 	if leg == legSource {

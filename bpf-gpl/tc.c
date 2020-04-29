@@ -611,6 +611,12 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 			}
 		}
 	}
+	if (state.ip_proto == IPPROTO_ICMP)
+	{
+		state.icmp_type = icmp_header->type;
+        	state.icmp_code = icmp_header->code;
+	}
+
 
 	// Set up an entry in the state map and then jump to the normal policy program.
 	int key = 0;
