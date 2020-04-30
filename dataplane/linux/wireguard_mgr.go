@@ -15,6 +15,7 @@
 package intdataplane
 
 import (
+	"github.com/projectcalico/libcalico-go/lib/set"
 	log "github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
@@ -31,12 +32,15 @@ import (
 // -  Wireguard peer configuration
 //
 // The wireguard component implements the routetable interface and so dataplane programming is triggered through calls
-// to the Apply method, with period resyncs occuring after calls to QueueResync. Calls from the main OnUpdate method
+// to the Apply method, with periodic resyncs occuring after calls to QueueResync. Calls from the main OnUpdate method
 // call through to the various update methods on the wireguard module which simply record state without actually
 // programming.
 type wireguardManager struct {
 	// Our dependencies.
 	wireguardRouteTable *wireguard.Wireguard
+
+	// Local and remote workload CIDRs.
+	localCIDRs set.Set
 }
 
 type WireguardStatusUpdateCallback func(ipVersion uint8, id interface{}, status string)
@@ -46,6 +50,7 @@ func newWireguardManager(
 ) *wireguardManager {
 	return &wireguardManager{
 		wireguardRouteTable: wireguardRouteTable,
+		localCIDRs: set.New(),
 	}
 }
 
@@ -60,21 +65,40 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		m.wireguardRouteTable.EndpointRemove(msg.Hostname)
 	case *proto.RouteUpdate:
 		log.WithField("msg", msg).Debug("RouteUpdate update")
-		if msg.Type != proto.RouteType_REMOTE_WORKLOAD {
+		switch msg.Type {
+		case proto.RouteType_LOCAL_WORKLOAD:
+			if cidr := ip.MustParseCIDROrIP(msg.Dst); cidr == nil {
+				log.Error("error parsing RouteUpdate CIDR", msg.Dst)
+			} else if cidr.Version() == 4 {
+				log.Debug("Update for IPv4 CIDR: %s", cidr)
+				m.localCIDRs.Add(cidr)
+				m.wireguardRouteTable.LocalWorkloadCIDRAdd(cidr)
+			}
+		case proto.RouteType_REMOTE_WORKLOAD:
+			if cidr := ip.MustParseCIDROrIP(msg.Dst); cidr == nil {
+				log.Error("error parsing RouteUpdate CIDR", msg.Dst)
+			} else if cidr.Version() == 4 {
+				log.Debug("Update for IPv4 CIDR: %s", cidr)
+				m.wireguardRouteTable.EndpointAllowedCIDRAdd(msg.DstNodeName, cidr)
+			}
+		default:
 			log.Debug("RouteUpdate is not a peer workload update, ignoring")
-			return
-		}
-		cidr := ip.MustParseCIDROrIP(msg.Dst)
-		if cidr != nil {
-			m.wireguardRouteTable.EndpointAllowedCIDRAdd(msg.DstNodeName, cidr)
 		}
 	case *proto.RouteRemove:
 		log.WithField("msg", msg).Debug("RouteRemove update")
 		cidr := ip.MustParseCIDROrIP(msg.Dst)
-		if cidr != nil {
-			m.wireguardRouteTable.EndpointAllowedCIDRRemove(cidr)
-		} else {
+		if cidr == nil {
 			log.Error("error parsing RouteRemove CIDR", msg.Dst)
+		} else if cidr.Version() != 4 {
+			log.Debug("Route removal for non-IPv4 CIDR: %s", cidr)
+			m.wireguardRouteTable.EndpointAllowedCIDRRemove(cidr)
+		} else if m.localCIDRs.Contains(cidr) {
+			log.Debug("Route removal for local IPv4 CIDR: %s", cidr)
+			m.localCIDRs.Discard(cidr)
+			m.wireguardRouteTable.LocalWorkloadCIDRRemove(cidr)
+		} else {
+			log.Debug("Route removal for remote IPv4 CIDR: %s", cidr)
+			m.wireguardRouteTable.EndpointAllowedCIDRRemove(cidr)
 		}
 	case *proto.WireguardEndpointUpdate:
 		log.WithField("msg", msg).Debug("WireguardEndpointUpdate update")
@@ -82,11 +106,16 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		if err != nil {
 			log.WithError(err).Errorf("error parsing wireguard public key %s for node %s", msg.PublicKey, msg.Hostname)
 		}
-		ifaceAddr := ip.FromString(msg.InterfaceAddr)
-		if ifaceAddr == nil && msg.InterfaceAddr != "" {
-			// Unable to parse the wireguard interface address. We can still enable wireguard without this, so treat as
-			// an update with no interface address.
-			log.WithError(err).Errorf("error parsing wireguard interface address %s for node %s", msg.InterfaceAddr, msg.Hostname)
+		var ifaceAddr ip.Addr
+		if msg.InterfaceIpv4Addr != "" {
+			addr := ip.FromString(msg.InterfaceIpv4Addr)
+			if addr == nil {
+				// Unable to parse the wireguard interface address. We can still enable wireguard without this, so treat as
+				// an update with no interface address.
+				log.WithError(err).Errorf("error parsing wireguard interface address %s for node %s", msg.InterfaceIpv4Addr, msg.Hostname)
+			} else if addr.Version() == 4 {
+				ifaceAddr = addr
+			}
 		}
 		m.wireguardRouteTable.EndpointWireguardUpdate(msg.Hostname, key, ifaceAddr)
 	case *proto.WireguardEndpointRemove:
