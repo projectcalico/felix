@@ -280,8 +280,7 @@ var _ = Describe("Enable wireguard", func() {
 				Expect(err).ToNot(HaveOccurred())
 
 				Expect(rrDataplane.AddedRules).To(HaveLen(0))
-				Expect(rrDataplane.DeletedRules).To(HaveLen(1))
-				Expect(rrDataplane.DeletedRules[0]).To(Equal(*incorrectRule))
+				Expect(rrDataplane.DeletedRules).To(ConsistOf(*incorrectRule))
 			})
 
 			It("after endpoint update with incorrect key should program the interface address and resend same key as status", func() {
@@ -329,20 +328,22 @@ var _ = Describe("Enable wireguard", func() {
 			})
 
 			Describe("add local routes with overlap", func() {
-				var rule1, rule2, rule3 *netlink.Rule
-				var lc1, lc2, lc3 ip.CIDR
+				var rule1, rule2, rule3, rule4 *netlink.Rule
+				var lc1, lc2, lc3, lc4 ip.CIDR
 
 				BeforeEach(func() {
 					lc1 = ip.MustParseCIDROrIP("12.12.10.10/32")
 					lc2 = ip.MustParseCIDROrIP("12.12.10.0/24")
 					lc3 = ip.MustParseCIDROrIP("12.12.11.0/32")
+					lc4 = ip.MustParseCIDROrIP("12.12.10.11/32")
 					lc1Net := lc1.ToIPNet()
 					lc2Net := lc2.ToIPNet()
 					lc3Net := lc3.ToIPNet()
+					lc4Net := lc4.ToIPNet()
 
-					wg.LocalWorkloadCIDRAdd(lc1)
-					wg.LocalWorkloadCIDRAdd(lc2)
-					wg.LocalWorkloadCIDRAdd(lc3)
+					wg.RouteUpdate(hostname, lc1)
+					wg.RouteUpdate(hostname, lc2)
+					wg.RouteUpdate(hostname, lc3)
 
 					rule1 = netlink.NewRule()
 					rule1.Family = netlink.FAMILY_V4
@@ -368,12 +369,19 @@ var _ = Describe("Enable wireguard", func() {
 					rule3.Mark = 0
 					rule3.Mask = firewallMark
 
+					rule4 = netlink.NewRule()
+					rule4.Family = netlink.FAMILY_V4
+					rule4.Src = &lc4Net
+					rule4.Priority = rulePriority
+					rule4.Table = tableIndex
+					rule4.Mark = 0
+					rule4.Mask = firewallMark
+
 					err := wg.Apply()
 					Expect(err).ToNot(HaveOccurred())
 				})
 
 				It("should not create rules until local routes have been added", func() {
-					Expect(rrDataplane.AddedRules).To(HaveLen(2))
 					Expect(rrDataplane.DeletedRules).To(HaveLen(0))
 					Expect(rrDataplane.AddedRules).To(ConsistOf(*rule2, *rule3))
 				})
@@ -390,20 +398,47 @@ var _ = Describe("Enable wireguard", func() {
 					wg.QueueResync()
 					err = wg.Apply()
 					Expect(err).ToNot(HaveOccurred())
-					Expect(rrDataplane.AddedRules).To(HaveLen(1))
 					Expect(rrDataplane.DeletedRules).To(HaveLen(0))
-					Expect(rrDataplane.AddedRules[0]).To(Equal(*rule2))
+					Expect(rrDataplane.AddedRules).To(ConsistOf(*rule2))
 				})
 
-				It("should handle deletion of an CIDR that overlaps with a workload IP", func() {
-					wg.LocalWorkloadCIDRRemove(lc2)
+				It("should handle deletion of a CIDR that overlaps with a workload IP", func() {
+					wg.RouteRemove(lc2)
 					rrDataplane.ResetDeltas()
 					err := wg.Apply()
 					Expect(err).ToNot(HaveOccurred())
-					Expect(rrDataplane.AddedRules).To(HaveLen(1))
-					Expect(rrDataplane.DeletedRules).To(HaveLen(1))
-					Expect(rrDataplane.AddedRules[0]).To(Equal(*rule1))
-					Expect(rrDataplane.DeletedRules[0]).To(Equal(*rule2))
+					Expect(rrDataplane.AddedRules).To(ConsistOf(*rule1))
+					Expect(rrDataplane.DeletedRules).To(ConsistOf(*rule2))
+				})
+
+				It("should be a no-op if deleting a workload IP that overlaps with a CIDR", func() {
+					wg.RouteRemove(lc1)
+					rrDataplane.ResetDeltas()
+					err := wg.Apply()
+					Expect(err).ToNot(HaveOccurred())
+					Expect(rrDataplane.NumRuleListCalls).To(BeZero())
+					Expect(rrDataplane.NumRuleAddCalls).To(BeZero())
+					Expect(rrDataplane.NumRuleDelCalls).To(BeZero())
+				})
+
+				It("should be a no-op if adding a workload IP that overlaps with a CIDR", func() {
+					wg.RouteUpdate(hostname, lc4)
+					rrDataplane.ResetDeltas()
+					err := wg.Apply()
+					Expect(err).ToNot(HaveOccurred())
+					Expect(rrDataplane.NumRuleListCalls).To(BeZero())
+					Expect(rrDataplane.NumRuleAddCalls).To(BeZero())
+					Expect(rrDataplane.NumRuleDelCalls).To(BeZero())
+				})
+
+				It("should handle replacing and adding rules in a single apply", func() {
+					wg.RouteUpdate(hostname, lc4)
+					wg.RouteRemove(lc2)
+					rrDataplane.ResetDeltas()
+					err := wg.Apply()
+					Expect(err).ToNot(HaveOccurred())
+					Expect(rrDataplane.AddedRules).To(ConsistOf(*rule1, *rule4))
+					Expect(rrDataplane.DeletedRules).To(ConsistOf(*rule2))
 				})
 			})
 
@@ -419,7 +454,7 @@ var _ = Describe("Enable wireguard", func() {
 					key_peer2 = mustGeneratePrivateKey().PublicKey()
 					wg.EndpointWireguardUpdate(peer2, key_peer2, nil)
 					wg.EndpointUpdate(peer2, ipv4_peer2)
-					wg.LocalWorkloadCIDRAdd(cidr_local)
+					wg.RouteUpdate(hostname, cidr_local)
 					err := wg.Apply()
 					Expect(err).NotTo(HaveOccurred())
 					link = wgDataplane.NameToLink[ifaceName]
@@ -596,11 +631,11 @@ var _ = Describe("Enable wireguard", func() {
 							routekey_2 = fmt.Sprintf("%d-%d-%s", tableIndex, link.LinkAttrs.Index, cidr_2)
 							routekey_3 = fmt.Sprintf("%d-%d-%s", tableIndex, link.LinkAttrs.Index, cidr_3)
 
-							wg.EndpointAllowedCIDRAdd(hostname, cidr_local)
-							wg.EndpointAllowedCIDRAdd(peer1, cidr_1)
-							wg.EndpointAllowedCIDRAdd(peer1, cidr_2)
-							wg.EndpointAllowedCIDRAdd(peer2, cidr_3)
-							wg.EndpointAllowedCIDRAdd(peer3, cidr_4)
+							wg.RouteUpdate(hostname, cidr_local)
+							wg.RouteUpdate(peer1, cidr_1)
+							wg.RouteUpdate(peer1, cidr_2)
+							wg.RouteUpdate(peer2, cidr_3)
+							wg.RouteUpdate(peer3, cidr_4)
 							err := wg.Apply()
 							Expect(err).NotTo(HaveOccurred())
 						})
@@ -669,7 +704,7 @@ var _ = Describe("Enable wireguard", func() {
 						It("should remove a route from the peer", func() {
 							wgDataplane.ResetDeltas()
 							rtDataplane.ResetDeltas()
-							wg.EndpointAllowedCIDRRemove(cidr_1)
+							wg.RouteRemove(cidr_1)
 							err := wg.Apply()
 							Expect(err).NotTo(HaveOccurred())
 							Expect(rtDataplane.AddedRouteKeys).To(HaveLen(0))
@@ -690,14 +725,10 @@ var _ = Describe("Enable wireguard", func() {
 						It("should have no updates if swapping routes and swapping back before an apply", func() {
 							wgDataplane.ResetDeltas()
 							rtDataplane.ResetDeltas()
-							wg.EndpointAllowedCIDRRemove(cidr_1)
-							wg.EndpointAllowedCIDRRemove(cidr_3)
-							wg.EndpointAllowedCIDRAdd(peer1, cidr_3)
-							wg.EndpointAllowedCIDRAdd(peer2, cidr_1)
-							wg.EndpointAllowedCIDRRemove(cidr_1)
-							wg.EndpointAllowedCIDRRemove(cidr_3)
-							wg.EndpointAllowedCIDRAdd(peer1, cidr_1)
-							wg.EndpointAllowedCIDRAdd(peer2, cidr_3)
+							wg.RouteUpdate(peer1, cidr_3)
+							wg.RouteUpdate(peer2, cidr_1)
+							wg.RouteUpdate(peer1, cidr_1)
+							wg.RouteUpdate(peer2, cidr_3)
 							err := wg.Apply()
 							Expect(err).NotTo(HaveOccurred())
 							Expect(rtDataplane.AddedRouteKeys).To(HaveLen(0))
@@ -708,8 +739,8 @@ var _ = Describe("Enable wireguard", func() {
 						It("should have no updates if adding and deleting a CIDR to a peer", func() {
 							wgDataplane.ResetDeltas()
 							rtDataplane.ResetDeltas()
-							wg.EndpointAllowedCIDRAdd(peer1, cidr_5)
-							wg.EndpointAllowedCIDRRemove(cidr_5)
+							wg.RouteUpdate(peer1, cidr_5)
+							wg.RouteRemove(cidr_5)
 							err := wg.Apply()
 							Expect(err).NotTo(HaveOccurred())
 							Expect(rtDataplane.AddedRouteKeys).To(HaveLen(0))
@@ -720,7 +751,7 @@ var _ = Describe("Enable wireguard", func() {
 						It("should have no updates if deleting an unknown CIDR", func() {
 							wgDataplane.ResetDeltas()
 							rtDataplane.ResetDeltas()
-							wg.EndpointAllowedCIDRRemove(cidr_5)
+							wg.RouteRemove(cidr_5)
 							err := wg.Apply()
 							Expect(err).NotTo(HaveOccurred())
 							Expect(rtDataplane.AddedRouteKeys).To(HaveLen(0))
@@ -733,8 +764,8 @@ var _ = Describe("Enable wireguard", func() {
 							rtDataplane.ResetDeltas()
 							wg.EndpointRemove(peer3)
 							wg.EndpointWireguardRemove(peer3)
-							wg.EndpointAllowedCIDRRemove(cidr_4)
-							wg.EndpointAllowedCIDRRemove(cidr_3)
+							wg.RouteRemove(cidr_4)
+							wg.RouteRemove(cidr_3)
 							wg.EndpointWireguardRemove(peer2)
 							wg.EndpointRemove(peer2)
 							err := wg.Apply()
@@ -751,10 +782,9 @@ var _ = Describe("Enable wireguard", func() {
 
 						Describe("move a route from peer1 to peer2 and a route from peer2 to peer3", func() {
 							BeforeEach(func() {
-								wg.EndpointAllowedCIDRRemove(cidr_2)
-								wg.EndpointAllowedCIDRAdd(peer2, cidr_2)
-								wg.EndpointAllowedCIDRRemove(cidr_3)
-								wg.EndpointAllowedCIDRAdd(peer3, cidr_3)
+								wg.RouteRemove(cidr_2)
+								wg.RouteUpdate(peer2, cidr_2)
+								wg.RouteUpdate(peer3, cidr_3)
 								rtDataplane.ResetDeltas()
 								err := wg.Apply()
 								Expect(err).NotTo(HaveOccurred())
@@ -997,11 +1027,11 @@ var _ = Describe("Enable wireguard", func() {
 				key_peer1 = mustGeneratePrivateKey()
 				wg.EndpointWireguardUpdate(peer1, key_peer1, nil)
 				wg.EndpointUpdate(peer1, ipv4_peer1)
-				wg.EndpointAllowedCIDRAdd(peer1, cidr_1)
-				wg.EndpointAllowedCIDRAdd(peer1, cidr_2)
+				wg.RouteUpdate(peer1, cidr_1)
+				wg.RouteUpdate(peer1, cidr_2)
 
 				// Add a single local workload CIDR to ensure we add a route rule.
-				wg.LocalWorkloadCIDRAdd(cidr_local)
+				wg.RouteUpdate(hostname, cidr_local)
 
 				// Apply - a single error should have been observed across all of the Applies.
 				err = apply.Apply()
@@ -1019,7 +1049,7 @@ var _ = Describe("Enable wireguard", func() {
 
 				Expect(link.WireguardPeers).To(HaveLen(1))
 				Expect(link.WireguardPeers).To(HaveKey(key_peer1))
-				Expect(link.WireguardPeers[key_peer1].AllowedIPs).To(Equal([]net.IPNet{cidr_1.ToIPNet(), cidr_2.ToIPNet()}))
+				Expect(link.WireguardPeers[key_peer1].AllowedIPs).To(ConsistOf(cidr_1.ToIPNet(), cidr_2.ToIPNet()))
 
 				Expect(rtDataplane.AddedRouteKeys).To(HaveLen(2))
 				Expect(rtDataplane.DeletedRouteKeys).To(HaveLen(0))
@@ -1055,15 +1085,15 @@ var _ = Describe("Enable wireguard", func() {
 						// Delete peer1
 						wg.EndpointWireguardRemove(peer1)
 						wg.EndpointRemove(peer1)
-						wg.EndpointAllowedCIDRRemove(cidr_1)
-						wg.EndpointAllowedCIDRRemove(cidr_2)
+						wg.RouteRemove(cidr_1)
+						wg.RouteRemove(cidr_2)
 
 						// Add peer2 with one of the same CIDRs as the previous peer1, and one different CIDR
 						key_peer2 = mustGeneratePrivateKey()
 						wg.EndpointWireguardUpdate(peer2, key_peer2, nil)
 						wg.EndpointUpdate(peer2, ipv4_peer2)
-						wg.EndpointAllowedCIDRAdd(peer2, cidr_1)
-						wg.EndpointAllowedCIDRAdd(peer2, cidr_3)
+						wg.RouteUpdate(peer2, cidr_1)
+						wg.RouteUpdate(peer2, cidr_3)
 
 						// Apply.
 						err := wg.Apply()
@@ -1170,10 +1200,10 @@ var _ = Describe("Enable wireguard", func() {
 		wg.EndpointWireguardUpdate(peer2, key_peer2, nil)
 		wg.EndpointWireguardUpdate(peer3, key_peer3, nil)
 		wg.EndpointWireguardUpdate(peer4, key_peer3, nil) // Peer 3 and 4 declaring same public key
-		wg.EndpointAllowedCIDRAdd(peer1, cidr_1)
-		wg.EndpointAllowedCIDRAdd(peer2, cidr_2)
-		wg.EndpointAllowedCIDRAdd(peer3, cidr_3)
-		wg.EndpointAllowedCIDRAdd(peer4, cidr_4)
+		wg.RouteUpdate(peer1, cidr_1)
+		wg.RouteUpdate(peer2, cidr_2)
+		wg.RouteUpdate(peer3, cidr_3)
+		wg.RouteUpdate(peer4, cidr_4)
 
 		wgDataplane.AddIface(1, ifaceName, true, true)
 		link := wgDataplane.NameToLink[ifaceName]
@@ -1301,7 +1331,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 		BeforeEach(func() {
 			wg.EndpointUpdate(peer1, ipv4_peer1)
 			wg.EndpointWireguardUpdate(peer1, mustGeneratePrivateKey().PublicKey(), nil)
-			wg.EndpointAllowedCIDRAdd(peer1, cidr_1)
+			wg.RouteUpdate(peer1, cidr_1)
 			err := wg.Apply()
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -1313,7 +1343,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 		})
 
 		It("should ignore endpoint deletes", func() {
-			wg.EndpointAllowedCIDRRemove(cidr_1)
+			wg.RouteRemove(cidr_1)
 			wg.EndpointRemove(peer1)
 			wg.EndpointWireguardRemove(peer1)
 			err := wg.Apply()
@@ -1412,4 +1442,50 @@ var _ = Describe("Wireguard (disabled)", func() {
 			})
 		})
 	}
+})
+
+var _ = Describe("Wireguard (with no table index)", func() {
+	var wgDataplane, rtDataplane, rrDataplane *mocknetlink.MockNetlinkDataplane
+	var t *mocktime.MockTime
+	var s mockStatus
+	var wgFn func(bool)
+
+	BeforeEach(func() {
+		wgDataplane = mocknetlink.NewMockNetlinkDataplane()
+		rtDataplane = mocknetlink.NewMockNetlinkDataplane()
+		rrDataplane = mocknetlink.NewMockNetlinkDataplane()
+		t = mocktime.NewMockTime()
+		t.SetAutoIncrement(11 * time.Second)
+
+		wgFn = func(enabled bool) {
+			NewWithShims(
+				hostname,
+				&Config{
+					Enabled:             enabled,
+					ListeningPort:       1000,
+					FirewallMark:        1,
+					RoutingRulePriority: rulePriority,
+					RoutingTableIndex:   0,
+					InterfaceName:       ifaceName,
+					MTU:                 1042,
+				},
+				rtDataplane.NewMockNetlink,
+				rrDataplane.NewMockNetlink,
+				wgDataplane.NewMockNetlink,
+				wgDataplane.NewMockWireguard,
+				10*time.Second,
+				t,
+				FelixRouteProtocol,
+				s.status,
+			)
+		}
+	})
+
+	It("should panic if wireguard is enabled", func() {
+		Expect(func() { wgFn(true) }).To(Panic())
+	})
+
+	It("should not panic if wireguard is disabled", func() {
+		Expect(func() { wgFn(false) }).NotTo(Panic())
+	})
 })
