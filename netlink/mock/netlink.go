@@ -640,7 +640,7 @@ func (d *MockNetlinkDataplane) RouteAdd(route *netlink.Route) error {
 		return SimulatedError
 	}
 	key := KeyForRoute(route)
-	log.WithField("routeKey", key).Info("Mock dataplane: RouteAdd called")
+	log.WithField("routeKey", key).Info("Mock dataplane: RouteUpdate called")
 	d.AddedRouteKeys.Add(key)
 	if _, ok := d.RouteKeyToRoute[key]; ok {
 		return AlreadyExistsError

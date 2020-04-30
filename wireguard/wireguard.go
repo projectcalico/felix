@@ -137,12 +137,13 @@ type Wireguard struct {
 	// - mapping between CIDRs and peerData
 	// - mapping between public key and peers - this does not include the "zero" key.
 	peers                map[string]*peerData
-	cidrToNodeName       map[ip.CIDR]string
 	publicKeyToNodeNames map[wgtypes.Key]set.Set
 
 	// Pending updates
-	peerUpdates           map[string]*peerUpdateData
-	cidrToNodeNameUpdates map[ip.CIDR]string
+	peerUpdates map[string]*peerUpdateData
+
+	// CIDR to node mappings - this is updated synchronously.
+	cidrToNodeName map[ip.CIDR]string
 
 	// Wireguard routing table and rule managers
 	routetable *routetable.RouteTable
@@ -219,23 +220,22 @@ func NewWithShims(
 	}
 
 	return &Wireguard{
-		hostname:              hostname,
-		config:                config,
-		logCxt:                logrus.WithFields(logrus.Fields{"enabled": config.Enabled, "wgIfaceName": config.InterfaceName}),
-		newNetlinkClient:      newWireguardNetlink,
-		newWireguardClient:    newWireguardDevice,
-		time:                  timeShim,
-		peers:                 map[string]*peerData{},
-		cidrToNodeName:        map[ip.CIDR]string{},
-		publicKeyToNodeNames:  map[wgtypes.Key]set.Set{},
-		peerUpdates:           map[string]*peerUpdateData{},
-		cidrToNodeNameUpdates: map[ip.CIDR]string{},
-		routetable:            rt,
-		routerule:             rr,
-		statusCallback:        statusCallback,
-		localCIDRsFiltered:    set.New(),
-		localIPs:              set.New(),
-		localCIDRs:            set.New(),
+		hostname:             hostname,
+		config:               config,
+		logCxt:               logrus.WithFields(logrus.Fields{"enabled": config.Enabled, "wgIfaceName": config.InterfaceName}),
+		newNetlinkClient:     newWireguardNetlink,
+		newWireguardClient:   newWireguardDevice,
+		time:                 timeShim,
+		peers:                map[string]*peerData{},
+		cidrToNodeName:       map[ip.CIDR]string{},
+		publicKeyToNodeNames: map[wgtypes.Key]set.Set{},
+		peerUpdates:          map[string]*peerUpdateData{},
+		routetable:           rt,
+		routerule:            rr,
+		statusCallback:       statusCallback,
+		localCIDRsFiltered:   set.New(),
+		localIPs:             set.New(),
+		localCIDRs:           set.New(),
 	}
 }
 
@@ -293,7 +293,8 @@ func (w *Wireguard) EndpointRemove(name string) {
 
 	if _, ok := w.peers[name]; ok {
 		// Node data exists, so store a blank update with a deleted flag. The delete will be applied first, and then any
-		// subsequent updates
+		// subsequent updates. There is no need to remove the pending CIDR to node mappings since the route resolver
+		// provides self consistent route updates (i.e. we will get route removes or updates for these CIDRs).
 		w.logCxt.Debug("Existing node is flagged for removal")
 		nu := newPeerUpdateData()
 		nu.deleted = true
@@ -305,87 +306,139 @@ func (w *Wireguard) EndpointRemove(name string) {
 	}
 }
 
-func (w *Wireguard) EndpointAllowedCIDRAdd(name string, cidr ip.CIDR) {
-	w.logCxt.Debugf("EndpointAllowedCIDRAdd: name=%s; cidr=%v", name, cidr)
+func (w *Wireguard) RouteUpdate(name string, cidr ip.CIDR) {
+	w.logCxt.Debugf("RouteUpdate: name=%s; cidr=%v", name, cidr)
 	if !w.config.Enabled {
 		w.logCxt.Debug("Not enabled - ignoring")
 		return
-	} else if name == w.hostname {
-		w.logCxt.Debug("Local update - ignoring")
-		return
 	}
 
-	update := w.getOrInitPeerUpdate(name)
-	if existing, ok := w.peers[name]; ok && existing.cidrs.Contains(cidr) {
-		// Adding the CIDR to a node that already has it. This may happen if there is a pending CIDR deletion for the
-		// node, so discard the deletion update.
-		w.logCxt.Debug("Node CIDR added which is already programmed - remove any pending delete")
-		update.allowedCidrsDeleted.Discard(cidr)
-		delete(w.cidrToNodeNameUpdates, cidr)
-	} else {
-		// Adding the CIDR to a node that does not already have it.
-		w.logCxt.Debug("Node CIDR added which is not programmed")
-		update.allowedCidrsAdded.Add(cidr)
-		w.cidrToNodeNameUpdates[cidr] = name
+	// Determine which node this CIDR belongs to.
+	if existing, ok := w.cidrToNodeName[cidr]; ok {
+		if name == existing {
+			// Update for the same CIDR and node - this is a no-op.
+			return
+		}
+		// Update is moving CIDR to a different node. Do the delete first.
+		w.routeRemove(existing, cidr)
 	}
-	w.setPeerUpdate(name, update)
+
+	// Update the CIDR->node mapping.
+	w.cidrToNodeName[cidr] = name
+
+	// If this is the local node then store as a local workload CIDR, otherwise store as a peer CIDR.
+	if name == w.hostname {
+		w.localWorkloadCIDRAdd(cidr)
+	} else {
+		w.peerAllowedCIDRAdd(name, cidr)
+	}
 }
 
-func (w *Wireguard) EndpointAllowedCIDRRemove(cidr ip.CIDR) {
-	w.logCxt.Debugf("EndpointAllowedCIDRRemove: cidr=%v", cidr)
+func (w *Wireguard) RouteRemove(cidr ip.CIDR) {
+	w.logCxt.Debugf("RouteRemove: cidr=%v", cidr)
 	if !w.config.Enabled {
 		w.logCxt.Debug("Not enabled - ignoring")
 		return
 	}
 
 	// Determine which node this CIDR belongs to. Check the updates first and then the processed.
-	name, ok := w.cidrToNodeNameUpdates[cidr]
+	name, ok := w.cidrToNodeName[cidr]
 	if !ok {
-		w.logCxt.Debugf("CIDR not found as node update, checking current configuration")
-		name, ok = w.cidrToNodeName[cidr]
-		if !ok {
-			// The wireguard manager filters out some of the CIDR updates, but not the removes, so it's possible to get
-			// CIDR removes for which we have seen no corresponding add.
-			w.logCxt.Debugf("CIDR remove update but not associated with a node: %v", cidr)
-			return
-		}
+		// The wireguard manager filters out some of the CIDR updates, but not the removes, so it's possible to get
+		// CIDR removes for which we have seen no corresponding add.
+		w.logCxt.Debugf("CIDR remove update but not associated with a node: %v", cidr)
+		return
 	}
 	w.logCxt.Debugf("CIDR found for node %s", name)
-
-	update := w.getOrInitPeerUpdate(name)
-	if existing, ok := w.peers[name]; ok && existing.cidrs.Contains(cidr) {
-		// Remove the CIDR from a node that already has the CIDR configured.
-		w.logCxt.Debug("Node CIDR removed")
-		update.allowedCidrsDeleted.Add(cidr)
-		w.cidrToNodeNameUpdates[cidr] = name
-	} else {
-		// Deleting the CIDR from a node that already doesn't have it. This may happen if there is a pending CIDR
-		// addition for the node, so discard the addition update.
-		w.logCxt.Debug("Node CIDR removed but is not programmed - remove any pending add")
-		update.allowedCidrsAdded.Discard(cidr)
-		delete(w.cidrToNodeNameUpdates, cidr)
-	}
-	w.setPeerUpdate(name, update)
+	w.routeRemove(name, cidr)
 }
 
-func (w *Wireguard) LocalWorkloadCIDRAdd(cidr ip.CIDR) {
-	w.logCxt.Debugf("LocalWorkloadCIDRAdd: cidr=%v", cidr)
+func (w *Wireguard) routeRemove(name string, cidr ip.CIDR) {
+	// Remove the CIDR->node mapping.
+	delete(w.cidrToNodeName, cidr)
+
+	// If this is the local node then remove as a local workload CIDR, otherwise remove as a peer CIDR.
+	if name == w.hostname {
+		w.localWorkloadCIDRRemove(cidr)
+	} else {
+		w.peerAllowedCIDRRemove(name, cidr)
+	}
+}
+
+// Add a local workload CIDR. These CIDRs are used for the source-matched wireguard routes to limit wireguard encryption
+// to traffic to/from local workloads. The workload CIDRs may overlap, in which case the updateAndApplyRouteRules
+// method will determine the minimal set of non-overlapping CIDRs.
+func (w *Wireguard) localWorkloadCIDRAdd(cidr ip.CIDR) {
+	w.logCxt.Debugf("localWorkloadCIDRAdd: cidr=%v", cidr)
 	if cidr.Prefix() == ipPrefixLen {
 		w.localIPs.Add(cidr.Addr())
 	} else {
 		w.localCIDRs.Add(cidr)
 	}
-	w.localCIDRsUpdated = true
+	// Only flag the CIDRs for update if it not wholly covered by the already filtered local CIDRs.
+	contained := false
+	w.localCIDRsFiltered.Iter(func(item interface{}) error {
+		filtered := item.(ip.CIDR).ToIPNet()
+		if filtered.Contains(cidr.ToIPNet().IP) {
+			contained = true
+			return set.StopIteration
+		}
+		return nil
+	})
+	if !contained {
+		w.localCIDRsUpdated = true
+	}
 }
 
-func (w *Wireguard) LocalWorkloadCIDRRemove(cidr ip.CIDR) {
-	w.logCxt.Debugf("LocalWorkloadCIDRRemove: cidr=%v", cidr)
+// Remove a local workload CIDR. These CIDRs are used for the source-matched wireguard routes to limit wireguard
+// encryption to traffic to/from local workloads.
+func (w *Wireguard) localWorkloadCIDRRemove(cidr ip.CIDR) {
+	w.logCxt.Debugf("localWorkloadCIDRRemove: cidr=%v", cidr)
 	if cidr.Prefix() == ipPrefixLen {
 		w.localIPs.Discard(cidr.Addr())
 	} else {
 		w.localCIDRs.Discard(cidr)
 	}
-	w.localCIDRsUpdated = true
+	// Only flag the CIDRs for update if this CIDR is one of the filtered CIDRs.
+	if w.localCIDRsFiltered.Contains(cidr) {
+		w.localCIDRsUpdated = true
+	}
+}
+
+// Add a peer allowed CIDR.  These CIDRs are used for the destination-matched wireguard routes to limit wireguard
+// encryption to traffic to/from remote workloads.
+func (w *Wireguard) peerAllowedCIDRAdd(name string, cidr ip.CIDR) {
+	w.logCxt.Debugf("peerAllowedCIDRAdd: cidr=%v", cidr)
+	update := w.getOrInitPeerUpdate(name)
+	if existing, ok := w.peers[name]; ok && existing.cidrs.Contains(cidr) {
+		// Adding the CIDR to a node that already has it. This may happen if there is a pending CIDR deletion for the
+		// node, so discard the deletion update.
+		w.logCxt.Debug("Node CIDR added which is already programmed - remove any pending delete")
+		update.allowedCidrsDeleted.Discard(cidr)
+	} else {
+		// Adding the CIDR to a node that does not already have it.
+		w.logCxt.Debug("Node CIDR added which is not programmed")
+		update.allowedCidrsAdded.Add(cidr)
+	}
+	w.setPeerUpdate(name, update)
+}
+
+// Remove a peer allowed CIDR.  These CIDRs are used for the destination-matched wireguard routes to limit wireguard
+// encryption to traffic to/from remote workloads.
+func (w *Wireguard) peerAllowedCIDRRemove(name string, cidr ip.CIDR) {
+	w.logCxt.Debugf("peerAllowedCIDRRemove: cidr=%v", cidr)
+	update := w.getOrInitPeerUpdate(name)
+	if existing, ok := w.peers[name]; ok && existing.cidrs.Contains(cidr) {
+		// Remove the CIDR from a node that already has the CIDR configured.
+		w.logCxt.Debug("Node CIDR removed")
+		update.allowedCidrsDeleted.Add(cidr)
+	} else {
+		// Deleting the CIDR from a node that already doesn't have it configured. This may happen if there is a pending
+		// CIDR addition for the node, so discard the addition update.
+		w.logCxt.Debug("Node CIDR removed but is not programmed - remove any pending add")
+		update.allowedCidrsAdded.Discard(cidr)
+	}
+	w.setPeerUpdate(name, update)
 }
 
 func (w *Wireguard) EndpointWireguardUpdate(name string, publicKey wgtypes.Key, ipv4InterfaceAddr ip.Addr) {
@@ -547,7 +600,6 @@ func (w *Wireguard) Apply() (err error) {
 		// or we'll need to do a full resync, in either case no need to keep the deltas.  Don't do this immediately because
 		// we may need them to calculate the wireguard config delta.
 		w.peerUpdates = map[string]*peerUpdateData{}
-		w.cidrToNodeNameUpdates = map[ip.CIDR]string{}
 	}()
 
 	// If necessary ensure the wireguard device is configured. If this errors or if it is not yet oper up then no point
@@ -830,7 +882,6 @@ func (w *Wireguard) updateCacheFromPeerUpdates(conflictingKeys set.Set) {
 			cidr := item.(ip.CIDR)
 			w.logCxt.Debugf("Discarding CIDR %s", cidr)
 			node.cidrs.Discard(cidr)
-			delete(w.cidrToNodeName, cidr)
 			updated = true
 			return nil
 		})
@@ -838,7 +889,6 @@ func (w *Wireguard) updateCacheFromPeerUpdates(conflictingKeys set.Set) {
 			cidr := item.(ip.CIDR)
 			w.logCxt.Debugf("Adding CIDR %s", cidr)
 			node.cidrs.Add(cidr)
-			w.cidrToNodeName[cidr] = name
 			updated = true
 			return nil
 		})
@@ -950,7 +1000,7 @@ func (w *Wireguard) constructWireguardDeltaFromPeerUpdates(conflictingKeys set.S
 				// The wgpeer should be programmed in wireguard. We need to do a full CIDR re-sync if either:
 				// -  A CIDR was deleted (there is no API directive for deleting an allowed CIDR), or
 				// -  The wgpeer has not been programmed.
-				logCxt.Debug("Peer should be programmed")
+				logCxt.Debug("Constructing update for peer")
 				wgpeer := wgtypes.PeerConfig{
 					UpdateOnly: peer.programmedInWireguard,
 					PublicKey:  peer.publicKey,
@@ -983,7 +1033,7 @@ func (w *Wireguard) constructWireguardDeltaFromPeerUpdates(conflictingKeys set.S
 				}
 			} else if peer.programmedInWireguard {
 				// This peer is programmed in wireguard and it should not be. Add a delta delete.
-				logCxt.Debug("Peer should not be programmed")
+				logCxt.Debug("Constructing peer removal update")
 				wireguardUpdate.Peers = append(wireguardUpdate.Peers, wgtypes.PeerConfig{
 					Remove:    true,
 					PublicKey: peer.publicKey,
