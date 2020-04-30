@@ -136,8 +136,7 @@ func (m *mockStatus) status(publicKey wgtypes.Key) error {
 }
 
 var _ = Describe("Enable wireguard", func() {
-	var wgDataplane *mocknetlink.MockNetlinkDataplane
-	var rtDataplane *mocknetlink.MockNetlinkDataplane
+	var wgDataplane, rtDataplane, rrDataplane *mocknetlink.MockNetlinkDataplane
 	var t *mocktime.MockTime
 	var s *mockStatus
 	var wg *Wireguard
@@ -145,6 +144,7 @@ var _ = Describe("Enable wireguard", func() {
 	BeforeEach(func() {
 		wgDataplane = mocknetlink.NewMockNetlinkDataplane()
 		rtDataplane = mocknetlink.NewMockNetlinkDataplane()
+		rrDataplane = mocknetlink.NewMockNetlinkDataplane()
 		t = mocktime.NewMockTime()
 		s = &mockStatus{}
 		// Setting an auto-increment greater than the route cleanup delay effectively
@@ -163,6 +163,7 @@ var _ = Describe("Enable wireguard", func() {
 				MTU:                 mtu,
 			},
 			rtDataplane.NewMockNetlink,
+			rrDataplane.NewMockNetlink,
 			wgDataplane.NewMockNetlink,
 			wgDataplane.NewMockWireguard,
 			10*time.Second,
@@ -177,16 +178,9 @@ var _ = Describe("Enable wireguard", func() {
 	})
 
 	Describe("create the wireguard link", func() {
-		var correctRule *netlink.Rule
 		BeforeEach(func() {
 			err := wg.Apply()
 			Expect(err).NotTo(HaveOccurred())
-
-			correctRule = netlink.NewRule()
-			correctRule.Priority = rulePriority
-			correctRule.Table = tableIndex
-			correctRule.Mark = firewallMark
-			correctRule.Invert = true
 		})
 
 		It("should configure the link but wait for link to be active", func() {
@@ -257,10 +251,9 @@ var _ = Describe("Enable wireguard", func() {
 				Expect(s.key).To(Equal(link.WireguardPublicKey))
 			})
 
-			It("should create rule", func() {
-				Expect(wgDataplane.AddedRules).To(HaveLen(1))
-				Expect(wgDataplane.DeletedRules).To(HaveLen(0))
-				Expect(wgDataplane.AddedRules[0]).To(Equal(*correctRule))
+			It("should not create rules until local routes have been added", func() {
+				Expect(rrDataplane.AddedRules).To(HaveLen(0))
+				Expect(rrDataplane.DeletedRules).To(HaveLen(0))
 			})
 
 			It("should leave the valid rule in place during resync", func() {
@@ -268,25 +261,8 @@ var _ = Describe("Enable wireguard", func() {
 				err := wg.Apply()
 				Expect(err).ToNot(HaveOccurred())
 
-				Expect(wgDataplane.AddedRules).To(HaveLen(0))
-				Expect(wgDataplane.DeletedRules).To(HaveLen(0))
-			})
-
-			It("should not re-add a deleted rule until resync", func() {
-				err := wgDataplane.RuleDel(correctRule)
-				Expect(err).ToNot(HaveOccurred())
-				wgDataplane.ResetDeltas()
-				err = wg.Apply()
-				Expect(err).ToNot(HaveOccurred())
-				Expect(wgDataplane.AddedRules).To(HaveLen(0))
-				Expect(wgDataplane.DeletedRules).To(HaveLen(0))
-
-				wg.QueueResync()
-				err = wg.Apply()
-				Expect(err).ToNot(HaveOccurred())
-				Expect(wgDataplane.AddedRules).To(HaveLen(1))
-				Expect(wgDataplane.DeletedRules).To(HaveLen(0))
-				Expect(wgDataplane.AddedRules[0]).To(Equal(*correctRule))
+				Expect(rrDataplane.AddedRules).To(HaveLen(0))
+				Expect(rrDataplane.DeletedRules).To(HaveLen(0))
 			})
 
 			It("should delete invalid rules jumping to the wireguard table", func() {
@@ -295,17 +271,17 @@ var _ = Describe("Enable wireguard", func() {
 				incorrectRule.Table = tableIndex
 				incorrectRule.Mark = firewallMark + 10
 				incorrectRule.Invert = false
-				err := wgDataplane.RuleAdd(incorrectRule)
+				err := rrDataplane.RuleAdd(incorrectRule)
 				Expect(err).ToNot(HaveOccurred())
-				wgDataplane.ResetDeltas()
+				rrDataplane.ResetDeltas()
 
 				wg.QueueResync()
 				err = wg.Apply()
 				Expect(err).ToNot(HaveOccurred())
 
-				Expect(wgDataplane.AddedRules).To(HaveLen(0))
-				Expect(wgDataplane.DeletedRules).To(HaveLen(1))
-				Expect(wgDataplane.DeletedRules[0]).To(Equal(*incorrectRule))
+				Expect(rrDataplane.AddedRules).To(HaveLen(0))
+				Expect(rrDataplane.DeletedRules).To(HaveLen(1))
+				Expect(rrDataplane.DeletedRules[0]).To(Equal(*incorrectRule))
 			})
 
 			It("after endpoint update with incorrect key should program the interface address and resend same key as status", func() {
@@ -352,6 +328,88 @@ var _ = Describe("Enable wireguard", func() {
 				Expect(s.numCallbacks).To(Equal(1))
 			})
 
+			Describe("add local routes with overlap", func() {
+				var rule1, rule2, rule3 *netlink.Rule
+				var lc1, lc2, lc3 ip.CIDR
+
+				BeforeEach(func() {
+					lc1 = ip.MustParseCIDROrIP("12.12.10.10/32")
+					lc2 = ip.MustParseCIDROrIP("12.12.10.0/24")
+					lc3 = ip.MustParseCIDROrIP("12.12.11.0/32")
+					lc1Net := lc1.ToIPNet()
+					lc2Net := lc2.ToIPNet()
+					lc3Net := lc3.ToIPNet()
+
+					wg.LocalWorkloadCIDRAdd(lc1)
+					wg.LocalWorkloadCIDRAdd(lc2)
+					wg.LocalWorkloadCIDRAdd(lc3)
+
+					rule1 = netlink.NewRule()
+					rule1.Family = netlink.FAMILY_V4
+					rule1.Src = &lc1Net
+					rule1.Priority = rulePriority
+					rule1.Table = tableIndex
+					rule1.Mark = firewallMark
+					rule1.Mask = firewallMark
+					rule1.Invert = true
+
+					rule2 = netlink.NewRule()
+					rule2.Family = netlink.FAMILY_V4
+					rule2.Src = &lc2Net
+					rule2.Priority = rulePriority
+					rule2.Table = tableIndex
+					rule2.Mark = firewallMark
+					rule2.Mask = firewallMark
+					rule2.Invert = true
+
+					rule3 = netlink.NewRule()
+					rule3.Family = netlink.FAMILY_V4
+					rule3.Src = &lc3Net
+					rule3.Priority = rulePriority
+					rule3.Table = tableIndex
+					rule3.Mark = firewallMark
+					rule3.Mask = firewallMark
+					rule3.Invert = true
+
+					err := wg.Apply()
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("should not create rules until local routes have been added", func() {
+					Expect(rrDataplane.AddedRules).To(HaveLen(2))
+					Expect(rrDataplane.DeletedRules).To(HaveLen(0))
+					Expect(rrDataplane.AddedRules).To(ConsistOf(*rule2, *rule3))
+				})
+
+				It("should not re-add a deleted rule until resync", func() {
+					err := rrDataplane.RuleDel(rule2)
+					Expect(err).ToNot(HaveOccurred())
+					rrDataplane.ResetDeltas()
+					err = wg.Apply()
+					Expect(err).ToNot(HaveOccurred())
+					Expect(rrDataplane.AddedRules).To(HaveLen(0))
+					Expect(rrDataplane.DeletedRules).To(HaveLen(0))
+
+					wg.QueueResync()
+					err = wg.Apply()
+					Expect(err).ToNot(HaveOccurred())
+					Expect(rrDataplane.AddedRules).To(HaveLen(1))
+					Expect(rrDataplane.DeletedRules).To(HaveLen(0))
+					Expect(rrDataplane.AddedRules[0]).To(Equal(*rule2))
+				})
+
+				It("should handle deletion of an CIDR that overlaps with a workload IP", func() {
+					wg.LocalWorkloadCIDRRemove(lc2)
+					rrDataplane.ResetDeltas()
+					err := wg.Apply()
+					Expect(err).ToNot(HaveOccurred())
+					Expect(rrDataplane.AddedRules).To(HaveLen(1))
+					Expect(rrDataplane.DeletedRules).To(HaveLen(1))
+					Expect(rrDataplane.AddedRules[0]).To(Equal(*rule1))
+					Expect(rrDataplane.DeletedRules[0]).To(Equal(*rule2))
+				})
+			})
+
 			Describe("create two wireguard peers with different public keys", func() {
 				var key_peer1, key_peer2 wgtypes.Key
 				var link *mocknetlink.MockLink
@@ -364,13 +422,15 @@ var _ = Describe("Enable wireguard", func() {
 					key_peer2 = mustGeneratePrivateKey().PublicKey()
 					wg.EndpointWireguardUpdate(peer2, key_peer2, nil)
 					wg.EndpointUpdate(peer2, ipv4_peer2)
+					wg.LocalWorkloadCIDRAdd(cidr_local)
 					err := wg.Apply()
 					Expect(err).NotTo(HaveOccurred())
 					link = wgDataplane.NameToLink[ifaceName]
 					Expect(link).ToNot(BeNil())
 					Expect(wgDataplane.WireguardOpen).To(BeTrue())
-					Expect(wgDataplane.NumRuleDelCalls).To(Equal(0))
-					Expect(wgDataplane.NumRuleAddCalls).To(Equal(1))
+					Expect(rrDataplane.NetlinkOpen).To(BeTrue())
+					Expect(rrDataplane.NumRuleDelCalls).To(Equal(0))
+					Expect(rrDataplane.NumRuleAddCalls).To(Equal(1))
 				})
 
 				It("should have both peers configured", func() {
@@ -470,7 +530,6 @@ var _ = Describe("Enable wireguard", func() {
 
 					It("should remove both peers", func() {
 						Expect(link.WireguardPeers).To(HaveLen(0))
-						Expect(wgDataplane.NumRuleAddCalls).To(Equal(1))
 					})
 
 					It("should handle a resync if the peer is added back in out-of-band", func() {
@@ -507,7 +566,6 @@ var _ = Describe("Enable wireguard", func() {
 								Port: 1000,
 							},
 						}))
-						Expect(wgDataplane.NumRuleAddCalls).To(Equal(1))
 					})
 				})
 
@@ -900,10 +958,18 @@ var _ = Describe("Enable wireguard", func() {
 			var link *mocknetlink.MockLink
 
 			BeforeEach(func() {
-				// Set the fail flags and reset errors.
-				wgDataplane.FailuresToSimulate = failFlags
+				// Set the fail flags and reset errors.|
+				Expect(wgDataplane.FailuresToSimulate).To(Equal(mocknetlink.FailNone))
+				Expect(rrDataplane.FailuresToSimulate).To(Equal(mocknetlink.FailNone))
+				Expect(rtDataplane.FailuresToSimulate).To(Equal(mocknetlink.FailNone))
+				if failFlags&(mocknetlink.FailNextRuleList|mocknetlink.FailNextRuleAdd) != 0 {
+					rrDataplane.FailuresToSimulate = failFlags
+				} else {
+					wgDataplane.FailuresToSimulate = failFlags
+				}
 				wgDataplane.ResetDeltas()
 				rtDataplane.ResetDeltas()
+				rrDataplane.ResetDeltas()
 
 				// Expect exactly one error from the series of applies.
 				apply := newApplyWithErrors(wg, 1)
@@ -937,8 +1003,13 @@ var _ = Describe("Enable wireguard", func() {
 				wg.EndpointAllowedCIDRAdd(peer1, cidr_1)
 				wg.EndpointAllowedCIDRAdd(peer1, cidr_2)
 
+				// Add a single local workload CIDR to ensure we add a route rule.
+				wg.LocalWorkloadCIDRAdd(cidr_local)
+
 				// Apply - a single error should have been observed across all of the Applies.
 				err = apply.Apply()
+				Expect(wgDataplane.FailuresToSimulate).To(Equal(mocknetlink.FailNone))
+				Expect(rtDataplane.FailuresToSimulate).To(Equal(mocknetlink.FailNone))
 				Expect(err).NotTo(HaveOccurred())
 				Expect(apply.LastError()).To(HaveOccurred())
 			})
@@ -1171,8 +1242,7 @@ var _ = Describe("Enable wireguard", func() {
 })
 
 var _ = Describe("Wireguard (disabled)", func() {
-	var wgDataplane *mocknetlink.MockNetlinkDataplane
-	var rtDataplane *mocknetlink.MockNetlinkDataplane
+	var wgDataplane, rtDataplane, rrDataplane *mocknetlink.MockNetlinkDataplane
 	var t *mocktime.MockTime
 	var s mockStatus
 	var wg *Wireguard
@@ -1180,6 +1250,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 	BeforeEach(func() {
 		wgDataplane = mocknetlink.NewMockNetlinkDataplane()
 		rtDataplane = mocknetlink.NewMockNetlinkDataplane()
+		rrDataplane = mocknetlink.NewMockNetlinkDataplane()
 		t = mocktime.NewMockTime()
 		// Setting an auto-increment greater than the route cleanup delay effectively
 		// disables the grace period for these tests.
@@ -1197,6 +1268,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 				MTU:                 1042,
 			},
 			rtDataplane.NewMockNetlink,
+			rrDataplane.NewMockNetlink,
 			wgDataplane.NewMockNetlink,
 			wgDataplane.NewMockWireguard,
 			10*time.Second,
@@ -1260,7 +1332,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 		mocknetlink.FailNextRuleList, mocknetlink.FailNextRuleDel, mocknetlink.FailNextRouteList,
 	} {
 		failFlags := testFailFlags
-		desc := fmt.Sprintf("failed netlink management (%v)", failFlags)
+		desc := fmt.Sprintf("failed netlink management (%v), sync with incorrect rule", failFlags)
 
 		Describe(desc, func() {
 			BeforeEach(func() {
@@ -1269,7 +1341,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 				rtDataplane.AddIface(1, ifaceName, true, true)
 
 				// Create a rule to route to the wireguard table.
-				wgDataplane.Rules = []netlink.Rule{
+				rrDataplane.Rules = []netlink.Rule{
 					{
 						Priority: 0,
 						Table:    255,
@@ -1289,10 +1361,13 @@ var _ = Describe("Wireguard (disabled)", func() {
 					},
 				}
 
-				// Set the fail flags and reset errors.
+				// Set the fail flags and reset errors. Routetable and Routerule modules have retry mechanisms built in
+				// so need to persist failures in those cases.
 				if failFlags&mocknetlink.FailNextRouteList != 0 {
 					rtDataplane.FailuresToSimulate = failFlags
 					rtDataplane.PersistFailures = true
+				} else if failFlags&(mocknetlink.FailNextRuleList|mocknetlink.FailNextRuleDel) != 0 {
+					rrDataplane.FailuresToSimulate = failFlags
 				} else {
 					wgDataplane.FailuresToSimulate = failFlags
 				}
@@ -1307,7 +1382,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 
-			It("delete the link", func() {
+			It("deletes the link", func() {
 				link := wgDataplane.NameToLink[ifaceName]
 				Expect(link).To(BeNil())
 
@@ -1320,10 +1395,10 @@ var _ = Describe("Wireguard (disabled)", func() {
 				}
 			})
 
-			It("should delete the ip rule", func() {
-				Expect(wgDataplane.NumRuleDelCalls).ToNot(Equal(0))
-				Expect(wgDataplane.NumRuleAddCalls).To(Equal(0))
-				Expect(wgDataplane.Rules).To(Equal([]netlink.Rule{
+			It("should delete the route rule", func() {
+				Expect(rrDataplane.NumRuleDelCalls).ToNot(Equal(0))
+				Expect(rrDataplane.NumRuleAddCalls).To(Equal(0))
+				Expect(rrDataplane.Rules).To(Equal([]netlink.Rule{
 					{
 						Priority: 0,
 						Table:    255,
