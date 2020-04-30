@@ -538,11 +538,11 @@ func (d *MockNetlinkDataplane) RuleAdd(rule *netlink.Rule) error {
 	}
 
 	for _, existing := range d.Rules {
-		if existing.Priority == rule.Priority && existing.Table == rule.Table &&
-			existing.Mark == rule.Mark && existing.Mask == rule.Mask {
+		if reflect.DeepEqual(existing, *rule) {
 			return AlreadyExistsError
 		}
 	}
+
 	d.Rules = append(d.Rules, *rule)
 	d.AddedRules = append(d.AddedRules, *rule)
 	return nil
@@ -640,7 +640,7 @@ func (d *MockNetlinkDataplane) RouteAdd(route *netlink.Route) error {
 		return SimulatedError
 	}
 	key := KeyForRoute(route)
-	log.WithField("routeKey", key).Info("Mock dataplane: RouteAdd called")
+	log.WithField("routeKey", key).Info("Mock dataplane: RouteUpdate called")
 	d.AddedRouteKeys.Add(key)
 	if _, ok := d.RouteKeyToRoute[key]; ok {
 		return AlreadyExistsError
