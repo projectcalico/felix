@@ -43,13 +43,17 @@ func (r *Rule) NetLinkRule() *netlink.Rule {
 }
 
 func (r *Rule) LogCxt() *log.Entry {
+	var src interface{}
+	if r.nlRule.Src != nil {
+		src = r.nlRule.Src
+	}
 	return log.WithFields(log.Fields{
 		"ipFamily": r.nlRule.Family,
 		"priority": r.nlRule.Priority,
 		"invert":   r.nlRule.Invert,
 		"Mark":     r.nlRule.Mark,
 		"Mask":     r.nlRule.Mask,
-		"src":      r.nlRule.Src.String(),
+		"src":      src,
 		"Table":    r.nlRule.Table,
 	})
 }
@@ -104,7 +108,8 @@ func RulesMatchSrcFWMark(r, p *Rule) bool {
 		(r.nlRule.Invert == p.nlRule.Invert) &&
 		(r.nlRule.Mark == p.nlRule.Mark) &&
 		(r.nlRule.Mask == p.nlRule.Mask) &&
-		(r.nlRule.Src.String() == p.nlRule.Src.String())
+		((r.nlRule.Src != nil && p.nlRule.Src != nil && r.nlRule.Src.String() == p.nlRule.Src.String()) ||
+			(r.nlRule.Src == nil && p.nlRule.Src == nil))
 }
 
 func RulesMatchSrcFWMarkTable(r, p *Rule) bool {

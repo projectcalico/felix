@@ -16,7 +16,6 @@ package wireguard
 
 import (
 	"errors"
-	"github.com/projectcalico/felix/routerule"
 	"net"
 	"sync"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
 	netlinkshim "github.com/projectcalico/felix/netlink"
+	"github.com/projectcalico/felix/routerule"
 	"github.com/projectcalico/felix/routetable"
 	timeshim "github.com/projectcalico/felix/time"
 	"github.com/projectcalico/libcalico-go/lib/set"
@@ -55,8 +55,8 @@ var (
 
 const (
 	wireguardType = "wireguard"
-	ipVersion = 4
-	ipPrefixLen = 32
+	ipVersion     = 4
+	ipPrefixLen   = 32
 )
 
 type noOpConnTrack struct{}

@@ -15,9 +15,10 @@
 package intdataplane
 
 import (
-	"github.com/projectcalico/libcalico-go/lib/set"
 	log "github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+
+	"github.com/projectcalico/libcalico-go/lib/set"
 
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/proto"
@@ -50,7 +51,7 @@ func newWireguardManager(
 ) *wireguardManager {
 	return &wireguardManager{
 		wireguardRouteTable: wireguardRouteTable,
-		localCIDRs: set.New(),
+		localCIDRs:          set.New(),
 	}
 }
 
