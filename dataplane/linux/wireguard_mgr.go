@@ -18,8 +18,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
-	"github.com/projectcalico/libcalico-go/lib/set"
-
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/felix/wireguard"
@@ -39,9 +37,6 @@ import (
 type wireguardManager struct {
 	// Our dependencies.
 	wireguardRouteTable *wireguard.Wireguard
-
-	// Local and remote workload CIDRs.
-	localCIDRs set.Set
 }
 
 type WireguardStatusUpdateCallback func(ipVersion uint8, id interface{}, status string)
@@ -51,7 +46,6 @@ func newWireguardManager(
 ) *wireguardManager {
 	return &wireguardManager{
 		wireguardRouteTable: wireguardRouteTable,
-		localCIDRs:          set.New(),
 	}
 }
 
@@ -66,41 +60,37 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		m.wireguardRouteTable.EndpointRemove(msg.Hostname)
 	case *proto.RouteUpdate:
 		log.WithField("msg", msg).Debug("RouteUpdate update")
+		if msg.Type == proto.RouteType_CIDR_INFO {
+			return
+		}
+		cidr, err := ip.ParseCIDROrIP(msg.Dst)
+		if err != nil || cidr == nil {
+			log.Errorf("error parsing RouteUpdate CIDR: %s", msg.Dst)
+			return
+		}
 		switch msg.Type {
-		case proto.RouteType_LOCAL_WORKLOAD:
-			if cidr := ip.MustParseCIDROrIP(msg.Dst); cidr == nil {
-				log.Errorf("error parsing RouteUpdate CIDR: %s", msg.Dst)
-			} else if cidr.Version() == 4 {
-				log.Debugf("Update for IPv4 CIDR: %s", cidr)
-				m.localCIDRs.Add(cidr)
-				m.wireguardRouteTable.LocalWorkloadCIDRAdd(cidr)
-			}
-		case proto.RouteType_REMOTE_WORKLOAD:
-			if cidr := ip.MustParseCIDROrIP(msg.Dst); cidr == nil {
-				log.Errorf("error parsing RouteUpdate CIDR: %s", msg.Dst)
-			} else if cidr.Version() == 4 {
-				log.Debugf("Update for IPv4 CIDR: %s", cidr)
-				m.wireguardRouteTable.EndpointAllowedCIDRAdd(msg.DstNodeName, cidr)
-			}
+		case proto.RouteType_LOCAL_WORKLOAD, proto.RouteType_REMOTE_WORKLOAD:
+			// CIDR is for a workload.
+			log.Debug("RouteUpdate is a workload update")
+			m.wireguardRouteTable.RouteUpdate(msg.DstNodeName, cidr)
+		case proto.RouteType_LOCAL_HOST, proto.RouteType_REMOTE_HOST:
+			// CIDR is for a host. Wireguard does not care about host IPs from the route calculator, but it's
+			// possible this is replacing an identical workload route - so trigger deletion for this route.
+			log.Debug("RouteUpdate is a host update, treating as a deletion")
+			m.wireguardRouteTable.RouteRemove(cidr)
 		default:
-			log.Debug("RouteUpdate is not a peer workload update, ignoring")
+			// CIDR is for an unexpected type. Ignore the update.
+			log.WithField("msg", msg).Warning("RouteUpdate is for unexpected type")
 		}
 	case *proto.RouteRemove:
 		log.WithField("msg", msg).Debug("RouteRemove update")
-		cidr := ip.MustParseCIDROrIP(msg.Dst)
-		if cidr == nil {
-			log.Errorf("error parsing RouteRemove CIDR: %s", msg.Dst)
-		} else if cidr.Version() != 4 {
-			log.Debugf("Route removal for non-IPv4 CIDR: %s", cidr)
-			m.wireguardRouteTable.EndpointAllowedCIDRRemove(cidr)
-		} else if m.localCIDRs.Contains(cidr) {
-			log.Debugf("Route removal for local IPv4 CIDR: %s", cidr)
-			m.localCIDRs.Discard(cidr)
-			m.wireguardRouteTable.LocalWorkloadCIDRRemove(cidr)
-		} else {
-			log.Debugf("Route removal for remote IPv4 CIDR: %s", cidr)
-			m.wireguardRouteTable.EndpointAllowedCIDRRemove(cidr)
+		cidr, err := ip.ParseCIDROrIP(msg.Dst)
+		if err != nil || cidr == nil {
+			log.Errorf("error parsing RouteUpdate CIDR: %s", msg.Dst)
+			return
 		}
+		log.Debugf("Route removal for IPv4 CIDR: %s", cidr)
+		m.wireguardRouteTable.RouteRemove(cidr)
 	case *proto.WireguardEndpointUpdate:
 		log.WithField("msg", msg).Debug("WireguardEndpointUpdate update")
 		key, err := wgtypes.ParseKey(msg.PublicKey)
