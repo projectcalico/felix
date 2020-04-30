@@ -207,6 +207,7 @@ type MockNetlinkDataplane struct {
 	NumLinkAddCalls        int
 	NumLinkDeleteCalls     int
 	ImmediateLinkUp        bool
+	NumRuleListCalls       int
 	NumRuleAddCalls        int
 	NumRuleDelCalls        int
 	WireguardConfigUpdated bool
@@ -236,6 +237,9 @@ func (d *MockNetlinkDataplane) ResetDeltas() {
 	d.NumLinkDeleteCalls = 0
 	d.NumNewNetlinkCalls = 0
 	d.NumNewWireguardCalls = 0
+	d.NumRuleListCalls = 0
+	d.NumRuleAddCalls = 0
+	d.NumRuleDelCalls = 0
 	d.AddedRules = nil
 	d.DeletedRules = nil
 	d.WireguardConfigUpdated = false
@@ -519,6 +523,7 @@ func (d *MockNetlinkDataplane) RuleList(family int) ([]netlink.Rule, error) {
 	defer GinkgoRecover()
 
 	Expect(d.NetlinkOpen).To(BeTrue())
+	d.NumRuleListCalls++
 	if d.shouldFail(FailNextRuleList) {
 		return nil, SimulatedError
 	}
@@ -640,7 +645,7 @@ func (d *MockNetlinkDataplane) RouteAdd(route *netlink.Route) error {
 		return SimulatedError
 	}
 	key := KeyForRoute(route)
-	log.WithField("routeKey", key).Info("Mock dataplane: RouteAdd called")
+	log.WithField("routeKey", key).Info("Mock dataplane: RouteUpdate called")
 	d.AddedRouteKeys.Add(key)
 	if _, ok := d.RouteKeyToRoute[key]; ok {
 		return AlreadyExistsError

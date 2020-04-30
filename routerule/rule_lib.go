@@ -17,6 +17,8 @@ package routerule
 import (
 	"net"
 
+	"github.com/projectcalico/felix/ip"
+
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 )
@@ -112,8 +114,7 @@ func RulesMatchSrcFWMark(r, p *Rule) bool {
 		(r.nlRule.Invert == p.nlRule.Invert) &&
 		(r.nlRule.Mark == p.nlRule.Mark) &&
 		(r.nlRule.Mask == p.nlRule.Mask) &&
-		((r.nlRule.Src != nil && p.nlRule.Src != nil && r.nlRule.Src.String() == p.nlRule.Src.String()) ||
-			(r.nlRule.Src == nil && p.nlRule.Src == nil))
+		ip.IPNetsEqual(r.nlRule.Src, p.nlRule.Src)
 }
 
 func RulesMatchSrcFWMarkTable(r, p *Rule) bool {
