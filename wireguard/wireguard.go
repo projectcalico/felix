@@ -384,8 +384,9 @@ func (w *Wireguard) localWorkloadCIDRAdd(cidr ip.CIDR) {
 	// Only flag the CIDRs for update if it not wholly covered by the already filtered local CIDRs.
 	contained := false
 	w.localCIDRsFiltered.Iter(func(item interface{}) error {
-		filtered := item.(ip.CIDR).ToIPNet()
-		if filtered.Contains(cidr.ToIPNet().IP) {
+		filtered := item.(ip.CIDR)
+		filteredIPNet := filtered.ToIPNet()
+		if filteredIPNet.Contains(cidr.ToIPNet().IP) && filtered.Prefix() >= cidr.Prefix() {
 			contained = true
 			return set.StopIteration
 		}
