@@ -60,9 +60,6 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		m.wireguardRouteTable.EndpointRemove(msg.Hostname)
 	case *proto.RouteUpdate:
 		log.WithField("msg", msg).Debug("RouteUpdate update")
-		if msg.Type == proto.RouteType_CIDR_INFO {
-			return
-		}
 		cidr, err := ip.ParseCIDROrIP(msg.Dst)
 		if err != nil || cidr == nil {
 			log.Errorf("error parsing RouteUpdate CIDR: %s", msg.Dst)
@@ -73,14 +70,10 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 			// CIDR is for a workload.
 			log.Debug("RouteUpdate is a workload update")
 			m.wireguardRouteTable.RouteUpdate(msg.DstNodeName, cidr)
-		case proto.RouteType_LOCAL_HOST, proto.RouteType_REMOTE_HOST:
-			// CIDR is for a host. Wireguard does not care about host IPs from the route calculator, but it's
-			// possible this is replacing an identical workload route - so trigger deletion for this route.
-			log.Debug("RouteUpdate is a host update, treating as a deletion")
-			m.wireguardRouteTable.RouteRemove(cidr)
 		default:
-			// CIDR is for an unexpected type. Ignore the update.
-			log.WithField("msg", msg).Warning("RouteUpdate is for unexpected type")
+			// It is not a workload CIDR - treat this as a route deletion.
+			log.Debug("RouteUpdate is not a workload update, treating as a deletion")
+			m.wireguardRouteTable.RouteRemove(cidr)
 		}
 	case *proto.RouteRemove:
 		log.WithField("msg", msg).Debug("RouteRemove update")
