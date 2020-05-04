@@ -307,12 +307,12 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 
 	Context("with Wireguard disabled", func() {
 		BeforeEach(func() {
-			felixPID := felixes[0].GetFelixPID()
-
+			felixPID0 := felixes[0].GetFelixPID()
+			felixPID1 := felixes[1].GetFelixPID()
 			disableWireguard(client)
-
 			// Wait for felix to restart.
-			Eventually(felixes[0].GetFelixPID, "5s", "100ms").ShouldNot(Equal(felixPID))
+			Eventually(felixes[0].GetFelixPID, "5s", "100ms").ShouldNot(Equal(felixPID0))
+			Eventually(felixes[1].GetFelixPID, "5s", "100ms").ShouldNot(Equal(felixPID1))
 		})
 
 		It("the Wireguard device shouldn't exist", func() {
