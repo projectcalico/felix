@@ -592,7 +592,7 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool) error {
 
 		// Now do the resync - this will update our deltas again based on what is not programmed (it's a little bit
 		// circuitous, but simplifies the code paths for resync and delta processing).
-		if routesToDelete, resyncErr = r.fullResyncRoutesForLink(logCxt, ifaceName); resyncErr != nil && resyncErr != IfaceGrace {
+		if routesToDelete, resyncErr = r.fullResyncRoutesForLink(logCxt, ifaceName, deletedConnCIDRs); resyncErr != nil && resyncErr != IfaceGrace {
 			// If we hit anything other than an interface-in-grace error, exit now.
 			r.logCxt.WithError(resyncErr).Info("Hit error doing kernel reconciliation")
 			return r.filterErrorByIfaceState(ifaceName, resyncErr, UpdateFailed)
@@ -748,7 +748,7 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 // fullResyncRoutesForLink performs a full resync of the routes by first listing current routes and correlating against
 // the expected set. After correlation, it will create a set of routes to delete and update the delta routes to add
 // back any missing routes.
-func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string) ([]netlink.Route, error) {
+func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string, deletedConnCIDRs set.Set) ([]netlink.Route, error) {
 	// Get the netlink client and the link attributes
 	nl, err := r.getNetlink()
 	if err != nil {
@@ -796,15 +796,6 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 		}
 		return nil, filteredErr
 	}
-
-	// Track any CIDRs in the route table that should not have been programmed.
-	oldCIDRs := set.New()
-	defer oldCIDRs.Iter(func(item interface{}) error {
-		// Remove any conntrack entries that should no longer be there.
-		dest := item.(ip.CIDR)
-		r.startConntrackDeletion(dest.Addr())
-		return nil
-	})
 
 	var routesToDelete []netlink.Route
 	expectedTargets := r.ifaceNameToTargets[ifaceName]
@@ -863,6 +854,9 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 		}
 		logCxt.WithField("routeProblems", routeProblems).Info("Remove old route")
 		routesToDelete = append(routesToDelete, route)
+		if dest != nil {
+			deletedConnCIDRs.Add(dest)
+		}
 	}
 
 	// Now loop through the expected CIDRs to Target. Remove any that we did not find, and add them back into our
