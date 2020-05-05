@@ -563,17 +563,32 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool) error {
 	logCxt := r.logCxt.WithField("ifaceName", ifaceName)
 	logCxt.Debug("Syncing interface routes")
 
+	// Any deleted route that is not being replaced by a route with the same CIDR should have the corresponding
+	// conntrack entry removed.
+	deletedConnCIDRs := set.New()
+	defer func() {
+		cidrsToTarget := r.ifaceNameToTargets[ifaceName]
+		deletedConnCIDRs.Iter(func(item interface{}) error {
+			cidr := item.(ip.CIDR)
+			if _, ok := cidrsToTarget[cidr]; !ok {
+				// Route is deleted and CIDR should not be routable anymore - remove conntrack entries.
+				r.startConntrackDeletion(cidr.Addr())
+			}
+			return nil
+		})
+	}()
+
 	// If necessary perform a full resync. This will return a set of routes that need deleting and will update the
 	// deltas to fix any discrepancies with the expected configuration. If this errors, we still apply the deltas
 	// first because this allows us to tidy up configuration for interfaces that no longer have any routes associated
 	// with them.
-	updatesFailed := false
 	var routesToDelete []netlink.Route
+	updatesFailed := false
 	var resyncErr error
 	if fullSync {
 		// Performing a full re-sync.  Start by applying the deltas so that we don't delete routes that are required.
 		logCxt.Debug("Reconcile against kernel programming")
-		_, _ = r.applyRouteDeltas(ifaceName)
+		_, _ = r.applyRouteDeltas(ifaceName, deletedConnCIDRs)
 
 		// Now do the resync - this will update our deltas again based on what is not programmed (it's a little bit
 		// circuitous, but simplifies the code paths for resync and delta processing).
@@ -596,22 +611,8 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool) error {
 		}
 	}
 
-	// Any deleted route that is not being replaced by a route with the same CIDR should have the corresponding
-	// conntrack entry removed.
-	defer func() {
-		cidrsToTarget := r.ifaceNameToTargets[ifaceName]
-		for _, route := range routesToDelete {
-			if cidr := ip.CIDRFromIPNet(route.Dst); cidr == nil {
-				// No parseable CIDR destination in route.
-			} else if _, ok := cidrsToTarget[cidr]; !ok {
-				// Route is deleted and CIDR should not be routable anymore - remove conntrack entries.
-				r.startConntrackDeletion(cidr.Addr())
-			}
-		}
-	}()
-
 	// Update the cached values from the deltas and get the set of targets to create and delete.
-	targetsToCreate, targetsToDelete := r.applyRouteDeltas(ifaceName)
+	targetsToCreate, targetsToDelete := r.applyRouteDeltas(ifaceName, deletedConnCIDRs)
 
 	// Try to get the link.  This may fail if it's been deleted out from under us.
 	linkAttrs, err := r.getLinkAttributes(ifaceName)
@@ -671,7 +672,7 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool) error {
 	return resyncErr
 }
 
-func (r *RouteTable) applyRouteDeltas(ifaceName string) (targetsToCreate, targetsToDelete []Target) {
+func (r *RouteTable) applyRouteDeltas(ifaceName string, deletedConnCIDRs set.Set) (targetsToCreate, targetsToDelete []Target) {
 	// Determine the set of deleted, created and current targets
 	cidrsToTarget := r.ifaceNameToTargets[ifaceName]
 	if cidrsToTarget == nil {
@@ -687,6 +688,7 @@ func (r *RouteTable) applyRouteDeltas(ifaceName string) (targetsToCreate, target
 			// add deltas for unchanged targets, so we don't need to check for target equivalency here.
 			log.Debugf("Deleted or updated CIDR: %v", cidr)
 			targetsToDelete = append(targetsToDelete, current)
+			deletedConnCIDRs.Add(cidr)
 			delete(cidrsToTarget, cidr)
 		}
 		if target != nil {
