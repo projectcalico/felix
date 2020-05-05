@@ -10,7 +10,6 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// See the License for the specific language governing permissions and
 // limitations under the License.
 
 package wireguard
@@ -375,8 +374,8 @@ func (w *Wireguard) routeRemove(name string, cidr ip.CIDR) {
 // - the source-matched wireguard routing rules to limit wireguard encryption to traffic to/from local workloads.
 // - add throw routes to the wireguard route table to ensure we throw to the main table for local routing.
 //
-// Note that the workload CIDRs may overlap. This method determines the minimal overlapping set of routes and then
-// programs that as a .
+// Note that the workload CIDRs may overlap. This method determines if the added CIDR is wholly covered by one already
+// programmed - if it is then no further update is required.
 func (w *Wireguard) localWorkloadCIDRAdd(cidr ip.CIDR) {
 	log.WithField("cidr", cidr).Debug("localWorkloadCIDRAdd")
 	// Split the local CIDRs into actual /32 workload IPs and the CIDR blocks for the node. We assume the CIDR blocks
@@ -407,11 +406,12 @@ func (w *Wireguard) localWorkloadCIDRAdd(cidr ip.CIDR) {
 	}
 }
 
-// Add a local workload CIDR. These CIDRs are used for:
+// Remove a local workload CIDR. These CIDRs are used for:
 // - the source-matched wireguard routing rules to limit wireguard encryption to traffic to/from local workloads.
 // - add throw routes to the wireguard route table to ensure we throw to the main table for local routing.
 //
-// Note that the workload CIDRs may overlap so the minimal overlapping set of routes needs to be recalculated.
+// Note that the workload CIDRs may overlap so the minimal overlapping set of routes needs to be recalculated, so
+// we only need to update the local CIDRs if the CIDR being removed is one of the ones programmed.
 func (w *Wireguard) localWorkloadCIDRRemove(cidr ip.CIDR) {
 	log.WithField("cidr", cidr).Debug("localWorkloadCIDRRemove")
 	if cidr.Prefix() == ipPrefixLen {
