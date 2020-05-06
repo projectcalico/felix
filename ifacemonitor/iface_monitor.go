@@ -23,6 +23,8 @@ import (
 	"github.com/vishvananda/netlink"
 
 	"github.com/projectcalico/libcalico-go/lib/set"
+
+	"github.com/projectcalico/felix/ip"
 )
 
 type netlinkStub interface {
@@ -91,6 +93,8 @@ func (m *InterfaceMonitor) MonitorInterfaces() {
 	if err := m.netlinkStub.Subscribe(updates, addrUpdates); err != nil {
 		log.WithError(err).Panic("Failed to subscribe to netlink stub")
 	}
+	filteredAddrUpdates := make(chan netlink.AddrUpdate, 10)
+	go filterAddrUpdates(addrUpdates, filteredAddrUpdates)
 	log.Info("Subscribed to netlink updates.")
 
 	// Start of day, do a resync to notify all our existing interfaces.  We also do periodic
@@ -116,7 +120,7 @@ readLoop:
 				break readLoop
 			}
 			m.handleNetlinkUpdate(update)
-		case addrUpdate, ok := <-addrUpdates:
+		case addrUpdate, ok := <-filteredAddrUpdates:
 			log.WithField("addrUpdate", addrUpdate).Debug("Address update")
 			if !ok {
 				log.Warn("Failed to read an address update")
@@ -132,6 +136,88 @@ readLoop:
 		}
 	}
 	log.Panic("Failed to read events from Netlink.")
+}
+
+func filterAddrUpdates(in chan netlink.AddrUpdate, out chan netlink.AddrUpdate) {
+	var timerC <-chan time.Time
+
+	type timestampedUpd struct {
+		ReadyAt time.Time
+		Update  netlink.AddrUpdate
+	}
+
+	var updatesByIfaceIdx map[int][]timestampedUpd
+
+	for {
+		select {
+		case addrUpd := <-in:
+			idx := addrUpd.LinkIndex
+			oldUpds := updatesByIfaceIdx[idx]
+
+			var readyToSendTime time.Time
+			if addrUpd.NewAddr {
+				if len(oldUpds) == 0 {
+					// This is an add for a new IP and there's nothing else in the queue for this interface.
+					// Short circuit.
+					out <- addrUpd
+					continue
+				}
+
+				// Else, there's something else in the queue, need to process the queue...
+				readyToSendTime = time.Now()
+			} else {
+				readyToSendTime = time.Now().Add(20*time.Millisecond)
+			}
+			upds := oldUpds[:0]
+			for _, upd := range oldUpds {
+				if ip.IPNetsEqual(&upd.Update.LinkAddress, &addrUpd.LinkAddress) {
+					// New update for the same IP, suppress the old update
+					log.WithField("address", upd.Update.LinkAddress.String()).Debug(
+						"Received update for same IP within a short time, squashed the update.")
+					// To prevent continuous flapping from delaying route updates forever, take the timestamp of the
+					// first update.
+					readyToSendTime = upd.ReadyAt
+					continue
+				}
+				upds = append(upds, upd)
+			}
+			upds = append(upds, timestampedUpd{ReadyAt: readyToSendTime, Update: addrUpd})
+		case <-timerC:
+		}
+		var nextUpdTime time.Time
+		for idx, upds := range updatesByIfaceIdx {
+			for len(upds) > 0 {
+				firstUpd := upds[0]
+				if time.Since(firstUpd.ReadyAt) >= 0 {
+					// Either update is old enough to prevent flapping or it's an address being added.
+					// Ready to send...
+					out <- firstUpd.Update
+					upds = upds[1:]
+				} else {
+					// Update is too new, figure out when it'll be safe to send it.
+					if nextUpdTime.IsZero() || firstUpd.ReadyAt.Before(nextUpdTime) {
+						nextUpdTime = firstUpd.ReadyAt
+					}
+					break
+				}
+			}
+			if len(upds) == 0 {
+				delete(updatesByIfaceIdx, idx)
+			} else {
+				updatesByIfaceIdx[idx] = upds
+			}
+		}
+		if !nextUpdTime.IsZero() {
+			// Need to schedule a retry.
+			delay := time.Until(nextUpdTime)
+			if delay <= 0 {
+				delay = 1
+			}
+			timerC = time.After(delay)
+		} else {
+			timerC = nil
+		}
+	}
 }
 
 func (m *InterfaceMonitor) isExcludedInterface(ifName string) bool {
