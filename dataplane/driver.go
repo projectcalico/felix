@@ -111,16 +111,6 @@ func StartDataplaneDriver(configParams *config.Config,
 
 		// Always allocate the wireguard table index (even when not enabled). This ensures we can tidy up entries
 		// if wireguard is disabled after being previously enabled.
-		var wireguardEnabled bool
-		var wireguardTableIndex int
-		if idx, err := routeTableIndexAllocator.GrabIndex(); err == nil {
-			log.Debugf("Assigned wireguard table index: %d", idx)
-			wireguardEnabled = configParams.WireguardEnabled
-			wireguardTableIndex = idx
-		} else {
-			log.WithError(err).Warning("Unable to assign table index for wireguard")
-		}
-
 		dpConfig := intdataplane.Config{
 			Hostname: configParams.FelixHostname,
 			IfaceMonitorConfig: ifacemonitor.Config{
@@ -180,11 +170,11 @@ func StartDataplaneDriver(configParams *config.Config,
 				BPFEnabled:                         configParams.BPFEnabled,
 			},
 			Wireguard: wireguard.Config{
-				Enabled:             wireguardEnabled,
+				Enabled:             false,
 				ListeningPort:       configParams.WireguardListeningPort,
 				FirewallMark:        int(markWireguard),
 				RoutingRulePriority: configParams.WireguardRoutingRulePriority,
-				RoutingTableIndex:   wireguardTableIndex,
+				RoutingTableIndex:   0,
 				InterfaceName:       configParams.WireguardInterfaceName,
 				MTU:                 configParams.WireguardMTU,
 			},
