@@ -115,7 +115,7 @@ func StartDataplaneDriver(configParams *config.Config,
 		var wireguardTableIndex int
 		if idx, err := routeTableIndexAllocator.GrabIndex(); err == nil {
 			log.Debugf("Assigned wireguard table index: %d", idx)
-			wireguardEnabled = configParams.WireguardEnabled
+			//wireguardEnabled = configParams.WireguardEnabled
 			wireguardTableIndex = idx
 		} else {
 			log.WithError(err).Warning("Unable to assign table index for wireguard")
