@@ -3,6 +3,8 @@ module github.com/projectcalico/felix
 go 1.13
 
 require (
+	github.com/Workiva/go-datastructures v1.0.50 // indirect
+	github.com/beorn7/perks v1.0.0 // indirect
 	github.com/containernetworking/plugins v0.8.2
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
@@ -25,10 +27,12 @@ require (
 	github.com/philhofer/fwd v1.0.0 // indirect
 	github.com/pkg/errors v0.8.1
 	github.com/pquerna/ffjson v0.0.0-20190813045741-dac163c6c0a9 // indirect
-	github.com/projectcalico/libcalico-go v1.7.2-0.20200427180741-f197f7370140
+	github.com/projectcalico/libcalico-go v0.0.0-20200506032348-dda4a7964ffa
 	github.com/projectcalico/pod2daemon v0.0.0-20191223184832-a0e1c4693271
-	github.com/projectcalico/typha v0.7.3-0.20200428231740-c01bb349f7f0
+	github.com/projectcalico/typha v0.7.2
 	github.com/prometheus/client_golang v0.9.2
+	github.com/prometheus/client_model v0.0.0-20190129233127-fd36f4220a90 // indirect
+	github.com/prometheus/common v0.0.0-20190416093430-c873fb1f9420 // indirect
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/smartystreets/goconvey v0.0.0-20190731233626-505e41936337 // indirect
@@ -41,6 +45,7 @@ require (
 	golang.org/x/sys v0.0.0-20200202164722-d101bd2416d5
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20200324154536-ceff61240acf
 	google.golang.org/grpc v1.23.0
+	gopkg.in/go-playground/validator.v9 v9.28.0 // indirect
 	gopkg.in/ini.v1 v1.46.0 // indirect
 	k8s.io/api v0.0.0
 	k8s.io/apimachinery v0.0.0
