@@ -95,7 +95,7 @@ func (m *InterfaceMonitor) MonitorInterfaces() {
 	}
 	filteredUpdates := make(chan netlink.LinkUpdate, 10)
 	filteredAddrUpdates := make(chan netlink.AddrUpdate, 10)
-	go filterUpdates(addrUpdates, filteredAddrUpdates, updates, filteredUpdates)
+	go filterUpdates(filteredAddrUpdates, addrUpdates, filteredUpdates, updates)
 	log.Info("Subscribed to netlink updates.")
 
 	// Start of day, do a resync to notify all our existing interfaces.  We also do periodic
@@ -141,13 +141,22 @@ readLoop:
 
 const flapDampingDelay = 100 * time.Millisecond
 
-func filterUpdates(addrInC, addrOutC chan netlink.AddrUpdate, linkInC, linkOutC chan netlink.LinkUpdate) {
+// filterUpdates filters out updates that occur when IPs are quickly removed and re-added.
+// Some DHCP clients flap the IP during an IP renewal, for example.
+//
+// Algorithm:
+// * Maintain a queue of link and address updates per interface.
+// * When we see a potential flap (i.e. an IP deletion), defer processing the queue for a while.
+// * If the flap resolves itself (i.e. the IP is added back), suppress the IP deletion.
+func filterUpdates(addrOutC chan<- netlink.AddrUpdate, addrInC <-chan netlink.AddrUpdate,
+	linkOutC chan<- netlink.LinkUpdate, linkInC <-chan netlink.LinkUpdate) {
+
 	log.Debug("filterUpdates: starting")
 	var timerC <-chan time.Time
 
 	type timestampedUpd struct {
 		ReadyAt time.Time
-		Update  interface{}
+		Update  interface{} // AddrUpdate or LinkUpdate
 	}
 
 	updatesByIfaceIdx := map[int][]timestampedUpd{}
