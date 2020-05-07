@@ -93,8 +93,9 @@ func (m *InterfaceMonitor) MonitorInterfaces() {
 	if err := m.netlinkStub.Subscribe(updates, addrUpdates); err != nil {
 		log.WithError(err).Panic("Failed to subscribe to netlink stub")
 	}
+	filteredUpdates := make(chan netlink.LinkUpdate, 10)
 	filteredAddrUpdates := make(chan netlink.AddrUpdate, 10)
-	go filterAddrUpdates(addrUpdates, filteredAddrUpdates)
+	go filterUpdates(addrUpdates, filteredAddrUpdates, updates, filteredUpdates)
 	log.Info("Subscribed to netlink updates.")
 
 	// Start of day, do a resync to notify all our existing interfaces.  We also do periodic
@@ -113,7 +114,7 @@ readLoop:
 			"resyncC":     m.resyncC,
 		}).Debug("About to select on possible triggers")
 		select {
-		case update, ok := <-updates:
+		case update, ok := <-filteredUpdates:
 			log.WithField("update", update).Debug("Link update")
 			if !ok {
 				log.Warn("Failed to read a link update")
@@ -140,21 +141,33 @@ readLoop:
 
 const flapDampingDelay = 100 * time.Millisecond
 
-func filterAddrUpdates(in chan netlink.AddrUpdate, out chan netlink.AddrUpdate) {
-	log.Debug("filterAddrUpdates: starting")
+func filterUpdates(addrInC, addrOutC chan netlink.AddrUpdate, linkInC, linkOutC chan netlink.LinkUpdate) {
+	log.Debug("filterUpdates: starting")
 	var timerC <-chan time.Time
 
 	type timestampedUpd struct {
 		ReadyAt time.Time
-		Update  netlink.AddrUpdate
+		Update  interface{}
 	}
 
 	updatesByIfaceIdx := map[int][]timestampedUpd{}
 
 	for {
 		select {
-		case addrUpd := <-in:
-			log.WithField("update", addrUpd).Debug("filterAddrUpdates: got new update")
+		case linkUpd := <-linkInC:
+			idx := linkUpd.Index
+			if len(updatesByIfaceIdx[int(idx)]) == 0 {
+				log.Debug("filterUpdates: link change with empty queue, short circuit.")
+				linkOutC <- linkUpd
+				continue
+			}
+			updatesByIfaceIdx[int(idx)] = append(updatesByIfaceIdx[int(idx)],
+				timestampedUpd{
+					ReadyAt: time.Now().Add(flapDampingDelay),
+					Update:  linkUpd,
+				})
+		case addrUpd := <-addrInC:
+			log.WithField("update", addrUpd).Debug("filterUpdates: got new update")
 			idx := addrUpd.LinkIndex
 			oldUpds := updatesByIfaceIdx[idx]
 
@@ -163,51 +176,58 @@ func filterAddrUpdates(in chan netlink.AddrUpdate, out chan netlink.AddrUpdate) 
 				if len(oldUpds) == 0 {
 					// This is an add for a new IP and there's nothing else in the queue for this interface.
 					// Short circuit.
-					log.Debug("filterAddrUpdates: add with empty queue, short circuit.")
-					out <- addrUpd
+					log.Debug("filterUpdates: add with empty queue, short circuit.")
+					addrOutC <- addrUpd
 					continue
 				}
 
 				// Else, there's something else in the queue, need to process the queue...
-				log.Debug("filterAddrUpdates: add with non-empty queue.")
+				log.Debug("filterUpdates: add with non-empty queue.")
 				readyToSendTime = time.Now()
 			} else {
-				log.Debug("filterAddrUpdates: delete.")
+				log.Debug("filterUpdates: delete.")
 				readyToSendTime = time.Now().Add(flapDampingDelay)
 			}
 			upds := oldUpds[:0]
 			for _, upd := range oldUpds {
-				log.WithField("previous", upd).Debug("filterAddrUpdates: examining previous update.")
-				if ip.IPNetsEqual(&upd.Update.LinkAddress, &addrUpd.LinkAddress) {
-					// New update for the same IP, suppress the old update
-					log.WithField("address", upd.Update.LinkAddress.String()).Debug(
-						"Received update for same IP within a short time, squashed the update.")
-					// To prevent continuous flapping from delaying route updates forever, take the timestamp of the
-					// first update.
-					readyToSendTime = upd.ReadyAt
-					continue
+				log.WithField("previous", upd).Debug("filterUpdates: examining previous update.")
+				if oldAddrUpd, ok := upd.Update.(netlink.AddrUpdate); ok {
+					if ip.IPNetsEqual(&oldAddrUpd.LinkAddress, &addrUpd.LinkAddress) {
+						// New update for the same IP, suppress the old update
+						log.WithField("address", oldAddrUpd.LinkAddress.String()).Debug(
+							"Received update for same IP within a short time, squashed the update.")
+						// To prevent continuous flapping from delaying route updates forever, take the timestamp of the
+						// first update.
+						readyToSendTime = upd.ReadyAt
+						continue
+					}
 				}
 				upds = append(upds, upd)
 			}
 			upds = append(upds, timestampedUpd{ReadyAt: readyToSendTime, Update: addrUpd})
 			updatesByIfaceIdx[idx] = upds
 		case <-timerC:
-			log.Debug("filterAddrUpdates: timer popped.")
+			log.Debug("filterUpdates: timer popped.")
 		}
 		var nextUpdTime time.Time
 		for idx, upds := range updatesByIfaceIdx {
-			log.WithField("ifaceIdx", idx).Debug("filterAddrUpdates: examining updates for interface.")
+			log.WithField("ifaceIdx", idx).Debug("filterUpdates: examining updates for interface.")
 			for len(upds) > 0 {
 				firstUpd := upds[0]
 				if time.Since(firstUpd.ReadyAt) >= 0 {
 					// Either update is old enough to prevent flapping or it's an address being added.
 					// Ready to send...
-					log.WithField("update", firstUpd).Debug("filterAddrUpdates: update ready to send.")
-					out <- firstUpd.Update
+					log.WithField("update", firstUpd).Debug("filterUpdates: update ready to send.")
+					switch u := firstUpd.Update.(type) {
+					case netlink.AddrUpdate:
+						addrOutC <- u
+					case netlink.LinkUpdate:
+						linkOutC <- u
+					}
 					upds = upds[1:]
 				} else {
 					// Update is too new, figure out when it'll be safe to send it.
-					log.WithField("update", firstUpd).Debug("filterAddrUpdates: update not ready.")
+					log.WithField("update", firstUpd).Debug("filterUpdates: update not ready.")
 					if nextUpdTime.IsZero() || firstUpd.ReadyAt.Before(nextUpdTime) {
 						nextUpdTime = firstUpd.ReadyAt
 					}
@@ -215,11 +235,11 @@ func filterAddrUpdates(in chan netlink.AddrUpdate, out chan netlink.AddrUpdate) 
 				}
 			}
 			if len(upds) == 0 {
-				log.WithField("ifaceIdx", idx).Debug("filterAddrUpdates: no more updates for interface.")
+				log.WithField("ifaceIdx", idx).Debug("filterUpdates: no more updates for interface.")
 				delete(updatesByIfaceIdx, idx)
 			} else {
 				log.WithField("ifaceIdx", idx).WithField("num", len(upds)).Debug(
-					"filterAddrUpdates: still updates for interface.")
+					"filterUpdates: still updates for interface.")
 				updatesByIfaceIdx[idx] = upds
 			}
 		}
@@ -229,10 +249,10 @@ func filterAddrUpdates(in chan netlink.AddrUpdate, out chan netlink.AddrUpdate) 
 			if delay <= 0 {
 				delay = 1
 			}
-			log.WithField("delay", delay).Debug("filterAddrUpdates: calculated delay.")
+			log.WithField("delay", delay).Debug("filterUpdates: calculated delay.")
 			timerC = time.After(delay)
 		} else {
-			log.Debug("filterAddrUpdates: no more updates to send, disabling timer.")
+			log.Debug("filterUpdates: no more updates to send, disabling timer.")
 			timerC = nil
 		}
 	}
