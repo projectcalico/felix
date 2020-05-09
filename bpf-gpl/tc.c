@@ -1171,10 +1171,6 @@ nat_encap:
 	state->sport = state->dport = CALI_VXLAN_PORT;
 	state->ip_proto = IPPROTO_UDP;
 
-	if (CALI_F_INGRESS) {
-		fib_flags |= BPF_FIB_LOOKUP_OUTPUT;
-	}
-
 allow:
 	{
 		struct fwd fwd = {
