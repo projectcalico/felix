@@ -69,10 +69,11 @@ func (ap AttachPoint) AttachProgram() error {
 	// FIXME we use this lock so that two copies of tc running in parallel don't re-use the same jump map.
 	// This can happen if tc incorrectly decides the two programs are identical (when in fact they differ by attach
 	// point).
-	log.Debug("AttachProgram waiting for lock...")
+	logCxt := log.WithField("ap", ap)
+	logCxt.Debug("AttachProgram waiting for lock...")
 	tcLock.Lock()
 	defer tcLock.Unlock()
-	log.Debug("AttachProgram got lock.")
+	logCxt.Debug("AttachProgram got lock.")
 
 	// Work around tc map name collision: when we load two identical BPF programs onto different interfaces, tc
 	// pins object-local maps to a namespace based on the hash of the BPF program, which is the same for both
@@ -97,7 +98,7 @@ func (ap AttachPoint) AttachProgram() error {
 
 	err = ap.patchBinary(preCompiledBinary, tempBinary)
 	if err != nil {
-		log.WithError(err).Error("Failed to patch binary")
+		logCxt.WithError(err).Error("Failed to patch binary")
 		return err
 	}
 
@@ -111,11 +112,11 @@ func (ap AttachPoint) AttachProgram() error {
 	if err != nil {
 		if strings.Contains(err.Error(), "Cannot find device") {
 			// Avoid a big, spammy log when the issue is that the interface isn't present.
-			log.WithField("iface", ap.Iface).Info(
+			logCxt.WithField("iface", ap.Iface).Info(
 				"Failed to attach BPF program; interface not found.  Will retry if it show up.")
 			return nil
 		}
-		log.WithError(err).WithFields(log.Fields{"out": string(out)}).
+		logCxt.WithError(err).WithFields(logCxt.Fields{"out": string(out)}).
 			WithField("command", tcCmd).Error("Failed to attach BPF program")
 		if err, ok := err.(*exec.ExitError); ok {
 			// ExitError is really unhelpful dumped to the log, swap it for a custom one.
@@ -136,7 +137,7 @@ func (ap AttachPoint) patchBinary(ifile, ofile string) error {
 		return errors.Wrap(err, "failed to read pre-compiled BPF binary")
 	}
 
-	log.WithField("ip", ap.IP).Debug("Patching in IP")
+	log.WithField("ap", ap).WithField("ip", ap.IP).Debug("Patching in IP")
 	err = b.PatchIPv4(ap.IP)
 	if err != nil {
 		return errors.WithMessage(err, "patching in IPv4")
