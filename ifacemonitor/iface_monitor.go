@@ -109,8 +109,8 @@ func (m *InterfaceMonitor) MonitorInterfaces() {
 readLoop:
 	for {
 		log.WithFields(log.Fields{
-			"updates":     updates,
-			"addrUpdates": addrUpdates,
+			"updates":     filteredUpdates,
+			"addrUpdates": filteredAddrUpdates,
 			"resyncC":     m.resyncC,
 		}).Debug("About to select on possible triggers")
 		select {
