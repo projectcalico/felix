@@ -116,7 +116,7 @@ func (ap AttachPoint) AttachProgram() error {
 				"Failed to attach BPF program; interface not found.  Will retry if it show up.")
 			return nil
 		}
-		logCxt.WithError(err).WithFields(logCxt.Fields{"out": string(out)}).
+		logCxt.WithError(err).WithFields(log.Fields{"out": string(out)}).
 			WithField("command", tcCmd).Error("Failed to attach BPF program")
 		if err, ok := err.(*exec.ExitError); ok {
 			// ExitError is really unhelpful dumped to the log, swap it for a custom one.
