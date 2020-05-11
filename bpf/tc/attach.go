@@ -69,7 +69,7 @@ func (ap AttachPoint) AttachProgram() error {
 	// FIXME we use this lock so that two copies of tc running in parallel don't re-use the same jump map.
 	// This can happen if tc incorrectly decides the two programs are identical (when in fact they differ by attach
 	// point).
-	logCxt := log.WithField("ap", ap)
+	logCxt := log.WithField("attachPoint", ap)
 	logCxt.Debug("AttachProgram waiting for lock...")
 	tcLock.Lock()
 	defer tcLock.Unlock()
@@ -108,7 +108,7 @@ func (ap AttachPoint) AttachProgram() error {
 		"bpf", "da", "obj", tempBinary,
 		"sec", SectionName(ap.Type, ap.ToOrFrom))
 
-	out, err := tcCmd.Output()
+	out, err := tcCmd.CombinedOutput()
 	if err != nil {
 		if strings.Contains(err.Error(), "Cannot find device") {
 			// Avoid a big, spammy log when the issue is that the interface isn't present.
