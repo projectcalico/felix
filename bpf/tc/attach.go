@@ -138,7 +138,7 @@ func (ap AttachPoint) patchBinary(ifile, ofile string) error {
 		return errors.Wrap(err, "failed to read pre-compiled BPF binary")
 	}
 
-	log.WithField("ap", ap).WithField("ip", ap.IP).Debug("Patching in IP")
+	logCtx.WithField("ip", ap.IP).Debug("Patching in IP")
 	err = b.PatchIPv4(ap.IP)
 	if err != nil {
 		return errors.WithMessage(err, "patching in IPv4")
