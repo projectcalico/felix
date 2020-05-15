@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,13 +37,22 @@ const (
 	minPostWriteInterval = 50 * time.Millisecond
 )
 
+type TableName string
+
+const (
+	TableRaw    TableName = "raw"
+	TableMangle TableName = "mangle"
+	TableNAT    TableName = "nat"
+	TableFilter TableName = "filter"
+)
+
 var (
 	// List of all the top-level kernel-created chains by iptables table.
-	tableToKernelChains = map[string][]string{
-		"filter": []string{"INPUT", "FORWARD", "OUTPUT"},
-		"nat":    []string{"PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"},
-		"mangle": []string{"PREROUTING", "INPUT", "FORWARD", "OUTPUT", "POSTROUTING"},
-		"raw":    []string{"PREROUTING", "OUTPUT"},
+	tableToKernelChains = map[TableName][]string{
+		TableFilter: []string{"INPUT", "FORWARD", "OUTPUT"},
+		TableNAT:    []string{"PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"},
+		TableMangle: []string{"PREROUTING", "INPUT", "FORWARD", "OUTPUT", "POSTROUTING"},
+		TableRaw:    []string{"PREROUTING", "OUTPUT"},
 	}
 
 	// chainCreateRegexp matches iptables-save output lines for chain forward reference lines.
@@ -291,7 +300,7 @@ type TableOptions struct {
 }
 
 func NewTable(
-	name string,
+	name TableName,
 	ipVersion uint8,
 	hashPrefix string,
 	iptablesWriteLock sync.Locker,
