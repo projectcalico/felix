@@ -346,14 +346,14 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	}
 
 	mangleTableV4 := iptables.NewTable(
-		"mangle",
+		iptables.TableMangle,
 		4,
 		rules.RuleHashPrefix,
 		iptablesLock,
 		featureDetector,
 		iptablesOptions)
 	natTableV4 := iptables.NewTable(
-		"nat",
+		iptables.TableNAT,
 		4,
 		rules.RuleHashPrefix,
 		iptablesLock,
@@ -361,14 +361,14 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		iptablesNATOptions,
 	)
 	rawTableV4 := iptables.NewTable(
-		"raw",
+		iptables.TableRaw,
 		4,
 		rules.RuleHashPrefix,
 		iptablesLock,
 		featureDetector,
 		iptablesOptions)
 	filterTableV4 := iptables.NewTable(
-		"filter",
+		iptables.TableFilter,
 		4,
 		rules.RuleHashPrefix,
 		iptablesLock,
@@ -620,7 +620,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 
 	if config.IPv6Enabled {
 		mangleTableV6 := iptables.NewTable(
-			"mangle",
+			iptables.TableMangle,
 			6,
 			rules.RuleHashPrefix,
 			iptablesLock,
@@ -628,7 +628,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			iptablesOptions,
 		)
 		natTableV6 := iptables.NewTable(
-			"nat",
+			iptables.TableNAT,
 			6,
 			rules.RuleHashPrefix,
 			iptablesLock,
@@ -636,7 +636,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			iptablesNATOptions,
 		)
 		rawTableV6 := iptables.NewTable(
-			"raw",
+			iptables.TableRaw,
 			6,
 			rules.RuleHashPrefix,
 			iptablesLock,
@@ -644,7 +644,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			iptablesOptions,
 		)
 		filterTableV6 := iptables.NewTable(
-			"filter",
+			iptables.TableFilter,
 			6,
 			rules.RuleHashPrefix,
 			iptablesLock,
