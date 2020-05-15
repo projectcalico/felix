@@ -39,7 +39,7 @@ import (
 // and EndTransaction() calls.
 type RestoreInputBuilder struct {
 	buf              bytes.Buffer
-	currentTableName string
+	currentTableName TableName
 	txnOpenerWritten bool
 	NumLinesWritten  counter
 }
@@ -58,7 +58,7 @@ func (b *RestoreInputBuilder) Reset() {
 
 // StartTransaction opens a new transaction context for the named table.
 // Panics if there is already a transaction in progress.
-func (b *RestoreInputBuilder) StartTransaction(tableName string) {
+func (b *RestoreInputBuilder) StartTransaction(tableName TableName) {
 	if b.currentTableName != "" {
 		log.Panic("StartTransaction() called without ending previous transaction.")
 	}

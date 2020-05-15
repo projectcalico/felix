@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ var _ = Describe("Table with an empty dataplane (legacy)", func() {
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table := NewTable(
-			"filter",
+			TableFilter,
 			4,
 			rules.RuleHashPrefix,
 			iptLock,
@@ -86,7 +86,7 @@ func describeEmptyDataplaneTests(dataplaneMode string) {
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table = NewTable(
-			"filter",
+			TableFilter,
 			4,
 			rules.RuleHashPrefix,
 			iptLock,
@@ -160,7 +160,7 @@ func describeEmptyDataplaneTests(dataplaneMode string) {
 	It("should police the insert mode", func() {
 		Expect(func() {
 			NewTable(
-				"filter",
+				TableFilter,
 				4,
 				rules.RuleHashPrefix,
 				&mockMutex{},
@@ -727,7 +727,7 @@ func describePostUpdateCheckTests(enableRefresh bool, dataplaneMode string) {
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table = NewTable(
-			"filter",
+			TableFilter,
 			4,
 			rules.RuleHashPrefix,
 			&mockMutex{},
@@ -930,7 +930,7 @@ func describeDirtyDataplaneTests(appendMode bool, dataplaneMode string) {
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table = NewTable(
-			"filter",
+			TableFilter,
 			4,
 			rules.RuleHashPrefix,
 			&mockMutex{},
@@ -1327,7 +1327,7 @@ func describeInsertAndNonCalicoChainTests(dataplaneMode string) {
 		featureDetector.NewCmd = dataplane.newCmd
 		featureDetector.GetKernelVersionReader = dataplane.getKernelVersionReader
 		table = NewTable(
-			"filter",
+			TableFilter,
 			6,
 			rules.RuleHashPrefix,
 			iptLock,

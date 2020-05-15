@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,13 +37,22 @@ const (
 	minPostWriteInterval = 50 * time.Millisecond
 )
 
+type TableName string
+
+const (
+	TableRaw    TableName = "raw"
+	TableMangle TableName = "mangle"
+	TableNAT    TableName = "nat"
+	TableFilter TableName = "filter"
+)
+
 var (
 	// List of all the top-level kernel-created chains by iptables table.
-	tableToKernelChains = map[string][]string{
-		"filter": []string{"INPUT", "FORWARD", "OUTPUT"},
-		"nat":    []string{"PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"},
-		"mangle": []string{"PREROUTING", "INPUT", "FORWARD", "OUTPUT", "POSTROUTING"},
-		"raw":    []string{"PREROUTING", "OUTPUT"},
+	tableToKernelChains = map[TableName][]string{
+		TableFilter: []string{"INPUT", "FORWARD", "OUTPUT"},
+		TableNAT:    []string{"PREROUTING", "INPUT", "OUTPUT", "POSTROUTING"},
+		TableMangle: []string{"PREROUTING", "INPUT", "FORWARD", "OUTPUT", "POSTROUTING"},
+		TableRaw:    []string{"PREROUTING", "OUTPUT"},
 	}
 
 	// chainCreateRegexp matches iptables-save output lines for chain forward reference lines.
@@ -179,7 +188,7 @@ func init() {
 // thread.  To avoid conflicts in the dataplane itself, there should only be one instance of
 // Table for each iptable table in an application.
 type Table struct {
-	Name      string
+	Name      TableName
 	IPVersion uint8
 
 	// featureDetector detects the features of the dataplane.
@@ -291,7 +300,7 @@ type TableOptions struct {
 }
 
 func NewTable(
-	name string,
+	name TableName,
 	ipVersion uint8,
 	hashPrefix string,
 	iptablesWriteLock sync.Locker,
@@ -402,9 +411,9 @@ func NewTable(
 		timeNow:   now,
 		lookPath:  lookPath,
 
-		gaugeNumChains:        gaugeNumChains.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
-		gaugeNumRules:         gaugeNumRules.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
-		countNumLinesExecuted: countNumLinesExecuted.WithLabelValues(fmt.Sprintf("%d", ipVersion), name),
+		gaugeNumChains:        gaugeNumChains.WithLabelValues(fmt.Sprintf("%d", ipVersion), string(name)),
+		gaugeNumRules:         gaugeNumRules.WithLabelValues(fmt.Sprintf("%d", ipVersion), string(name)),
+		countNumLinesExecuted: countNumLinesExecuted.WithLabelValues(fmt.Sprintf("%d", ipVersion), string(name)),
 	}
 	table.restoreInputBuffer.NumLinesWritten = table.countNumLinesExecuted
 
@@ -655,7 +664,7 @@ func (t *Table) getHashesAndRulesFromDataplane() (hashes map[string][]string, ru
 // attemptToGetHashesAndRulesFromDataplane starts an iptables-save subprocess and feeds its output to
 // readHashesAndRulesFrom() via a pipe.  It handles the various error cases.
 func (t *Table) attemptToGetHashesAndRulesFromDataplane() (hashes map[string][]string, rules map[string][]string, err error) {
-	cmd := t.newCmd(t.iptablesSaveCmd, "-t", t.Name)
+	cmd := t.newCmd(t.iptablesSaveCmd, "-t", string(t.Name))
 	countNumSaveCalls.Inc()
 
 	stdout, err := cmd.StdoutPipe()
@@ -870,7 +879,7 @@ func (t *Table) Apply() (rescheduleAfter time.Duration) {
 				continue
 			} else {
 				t.logCxt.WithError(err).Error("Failed to program iptables, loading diags before panic.")
-				cmd := t.newCmd(t.iptablesSaveCmd, "-t", t.Name)
+				cmd := t.newCmd(t.iptablesSaveCmd, "-t", string(t.Name))
 				output, err2 := cmd.Output()
 				if err2 != nil {
 					t.logCxt.WithError(err2).Error("Failed to load iptables state")
