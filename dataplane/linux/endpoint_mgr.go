@@ -1047,6 +1047,12 @@ func (m *endpointManager) configureInterface(name string) error {
 			"Skipping configuration of interface because it is oper down.")
 		return nil
 	}
+
+	err := m.writeProcSys(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", name), "0")
+	if err != nil {
+		return err
+	}
+
 	log.WithField("ifaceName", name).Info(
 		"Applying /proc/sys configuration to interface.")
 	if m.ipVersion == 4 {
