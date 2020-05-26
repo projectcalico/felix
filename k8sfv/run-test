@@ -76,7 +76,7 @@ fi
 : ${TYPHA_LOG_LEVEL:=info}
 #
 # CRD Manifest to use
-: ${CRD_PATH:=./fv/infrastructure/crds.yaml}
+: ${CRD_PATH:=./fv/infrastructure/crds}
 
 # Generate a unique prefix for the names of the containers that we
 # will create.
@@ -175,12 +175,12 @@ if [ ! -e ${CRD_PATH} ]; then
 fi
 
 # Copy CRD manifest into running k8sfs-apiserver
-while ! docker cp ${CRD_PATH} ${prefix}-apiserver:/crds.yaml; do
+while ! docker cp ${CRD_PATH} ${prefix}-apiserver:/crds; do
     sleep 2
 done
 
 # Apply CRD manifest to pre-create resource definitions
-while ! docker exec ${prefix}-apiserver kubectl apply -f /crds.yaml; do
+while ! docker exec ${prefix}-apiserver kubectl apply -f /crds; do
     sleep 2
 done
 

@@ -256,13 +256,13 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 
 	log.Info("Started controller manager.")
 
-	// Copy CRD registration manifest into the API server container, and apply it.
-	err := kds.k8sApiContainer.CopyFileIntoContainer("infrastructure/crds.yaml", "/crds.yaml")
+	// Copy CRD registration manifests into the API server container, and apply it.
+	err := kds.k8sApiContainer.CopyFileIntoContainer("infrastructure/crds", "/crds")
 	if err != nil {
 		TearDownK8sInfra(kds)
 		return nil, err
 	}
-	err = kds.k8sApiContainer.ExecMayFail("kubectl", "apply", "-f", "/crds.yaml")
+	err = kds.k8sApiContainer.ExecMayFail("kubectl", "apply", "-f", "/crds/")
 	if err != nil {
 		TearDownK8sInfra(kds)
 		return nil, err
