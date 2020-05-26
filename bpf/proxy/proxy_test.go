@@ -421,8 +421,9 @@ var _ = Describe("BPF Proxy", func() {
 							Name:      "nodeport",
 							Namespace: "default",
 						},
+						Protocol: "TCP",
 					}
-
+					Expect(s.SvcMap).To(HaveKey(npKey))
 					Expect(s.SvcMap[npKey].Port()).
 						To(Equal(int(nodeport.Spec.Ports[0].Port)))
 					Expect(s.SvcMap[npKey].NodePort()).To(Equal(int(nodeport.Spec.Ports[0].NodePort)))
