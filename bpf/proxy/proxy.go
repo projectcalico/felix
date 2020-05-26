@@ -42,7 +42,7 @@ import (
 // Proxy watches for updates of Services and Endpoints, maintains their mapping
 // and programs it into the dataplane
 type Proxy interface {
-	//Stop stops the proxy and waits for its exit
+	// Stop stops the proxy and waits for its exit
 	Stop()
 }
 
@@ -87,11 +87,9 @@ type proxy struct {
 	syncPeriod time.Duration
 
 	// event recorder to update node events
-	recorder record.EventRecorder
-
-	// LB health checker proxy
-	healthChecker healthcheck.Server
-	healthzServer healthcheck.HealthzUpdater
+	recorder        record.EventRecorder
+	svcHealthServer healthcheck.ServiceHealthServer
+	healthzServer   healthcheck.ProxierHealthUpdater
 
 	stopCh   chan struct{}
 	stopWg   sync.WaitGroup
@@ -133,7 +131,7 @@ func New(k8s kubernetes.Interface, dp DPSyncer, hostname string, opts ...Option)
 	p.runner = async.NewBoundedFrequencyRunner("dp-sync-runner",
 		p.invokeDPSyncer, p.minDPSyncPeriod, time.Hour /* XXX might be infinite? */, 1)
 
-	p.healthChecker = healthcheck.NewServer(p.hostname, p.recorder, nil, nil)
+	p.svcHealthServer = healthcheck.NewServiceHealthServer(p.hostname, p.recorder)
 	isIPv6 := false
 	p.epsChanges = k8sp.NewEndpointChangeTracker(p.hostname,
 		nil, // change if you want to provide more ctx
@@ -228,15 +226,10 @@ func (p *proxy) invokeDPSyncer() {
 	}
 	*/
 
-	// XXX perhaps in a different thread that runs regularly
-	if p.healthzServer != nil {
-		p.healthzServer.UpdateTimestamp()
-	}
-
-	if err := p.healthChecker.SyncServices(svcUpdateResult.HCServiceNodePorts); err != nil {
+	if err := p.svcHealthServer.SyncServices(svcUpdateResult.HCServiceNodePorts); err != nil {
 		log.WithError(err).Error("Error syncing healthcheck services")
 	}
-	if err := p.healthChecker.SyncEndpoints(epsUpdateResult.HCEndpointsLocalIPSize); err != nil {
+	if err := p.svcHealthServer.SyncEndpoints(epsUpdateResult.HCEndpointsLocalIPSize); err != nil {
 		log.WithError(err).Error("Error syncing healthcheck endpoints")
 	}
 	err := p.dpSyncer.Apply(DPSyncerState{
@@ -249,6 +242,11 @@ func (p *proxy) invokeDPSyncer() {
 		log.WithError(err).Errorf("applying changes failed")
 		// TODO log the error or panic as the best might be to restart
 		// completely to wipe out the loaded bpf maps
+	}
+
+	// XXX perhaps in a different thread that runs regularly
+	if p.healthzServer != nil {
+		p.healthzServer.Updated()
 	}
 }
 
