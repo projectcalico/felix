@@ -70,7 +70,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 		}
 
 		infra = getInfra()
-		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions(), infra)
+		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions(true), infra)
 
 		// To allow all ingress and egress, in absence of any Policy.
 		infra.AddDefaultAllow()
@@ -131,12 +131,6 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 		}
 		infra.Stop()
 	})
-
-	tcpdumpMatchCount := func(tdump *tcpdump.TCPDump, matcherName string) func() int {
-		return func() int {
-			return tdump.MatchCount(matcherName)
-		}
-	}
 
 	Context("with Wireguard enabled", func() {
 		BeforeEach(func() {
@@ -363,8 +357,8 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			felixPID1 := felixes[1].GetFelixPID()
 			disableWireguard(client)
 			// Wait for felix to restart.
-			Eventually(felixes[0].GetFelixPID, "5s", "100ms").ShouldNot(Equal(felixPID0))
-			Eventually(felixes[1].GetFelixPID, "5s", "100ms").ShouldNot(Equal(felixPID1))
+			Eventually(felixes[0].GetFelixPID, "10s", "100ms").ShouldNot(Equal(felixPID0))
+			Eventually(felixes[1].GetFelixPID, "10s", "100ms").ShouldNot(Equal(felixPID1))
 		})
 
 		It("the Wireguard device shouldn't exist", func() {
@@ -378,13 +372,13 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 
 		It("the Wireguard routing rule shouldn't exist", func() {
 			for _, felix := range felixes {
-				Eventually(getWireguardRoutingRule(felix), "5s", "100ms").Should(BeEmpty())
+				Eventually(getWireguardRoutingRule(felix), "10s", "100ms").Should(BeEmpty())
 			}
 		})
 
 		It("the Wireguard route table entry shouldn't exist", func() {
 			for i, felix := range felixes {
-				Eventually(getWireguardRouteEntry(felix), "5s", "100ms").ShouldNot(ContainSubstring(routeEntries[i]))
+				Eventually(getWireguardRouteEntry(felix), "10s", "100ms").ShouldNot(ContainSubstring(routeEntries[i]))
 			}
 		})
 
@@ -394,7 +388,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 					node, err := client.Nodes().Get(context.Background(), felix.Hostname, options.GetOptions{})
 					Expect(err).NotTo(HaveOccurred())
 					return node.Status.WireguardPublicKey
-				}, "5s", "100ms").Should(BeEmpty())
+				}, "10s", "100ms").Should(BeEmpty())
 			}
 		})
 
@@ -415,6 +409,136 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 	})
 })
 
+var _ = infrastructure.DatastoreDescribe("WireGuard-Supported but disabled", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+	const nodeCount = 2
+
+	var (
+		infra        infrastructure.DatastoreInfra
+		felixes      []*infrastructure.Felix
+		client       clientv3.Interface
+		tcpdumps     []*tcpdump.TCPDump
+		wls          [nodeCount]*workload.Workload // simulated host workloads
+		cc           *connectivity.Checker
+		routeEntries [nodeCount]string
+		ruleCIDRs    [nodeCount]string
+	)
+
+	BeforeEach(func() {
+		// Run these tests only when the Host has Wireguard kernel module installed.
+		if os.Getenv("FELIX_FV_WIREGUARD_AVAILABLE") != "true" {
+			Skip("Skipping Wireguard supported tests.")
+		}
+
+		infra = getInfra()
+		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions(false), infra)
+
+		// To allow all ingress and egress, in absence of any Policy.
+		infra.AddDefaultAllow()
+
+		for i := range wls {
+			wlIP := fmt.Sprintf("10.65.%d.2", i)
+			wlName := fmt.Sprintf("wl%d", i)
+
+			err := client.IPAM().AssignIP(context.Background(), ipam.AssignIPArgs{
+				IP:       net.MustParseIP(wlIP),
+				HandleID: &wlName,
+				Attrs: map[string]string{
+					ipam.AttributeNode: felixes[i].Hostname,
+				},
+				Hostname: felixes[i].Hostname,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			wls[i] = workload.Run(felixes[i], wlName, "default", wlIP, "8055", "tcp")
+			wls[i].ConfigureInDatastore(infra)
+
+			// Prepare substring to match in rule.
+			ruleCIDRs[i] = fmt.Sprintf("10.65.%d.0/26", i)
+			// Prepare route entry.
+			routeEntries[i] = fmt.Sprintf("10.65.%d.0/26 dev %s scope link", i, wireguardInterfaceNameDefault)
+
+			felixes[i].TriggerDelayedStart()
+		}
+		// Swap route entry to match between workloads.
+		routeEntries[0], routeEntries[1] = routeEntries[1], routeEntries[0]
+
+		cc = &connectivity.Checker{}
+	})
+
+	AfterEach(func() {
+		if CurrentGinkgoTestDescription().Failed {
+			for _, felix := range felixes {
+				felix.Exec("ip", "link", "show")
+				felix.Exec("ip", "rule", "list")
+				felix.Exec("ip", "route", "show", "table", "all")
+				felix.Exec("ip", "route", "show", "cached")
+				felix.Exec("wg")
+			}
+		}
+
+		for _, wl := range wls {
+			wl.Stop()
+		}
+		for _, tcpdump := range tcpdumps {
+			tcpdump.Stop()
+		}
+		for _, felix := range felixes {
+			felix.Stop()
+		}
+
+		if CurrentGinkgoTestDescription().Failed {
+			infra.DumpErrorData()
+		}
+		infra.Stop()
+	})
+
+	It("the Wireguard device shouldn't exist", func() {
+		for _, felix := range felixes {
+			Eventually(func() string {
+				out, _ := felix.ExecOutput("ip", "link", "show", wireguardInterfaceNameDefault)
+				return out
+			}, "10s", "100ms").Should(BeEmpty())
+		}
+	})
+
+	It("the Wireguard routing rule shouldn't exist", func() {
+		for _, felix := range felixes {
+			Eventually(getWireguardRoutingRule(felix), "10s", "100ms").Should(BeEmpty())
+		}
+	})
+
+	It("the Wireguard route table entry shouldn't exist", func() {
+		for i, felix := range felixes {
+			Eventually(getWireguardRouteEntry(felix), "10s", "100ms").ShouldNot(ContainSubstring(routeEntries[i]))
+		}
+	})
+
+	It("v3 node resource shouldn't contain public-key", func() {
+		for _, felix := range felixes {
+			Eventually(func() string {
+				node, err := client.Nodes().Get(context.Background(), felix.Hostname, options.GetOptions{})
+				Expect(err).NotTo(HaveOccurred())
+				return node.Status.WireguardPublicKey
+			}, "10s", "100ms").Should(BeEmpty())
+		}
+	})
+
+	It("workload connectivity remains but uses un-encrypted tunnel", func() {
+		cc.ExpectSome(wls[0], wls[1])
+		cc.ExpectSome(wls[1], wls[0])
+		cc.CheckConnectivity()
+
+		for _, felix := range felixes {
+			Eventually(func() string {
+				// No tunnel implies un-encrypted communication.
+				out, err := felix.ExecOutput("wg")
+				Expect(err).NotTo(HaveOccurred())
+				return out
+			}, "10s", "100ms").Should(BeEmpty())
+		}
+	})
+})
+
 var _ = infrastructure.DatastoreDescribe("WireGuard-Unsupported", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
 	var (
 		infra   infrastructure.DatastoreInfra
@@ -426,7 +550,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Unsupported", []apiconfig.Da
 		const nodeCount = 1
 
 		infra = getInfra()
-		felixes, _ = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions(), infra)
+		felixes, _ = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions(false), infra)
 
 		// Install a default profile that allows all ingress and egress, in the absence of any Policy.
 		infra.AddDefaultAllow()
@@ -467,7 +591,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Unsupported", []apiconfig.Da
 
 // Setup cluster toplogy options.
 // mainly, enable Wireguard with delayed start option.
-func wireguardTopologyOptions() infrastructure.TopologyOptions {
+func wireguardTopologyOptions(wireguardEnabled bool) infrastructure.TopologyOptions {
 	topologyOptions := infrastructure.DefaultTopologyOptions()
 
 	// Waiting for calico-node to be ready.
@@ -480,8 +604,7 @@ func wireguardTopologyOptions() infrastructure.TopologyOptions {
 	// Enable Wireguard.
 	felixConfig := api.NewFelixConfiguration()
 	felixConfig.SetName("default")
-	enabled := true
-	felixConfig.Spec.WireguardEnabled = &enabled
+	felixConfig.Spec.WireguardEnabled = &wireguardEnabled
 	topologyOptions.InitialFelixConfiguration = felixConfig
 
 	// Debugging.
@@ -530,4 +653,10 @@ func getWireguardRouteEntry(felix *infrastructure.Felix) string {
 	Expect(err).NotTo(HaveOccurred())
 
 	return routes
+}
+
+func tcpdumpMatchCount(tdump *tcpdump.TCPDump, matcherName string) func() int {
+	return func() int {
+		return tdump.MatchCount(matcherName)
+	}
 }
