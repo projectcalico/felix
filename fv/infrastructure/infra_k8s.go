@@ -275,7 +275,7 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 	start = time.Now()
 	for {
 		var resp *http.Response
-		resp, err = insecureHTTPClient.Get(kds.Endpoint + "/apis/crd.projectcalico.org/v1/globalfelixconfigs")
+		resp, err = insecureHTTPClient.Get(kds.Endpoint + "/apis/crd.projectcalico.org/v1/felixconfigurations")
 		if resp.StatusCode != 200 {
 			err = fmt.Errorf("Bad status (%v) for CRD GET request", resp.StatusCode)
 		}
