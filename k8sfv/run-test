@@ -180,7 +180,7 @@ while ! docker cp ${CRD_PATH} ${prefix}-apiserver:/crds; do
 done
 
 # Apply CRD manifest to pre-create resource definitions
-while ! docker exec ${prefix}-apiserver kubectl apply -k /crds; do
+while ! docker exec ${prefix}-apiserver kubectl apply -f /crds; do
     sleep 2
 done
 
