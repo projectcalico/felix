@@ -28,7 +28,7 @@
 #
 ###############################################################################
 PACKAGE_NAME?=github.com/projectcalico/felix
-GO_BUILD_VER?=v0.38
+GO_BUILD_VER?=v0.40
 
 ###############################################################################
 # Download and include Makefile.common
