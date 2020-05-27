@@ -38,6 +38,18 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
+	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/buildinfo"
+	"github.com/projectcalico/felix/calc"
+	"github.com/projectcalico/felix/config"
+	_ "github.com/projectcalico/felix/config"
+	dp "github.com/projectcalico/felix/dataplane"
+	"github.com/projectcalico/felix/jitter"
+	"github.com/projectcalico/felix/logutils"
+	"github.com/projectcalico/felix/policysync"
+	"github.com/projectcalico/felix/proto"
+	"github.com/projectcalico/felix/statusrep"
+	"github.com/projectcalico/felix/usagerep"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/backend"
@@ -55,19 +67,6 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 	"github.com/projectcalico/pod2daemon/binder"
 	"github.com/projectcalico/typha/pkg/syncclient"
-
-	"github.com/projectcalico/felix/bpf"
-	"github.com/projectcalico/felix/buildinfo"
-	"github.com/projectcalico/felix/calc"
-	"github.com/projectcalico/felix/config"
-	_ "github.com/projectcalico/felix/config"
-	dp "github.com/projectcalico/felix/dataplane"
-	"github.com/projectcalico/felix/jitter"
-	"github.com/projectcalico/felix/logutils"
-	"github.com/projectcalico/felix/policysync"
-	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/felix/statusrep"
-	"github.com/projectcalico/felix/usagerep"
 )
 
 const (
