@@ -139,7 +139,7 @@ etcd_ip=$(get_container_ip ${prefix}-etcd)
 docker run --detach --name ${prefix}-apiserver \
        -v ${PRIVATE_KEY}:/private.key \
        $FV_K8SIMAGE \
-       /hyperkube apiserver \
+       kube-apiserver \
        --etcd-servers=http://${etcd_ip}:2379 \
        --service-cluster-ip-range=10.101.0.0/16 -v=10 \
        --authorization-mode=RBAC \
@@ -156,7 +156,7 @@ done
 docker run --detach --name ${prefix}-controller-manager \
 	  -v ${PRIVATE_KEY}:/private.key \
           $FV_K8SIMAGE \
-	  /hyperkube controller-manager \
+	  kube-controller-manager \
             --master=${k8s_ip}:8080 \
 	    --min-resync-period=3m \
 	    --allocate-node-cidrs=true \

@@ -127,7 +127,7 @@ func runK8sApiserver(etcdIp string) *containers.Container {
 		containers.RunOpts{AutoRemove: true},
 		"-v", os.Getenv("PRIVATE_KEY")+":/private.key",
 		utils.Config.K8sImage,
-		"/hyperkube", "apiserver",
+		"kube-apiserver",
 		"--service-cluster-ip-range=10.101.0.0/16",
 		"--authorization-mode=RBAC",
 		"--insecure-port=8080", // allow insecure connection from controller manager.
@@ -142,7 +142,7 @@ func runK8sControllerManager(apiserverIp string) *containers.Container {
 		containers.RunOpts{AutoRemove: true},
 		"-v", os.Getenv("PRIVATE_KEY")+":/private.key",
 		utils.Config.K8sImage,
-		"/hyperkube", "controller-manager",
+		"kube-controller-manager",
 		fmt.Sprintf("--master=%v:8080", apiserverIp),
 		// We run trivially small clusters, so increase the QPS to get the
 		// cluster to start up as fast as possible.
