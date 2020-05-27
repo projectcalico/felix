@@ -1,5 +1,5 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
-
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -41,7 +41,7 @@ var wlDispatchEmpty = []*iptables.Chain{
 			{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		},
 	},
@@ -51,7 +51,7 @@ var wlDispatchEmpty = []*iptables.Chain{
 			{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		},
 	},
@@ -61,7 +61,7 @@ var wlDispatchEmpty = []*iptables.Chain{
 			{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		},
 	},
@@ -71,16 +71,16 @@ var wlDispatchEmpty = []*iptables.Chain{
 			iptables.Rule{
 				Match:   iptables.Match().InInterface("cali+"),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown endpoint",
+				Comment: []string{"Unknown endpoint"},
 			},
 			iptables.Rule{
 				Match:   iptables.Match().InInterface("tap+"),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown endpoint",
+				Comment: []string{"Unknown endpoint"},
 			},
 			{
 				Action:  iptables.SetMaskedMarkAction{Mark: 0x0100, Mask: 0xff00},
-				Comment: "Non-Cali endpoint mark",
+				Comment: []string{"Non-Cali endpoint mark"},
 			},
 		},
 	},
@@ -167,12 +167,12 @@ func chainsForIfaces(ifaceMetadata []string,
 			Match: iptables.Match().ProtocolNum(ProtoUDP).
 				DestPorts(uint16(VXLANPort)),
 			Action:  iptables.DropAction{},
-			Comment: "Drop VXLAN encapped packets originating in pods",
+			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
 		},
 		{
 			Match:   iptables.Match().ProtocolNum(ProtoIPIP),
 			Action:  iptables.DropAction{},
-			Comment: "Drop IPinIP encapped packets originating in pods",
+			Comment: []string{"Drop IPinIP encapped packets originating in pods"},
 		},
 	}
 
@@ -264,7 +264,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			outRules = append(outRules, iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.ClearMarkAction{Mark: 16},
-				Comment: "Start of policies",
+				Comment: []string{"Start of policies"},
 			})
 			outRules = append(outRules, iptables.Rule{
 				Match:  iptables.Match().MarkClear(16),
@@ -279,7 +279,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			outRules = append(outRules, iptables.Rule{
 				Match:   iptables.Match().MarkSingleBitSet(8),
 				Action:  iptables.ReturnAction{},
-				Comment: "Return if policy accepted",
+				Comment: []string{"Return if policy accepted"},
 			})
 			if tableKind == "normal" || tableKind == "applyOnForward" {
 				// Only end with a drop rule in the filter chain.  In the raw chain,
@@ -288,7 +288,7 @@ func chainsForIfaces(ifaceMetadata []string,
 				outRules = append(outRules, iptables.Rule{
 					Match:   iptables.Match().MarkClear(16),
 					Action:  iptables.DropAction{},
-					Comment: "Drop if no policies passed packet",
+					Comment: []string{"Drop if no policies passed packet"},
 				})
 			}
 
@@ -297,11 +297,11 @@ func chainsForIfaces(ifaceMetadata []string,
 			// applicable policies.
 			outRules = append(outRules, iptables.Rule{
 				Action:  iptables.SetMarkAction{Mark: 8},
-				Comment: "Allow forwarded traffic by default",
+				Comment: []string{"Allow forwarded traffic by default"},
 			})
 			outRules = append(outRules, iptables.Rule{
 				Action:  iptables.ReturnAction{},
-				Comment: "Return for accepted forward traffic",
+				Comment: []string{"Return for accepted forward traffic"},
 			})
 		}
 
@@ -309,7 +309,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			outRules = append(outRules, iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Drop if no profiles matched",
+				Comment: []string{"Drop if no profiles matched"},
 			})
 		}
 
@@ -342,7 +342,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			inRules = append(inRules, iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.ClearMarkAction{Mark: 16},
-				Comment: "Start of policies",
+				Comment: []string{"Start of policies"},
 			})
 			// For untracked policy, we expect a tier with a policy in it.
 			inRules = append(inRules, iptables.Rule{
@@ -358,7 +358,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			inRules = append(inRules, iptables.Rule{
 				Match:   iptables.Match().MarkSingleBitSet(8),
 				Action:  iptables.ReturnAction{},
-				Comment: "Return if policy accepted",
+				Comment: []string{"Return if policy accepted"},
 			})
 			if tableKind == "normal" || tableKind == "applyOnForward" {
 				// Only end with a drop rule in the filter chain.  In the raw chain,
@@ -367,7 +367,7 @@ func chainsForIfaces(ifaceMetadata []string,
 				inRules = append(inRules, iptables.Rule{
 					Match:   iptables.Match().MarkClear(16),
 					Action:  iptables.DropAction{},
-					Comment: "Drop if no policies passed packet",
+					Comment: []string{"Drop if no policies passed packet"},
 				})
 			}
 
@@ -376,11 +376,11 @@ func chainsForIfaces(ifaceMetadata []string,
 			// applicable policies.
 			inRules = append(inRules, iptables.Rule{
 				Action:  iptables.SetMarkAction{Mark: 8},
-				Comment: "Allow forwarded traffic by default",
+				Comment: []string{"Allow forwarded traffic by default"},
 			})
 			inRules = append(inRules, iptables.Rule{
 				Action:  iptables.ReturnAction{},
-				Comment: "Return for accepted forward traffic",
+				Comment: []string{"Return for accepted forward traffic"},
 			})
 		}
 
@@ -388,7 +388,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			inRules = append(inRules, iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Drop if no profiles matched",
+				Comment: []string{"Drop if no profiles matched"},
 			})
 		}
 
@@ -471,14 +471,14 @@ func chainsForIfaces(ifaceMetadata []string,
 			iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		)
 		dispatchIn = append(dispatchIn,
 			iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		)
 	}
@@ -488,23 +488,23 @@ func chainsForIfaces(ifaceMetadata []string,
 			iptables.Rule{
 				Match:   iptables.Match().InInterface("cali+"),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown endpoint",
+				Comment: []string{"Unknown endpoint"},
 			},
 			iptables.Rule{
 				Match:   iptables.Match().InInterface("tap+"),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown endpoint",
+				Comment: []string{"Unknown endpoint"},
 			},
 			iptables.Rule{
 				Action:  iptables.SetMaskedMarkAction{Mark: 0x0100, Mask: 0xff00},
-				Comment: "Non-Cali endpoint mark",
+				Comment: []string{"Non-Cali endpoint mark"},
 			},
 		)
 		epMarkFrom = append(epMarkFrom,
 			iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		)
 		chains = append(chains,
@@ -668,6 +668,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 				[]string{"cali"},
 				statusReportRec.endpointStatusUpdateCallback,
 				mockProcSys.write,
+				false,
 				newCallbacks(),
 			)
 		})
@@ -1373,6 +1374,118 @@ func endpointManagerTests(ipVersion uint8) func() {
 					})
 
 					It("should have expected chains", expectWlChainsFor("cali12345-ab_policy1"))
+
+					Context("with another endpoint with the same interface name and earlier workload ID, and no policy", func() {
+
+						JustBeforeEach(func() {
+							epMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
+								Id: &proto.WorkloadEndpointID{
+									OrchestratorId: "k8s",
+									WorkloadId:     "pod-10a",
+									EndpointId:     "endpoint-id-11",
+								},
+								Endpoint: &proto.WorkloadEndpoint{
+									State:      "active",
+									Mac:        "01:02:03:04:05:06",
+									Name:       "cali12345-ab",
+									ProfileIds: []string{},
+									Tiers:      []*proto.TierInfo{},
+									Ipv4Nets:   []string{"10.0.240.2/24"},
+									Ipv6Nets:   []string{"2001:db8:2::2/128"},
+								},
+							})
+							err := epMgr.CompleteDeferredWork()
+							Expect(err).ToNot(HaveOccurred())
+						})
+
+						It("should have expected chains with no policy", expectWlChainsFor("cali12345-ab"))
+
+						Context("with the first endpoint removed", func() {
+
+							JustBeforeEach(func() {
+								epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+									Id: &wlEPID1,
+								})
+								err := epMgr.CompleteDeferredWork()
+								Expect(err).ToNot(HaveOccurred())
+							})
+
+							It("should have expected chains with no policy", expectWlChainsFor("cali12345-ab"))
+
+							Context("with the second endpoint removed", func() {
+
+								JustBeforeEach(func() {
+									epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+										Id: &proto.WorkloadEndpointID{
+											OrchestratorId: "k8s",
+											WorkloadId:     "pod-10a",
+											EndpointId:     "endpoint-id-11",
+										},
+									})
+									err := epMgr.CompleteDeferredWork()
+									Expect(err).ToNot(HaveOccurred())
+								})
+
+								It("should have empty dispatch chains", expectEmptyChains())
+							})
+						})
+					})
+
+					Context("with another endpoint with the same interface name and later workload ID, and no policy", func() {
+
+						JustBeforeEach(func() {
+							epMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
+								Id: &proto.WorkloadEndpointID{
+									OrchestratorId: "k8s",
+									WorkloadId:     "pod-11a",
+									EndpointId:     "endpoint-id-11",
+								},
+								Endpoint: &proto.WorkloadEndpoint{
+									State:      "active",
+									Mac:        "01:02:03:04:05:06",
+									Name:       "cali12345-ab",
+									ProfileIds: []string{},
+									Tiers:      []*proto.TierInfo{},
+									Ipv4Nets:   []string{"10.0.240.2/24"},
+									Ipv6Nets:   []string{"2001:db8:2::2/128"},
+								},
+							})
+							err := epMgr.CompleteDeferredWork()
+							Expect(err).ToNot(HaveOccurred())
+						})
+
+						It("should have expected chains", expectWlChainsFor("cali12345-ab_policy1"))
+
+						Context("with the first endpoint removed", func() {
+
+							JustBeforeEach(func() {
+								epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+									Id: &wlEPID1,
+								})
+								err := epMgr.CompleteDeferredWork()
+								Expect(err).ToNot(HaveOccurred())
+							})
+
+							It("should have expected chains with no policy", expectWlChainsFor("cali12345-ab"))
+
+							Context("with the second endpoint removed", func() {
+
+								JustBeforeEach(func() {
+									epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+										Id: &proto.WorkloadEndpointID{
+											OrchestratorId: "k8s",
+											WorkloadId:     "pod-11a",
+											EndpointId:     "endpoint-id-11",
+										},
+									})
+									err := epMgr.CompleteDeferredWork()
+									Expect(err).ToNot(HaveOccurred())
+								})
+
+								It("should have empty dispatch chains", expectEmptyChains())
+							})
+						})
+					})
 				})
 
 				Context("with ingress-only policy", func() {
@@ -1463,13 +1576,14 @@ func endpointManagerTests(ipVersion uint8) func() {
 					It("should write /proc/sys entries", func() {
 						if ipVersion == 6 {
 							mockProcSys.checkState(map[string]string{
+								"/proc/sys/net/ipv6/conf/cali12345-ab/accept_ra":  "0",
 								"/proc/sys/net/ipv6/conf/cali12345-ab/proxy_ndp":  "1",
 								"/proc/sys/net/ipv6/conf/cali12345-ab/forwarding": "1",
 							})
 						} else {
 							mockProcSys.checkState(map[string]string{
+								"/proc/sys/net/ipv6/conf/cali12345-ab/accept_ra":      "0",
 								"/proc/sys/net/ipv4/conf/cali12345-ab/forwarding":     "1",
-								"/proc/sys/net/ipv4/conf/cali12345-ab/rp_filter":      "1",
 								"/proc/sys/net/ipv4/conf/cali12345-ab/route_localnet": "1",
 								"/proc/sys/net/ipv4/conf/cali12345-ab/proxy_arp":      "1",
 								"/proc/sys/net/ipv4/neigh/cali12345-ab/proxy_delay":   "0",
@@ -1642,7 +1756,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 							Name: "cali-tw-cali12345-ab",
 							Rules: []iptables.Rule{{
 								Action:  iptables.DropAction{},
-								Comment: "Endpoint admin disabled",
+								Comment: []string{"Endpoint admin disabled"},
 							}},
 						},
 					))
@@ -1651,7 +1765,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 							Name: "cali-fw-cali12345-ab",
 							Rules: []iptables.Rule{{
 								Action:  iptables.DropAction{},
-								Comment: "Endpoint admin disabled",
+								Comment: []string{"Endpoint admin disabled"},
 							}},
 						},
 					))

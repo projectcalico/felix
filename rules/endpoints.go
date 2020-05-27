@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -281,7 +281,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		rules = append(rules, Rule{
 			Match:   Match(),
 			Action:  r.dropActionOverride,
-			Comment: "Endpoint admin disabled",
+			Comment: []string{"Endpoint admin disabled"},
 		})
 		return &Chain{
 			Name:  chainName,
@@ -315,12 +315,12 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 			Match: Match().ProtocolNum(ProtoUDP).
 				DestPorts(uint16(r.Config.VXLANPort)),
 			Action:  r.dropActionOverride,
-			Comment: fmt.Sprintf("%s VXLAN encapped packets originating in pods", r.dropActionOverride),
+      Comment: []string{fmt.Sprintf("%s VXLAN encapped packets originating in pods", r.dropActionOverride)},
 		})
 		rules = append(rules, Rule{
 			Match:   Match().ProtocolNum(ProtoIPIP),
 			Action:  r.dropActionOverride,
-			Comment: fmt.Sprintf("%s IPinIP encapped packets originating in pods", r.dropActionOverride),
+      Comment: []string{fmt.Sprintf("%s IPinIP encapped packets originating in pods", r.dropActionOverride)},
 		})
 	}
 
@@ -328,7 +328,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		// Clear the "pass" mark.  If a policy sets that mark, we'll skip the rest of the policies and
 		// continue processing the profiles, if there are any.
 		rules = append(rules, Rule{
-			Comment: "Start of policies",
+			Comment: []string{"Start of policies"},
 			Action: ClearMarkAction{
 				Mark: r.IptablesMarkPass,
 			},
@@ -360,7 +360,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 			rules = append(rules, Rule{
 				Match:   Match().MarkSingleBitSet(r.IptablesMarkAccept),
 				Action:  ReturnAction{},
-				Comment: "Return if policy accepted",
+				Comment: []string{"Return if policy accepted"},
 			})
 		}
 
@@ -373,7 +373,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 			rules = append(rules, Rule{
 				Match:   Match().MarkClear(r.IptablesMarkPass),
 				Action:  r.dropActionOverride,
-				Comment: fmt.Sprintf("%s if no policies passed packet", r.dropActionOverride),
+        Comment: []string{fmt.Sprintf("%s if no policies passed packet", r.dropActionOverride)},
 			})
 		}
 
@@ -382,11 +382,11 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		// applyOnForward that apply to this endpoint (and in this direction).
 		rules = append(rules, Rule{
 			Action:  SetMarkAction{Mark: r.IptablesMarkAccept},
-			Comment: "Allow forwarded traffic by default",
+			Comment: []string{"Allow forwarded traffic by default"},
 		})
 		rules = append(rules, Rule{
 			Action:  ReturnAction{},
-			Comment: "Return for accepted forward traffic",
+			Comment: []string{"Return for accepted forward traffic"},
 		})
 	}
 
@@ -401,7 +401,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 				Rule{
 					Match:   Match().MarkSingleBitSet(r.IptablesMarkAccept),
 					Action:  ReturnAction{},
-					Comment: "Return if profile accepted",
+					Comment: []string{"Return if profile accepted"},
 				})
 		}
 
@@ -410,11 +410,13 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		//
 		// For untracked rules, we don't do that because there may be tracked rules
 		// still to be applied to the packet in the filter table.
+		//if dropIfNoProfilesMatched {
 		rules = append(rules, Rule{
 			Match:   Match(),
 			Action:  r.dropActionOverride,
-			Comment: fmt.Sprintf("%s if no profiles matched", r.dropActionOverride),
+      Comment: []string{fmt.Sprintf("%s if no profiles matched", r.dropActionOverride)},
 		})
+		//}
 	}
 
 	return &Chain{

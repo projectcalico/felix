@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,17 +26,14 @@ import (
 	"strconv"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/validation"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/kardianos/osext"
 	log "github.com/sirupsen/logrus"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/projectcalico/felix/idalloc"
 	cnet "github.com/projectcalico/libcalico-go/lib/net"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
 )
@@ -174,6 +171,22 @@ func (p *RegexpParam) Parse(raw string) (result interface{}, err error) {
 		result = raw
 	}
 	return
+}
+
+// RegexpPatternParam differs from RegexpParam (above) in that it validates
+// string values that are (themselves) regular expressions.
+type RegexpPatternParam struct {
+	Metadata
+}
+
+// Parse validates whether the given raw string contains a valid regexp pattern.
+func (p *RegexpPatternParam) Parse(raw string) (interface{}, error) {
+	var result *regexp.Regexp
+	result, compileErr := regexp.Compile(raw)
+	if compileErr != nil {
+		return nil, p.parseFailed(raw, "invalid regexp")
+	}
+	return result, nil
 }
 
 // RegexpPatternListParam differs from RegexpParam (above) in that it validates
@@ -471,21 +484,6 @@ func (c *CIDRListParam) Parse(raw string) (result interface{}, err error) {
 	return resultSlice, nil
 }
 
-func GetKubernetesService(namespace, svcName string) (*v1.Service, error) {
-	k8sconf, err := rest.InClusterConfig()
-	if err != nil {
-		log.WithError(err).Error("Unable to create Kubernetes config.")
-		return nil, err
-	}
-	clientset, err := kubernetes.NewForConfig(k8sconf)
-	if err != nil {
-		log.WithError(err).Error("Unable to create Kubernetes client set.")
-		return nil, err
-	}
-	svcClient := clientset.CoreV1().Services(namespace)
-	return svcClient.Get(svcName, metav1.GetOptions{})
-}
-
 type RegionParam struct {
 	Metadata
 }
@@ -509,4 +507,29 @@ func (r *RegionParam) Parse(raw string) (result interface{}, err error) {
 		return
 	}
 	return raw, nil
+}
+
+type RouteTableRangeParam struct {
+	Metadata
+}
+
+func (p *RouteTableRangeParam) Parse(raw string) (result interface{}, err error) {
+	err = p.parseFailed(raw, "must be a range of route table indices within 1-250")
+	m := regexp.MustCompile(`^(\d+)-(\d+)$`).FindStringSubmatch(raw)
+	if m == nil {
+		return
+	}
+	min, serr := strconv.Atoi(m[1])
+	if serr != nil {
+		return
+	}
+	max, serr := strconv.Atoi(m[2])
+	if serr != nil {
+		return
+	}
+	if min >= 1 && max >= min && max <= 250 {
+		result = idalloc.IndexRange{Min: min, Max: max}
+		err = nil
+	}
+	return
 }

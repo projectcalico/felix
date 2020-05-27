@@ -2,6 +2,7 @@
 [![Coverage Status](https://coveralls.io/repos/projectcalico/felix/badge.svg?branch=master&service=github)](https://coveralls.io/github/projectcalico/felix?branch=master)
 [![Slack Status](https://slack.projectcalico.org/badge.svg)](https://slack.projectcalico.org)
 [![IRC Channel](https://img.shields.io/badge/irc-%23calico-blue.svg)](https://kiwiirc.com/client/irc.freenode.net/#calico)
+[![Go Report Card](https://goreportcard.com/badge/github.com/projectcalico/felix)](https://goreportcard.com/report/github.com/projectcalico/felix)
 # Project Calico
 
 <blockquote>
@@ -11,6 +12,12 @@ Note that the documentation in this repo is targeted at Calico contributors.
 
 This repository contains the source code for Project Calico's per-host
 daemon, Felix.
+
+## Licensing
+
+Felix itself, along with most of Calico, is licensed under the Apache v2.0 license.  The BPF programs
+in the bpf-gpl directory are licensed under the GPL v2.0 for compatibility with Linux kernel helper 
+functions. 
 
 ## How can I get support for contributing to Project Calico?
 

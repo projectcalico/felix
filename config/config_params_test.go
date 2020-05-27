@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,6 +59,7 @@ var _ = Describe("FelixConfig vs ConfigParams parity", func() {
 
 		"loadClientConfigFromEnvironment",
 		"useNodeResourceUpdates",
+		"internalOverrides",
 	}
 	cpFieldNameToFC := map[string]string{
 		"IpInIpEnabled":                      "IPIPEnabled",
@@ -81,6 +82,7 @@ var _ = Describe("FelixConfig vs ConfigParams parity", func() {
 
 	BeforeEach(func() {
 		fcFields = fieldsByName(v3.FelixConfigurationSpec{})
+
 		cpFields = fieldsByName(Config{})
 		for _, name := range cpFieldsToIgnore {
 			delete(cpFields, name)
@@ -122,6 +124,62 @@ func fieldsByName(example interface{}) map[string]reflect.StructField {
 	}
 	return fields
 }
+
+var _ = Describe("Config override empty", func() {
+	var cp *Config
+	BeforeEach(func() {
+		cp = New()
+	})
+
+	It("should allow config override", func() {
+		changed, err := cp.OverrideParam("BPFEnabled", "true")
+		Expect(changed).To(BeTrue())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cp.BPFEnabled).To(BeTrue())
+	})
+
+	Describe("with a param set", func() {
+		BeforeEach(func() {
+			_, err := cp.UpdateFrom(map[string]string{"BPFEnabled": "true"}, DatastorePerHost)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should allow config override", func() {
+			By("Having correct initial value")
+			Expect(cp.BPFEnabled).To(BeTrue())
+
+			By("Having correct value after override")
+			changed, err := cp.OverrideParam("BPFEnabled", "false")
+			Expect(changed).To(BeTrue())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cp.BPFEnabled).To(BeFalse())
+
+			By("Ignoring a lower-priority config update")
+			// Env vars get converted to lower-case before calling UpdateFrom.
+			changed, err = cp.UpdateFrom(map[string]string{"bpfenabled": "true"}, EnvironmentVariable)
+			Expect(changed).To(BeFalse())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cp.BPFEnabled).To(BeFalse())
+		})
+	})
+
+	Describe("with env var set", func() {
+		BeforeEach(func() {
+			// Env vars get converted to lower-case before calling UpdateFrom.
+			changed, err := cp.UpdateFrom(map[string]string{"bpfenabled": "true"}, EnvironmentVariable)
+			Expect(changed).To(BeTrue())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cp.BPFEnabled).To(BeTrue())
+		})
+
+		It("should be overridable", func() {
+			changed, err := cp.OverrideParam("BPFEnabled", "false")
+			Expect(changed).To(BeTrue())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cp.BPFEnabled).To(BeFalse())
+		})
+	})
+})
 
 var _ = DescribeTable("Config parsing",
 	func(key, value string, expected interface{}, errorExpected ...bool) {
@@ -315,6 +373,7 @@ var _ = DescribeTable("Config parsing",
 			{Protocol: "tcp", Port: 179},
 			{Protocol: "tcp", Port: 2379},
 			{Protocol: "tcp", Port: 2380},
+			{Protocol: "tcp", Port: 6443},
 			{Protocol: "tcp", Port: 6666},
 			{Protocol: "tcp", Port: 6667},
 		},
@@ -327,6 +386,7 @@ var _ = DescribeTable("Config parsing",
 			{Protocol: "tcp", Port: 179},
 			{Protocol: "tcp", Port: 2379},
 			{Protocol: "tcp", Port: 2380},
+			{Protocol: "tcp", Port: 6443},
 			{Protocol: "tcp", Port: 6666},
 			{Protocol: "tcp", Port: 6667},
 		},
@@ -343,6 +403,7 @@ var _ = DescribeTable("Config parsing",
 			{Protocol: "tcp", Port: 179},
 			{Protocol: "tcp", Port: 2379},
 			{Protocol: "tcp", Port: 2380},
+			{Protocol: "tcp", Port: 6443},
 			{Protocol: "tcp", Port: 6666},
 			{Protocol: "tcp", Port: 6667},
 		},
@@ -354,6 +415,7 @@ var _ = DescribeTable("Config parsing",
 			{Protocol: "tcp", Port: 179},
 			{Protocol: "tcp", Port: 2379},
 			{Protocol: "tcp", Port: 2380},
+			{Protocol: "tcp", Port: 6443},
 			{Protocol: "tcp", Port: 6666},
 			{Protocol: "tcp", Port: 6667},
 		},
@@ -580,6 +642,15 @@ var _ = DescribeTable("Config validation",
 	}, false),
 	Entry("OpenstackRegion too long", map[string]string{
 		"OpenstackRegion": "my-region-has-a-very-long-and-extremely-interesting-name",
+	}, false),
+	Entry("valid RouteTableRange", map[string]string{
+		"RouteTableRange": "1-250",
+	}, true),
+	Entry("invalid RouteTableRange", map[string]string{
+		"RouteTableRange": "1-255",
+	}, false),
+	Entry("invalid RouteTableRange", map[string]string{
+		"RouteTableRange": "abcde",
 	}, false),
 )
 

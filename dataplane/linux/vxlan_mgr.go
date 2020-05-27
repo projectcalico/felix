@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -96,10 +96,10 @@ func newVXLANManager(
 		deviceName,
 		dpConfig,
 		nlHandle,
-		func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
+		func(interfaceRegexes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
 			deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable {
-			return routetable.New(interfacePrefixes, ipVersion, vxlan, netlinkTimeout,
-				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes)
+			return routetable.New(interfaceRegexes, ipVersion, vxlan, netlinkTimeout,
+				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0)
 		},
 	)
 }
@@ -144,17 +144,16 @@ func newVXLANManagerWithShims(
 func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
 	switch msg := protoBufMsg.(type) {
 	case *proto.RouteUpdate:
-		if msg.Type == proto.RouteType_VXLAN || msg.Type == proto.RouteType_NOENCAP {
-			logrus.WithField("msg", msg).WithField("type", msg.Type).Debug("VXLAN data plane received route update")
+		// In case the route changes type to one we no longer care about...
+		m.deleteRoute(msg.Dst)
+
+		if msg.Type == proto.RouteType_REMOTE_WORKLOAD && msg.IpPoolType == proto.IPPoolType_VXLAN {
+			logrus.WithField("msg", msg).Debug("VXLAN data plane received route update")
 			m.routesByDest[msg.Dst] = msg
 			m.routesDirty = true
 		}
 	case *proto.RouteRemove:
-		if msg.Type == proto.RouteType_VXLAN || msg.Type == proto.RouteType_NOENCAP {
-			logrus.WithField("msg", msg).Debug("VXLAN data plane received route remove")
-			delete(m.routesByDest, msg.Dst)
-			m.routesDirty = true
-		}
+		m.deleteRoute(msg.Dst)
 	case *proto.VXLANTunnelEndpointUpdate:
 		logrus.WithField("msg", msg).Debug("VXLAN data plane received VTEP update")
 		if msg.Node == m.hostname {
@@ -173,6 +172,15 @@ func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
 		}
 		m.routesDirty = true
 		m.vtepsDirty = true
+	}
+}
+
+func (m *vxlanManager) deleteRoute(dst string) {
+	_, exists := m.routesByDest[dst]
+	if exists {
+		// In case the route changes type to one we no longer care about...
+		delete(m.routesByDest, dst)
+		m.routesDirty = true
 	}
 }
 
@@ -206,8 +214,8 @@ func (m *vxlanManager) setNoEncapRouteTable(rt routeTable) {
 	m.noEncapRouteTable = rt
 }
 
-func (m *vxlanManager) GetRouteTables() []routeTable {
-	rts := []routeTable{m.routeTable}
+func (m *vxlanManager) GetRouteTableSyncers() []routeTableSyncer {
+	rts := []routeTableSyncer{m.routeTable}
 
 	noEncapRouteTable := m.getNoEncapRouteTable()
 	if noEncapRouteTable != nil {
@@ -266,25 +274,29 @@ func (m *vxlanManager) CompleteDeferredWork() error {
 				continue
 			}
 
-			// Extract the gateway addr for this route based on its remote VTEP.
-			vtep, ok := m.vtepsByNode[r.Node]
-			if !ok {
-				// The calculation graph should by design ensure that we never have a route with no
-				// corresponding VTEP. This branch means there is likely a calc graph bug.
-				logCtx.Warnf("Dataplane has route with no corresponding VTEP")
-				continue
-			}
+			if r.GetSameSubnet() {
+				if r.DstNodeIp == "" {
+					logCtx.Debug("Can't program non-encap route since host IP is not known.")
+					continue
+				}
 
-			if r.Type == proto.RouteType_NOENCAP {
 				defaultRoute := routetable.Target{
 					Type: routetable.TargetTypeNoEncap,
 					CIDR: cidr,
-					GW:   ip.FromString(r.Gw),
+					GW:   ip.FromString(r.DstNodeIp),
 				}
 
 				noEncapRoutes = append(noEncapRoutes, defaultRoute)
 				logCtx.WithField("route", r).Debug("adding no encap route to list for addition")
 			} else {
+				// Extract the gateway addr for this route based on its remote VTEP.
+				vtep, ok := m.vtepsByNode[r.DstNodeName]
+				if !ok {
+					// When the VTEP arrives, it'll set routesDirty=true so this loop will execute again.
+					logCtx.Debug("Dataplane has route with no corresponding VTEP")
+					continue
+				}
+
 				vxlanRoute := routetable.Target{
 					Type: routetable.TargetTypeVXLAN,
 					CIDR: cidr,
@@ -340,7 +352,7 @@ func (m *vxlanManager) KeepVXLANDeviceInSync(mtu int, wait time.Duration) {
 			continue
 		} else {
 			if m.getNoEncapRouteTable() == nil {
-				noEncapRouteTable := m.noEncapRTConstruct([]string{parent.Attrs().Name}, 4, false, m.dpConfig.NetlinkTimeout, m.dpConfig.DeviceRouteSourceAddress,
+				noEncapRouteTable := m.noEncapRTConstruct([]string{"^" + parent.Attrs().Name + "$"}, 4, false, m.dpConfig.NetlinkTimeout, m.dpConfig.DeviceRouteSourceAddress,
 					m.noEncapProtocol, false)
 				m.setNoEncapRouteTable(noEncapRouteTable)
 			}
@@ -425,7 +437,7 @@ func (m *vxlanManager) configureVXLANDevice(mtu int, localVTEP *proto.VXLANTunne
 	// already. Check for mismatched configuration. If they don't match, recreate the device.
 	if incompat := vxlanLinksIncompat(vxlan, link); incompat != "" {
 		// Existing device doesn't match desired configuration - delete it and recreate.
-		logrus.Warningf("%q exists with incompatable configuration: %v; recreating device", vxlan.Name, incompat)
+		logrus.Warningf("%q exists with incompatible configuration: %v; recreating device", vxlan.Name, incompat)
 		if err = m.nlHandle.LinkDel(link); err != nil {
 			return fmt.Errorf("failed to delete interface: %v", err)
 		}

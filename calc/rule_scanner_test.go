@@ -1,5 +1,5 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
-
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -154,6 +154,10 @@ var _ = DescribeTable("RuleScanner rule conversion should generate correct Parse
 		{Exact: "/foo"},
 		{Prefix: "/bar"},
 	}}}),
+
+	Entry("Metadata",
+		model.Rule{Metadata: &model.RuleMetadata{Annotations: map[string]string{"key": "value"}}},
+		ParsedRule{Metadata: &model.RuleMetadata{Annotations: map[string]string{"key": "value"}}}),
 
 	// Tags/Selectors.
 	Entry("source tag", model.Rule{SrcTag: "tag1"}, ParsedRule{SrcIPSetIDs: []string{tag1ID}}),

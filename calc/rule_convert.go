@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -157,6 +157,15 @@ func parsedRuleToProtoRule(in *ParsedRule) *proto.Rule {
 		}
 		if len(in.HTTPMatch.Methods) > 0 {
 			out.HttpMatch.Methods = in.HTTPMatch.Methods
+		}
+	}
+
+	if in.Metadata != nil {
+		if in.Metadata.Annotations != nil {
+			out.Metadata = &proto.RuleMetadata{Annotations: make(map[string]string)}
+			for k, v := range in.Metadata.Annotations {
+				out.Metadata.Annotations[k] = v
+			}
 		}
 	}
 

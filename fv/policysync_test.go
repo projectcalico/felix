@@ -1,6 +1,6 @@
 // +build fvtests
 
-// Copyright (c) 2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ import (
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 )
 
-var _ = Context("policy sync API tests", func() {
+var _ = Context("_POL-SYNC_ _BPF-SAFE_ policy sync API tests", func() {
 
 	var (
 		etcd              *containers.Container
@@ -77,19 +77,7 @@ var _ = Context("policy sync API tests", func() {
 		// options.FelixLogSeverity = "debug"
 		options.ExtraVolumes[tempDir] = "/var/run/calico"
 		felix, etcd, calicoClient = infrastructure.StartSingleNodeEtcdTopology(options)
-
-		// Install a default profile that allows workloads with this profile to talk to each
-		// other, in the absence of any Policy.
-		defaultProfile := api.NewProfile()
-		defaultProfile.Name = "default"
-		defaultProfile.Spec.LabelsToApply = map[string]string{"default": ""}
-		defaultProfile.Spec.Egress = []api.Rule{{Action: api.Allow}}
-		defaultProfile.Spec.Ingress = []api.Rule{{
-			Action: api.Allow,
-			Source: api.EntityRule{Selector: "default == ''"},
-		}}
-		_, err = calicoClient.Profiles().Create(utils.Ctx, defaultProfile, utils.NoOptions)
-		Expect(err).NotTo(HaveOccurred())
+		infrastructure.CreateDefaultProfile(calicoClient, "default", map[string]string{"default": ""}, "default == ''")
 
 		// Create three workloads, using that profile.
 		for ii := range w {
@@ -304,16 +292,23 @@ var _ = Context("policy sync API tests", func() {
 								policy, err = calicoClient.GlobalNetworkPolicies().Create(ctx, policy, utils.NoOptions)
 								Expect(err).NotTo(HaveOccurred())
 
+								waitTime := "1s" // gomega default
+								if os.Getenv("FELIX_FV_ENABLE_BPF") == "true" {
+									// FIXME avoid blocking policysync while BPF dataplane does its thing.
+									// When BPF dataplane reprograms policy it can block >1s.
+									waitTime = "5s"
+								}
+
 								if wlIdx != 2 {
 									policyID := proto.PolicyID{Name: "default.policy-0", Tier: "default"}
-									Eventually(mockWlClient[wlIdx].ActivePolicies).Should(Equal(set.From(policyID)))
+									Eventually(mockWlClient[wlIdx].ActivePolicies, waitTime).Should(Equal(set.From(policyID)))
 								}
 
 								_, err = calicoClient.GlobalNetworkPolicies().Delete(ctx, "policy-0", options.DeleteOptions{})
 								Expect(err).NotTo(HaveOccurred())
 
 								if wlIdx != 2 {
-									Eventually(mockWlClient[wlIdx].ActivePolicies).Should(Equal(set.New()))
+									Eventually(mockWlClient[wlIdx].ActivePolicies, waitTime).Should(Equal(set.New()))
 								}
 							}
 						}

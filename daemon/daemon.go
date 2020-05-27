@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,12 +35,17 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
+	"github.com/projectcalico/felix/bpf"
 	"github.com/projectcalico/felix/buildinfo"
 	"github.com/projectcalico/felix/calc"
 	"github.com/projectcalico/felix/config"
 	_ "github.com/projectcalico/felix/config"
 	dp "github.com/projectcalico/felix/dataplane"
+	"github.com/projectcalico/felix/jitter"
 	"github.com/projectcalico/felix/logutils"
 	"github.com/projectcalico/felix/policysync"
 	"github.com/projectcalico/felix/proto"
@@ -50,13 +55,16 @@ import (
 	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/backend"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/libcalico-go/lib/backend/k8s"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/backend/syncersv1/felixsyncer"
 	"github.com/projectcalico/libcalico-go/lib/backend/syncersv1/updateprocessors"
 	"github.com/projectcalico/libcalico-go/lib/backend/watchersyncer"
+	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	cerrors "github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/health"
 	lclogutils "github.com/projectcalico/libcalico-go/lib/logutils"
+	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/projectcalico/libcalico-go/lib/set"
 	"github.com/projectcalico/pod2daemon/binder"
 	"github.com/projectcalico/typha/pkg/syncclient"
@@ -153,10 +161,13 @@ func Run(configFile string, gitVersion string, buildDate string, gitRevision str
 	// loop until the datastore is ready.
 	log.Info("Loading configuration...")
 	var backendClient bapi.Client
+	var v3Client client.Interface
 	var datastoreConfig apiconfig.CalicoAPIConfig
 	var configParams *config.Config
 	var typhaAddr string
 	var numClientsCreated int
+	var k8sClientSet *kubernetes.Clientset
+	var kubernetesVersion string
 configRetry:
 	for {
 		if numClientsCreated > 60 {
@@ -207,7 +218,7 @@ configRetry:
 		datastoreConfig = configParams.DatastoreConfig()
 		// Can't dump the whole config because it may have sensitive information...
 		log.WithField("datastore", datastoreConfig.Spec.DatastoreType).Info("Connecting to datastore")
-		backendClient, err = backend.NewClient(datastoreConfig)
+		v3Client, err = client.New(datastoreConfig)
 		if err != nil {
 			log.WithError(err).Error("Failed to create datastore client")
 			time.Sleep(1 * time.Second)
@@ -215,9 +226,10 @@ configRetry:
 		}
 		log.Info("Created datastore client")
 		numClientsCreated++
+		backendClient = v3Client.(interface{ Backend() bapi.Client }).Backend()
 		for {
 			globalConfig, hostConfig, err := loadConfigFromDatastore(
-				ctx, backendClient, configParams.FelixHostname)
+				ctx, backendClient, datastoreConfig, configParams.FelixHostname)
 			if err == ErrNotReady {
 				log.Warn("Waiting for datastore to be initialized (or migrated)")
 				time.Sleep(1 * time.Second)
@@ -262,8 +274,49 @@ configRetry:
 		}
 		numClientsCreated++
 
+		// Try to get a Kubernetes client.  This is needed for discovering Typha and for the BPF mode of the dataplane.
+		k8sClientSet = nil
+		if kc, ok := backendClient.(*k8s.KubeClient); ok {
+			// Opportunistically share the k8s client with the datastore driver.  This is the best option since
+			// it reduces the number of connections and it lets us piggy-back on the datastore driver's config.
+			log.Info("Using Kubernetes datastore driver, sharing Kubernetes client with datastore driver.")
+			k8sClientSet = kc.ClientSet
+		} else {
+			// Not using KDD, fall back on trying to get a Kubernetes client from the environment.
+			log.Info("Not using Kubernetes datastore driver, trying to get a Kubernetes client...")
+			k8sconf, err := rest.InClusterConfig()
+			if err != nil {
+				log.WithError(err).Info("Kubernetes in-cluster config not available. " +
+					"Assuming we're not in a Kubernetes deployment.")
+			} else {
+				k8sClientSet, err = kubernetes.NewForConfig(k8sconf)
+				if err != nil {
+					log.WithError(err).Error("Got in-cluster config but failed to create Kubernetes client.")
+					time.Sleep(1 * time.Second)
+					continue configRetry
+				}
+			}
+		}
+
+		if k8sClientSet != nil {
+			serverVersion, err := k8sClientSet.Discovery().ServerVersion()
+			if err != nil {
+				log.WithError(err).Error("Couldn't read server version from server")
+			}
+
+			log.Infof("Server Version: %#v\n", *serverVersion)
+			kubernetesVersion = serverVersion.GitVersion
+		} else {
+			log.Info("no Kubernetes client available")
+		}
+
 		// If we're configured to discover Typha, do that now so we can retry if we fail.
-		typhaAddr, err = discoverTyphaAddr(configParams, config.GetKubernetesService)
+		typhaAddr, err = discoverTyphaAddr(configParams, func(namespace, name string) (service *v1.Service, e error) {
+			if k8sClientSet == nil {
+				return nil, errors.New("failed to look up Typha, no Kubernetes client available")
+			}
+			return k8sClientSet.CoreV1().Services(namespace).Get(name, metav1.GetOptions{})
+		})
 		if err != nil {
 			log.WithError(err).Error("Typha discovery enabled but discovery failed.")
 			time.Sleep(1 * time.Second)
@@ -277,6 +330,17 @@ configRetry:
 		// We don't have a way to close datastore connection so, if we reconnected after
 		// a failure to load config, restart felix to avoid leaking connections.
 		exitWithCustomRC(configChangedRC, "Restarting to avoid leaking datastore connections")
+	}
+
+	if configParams.BPFEnabled {
+		// Check for BPF dataplane support before we do anything that relies on the flag being set one way or another.
+		if err := bpf.SupportsBPFDataplane(); err != nil {
+			log.Error("BPF dataplane mode enabled but not supported by the kernel.  Disabling BPF mode.")
+			_, err := configParams.OverrideParam("BPFEnabled", "false")
+			if err != nil {
+				log.WithError(err).Panic("Bug: failed to override config parameter")
+			}
+		}
 	}
 
 	// We're now both live and ready.
@@ -301,7 +365,7 @@ configRetry:
 	failureReportChan := make(chan string)
 	configChangedRestartCallback := func() { failureReportChan <- reasonConfigChanged }
 
-	dpDriver, dpDriverCmd = dp.StartDataplaneDriver(configParams, healthAggregator, configChangedRestartCallback)
+	dpDriver, dpDriverCmd = dp.StartDataplaneDriver(configParams, healthAggregator, configChangedRestartCallback, k8sClientSet)
 
 	// Initialise the glue logic that connects the calculation graph to/from the dataplane driver.
 	log.Info("Connect to the dataplane driver.")
@@ -312,7 +376,7 @@ configRetry:
 		// (Otherwise, we pass in a nil channel, which disables such updates.)
 		connToUsageRepUpdChan = make(chan map[string]string, 1)
 	}
-	dpConnector := newConnector(configParams, connToUsageRepUpdChan, backendClient, dpDriver, failureReportChan)
+	dpConnector := newConnector(configParams, connToUsageRepUpdChan, backendClient, v3Client, dpDriver, failureReportChan)
 
 	// If enabled, create a server for the policy sync API.  This allows clients to connect to
 	// Felix over a socket and receive policy updates.
@@ -468,6 +532,7 @@ configRetry:
 		}()
 
 		usageRep := usagerep.New(
+			usagerep.StaticItems{KubernetesVersion: kubernetesVersion},
 			configParams.UsageReportingInitialDelaySecs,
 			configParams.UsageReportingIntervalSecs,
 			statsChanOut,
@@ -546,25 +611,26 @@ configRetry:
 }
 
 func servePrometheusMetrics(configParams *config.Config) {
-	for {
-		log.WithFields(log.Fields{
-			"host": configParams.PrometheusMetricsHost,
-			"port": configParams.PrometheusMetricsPort,
-		}).Info("Starting prometheus metrics endpoint")
-		if configParams.PrometheusGoMetricsEnabled && configParams.PrometheusProcessMetricsEnabled {
-			log.Info("Including Golang & Process metrics")
-		} else {
-			if !configParams.PrometheusGoMetricsEnabled {
-				log.Info("Discarding Golang metrics")
-				prometheus.Unregister(prometheus.NewGoCollector())
-			}
-			if !configParams.PrometheusProcessMetricsEnabled {
-				log.Info("Discarding process metrics")
-				prometheus.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
-			}
+	log.WithFields(log.Fields{
+		"host": configParams.PrometheusMetricsHost,
+		"port": configParams.PrometheusMetricsPort,
+	}).Info("Starting prometheus metrics endpoint")
+	if configParams.PrometheusGoMetricsEnabled && configParams.PrometheusProcessMetricsEnabled {
+		log.Info("Including Golang & Process metrics")
+	} else {
+		if !configParams.PrometheusGoMetricsEnabled {
+			log.Info("Discarding Golang metrics")
+			prometheus.Unregister(prometheus.NewGoCollector())
 		}
-		http.Handle("/metrics", promhttp.Handler())
-		err := http.ListenAndServe(net.JoinHostPort(configParams.PrometheusMetricsHost, strconv.Itoa(configParams.PrometheusMetricsPort)), nil)
+		if !configParams.PrometheusProcessMetricsEnabled {
+			log.Info("Discarding process metrics")
+			prometheus.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+		}
+	}
+	http.Handle("/metrics", promhttp.Handler())
+	addr := net.JoinHostPort(configParams.PrometheusMetricsHost, strconv.Itoa(configParams.PrometheusMetricsPort))
+	for {
+		err := http.ListenAndServe(addr, nil)
 		log.WithError(err).Error(
 			"Prometheus metrics endpoint failed, trying to restart it...")
 		time.Sleep(1 * time.Second)
@@ -701,7 +767,7 @@ var (
 )
 
 func loadConfigFromDatastore(
-	ctx context.Context, client bapi.Client, hostname string,
+	ctx context.Context, client bapi.Client, cfg apiconfig.CalicoAPIConfig, hostname string,
 ) (globalConfig, hostConfig map[string]string, err error) {
 
 	// The configuration is split over 3 different resource types and 4 different resource
@@ -750,7 +816,7 @@ func loadConfigFromDatastore(
 	err = getAndMergeConfig(
 		ctx, client, hostConfig,
 		apiv3.KindNode, hostname,
-		updateprocessors.NewFelixNodeUpdateProcessor(),
+		updateprocessors.NewFelixNodeUpdateProcessor(cfg.Spec.K8sUsePodCIDR),
 		&ready,
 	)
 	if err != nil {
@@ -826,11 +892,14 @@ type DataplaneConnector struct {
 	failureReportChan          chan<- string
 	dataplane                  dp.DataplaneDriver
 	datastore                  bapi.Client
+	datastorev3                client.Interface
 	statusReporter             *statusrep.EndpointStatusReporter
 
 	datastoreInSync bool
 
 	firstStatusReportSent bool
+
+	wireguardStatUpdateFromDataplane chan *proto.WireguardStatusUpdate
 }
 
 type Startable interface {
@@ -840,18 +909,21 @@ type Startable interface {
 func newConnector(configParams *config.Config,
 	configUpdChan chan<- map[string]string,
 	datastore bapi.Client,
+	datastorev3 client.Interface,
 	dataplane dp.DataplaneDriver,
 	failureReportChan chan<- string,
 ) *DataplaneConnector {
 	felixConn := &DataplaneConnector{
-		config:                     configParams,
-		configUpdChan:              configUpdChan,
-		datastore:                  datastore,
-		ToDataplane:                make(chan interface{}),
-		StatusUpdatesFromDataplane: make(chan interface{}),
-		InSync:                     make(chan bool, 1),
-		failureReportChan:          failureReportChan,
-		dataplane:                  dataplane,
+		config:                           configParams,
+		configUpdChan:                    configUpdChan,
+		datastore:                        datastore,
+		datastorev3:                      datastorev3,
+		ToDataplane:                      make(chan interface{}),
+		StatusUpdatesFromDataplane:       make(chan interface{}),
+		InSync:                           make(chan bool, 1),
+		failureReportChan:                failureReportChan,
+		dataplane:                        dataplane,
+		wireguardStatUpdateFromDataplane: make(chan *proto.WireguardStatusUpdate, 1),
 	}
 	return felixConn
 }
@@ -888,6 +960,8 @@ func (fc *DataplaneConnector) readMessagesFromDataplane() {
 			if fc.statusReporter != nil {
 				fc.StatusUpdatesFromDataplane <- msg
 			}
+		case *proto.WireguardStatusUpdate:
+			fc.wireguardStatUpdateFromDataplane <- msg
 		default:
 			log.WithField("msg", msg).Warning("Unknown message from dataplane")
 		}
@@ -929,6 +1003,87 @@ func (fc *DataplaneConnector) handleProcessStatusUpdate(ctx context.Context, msg
 	cancel()
 	if err != nil {
 		log.Warningf("Failed to write status to datastore: %v", err)
+	}
+}
+
+func (fc *DataplaneConnector) reconcileWireguardStatUpdate(dpPubKey string) error {
+	// In case of a recoverable failure (ErrorResourceUpdateConflict), retry update 3 times.
+	for iter := 0; iter < 3; iter++ {
+		// Read node resource from datastore and compare it with the publicKey from dataplane.
+		getCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		node, err := fc.datastorev3.Nodes().Get(getCtx, fc.config.FelixHostname, options.GetOptions{})
+		cancel()
+		if err != nil {
+			switch err.(type) {
+			case cerrors.ErrorResourceDoesNotExist:
+				if dpPubKey != "" {
+					// If the node doesn't exist but non-empty public-key need to be set.
+					log.Panic("v3 node resource must exist for Wireguard.")
+				} else {
+					// No node with empty dataplane update implies node resource
+					// doesn't need to be processed further.
+					log.Debug("v3 node resource doesn't need any update")
+					return nil
+				}
+			}
+			// return error here so we can retry in some time.
+			log.WithError(err).Info("Failed to read node resource")
+			return err
+		}
+
+		// Check if the public-key needs to be updated.
+		storedPublicKey := node.Status.WireguardPublicKey
+		if storedPublicKey != dpPubKey {
+			updateCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			node.Status.WireguardPublicKey = dpPubKey
+			_, err := fc.datastorev3.Nodes().Update(updateCtx, node, options.SetOptions{})
+			cancel()
+			if err != nil {
+				// check if failure is recoverable
+				switch err.(type) {
+				case cerrors.ErrorResourceUpdateConflict:
+					log.Debug("Update conflict, retrying update")
+					continue
+				}
+				// retry in some time.
+				log.WithError(err).Info("Failed updating node resource")
+				return err
+			}
+			log.Debugf("Updated Wireguard public-key from %s to %s", storedPublicKey, dpPubKey)
+		}
+		break
+	}
+	return nil
+}
+
+func (fc *DataplaneConnector) handleWireguardStatUpdateFromDataplane() {
+	var current *proto.WireguardStatusUpdate
+	var ticker *jitter.Ticker
+	var retryC <-chan time.Time
+
+	for {
+		// Block until we either get an update or it's time to retry a failed update.
+		select {
+		case current = <-fc.wireguardStatUpdateFromDataplane:
+			log.Debugf("Wireguard status update from dataplane driver: %s", current.PublicKey)
+		case <-retryC:
+			log.Debug("retrying failed Wireguard status update")
+		}
+		if ticker != nil {
+			ticker.Stop()
+		}
+
+		// Try and reconcile the current wireguard status data.
+		err := fc.reconcileWireguardStatUpdate(current.PublicKey)
+		if err == nil {
+			current = nil
+			retryC = nil
+			ticker = nil
+		} else {
+			// retry reconciling between 2-4 seconds.
+			ticker = jitter.NewTicker(2*time.Second, 2*time.Second)
+			retryC = ticker.C
+		}
 	}
 }
 
@@ -1027,6 +1182,9 @@ func (fc *DataplaneConnector) Start() {
 
 	// Start background thread to read messages from dataplane driver.
 	go fc.readMessagesFromDataplane()
+
+	// Start a background thread to handle Wireguard update to Node.
+	go fc.handleWireguardStatUpdateFromDataplane()
 }
 
 var ErrServiceNotReady = errors.New("Kubernetes service missing IP or port.")

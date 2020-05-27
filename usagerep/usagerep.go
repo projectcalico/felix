@@ -35,12 +35,14 @@ const (
 )
 
 func New(
+	staticItems StaticItems,
 	initialDelay time.Duration,
 	interval time.Duration,
 	statsUpdateC <-chan calc.StatsUpdate,
 	configUpdateC <-chan map[string]string,
 ) *UsageReporter {
 	return &UsageReporter{
+		staticItems:   staticItems,
 		interval:      interval,
 		statsUpdateC:  statsUpdateC,
 		configUpdateC: configUpdateC,
@@ -54,7 +56,13 @@ func New(
 	}
 }
 
+type StaticItems struct {
+	KubernetesVersion string
+}
+
 type UsageReporter struct {
+	staticItems StaticItems
+
 	interval      time.Duration
 	statsUpdateC  <-chan calc.StatsUpdate
 	configUpdateC <-chan map[string]string
@@ -89,7 +97,8 @@ func (u *UsageReporter) PeriodicallyReportUsage(ctx context.Context) {
 
 	doReport := func() {
 		alpEnabled := (config["PolicySyncPathPrefix"] != "")
-		u.reportUsage(config["ClusterGUID"], config["ClusterType"], config["CalicoVersion"], alpEnabled, stats)
+		bpfEnabled := (config["BPFEnabled"] == "true")
+		u.reportUsage(config["ClusterGUID"], config["ClusterType"], config["CalicoVersion"], alpEnabled, bpfEnabled, stats)
 	}
 
 	var ticker *jitter.Ticker
@@ -141,8 +150,8 @@ func (u *UsageReporter) calculateInitialDelay(numHosts int) time.Duration {
 	return initialDelay
 }
 
-func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion string, alpEnabled bool, stats calc.StatsUpdate) {
-	fullURL := u.calculateURL(clusterGUID, clusterType, calicoVersion, alpEnabled, stats)
+func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion string, alpEnabled bool, bpfEnabled bool, stats calc.StatsUpdate) {
+	fullURL := u.calculateURL(clusterGUID, clusterType, calicoVersion, alpEnabled, bpfEnabled, stats)
 	resp, err := u.httpClient.Get(fullURL)
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
@@ -164,29 +173,41 @@ func (u *UsageReporter) reportUsage(clusterGUID, clusterType, calicoVersion stri
 	}
 }
 
-func (u *UsageReporter) calculateURL(clusterGUID, clusterType, calicoVersion string, alpEnabled bool, stats calc.StatsUpdate) string {
+func (u *UsageReporter) calculateURL(clusterGUID, clusterType, calicoVersion string, alpEnabled bool, bpfEnabled bool, stats calc.StatsUpdate) string {
+	var kubernetesVersion string
+
 	if clusterType == "" {
 		clusterType = "unknown"
 	}
 	if calicoVersion == "" {
 		calicoVersion = "unknown"
 	}
+	if u.staticItems.KubernetesVersion == "" {
+		kubernetesVersion = "unknown"
+	} else {
+		kubernetesVersion = u.staticItems.KubernetesVersion
+	}
 	if clusterGUID == "" {
 		clusterGUID = "baddecaf"
 	}
+	if bpfEnabled {
+		clusterType = clusterType + ",bpf"
+	}
 	log.WithFields(log.Fields{
-		"clusterGUID":   clusterGUID,
-		"clusterType":   clusterType,
-		"calicoVersion": calicoVersion,
-		"alpEnabled":    alpEnabled,
-		"stats":         stats,
-		"version":       buildinfo.GitVersion,
-		"gitRevision":   buildinfo.GitRevision,
+		"clusterGUID":       clusterGUID,
+		"clusterType":       clusterType,
+		"calicoVersion":     calicoVersion,
+		"kubernetesVersion": kubernetesVersion,
+		"alpEnabled":        alpEnabled,
+		"stats":             stats,
+		"version":           buildinfo.GitVersion,
+		"gitRevision":       buildinfo.GitRevision,
 	}).Info("Reporting cluster usage/checking for deprecation warnings.")
 	queryParams := url.Values{
 		"guid":         {clusterGUID},
 		"type":         {clusterType},
 		"cal_ver":      {calicoVersion},
+		"k8s_ver":      {kubernetesVersion},
 		"alp":          {fmt.Sprint(alpEnabled)},
 		"size":         {fmt.Sprint(stats.NumHosts)},
 		"weps":         {fmt.Sprint(stats.NumWorkloadEndpoints)},

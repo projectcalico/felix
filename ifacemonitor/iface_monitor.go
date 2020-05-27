@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,14 @@
 package ifacemonitor
 
 import (
+	"context"
 	"regexp"
 	"syscall"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
@@ -28,20 +30,21 @@ import (
 type netlinkStub interface {
 	Subscribe(
 		linkUpdates chan netlink.LinkUpdate,
-		addrUpdates chan netlink.AddrUpdate,
+		routeUpdates chan netlink.RouteUpdate,
 	) error
 	LinkList() ([]netlink.Link, error)
-	AddrList(link netlink.Link, family int) ([]netlink.Addr, error)
+	ListLocalRoutes(link netlink.Link, family int) ([]netlink.Route, error)
 }
 
 type State string
 
 const (
-	StateUp   = "up"
-	StateDown = "down"
+	StateUnknown = ""
+	StateUp      = "up"
+	StateDown    = "down"
 )
 
-type InterfaceStateCallback func(ifaceName string, ifaceState State)
+type InterfaceStateCallback func(ifaceName string, ifaceState State, ifIndex int)
 type AddrStateCallback func(ifaceName string, addrs set.Set)
 
 type Config struct {
@@ -51,13 +54,13 @@ type Config struct {
 type InterfaceMonitor struct {
 	Config
 
-	netlinkStub  netlinkStub
-	resyncC      <-chan time.Time
-	upIfaces     map[string]int // Map from interface name to index.
-	Callback     InterfaceStateCallback
-	AddrCallback AddrStateCallback
-	ifaceName    map[int]string
-	ifaceAddrs   map[int]set.Set
+	netlinkStub   netlinkStub
+	resyncC       <-chan time.Time
+	upIfaces      map[string]int // Map from interface name to index.
+	StateCallback InterfaceStateCallback
+	AddrCallback  AddrStateCallback
+	ifaceName     map[int]string
+	ifaceAddrs    map[int]set.Set
 }
 
 func New(config Config) *InterfaceMonitor {
@@ -86,10 +89,13 @@ func (m *InterfaceMonitor) MonitorInterfaces() {
 	log.Info("Interface monitoring thread started.")
 
 	updates := make(chan netlink.LinkUpdate, 10)
-	addrUpdates := make(chan netlink.AddrUpdate, 10)
-	if err := m.netlinkStub.Subscribe(updates, addrUpdates); err != nil {
+	routeUpdates := make(chan netlink.RouteUpdate, 10)
+	if err := m.netlinkStub.Subscribe(updates, routeUpdates); err != nil {
 		log.WithError(err).Panic("Failed to subscribe to netlink stub")
 	}
+	filteredUpdates := make(chan netlink.LinkUpdate, 10)
+	filteredRouteUpdates := make(chan netlink.RouteUpdate, 10)
+	go FilterUpdates(context.Background(), filteredRouteUpdates, routeUpdates, filteredUpdates, updates)
 	log.Info("Subscribed to netlink updates.")
 
 	// Start of day, do a resync to notify all our existing interfaces.  We also do periodic
@@ -103,25 +109,25 @@ func (m *InterfaceMonitor) MonitorInterfaces() {
 readLoop:
 	for {
 		log.WithFields(log.Fields{
-			"updates":     updates,
-			"addrUpdates": addrUpdates,
-			"resyncC":     m.resyncC,
+			"updates":      filteredUpdates,
+			"routeUpdates": filteredRouteUpdates,
+			"resyncC":      m.resyncC,
 		}).Debug("About to select on possible triggers")
 		select {
-		case update, ok := <-updates:
+		case update, ok := <-filteredUpdates:
 			log.WithField("update", update).Debug("Link update")
 			if !ok {
 				log.Warn("Failed to read a link update")
 				break readLoop
 			}
 			m.handleNetlinkUpdate(update)
-		case addrUpdate, ok := <-addrUpdates:
-			log.WithField("addrUpdate", addrUpdate).Debug("Address update")
+		case routeUpdate, ok := <-filteredRouteUpdates:
+			log.WithField("addrUpdate", routeUpdate).Debug("Address update")
 			if !ok {
 				log.Warn("Failed to read an address update")
 				break readLoop
 			}
-			m.handleNetlinkAddrUpdate(addrUpdate)
+			m.handleNetlinkRouteUpdate(routeUpdate)
 		case <-m.resyncC:
 			log.Debug("Resync trigger")
 			err := m.resync()
@@ -156,7 +162,7 @@ func (m *InterfaceMonitor) handleNetlinkUpdate(update netlink.LinkUpdate) {
 	m.storeAndNotifyLink(ifaceExists, update.Link)
 }
 
-func (m *InterfaceMonitor) handleNetlinkAddrUpdate(update netlink.AddrUpdate) {
+func (m *InterfaceMonitor) handleNetlinkRouteUpdate(update netlink.RouteUpdate) {
 	ifIndex := update.LinkIndex
 	if ifName, known := m.ifaceName[ifIndex]; known {
 		if m.isExcludedInterface(ifName) {
@@ -164,8 +170,8 @@ func (m *InterfaceMonitor) handleNetlinkAddrUpdate(update netlink.AddrUpdate) {
 		}
 	}
 
-	addr := update.LinkAddress.IP.String()
-	exists := update.NewAddr
+	addr := update.Dst.IP.String()
+	exists := update.Type == unix.RTM_NEWROUTE
 	log.WithFields(log.Fields{
 		"addr":    addr,
 		"ifIndex": ifIndex,
@@ -238,6 +244,19 @@ func (m *InterfaceMonitor) storeAndNotifyLink(ifaceExists bool, link netlink.Lin
 	m.storeAndNotifyLinkInner(ifaceExists, newName, link)
 }
 
+func linkIsOperUp(link netlink.Link) bool {
+	// We need the operstate of the interface; this is carried in the IFF_RUNNING flag.  The
+	// IFF_UP flag contains the admin state, which doesn't tell us whether we can program routes
+	// etc.
+	attrs := link.Attrs()
+	if attrs == nil {
+		return false
+	}
+	rawFlags := attrs.RawFlags
+	ifaceIsUp := rawFlags&syscall.IFF_RUNNING != 0
+	return ifaceIsUp
+}
+
 func (m *InterfaceMonitor) storeAndNotifyLinkInner(ifaceExists bool, ifaceName string, link netlink.Link) {
 	log.WithFields(log.Fields{
 		"ifaceExists": ifaceExists,
@@ -263,18 +282,17 @@ func (m *InterfaceMonitor) storeAndNotifyLinkInner(ifaceExists bool, ifaceName s
 	// We need the operstate of the interface; this is carried in the IFF_RUNNING flag.  The
 	// IFF_UP flag contains the admin state, which doesn't tell us whether we can program routes
 	// etc.
-	rawFlags := attrs.RawFlags
-	ifaceIsUp := ifaceExists && rawFlags&syscall.IFF_RUNNING != 0
-	_, ifaceWasUp := m.upIfaces[ifaceName]
+	ifaceIsUp := ifaceExists && linkIsOperUp(link)
+	oldIfIndex, ifaceWasUp := m.upIfaces[ifaceName]
 	logCxt := log.WithField("ifaceName", ifaceName)
 	if ifaceIsUp && !ifaceWasUp {
 		logCxt.Debug("Interface now up")
 		m.upIfaces[ifaceName] = ifIndex
-		m.Callback(ifaceName, StateUp)
+		m.StateCallback(ifaceName, StateUp, ifIndex)
 	} else if ifaceWasUp && !ifaceIsUp {
 		logCxt.Debug("Interface now down")
 		delete(m.upIfaces, ifaceName)
-		m.Callback(ifaceName, StateDown)
+		m.StateCallback(ifaceName, StateDown, oldIfIndex)
 	} else {
 		logCxt.WithField("ifaceIsUp", ifaceIsUp).Debug("Nothing to notify")
 	}
@@ -288,15 +306,22 @@ func (m *InterfaceMonitor) storeAndNotifyLinkInner(ifaceExists bool, ifaceName s
 		// Notify address changes for non excluded interfaces.
 		newAddrs := set.New()
 		for _, family := range [2]int{netlink.FAMILY_V4, netlink.FAMILY_V6} {
-			addrs, err := m.netlinkStub.AddrList(link, family)
+			routes, err := m.netlinkStub.ListLocalRoutes(link, family)
 			if err != nil {
-				log.WithError(err).Warn("Netlink addr list operation failed.")
+				log.WithError(err).Warn("Netlink route list operation failed.")
 			}
-			for _, addr := range addrs {
-				newAddrs.Add(addr.IPNet.IP.String())
+			for _, route := range routes {
+				if route.Type != unix.RTN_LOCAL {
+					continue
+				}
+				newAddrs.Add(route.Dst.IP.String())
 			}
 		}
 		if (m.ifaceAddrs[ifIndex] == nil) || !m.ifaceAddrs[ifIndex].Equals(newAddrs) {
+			log.WithFields(log.Fields{
+				"old": m.ifaceAddrs[ifIndex],
+				"new": newAddrs,
+			}).Debug("Detected interface address change while notifying link")
 			m.ifaceAddrs[ifIndex] = newAddrs
 
 			m.notifyIfaceAddrs(ifIndex)
@@ -328,7 +353,7 @@ func (m *InterfaceMonitor) resync() error {
 			continue
 		}
 		log.WithField("ifaceName", name).Info("Spotted interface removal on resync.")
-		m.Callback(name, StateDown)
+		m.StateCallback(name, StateDown, ifIndex)
 		m.AddrCallback(name, nil)
 		delete(m.upIfaces, name)
 		delete(m.ifaceAddrs, ifIndex)

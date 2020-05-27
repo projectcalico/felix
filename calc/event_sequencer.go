@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,10 +67,12 @@ type EventSequencer struct {
 	pendingServiceAccountDeletes set.Set
 	pendingNamespaceUpdates      map[proto.NamespaceID]*proto.NamespaceUpdate
 	pendingNamespaceDeletes      set.Set
-	pendingRouteUpdates          map[string]*proto.RouteUpdate
+	pendingRouteUpdates          map[routeID]*proto.RouteUpdate
 	pendingRouteDeletes          set.Set
 	pendingVTEPUpdates           map[string]*proto.VXLANTunnelEndpointUpdate
 	pendingVTEPDeletes           set.Set
+	pendingWireguardUpdates      map[string]*model.Wireguard
+	pendingWireguardDeletes      set.Set
 
 	// Sets to record what we've sent downstream.  Updated whenever we flush.
 	sentIPSets          set.Set
@@ -83,6 +85,7 @@ type EventSequencer struct {
 	sentNamespaces      set.Set
 	sentRoutes          set.Set
 	sentVTEPs           set.Set
+	sentWireguard       set.Set
 
 	Callback EventHandler
 }
@@ -120,10 +123,12 @@ func NewEventSequencer(conf configInterface) *EventSequencer {
 		pendingServiceAccountDeletes: set.New(),
 		pendingNamespaceUpdates:      map[proto.NamespaceID]*proto.NamespaceUpdate{},
 		pendingNamespaceDeletes:      set.New(),
-		pendingRouteUpdates:          map[string]*proto.RouteUpdate{},
+		pendingRouteUpdates:          map[routeID]*proto.RouteUpdate{},
 		pendingRouteDeletes:          set.New(),
 		pendingVTEPUpdates:           map[string]*proto.VXLANTunnelEndpointUpdate{},
 		pendingVTEPDeletes:           set.New(),
+		pendingWireguardUpdates:      map[string]*model.Wireguard{},
+		pendingWireguardDeletes:      set.New(),
 
 		// Sets to record what we've sent downstream.  Updated whenever we flush.
 		sentIPSets:          set.New(),
@@ -136,8 +141,13 @@ func NewEventSequencer(conf configInterface) *EventSequencer {
 		sentNamespaces:      set.New(),
 		sentRoutes:          set.New(),
 		sentVTEPs:           set.New(),
+		sentWireguard:       set.New(),
 	}
 	return buf
+}
+
+type routeID struct {
+	dst string
 }
 
 func (buf *EventSequencer) OnIPSetAdded(setID string, ipSetType proto.IPSetUpdate_IPSetType) {
@@ -505,6 +515,22 @@ func (buf *EventSequencer) flushIPPoolUpdates() {
 	}
 }
 
+func (buf *EventSequencer) flushHostWireguardUpdates() {
+	for nodename, wg := range buf.pendingWireguardUpdates {
+		var ipstr string
+		if wg.InterfaceIPv4Addr != nil {
+			ipstr = wg.InterfaceIPv4Addr.String()
+		}
+		buf.Callback(&proto.WireguardEndpointUpdate{
+			Hostname:          nodename,
+			PublicKey:         wg.PublicKey,
+			InterfaceIpv4Addr: ipstr,
+		})
+		buf.sentWireguard.Add(nodename)
+		delete(buf.pendingWireguardUpdates, nodename)
+	}
+}
+
 func (buf *EventSequencer) OnIPPoolRemove(key model.IPPoolKey) {
 	log.WithField("key", key).Debug("IPPool removed")
 	cidr := ip.CIDRFromCalicoNet(key.CIDR)
@@ -521,6 +547,19 @@ func (buf *EventSequencer) flushIPPoolDeletes() {
 			Id: cidrToIPPoolID(key),
 		})
 		buf.sentIPPools.Discard(key)
+		return set.RemoveItem
+	})
+}
+
+func (buf *EventSequencer) flushHostWireguardDeletes() {
+	buf.pendingWireguardDeletes.Iter(func(item interface{}) error {
+		key := item.(string)
+		if buf.sentWireguard.Contains(key) {
+			buf.Callback(&proto.WireguardEndpointRemove{
+				Hostname: key,
+			})
+			buf.sentWireguard.Discard(key)
+		}
 		return set.RemoveItem
 	})
 }
@@ -552,6 +591,8 @@ func memberToProto(member labelindex.IPSetMember) string {
 		return fmt.Sprintf("%s,tcp:%d", member.CIDR.Addr(), member.PortNumber)
 	case labelindex.ProtocolUDP:
 		return fmt.Sprintf("%s,udp:%d", member.CIDR.Addr(), member.PortNumber)
+	case labelindex.ProtocolSCTP:
+		return fmt.Sprintf("%s,sctp:%d", member.CIDR.Addr(), member.PortNumber)
 	}
 	log.WithField("member", member).Panic("Unknown IP set member type")
 	return ""
@@ -591,6 +632,8 @@ func (buf *EventSequencer) Flush() {
 
 	// Flush (rare) cluster-wide updates.  There's no particular ordering to these so we might
 	// as well do deletions first to minimise occupancy.
+	buf.flushHostWireguardDeletes()
+	buf.flushHostWireguardUpdates()
 	buf.flushHostIPDeletes()
 	buf.flushHostIPUpdates()
 	buf.flushIPPoolDeletes()
@@ -700,6 +743,22 @@ func (buf *EventSequencer) OnNamespaceRemove(id proto.NamespaceID) {
 	}
 }
 
+func (buf *EventSequencer) OnWireguardUpdate(nodename string, wg *model.Wireguard) {
+	log.WithFields(log.Fields{
+		"nodename": nodename,
+	}).Debug("Wireguard updated")
+	buf.pendingWireguardDeletes.Discard(nodename)
+	buf.pendingWireguardUpdates[nodename] = wg
+}
+
+func (buf *EventSequencer) OnWireguardRemove(nodename string) {
+	log.WithFields(log.Fields{
+		"nodename": nodename,
+	}).Debug("Wireguard removed")
+	delete(buf.pendingWireguardUpdates, nodename)
+	buf.pendingWireguardDeletes.Add(nodename)
+}
+
 func (buf *EventSequencer) flushNamespaces() {
 	// Order doesn't matter, but send removes first to reduce max occupancy
 	buf.pendingNamespaceDeletes.Iter(func(item interface{}) error {
@@ -758,35 +817,40 @@ func (buf *EventSequencer) flushVTEPAdds() {
 }
 
 func (buf *EventSequencer) OnRouteUpdate(update *proto.RouteUpdate) {
-	dst := update.Dst
-	log.WithFields(log.Fields{"dst": dst}).Debug("Route update")
-	buf.pendingRouteDeletes.Discard(dst)
-	buf.pendingRouteUpdates[dst] = update
+	routeID := routeID{
+		dst: update.Dst,
+	}
+	log.WithFields(log.Fields{"id": routeID}).Debug("Route update")
+	buf.pendingRouteDeletes.Discard(routeID)
+	buf.pendingRouteUpdates[routeID] = update
 }
 
 func (buf *EventSequencer) OnRouteRemove(dst string) {
-	log.WithFields(log.Fields{"dst": dst}).Debug("Route removed")
-	delete(buf.pendingRouteUpdates, dst)
-	if buf.sentRoutes.Contains(dst) {
-		buf.pendingRouteDeletes.Add(dst)
+	routeID := routeID{
+		dst: dst,
+	}
+	log.WithFields(log.Fields{"id": routeID}).Debug("Route update")
+	delete(buf.pendingRouteUpdates, routeID)
+	if buf.sentRoutes.Contains(routeID) {
+		buf.pendingRouteDeletes.Add(routeID)
 	}
 }
 
 func (buf *EventSequencer) flushRouteAdds() {
-	for _, msg := range buf.pendingRouteUpdates {
+	for id, msg := range buf.pendingRouteUpdates {
 		buf.Callback(msg)
-		buf.sentRoutes.Add(msg.Dst)
+		buf.sentRoutes.Add(id)
 	}
-	buf.pendingRouteUpdates = make(map[string]*proto.RouteUpdate)
+	buf.pendingRouteUpdates = make(map[routeID]*proto.RouteUpdate)
 	log.Debug("Done flushing route adds")
 }
 
 func (buf *EventSequencer) flushRouteRemoves() {
 	buf.pendingRouteDeletes.Iter(func(item interface{}) error {
-		dst := item.(string)
-		msg := proto.RouteRemove{Dst: dst}
+		id := item.(routeID)
+		msg := proto.RouteRemove{Dst: id.dst}
 		buf.Callback(&msg)
-		buf.sentRoutes.Discard(dst)
+		buf.sentRoutes.Discard(id)
 		return nil
 	})
 	buf.pendingRouteDeletes.Clear()

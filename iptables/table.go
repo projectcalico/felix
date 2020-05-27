@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -196,7 +196,12 @@ type Table struct {
 	// "--match foo --jump DROP" (i.e. omitting the action and chain name, which are calculated
 	// as needed).
 	chainNameToChain map[string]*Chain
-	dirtyChains      set.Set
+	// chainRefCounts counts the number of chains that refer to a given chain.  Transitive
+	// reachability isn't tracked but testing whether a chain is referenced does allow us to
+	// avoid programming unreferenced leaf chains (for example, policies that aren't used in
+	// this table).
+	chainRefCounts map[string]int
+	dirtyChains    set.Set
 
 	inSyncWithDataPlane bool
 
@@ -261,6 +266,8 @@ type Table struct {
 	timeNow   func() time.Time
 	// lookPath is a shim for exec.LookPath.
 	lookPath func(file string) (string, error)
+
+	onStillAlive func()
 }
 
 type TableOptions struct {
@@ -284,6 +291,8 @@ type TableOptions struct {
 	NowOverride func() time.Time
 	// LookPathOverride for tests, if non-nil, replacement for exec.LookPath()
 	LookPathOverride func(file string) (string, error)
+	// Thunk to call periodically when doing a long-running operation.
+	OnStillAlive func()
 }
 
 func NewTable(
@@ -310,15 +319,19 @@ func NewTable(
 			options.ExtraCleanupRegexPattern)
 	}
 	oldInsertPattern := strings.Join(oldInsertRegexpParts, "|")
+	log.WithField("pattern", oldInsertPattern).Info("Calculated old-insert detection regex.")
 	oldInsertRegexp := regexp.MustCompile(oldInsertPattern)
 
 	// Pre-populate the insert table with empty lists for each kernel chain.  Ensures that we
 	// clean up any chains that we hooked on a previous run.
 	inserts := map[string][]Rule{}
 	dirtyInserts := set.New()
+	refcounts := map[string]int{}
 	for _, kernelChain := range tableToKernelChains[name] {
 		inserts[kernelChain] = []Rule{}
 		dirtyInserts.Add(kernelChain)
+		// Kernel chains are referred to by definition.
+		refcounts[kernelChain] += 1
 	}
 
 	var insertMode string
@@ -340,7 +353,7 @@ func NewTable(
 	}
 
 	// Allow override of exec.Command() and time.Sleep() for test purposes.
-	newCmd := newRealCmd
+	newCmd := NewRealCmd
 	if options.NewCmdOverride != nil {
 		newCmd = options.NewCmdOverride
 	}
@@ -364,6 +377,7 @@ func NewTable(
 		chainToInsertedRules:   inserts,
 		dirtyInserts:           dirtyInserts,
 		chainNameToChain:       map[string]*Chain{},
+		chainRefCounts:         refcounts,
 		dirtyChains:            set.New(),
 		chainToDataplaneHashes: map[string][]string{},
 		chainToFullRules:       map[string][]string{},
@@ -403,6 +417,12 @@ func NewTable(
 	}
 	table.restoreInputBuffer.NumLinesWritten = table.countNumLinesExecuted
 
+	if options.OnStillAlive != nil {
+		table.onStillAlive = options.OnStillAlive
+	} else {
+		table.onStillAlive = func() {}
+	}
+
 	iptablesVariant := strings.ToLower(options.BackendMode)
 	if iptablesVariant == "" {
 		iptablesVariant = "legacy"
@@ -412,42 +432,10 @@ func NewTable(
 		table.nftablesMode = true
 	}
 
-	table.iptablesRestoreCmd = table.findBestBinary(ipVersion, iptablesVariant, "restore")
-	table.iptablesSaveCmd = table.findBestBinary(ipVersion, iptablesVariant, "save")
+	table.iptablesRestoreCmd = findBestBinary(table.lookPath, ipVersion, iptablesVariant, "restore")
+	table.iptablesSaveCmd = findBestBinary(table.lookPath, ipVersion, iptablesVariant, "save")
 
 	return table
-}
-
-// findBestBinary tries to find an iptables binary for the specific variant (legacy/nftables mode) and returns the name
-// of the binary.  Falls back on iptables-restore/iptables-save if the specific variant isn't available.
-// Panics if no binary can be found.
-func (t *Table) findBestBinary(ipVersion uint8, backendMode, saveOrRestore string) string {
-	verInfix := ""
-	if ipVersion == 6 {
-		verInfix = "6"
-	}
-	candidates := []string{
-		"ip" + verInfix + "tables-" + backendMode + "-" + saveOrRestore,
-		"ip" + verInfix + "tables-" + saveOrRestore,
-	}
-
-	logCxt := log.WithFields(log.Fields{
-		"ipVersion":     ipVersion,
-		"backendMode":   backendMode,
-		"saveOrRestore": saveOrRestore,
-		"candidates":    candidates,
-	})
-
-	for _, candidate := range candidates {
-		_, err := t.lookPath(candidate)
-		if err == nil {
-			logCxt.WithField("command", candidate).Info("Looked up iptables command")
-			return candidate
-		}
-	}
-
-	logCxt.Panic("Failed to find iptables command")
-	return ""
 }
 
 func (t *Table) SetRuleInsertions(chainName string, rules []Rule) {
@@ -457,6 +445,11 @@ func (t *Table) SetRuleInsertions(chainName string, rules []Rule) {
 	numRulesDelta := len(rules) - len(oldRules)
 	t.gaugeNumRules.Add(float64(numRulesDelta))
 	t.dirtyInserts.Add(chainName)
+
+	// Incref any newly-referenced chains, then decref the old ones.  By incrementing first we
+	// avoid marking a still-referenced chain as dirty.
+	t.increfReferredChains(rules)
+	t.decrefReferredChains(oldRules)
 
 	// Defensive: make sure we re-read the dataplane state before we make updates.  While the
 	// code was originally designed not to need this, we found that other users of
@@ -474,13 +467,20 @@ func (t *Table) UpdateChains(chains []*Chain) {
 func (t *Table) UpdateChain(chain *Chain) {
 	t.logCxt.WithField("chainName", chain.Name).Info("Queueing update of chain.")
 	oldNumRules := 0
+
+	// Incref any newly-referenced chains, then decref the old ones.  By incrementing first we
+	// avoid marking a still-referenced chain as dirty.
+	t.increfReferredChains(chain.Rules)
 	if oldChain := t.chainNameToChain[chain.Name]; oldChain != nil {
 		oldNumRules = len(oldChain.Rules)
+		t.decrefReferredChains(oldChain.Rules)
 	}
 	t.chainNameToChain[chain.Name] = chain
 	numRulesDelta := len(chain.Rules) - oldNumRules
 	t.gaugeNumRules.Add(float64(numRulesDelta))
-	t.dirtyChains.Add(chain.Name)
+	if t.chainRefCounts[chain.Name] > 0 {
+		t.dirtyChains.Add(chain.Name)
+	}
 
 	// Defensive: make sure we re-read the dataplane state before we make updates.  While the
 	// code was originally designed not to need this, we found that other users of
@@ -496,11 +496,14 @@ func (t *Table) RemoveChains(chains []*Chain) {
 }
 
 func (t *Table) RemoveChainByName(name string) {
-	t.logCxt.WithField("chainName", name).Info("Queing deletion of chain.")
+	t.logCxt.WithField("chainName", name).Info("Queuing deletion of chain.")
 	if oldChain, known := t.chainNameToChain[name]; known {
 		t.gaugeNumRules.Sub(float64(len(oldChain.Rules)))
 		delete(t.chainNameToChain, name)
-		t.dirtyChains.Add(name)
+		if t.chainRefCounts[name] > 0 {
+			t.dirtyChains.Add(name)
+		}
+		t.decrefReferredChains(oldChain.Rules)
 	}
 
 	// Defensive: make sure we re-read the dataplane state before we make updates.  While the
@@ -508,6 +511,49 @@ func (t *Table) RemoveChainByName(name string) {
 	// iptables-restore can still clobber out updates so it's safest to re-read the state before
 	// each write.
 	t.InvalidateDataplaneCache("chain removal")
+}
+
+// increfReferredChains finds all the chains that the given rules refer to  (i.e. have jumps/gotos to) and
+// increments their refcount.
+func (t *Table) increfReferredChains(rules []Rule) {
+	for _, r := range rules {
+		if ref, ok := r.Action.(Referrer); ok {
+			t.increfChain(ref.ReferencedChain())
+		}
+	}
+}
+
+// decrefReferredChains finds all the chains that the given rules refer to (i.e. have jumps/gotos to) and
+// decrements their refcount.
+func (t *Table) decrefReferredChains(rules []Rule) {
+	for _, r := range rules {
+		if ref, ok := r.Action.(Referrer); ok {
+			t.decrefChain(ref.ReferencedChain())
+		}
+	}
+}
+
+// increfChain increments the refcount of the given chain; if the refcount transitions from 0,
+// marks the chain dirty so it will be programmed.
+func (t *Table) increfChain(chainName string) {
+	log.WithField("chainName", chainName).Debug("Incref chain")
+	t.chainRefCounts[chainName] += 1
+	if t.chainRefCounts[chainName] == 1 {
+		log.WithField("chainName", chainName).Info("Chain became referenced, marking it for programming")
+		t.dirtyChains.Add(chainName)
+	}
+}
+
+// decrefChain decrements the refcount of the given chain; if the refcount transitions to 0,
+// marks the chain dirty so it will be cleaned up.
+func (t *Table) decrefChain(chainName string) {
+	log.WithField("chainName", chainName).Debug("Decref chain")
+	t.chainRefCounts[chainName] -= 1
+	if t.chainRefCounts[chainName] == 0 {
+		log.WithField("chainName", chainName).Info("Chain no longer referenced, marking it for removal")
+		delete(t.chainRefCounts, chainName)
+		t.dirtyChains.Add(chainName)
+	}
 }
 
 func (t *Table) loadDataplaneState() {
@@ -650,6 +696,7 @@ func (t *Table) getHashesAndRulesFromDataplane() (hashes map[string][]string, ru
 	// Retry a few times before we panic.  This deals with any transient errors and it prevents
 	// us from spamming a panic into the log when we're being gracefully shut down by a SIGTERM.
 	for {
+		t.onStillAlive()
 		hashes, rules, err := t.attemptToGetHashesAndRulesFromDataplane()
 		if err != nil {
 			countNumSaveErrors.Inc()
@@ -783,7 +830,7 @@ func (t *Table) readHashesAndRulesFrom(r io.ReadCloser) (hashes map[string][]str
 			chainHasCalicoRule.Add(chainName)
 		} else if t.oldInsertRegexp.Find(line) != nil {
 			logCxt.WithFields(log.Fields{
-				"rule":      line,
+				"rule":      string(line),
 				"chainName": chainName,
 			}).Info("Found inserted rule from previous Felix version, marking for cleanup.")
 			hash = "OLD INSERT RULE"
@@ -877,6 +924,7 @@ func (t *Table) Apply() (rescheduleAfter time.Duration) {
 			// sync.  Refresh it.  This may mark more chains as dirty.
 			t.loadDataplaneState()
 		}
+		t.onStillAlive()
 
 		if err := t.applyUpdates(); err != nil {
 			if retries > 0 {
@@ -905,7 +953,7 @@ func (t *Table) Apply() (rescheduleAfter time.Duration) {
 		break
 	}
 
-	t.gaugeNumChains.Set(float64(len(t.chainNameToChain)))
+	t.gaugeNumChains.Set(float64(len(t.chainRefCounts)))
 
 	// Check whether we need to be rescheduled and how soon.
 	if t.refreshInterval > 0 {
@@ -946,7 +994,7 @@ func (t *Table) applyUpdates() error {
 			// iptables-nft-restore <v1.8.3 has a bug (https://bugzilla.netfilter.org/show_bug.cgi?id=1348)
 			// where only the first replace command sets the rule index.  Work around that by refreshing the
 			// whole chain using a flush.
-			chain := t.chainNameToChain[chainName]
+			chain, _ := t.desiredStateOfChain(chainName)
 			currentHashes := chain.RuleHashes(features)
 			previousHashes := t.chainToDataplaneHashes[chainName]
 			t.logCxt.WithFields(log.Fields{
@@ -959,7 +1007,7 @@ func (t *Table) applyUpdates() error {
 				return set.RemoveItem
 			}
 			chainNeedsToBeFlushed = true
-		} else if _, ok := t.chainNameToChain[chainName]; !ok {
+		} else if _, present := t.desiredStateOfChain(chainName); !present {
 			// About to delete this chain, flush it first to sever dependencies.
 			chainNeedsToBeFlushed = true
 		} else if _, ok := t.chainToDataplaneHashes[chainName]; !ok {
@@ -976,7 +1024,7 @@ func (t *Table) applyUpdates() error {
 	newHashes := map[string][]string{}
 	t.dirtyChains.Iter(func(item interface{}) error {
 		chainName := item.(string)
-		if chain, ok := t.chainNameToChain[chainName]; ok {
+		if chain, ok := t.desiredStateOfChain(chainName); ok {
 			// Chain update or creation.  Scan the chain against its previous hashes
 			// and replace/append/delete as appropriate.
 			var previousHashes []string
@@ -1106,7 +1154,7 @@ func (t *Table) applyUpdates() error {
 
 		t.dirtyChains.Iter(func(item interface{}) error {
 			chainName := item.(string)
-			if _, ok := t.chainNameToChain[chainName]; !ok {
+			if _, ok := t.desiredStateOfChain(chainName); !ok {
 				// Chain deletion
 				buf.WriteForwardReference(chainName)
 			}
@@ -1121,7 +1169,7 @@ func (t *Table) applyUpdates() error {
 	// references.
 	t.dirtyChains.Iter(func(item interface{}) error {
 		chainName := item.(string)
-		if _, ok := t.chainNameToChain[chainName]; !ok {
+		if _, ok := t.desiredStateOfChain(chainName); !ok {
 			// Chain deletion
 			buf.WriteLine(fmt.Sprintf("--delete-chain %s", chainName))
 			newHashes[chainName] = nil
@@ -1214,6 +1262,16 @@ func (t *Table) applyUpdates() error {
 	t.chainToFullRules = newChainToFullRules
 
 	return nil
+}
+
+// desiredStateOfChain returns the given chain, if and only if it exists in the cache and it is referenced by some
+// other chain.  If the chain doesn't exist or it is not referenced, returns nil and false.
+func (t *Table) desiredStateOfChain(chainName string) (chain *Chain, present bool) {
+	if t.chainRefCounts[chainName] == 0 {
+		return
+	}
+	chain, present = t.chainNameToChain[chainName]
+	return
 }
 
 func (t *Table) commentFrag(hash string) string {

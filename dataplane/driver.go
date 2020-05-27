@@ -1,6 +1,4 @@
-// +build !windows
-
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,12 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// +build !windows
+
 package dataplane
 
 import (
 	"math/bits"
 	"net"
 	"os/exec"
+
+	"github.com/projectcalico/felix/wireguard"
+
+	"github.com/projectcalico/felix/bpf/conntrack"
+
+	"k8s.io/client-go/kubernetes"
 
 	log "github.com/sirupsen/logrus"
 
@@ -28,6 +34,7 @@ import (
 	"github.com/projectcalico/felix/config"
 	extdataplane "github.com/projectcalico/felix/dataplane/external"
 	intdataplane "github.com/projectcalico/felix/dataplane/linux"
+	"github.com/projectcalico/felix/idalloc"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ipsets"
 	"github.com/projectcalico/felix/logutils"
@@ -38,7 +45,8 @@ import (
 
 func StartDataplaneDriver(configParams *config.Config,
 	healthAggregator *health.HealthAggregator,
-	configChangedRestartCallback func()) (DataplaneDriver, *exec.Cmd) {
+	configChangedRestartCallback func(),
+	k8sClientSet *kubernetes.Clientset) (DataplaneDriver, *exec.Cmd) {
 	if configParams.UseInternalDataplaneDriver {
 		log.Info("Using internal (linux) dataplane driver.")
 		// If kube ipvs interface is present, enable ipvs support.
@@ -55,6 +63,19 @@ func StartDataplaneDriver(configParams *config.Config,
 		// that we use for communicating between chains.
 		markAccept, _ := markBitsManager.NextSingleBitMark()
 		markPass, _ := markBitsManager.NextSingleBitMark()
+
+		var markWireguard uint32
+		if configParams.WireguardEnabled {
+			log.Info("Wireguard enabled, allocating a mark bit")
+			markWireguard, _ = markBitsManager.NextSingleBitMark()
+			if markWireguard == 0 {
+				log.WithFields(log.Fields{
+					"Name":     "felix-iptables",
+					"MarkMask": configParams.IptablesMarkMask,
+				}).Panic("Failed to allocate a mark bit for wireguard, not enough mark bits available.")
+			}
+		}
+
 		// Short-lived mark bits for local calculations within a chain.
 		markScratch0, _ := markBitsManager.NextSingleBitMark()
 		markScratch1, _ := markBitsManager.NextSingleBitMark()
@@ -83,6 +104,22 @@ func StartDataplaneDriver(configParams *config.Config,
 			"endpointMark":        markEndpointMark,
 			"endpointMarkNonCali": markEndpointNonCaliEndpoint,
 		}).Info("Calculated iptables mark bits")
+
+		// Create a routing table manager. There are certain components that should take specific indices in the range
+		// to simplify table tidy-up.
+		routeTableIndexAllocator := idalloc.NewIndexAllocator(configParams.RouteTableRange)
+
+		// Always allocate the wireguard table index (even when not enabled). This ensures we can tidy up entries
+		// if wireguard is disabled after being previously enabled.
+		var wireguardEnabled bool
+		var wireguardTableIndex int
+		if idx, err := routeTableIndexAllocator.GrabIndex(); err == nil {
+			log.Debugf("Assigned wireguard table index: %d", idx)
+			wireguardEnabled = configParams.WireguardEnabled
+			wireguardTableIndex = idx
+		} else {
+			log.WithError(err).Warning("Unable to assign table index for wireguard")
+		}
 
 		dpConfig := intdataplane.Config{
 			Hostname: configParams.FelixHostname,
@@ -141,6 +178,16 @@ func StartDataplaneDriver(configParams *config.Config,
 				NATPortRange:                       configParams.NATPortRange,
 				IptablesNATOutgoingInterfaceFilter: configParams.IptablesNATOutgoingInterfaceFilter,
 				NATOutgoingAddress:                 configParams.NATOutgoingAddress,
+				BPFEnabled:                         configParams.BPFEnabled,
+			},
+			Wireguard: wireguard.Config{
+				Enabled:             wireguardEnabled,
+				ListeningPort:       configParams.WireguardListeningPort,
+				FirewallMark:        int(markWireguard),
+				RoutingRulePriority: configParams.WireguardRoutingRulePriority,
+				RoutingTableIndex:   wireguardTableIndex,
+				InterfaceName:       configParams.WireguardInterfaceName,
+				MTU:                 configParams.WireguardMTU,
 			},
 			IPIPMTU:                        configParams.IpInIpMtu,
 			VXLANMTU:                       configParams.VXLANMTU,
@@ -157,7 +204,6 @@ func StartDataplaneDriver(configParams *config.Config,
 			IptablesLockTimeout:            configParams.IptablesLockTimeoutSecs,
 			IptablesLockProbeInterval:      configParams.IptablesLockProbeIntervalMillis,
 			MaxIPSetSize:                   configParams.MaxIpsetSize,
-			IgnoreLooseRPF:                 configParams.IgnoreLooseRPF,
 			IPv6Enabled:                    configParams.Ipv6Support,
 			StatusReportingInterval:        configParams.ReportingIntervalSecs,
 			XDPRefreshInterval:             configParams.XDPRefreshInterval,
@@ -176,13 +222,31 @@ func StartDataplaneDriver(configParams *config.Config,
 				}
 				logutils.DumpHeapMemoryProfile(configParams.DebugMemoryProfilePath)
 			},
-			HealthAggregator:                healthAggregator,
-			DebugSimulateDataplaneHangAfter: configParams.DebugSimulateDataplaneHangAfter,
-			ExternalNodesCidrs:              configParams.ExternalNodesCIDRList,
-			SidecarAccelerationEnabled:      configParams.SidecarAccelerationEnabled,
-			XDPEnabled:                      configParams.XDPEnabled,
-			XDPAllowGeneric:                 configParams.GenericXDPEnabled,
+			HealthAggregator:                   healthAggregator,
+			DebugSimulateDataplaneHangAfter:    configParams.DebugSimulateDataplaneHangAfter,
+			ExternalNodesCidrs:                 configParams.ExternalNodesCIDRList,
+			SidecarAccelerationEnabled:         configParams.SidecarAccelerationEnabled,
+			BPFEnabled:                         configParams.BPFEnabled,
+			BPFDisableUnprivileged:             configParams.BPFDisableUnprivileged,
+			BPFConnTimeLBEnabled:               configParams.BPFConnectTimeLoadBalancingEnabled,
+			BPFKubeProxyIptablesCleanupEnabled: configParams.BPFKubeProxyIptablesCleanupEnabled,
+			BPFLogLevel:                        configParams.BPFLogLevel,
+			BPFDataIfacePattern:                configParams.BPFDataIfacePattern,
+			BPFCgroupV2:                        configParams.DebugBPFCgroupV2,
+			BPFMapRepin:                        configParams.DebugBPFMapRepinEnabled,
+			KubeProxyMinSyncPeriod:             configParams.BPFKubeProxyMinSyncPeriod,
+			XDPEnabled:                         configParams.XDPEnabled,
+			XDPAllowGeneric:                    configParams.GenericXDPEnabled,
+			BPFConntrackTimeouts:               conntrack.DefaultTimeouts(), // FIXME make timeouts configurable
+			RouteTableManager:                  routeTableIndexAllocator,
+
+			KubeClientSet: k8sClientSet,
 		}
+
+		if configParams.BPFExternalServiceMode == "dsr" {
+			dpConfig.BPFNodePortDSREnabled = true
+		}
+
 		intDP := intdataplane.NewIntDataplaneDriver(dpConfig)
 		intDP.Start()
 

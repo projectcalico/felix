@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2020 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -40,7 +41,6 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"github.com/gobuffalo/packr/v2"
 	"github.com/projectcalico/felix/labelindex"
 	"github.com/projectcalico/felix/versionparse"
 )
@@ -82,12 +82,10 @@ const (
 )
 
 var (
-	// this holds the compiled XDP binary as an ELF file
-	xdpAsset []byte
-	// this holds the compiled sockops binary as an ELF file
-	sockopsAsset []byte
-	// this holds the compiled sk_msg binary as an ELF file
-	skmsgAsset      []byte
+	xdpFilename     = "filter.o"
+	sockopsFilename = "sockops.o"
+	redirFilename   = "redir.o"
+
 	bpfCalicoSubdir = "calico"
 	ifaceRegexp     = regexp.MustCompile(`(?m)^[0-9]+:\s+(?P<name>.+):`)
 	// v4Dot16Dot0 is the first kernel version that has all the
@@ -96,29 +94,10 @@ var (
 	// v4Dot20Dot0 is the first kernel version that has all the
 	// required features we use for sidecar acceleration
 	v4Dot20Dot0 = versionparse.MustParseVersion("4.20.0")
+	// v5Dot3Dot0 is the first kernel version that has all the
+	// required features we use for BPF dataplane mode
+	v5Dot3Dot0 = versionparse.MustParseVersion("5.3.0")
 )
-
-func init() {
-	boxXDP := packr.New("xdp", "./xdp/generated")
-	xdpBytes, err := boxXDP.Find("xdp.o")
-	if err != nil {
-		panic(fmt.Sprintf("cannot find xdp.o: %v\n", err))
-	}
-
-	boxSockmap := packr.New("sockmap", "./sockmap/generated")
-	sockopsBytes, err := boxSockmap.Find("sockops.o")
-	if err != nil {
-		panic(fmt.Sprintf("cannot find sockops.o: %v\n", err))
-	}
-	skmsgBytes, err := boxSockmap.Find("redir.o")
-	if err != nil {
-		panic(fmt.Sprintf("cannot find redir.o: %v\n", err))
-	}
-
-	xdpAsset = xdpBytes
-	sockopsAsset = sockopsBytes
-	skmsgAsset = skmsgBytes
-}
 
 func (m XDPMode) String() string {
 	switch m {
@@ -168,25 +147,26 @@ func printCommand(name string, arg ...string) {
 }
 
 type BPFLib struct {
-	bpfDir      string
+	binDir      string
+	bpffsDir    string
 	calicoDir   string
 	sockmapDir  string
 	cgroupV2Dir string
 	xdpDir      string
 }
 
-func NewBPFLib() (*BPFLib, error) {
+func NewBPFLib(binDir string) (*BPFLib, error) {
 	_, err := exec.LookPath("bpftool")
 	if err != nil {
 		return nil, errors.New("bpftool not found in $PATH")
 	}
 
-	bpfDir, err := maybeMountBPFfs()
+	bpfDir, err := MaybeMountBPFfs()
 	if err != nil {
 		return nil, err
 	}
 
-	cgroupV2Dir, err := maybeMountCgroupV2()
+	cgroupV2Dir, err := MaybeMountCgroupV2()
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +176,8 @@ func NewBPFLib() (*BPFLib, error) {
 	sockmapDir := filepath.Join(calicoDir, "sockmap")
 
 	return &BPFLib{
-		bpfDir:      bpfDir,
+		binDir:      binDir,
+		bpffsDir:    bpfDir,
 		calicoDir:   calicoDir,
 		sockmapDir:  sockmapDir,
 		cgroupV2Dir: cgroupV2Dir,
@@ -204,7 +185,7 @@ func NewBPFLib() (*BPFLib, error) {
 	}, nil
 }
 
-func maybeMountBPFfs() (string, error) {
+func MaybeMountBPFfs() (string, error) {
 	var err error
 	bpffsPath := defaultBPFfsPath
 
@@ -242,7 +223,7 @@ func maybeMountBPFfs() (string, error) {
 	return bpffsPath, err
 }
 
-func maybeMountCgroupV2() (string, error) {
+func MaybeMountCgroupV2() (string, error) {
 	var err error
 	cgroupV2Path := "/run/calico/cgroup"
 
@@ -337,13 +318,11 @@ type BPFDataplane interface {
 	GetXDPIfaces() ([]string, error)
 	GetXDPObjTag(objPath string) (string, error)
 	GetXDPObjTagAuto() (string, error)
-	GetXDPObjTagWithBytes(objBytes []byte) (string, error)
 	GetXDPTag(ifName string) (string, error)
 	IsValidMap(ifName string, family IPFamily) (bool, error)
 	ListCIDRMaps(family IPFamily) ([]string, error)
 	LoadXDP(objPath, ifName string, mode XDPMode) error
 	LoadXDPAuto(ifName string, mode XDPMode) error
-	LoadXDPWithBytes(objBytes []byte, ifName string, mode XDPMode) error
 	LookupCIDRMap(ifName string, family IPFamily, ip net.IP, mask int) (uint32, error)
 	LookupFailsafeMap(proto uint8, port uint16) (bool, error)
 	NewCIDRMap(ifName string, family IPFamily) (string, error)
@@ -362,11 +341,9 @@ type BPFDataplane interface {
 	RemoveSockmap(mode FindObjectMode) error
 	loadBPF(objPath, progPath, progType string, mapArgs []string) error
 	LoadSockops(objPath string) error
-	LoadSockopsWithBytes(objBytes []byte) error
 	LoadSockopsAuto() error
 	RemoveSockops() error
 	LoadSkMsg(objPath string) error
-	LoadSkMsgWithBytes(objBytes []byte) error
 	LoadSkMsgAuto() error
 	RemoveSkMsg() error
 	AttachToCgroup() error
@@ -443,7 +420,7 @@ func (b *BPFLib) NewFailsafeMap() (string, error) {
 		65535,
 		keySize,
 		valueSize,
-		1, //BPF_F_NO_PREALLOC
+		1, // BPF_F_NO_PREALLOC
 	)
 }
 
@@ -468,7 +445,7 @@ func (b *BPFLib) NewCIDRMap(ifName string, family IPFamily) (string, error) {
 		10240,
 		keySize,
 		valueSize,
-		1, //BPF_F_NO_PREALLOC
+		1, // BPF_F_NO_PREALLOC
 	)
 }
 
@@ -974,6 +951,12 @@ func (b *BPFLib) UpdateCIDRMap(ifName string, family IPFamily, ip net.IP, mask i
 }
 
 func (b *BPFLib) loadXDPRaw(objPath, ifName string, mode XDPMode, mapArgs []string) error {
+	objPath = path.Join(b.binDir, objPath)
+
+	if _, err := os.Stat(objPath); os.IsNotExist(err) {
+		return fmt.Errorf("cannot find XDP object %q", objPath)
+	}
+
 	progName := getProgName(ifName)
 	progPath := filepath.Join(b.xdpDir, progName)
 
@@ -1032,10 +1015,6 @@ func (b *BPFLib) getMapArgs(ifName string) ([]string, error) {
 }
 
 func (b *BPFLib) LoadXDP(objPath, ifName string, mode XDPMode) error {
-	if _, err := os.Stat(objPath); os.IsNotExist(err) {
-		return fmt.Errorf("cannot find XDP object %q", objPath)
-	}
-
 	mapArgs, err := b.getMapArgs(ifName)
 	if err != nil {
 		return err
@@ -1044,18 +1023,8 @@ func (b *BPFLib) LoadXDP(objPath, ifName string, mode XDPMode) error {
 	return b.loadXDPRaw(objPath, ifName, mode, mapArgs)
 }
 
-func (b *BPFLib) LoadXDPWithBytes(objBytes []byte, ifName string, mode XDPMode) error {
-	f, err := writeBPFBytes(objBytes)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	return b.LoadXDP(f.f.Name(), ifName, mode)
-}
-
 func (b *BPFLib) LoadXDPAuto(ifName string, mode XDPMode) error {
-	return b.LoadXDPWithBytes(xdpAsset, ifName, mode)
+	return b.LoadXDP(xdpFilename, ifName, mode)
 }
 
 func (b *BPFLib) RemoveXDP(ifName string, mode XDPMode) error {
@@ -1167,45 +1136,8 @@ func (b *BPFLib) GetXDPObjTag(objPath string) (tag string, err error) {
 	return b.GetXDPTag(tmpIfA)
 }
 
-func (b *BPFLib) GetXDPObjTagWithBytes(objBytes []byte) (string, error) {
-	f, err := writeBPFBytes(objBytes)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	return b.GetXDPObjTag(f.f.Name())
-}
-
 func (b *BPFLib) GetXDPObjTagAuto() (string, error) {
-	return b.GetXDPObjTagWithBytes(xdpAsset)
-}
-
-type bpfFile struct {
-	f *os.File
-}
-
-func (f *bpfFile) Close() error {
-	err := f.f.Close()
-	os.Remove(f.f.Name())
-	return err
-}
-
-func writeBPFBytes(objBytes []byte) (*bpfFile, error) {
-	f, err := ioutil.TempFile("", "felix-bpf-")
-	if err != nil {
-		return nil, err
-	}
-	x := &bpfFile{
-		f: f,
-	}
-
-	if _, err := f.Write(objBytes); err != nil {
-		x.Close()
-		return nil, err
-	}
-
-	return x, nil
+	return b.GetXDPObjTag(xdpFilename)
 }
 
 func (b *BPFLib) GetMapsFromXDP(ifName string) ([]int, error) {
@@ -1472,7 +1404,7 @@ func hexToCIDRMapValue(hexStrings []string) (uint32, error) {
 }
 
 // cidrMapValueToHex takes a ref count as unsigned 32 bit number and
-// turns it into an array of hex strings, whic bpftool can understand.
+// turns it into an array of hex strings, which bpftool can understand.
 func cidrMapValueToHex(refCount uint32) []string {
 	refCountBytes := make([]byte, 4)
 	nativeEndian.PutUint32(refCountBytes, refCount)
@@ -1897,6 +1829,7 @@ func (b *BPFLib) getSockmapArgs() ([]string, error) {
 }
 
 func (b *BPFLib) LoadSockops(objPath string) error {
+	objPath = path.Join(b.binDir, objPath)
 	progPath := filepath.Join(b.sockmapDir, sockopsProgName)
 
 	sockmapArgs, err := b.getSockmapArgs()
@@ -1907,18 +1840,8 @@ func (b *BPFLib) LoadSockops(objPath string) error {
 	return b.loadBPF(objPath, progPath, "sockops", sockmapArgs)
 }
 
-func (b *BPFLib) LoadSockopsWithBytes(objBytes []byte) error {
-	f, err := writeBPFBytes(objBytes)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	return b.LoadSockops(f.f.Name())
-}
-
 func (b *BPFLib) LoadSockopsAuto() error {
-	return b.LoadSockopsWithBytes(sockopsAsset)
+	return b.LoadSockops(sockopsFilename)
 }
 
 func (b *BPFLib) RemoveSockops() error {
@@ -1949,6 +1872,7 @@ func (b *BPFLib) getSkMsgArgs() ([]string, error) {
 }
 
 func (b *BPFLib) LoadSkMsg(objPath string) error {
+	objPath = path.Join(b.binDir, objPath)
 	progPath := filepath.Join(b.sockmapDir, skMsgProgName)
 	mapArgs, err := b.getSkMsgArgs()
 	if err != nil {
@@ -1958,18 +1882,8 @@ func (b *BPFLib) LoadSkMsg(objPath string) error {
 	return b.loadBPF(objPath, progPath, "sk_msg", mapArgs)
 }
 
-func (b *BPFLib) LoadSkMsgWithBytes(objBytes []byte) error {
-	f, err := writeBPFBytes(objBytes)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	return b.LoadSkMsg(f.f.Name())
-}
-
 func (b *BPFLib) LoadSkMsgAuto() error {
-	return b.LoadSkMsgWithBytes(skmsgAsset)
+	return b.LoadSkMsg(redirFilename)
 }
 
 func (b *BPFLib) RemoveSkMsg() error {
@@ -2077,7 +1991,7 @@ func (b *BPFLib) NewSockmapEndpointsMap() (string, error) {
 		65535,
 		keySize,
 		valueSize,
-		1, //BPF_F_NO_PREALLOC
+		1, // BPF_F_NO_PREALLOC
 	)
 
 }
@@ -2275,4 +2189,31 @@ func SupportsSockmap() error {
 	}
 
 	return nil
+}
+
+func SupportsBPFDataplane() error {
+	if err := isAtLeastKernel(v5Dot3Dot0); err != nil {
+		return err
+	}
+
+	// Test endianness
+	if nativeEndian != binary.LittleEndian {
+		return errors.New("this bpf library only supports little endian architectures")
+	}
+
+	if !SyscallSupport() {
+		return errors.New("BPF syscall support is not available on this platform")
+	}
+
+	return nil
+}
+
+// KTimeNanos returns a nanosecond timestamp that is comparable with the ones generated by BPF.
+func KTimeNanos() int64 {
+	var ts unix.Timespec
+	err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts)
+	if err != nil {
+		log.WithError(err).Panic("Failed to read system clock")
+	}
+	return ts.Nano()
 }

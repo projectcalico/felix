@@ -1,6 +1,4 @@
-// +build fvtests
-
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// +build fvtests
+
 package fv_test
 
 import (
@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+
+	"github.com/projectcalico/felix/fv/connectivity"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
@@ -39,18 +41,25 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/options"
 )
 
-var _ = Context("TCP: Destination named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
+var _ = Context("_BPF-SAFE_ TCP: Destination named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
 	describeNamedPortTests(false, "tcp")
 })
-var _ = Context("TCP: Source named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
+var _ = Context("_BPF-SAFE_ TCP: Source named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
 	describeNamedPortTests(true, "tcp")
 })
 
-var _ = Context("UDP: Destination named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
+var _ = Context("_BPF-SAFE_ UDP: Destination named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
 	describeNamedPortTests(false, "udp")
 })
-var _ = Context("UDP: Source named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
+var _ = Context("_BPF-SAFE_ UDP: Source named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
 	describeNamedPortTests(true, "udp")
+})
+
+var _ = Context("SCTP: Destination named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
+	describeNamedPortTests(false, "sctp")
+})
+var _ = Context("SCTP: Source named ports: with initialized Felix, etcd datastore, 3 workloads, allow-all profile", func() {
+	describeNamedPortTests(true, "sctp")
 })
 
 // describeNamedPortTests describes tests for either source or destination named ports.
@@ -70,7 +79,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 		felix  *infrastructure.Felix
 		client client.Interface
 		w      [4]*workload.Workload
-		cc     *workload.ConnectivityChecker
+		cc     *connectivity.Checker
 	)
 
 	const (
@@ -86,20 +95,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 
 	BeforeEach(func() {
 		felix, etcd, client = infrastructure.StartSingleNodeEtcdTopology(infrastructure.DefaultTopologyOptions())
-
-		// Install a default profile that allows workloads with this profile to talk to each
-		// other, in the absence of any Policy.
-		defaultProfile := api.NewProfile()
-		defaultProfile.Name = "default"
-		defaultProfile.Spec.LabelsToApply = map[string]string{"default": ""}
-		defaultProfile.Spec.Egress = []api.Rule{{Action: api.Allow}}
-		defaultProfile.Spec.Ingress = []api.Rule{{
-			Action: api.Allow,
-			Source: api.EntityRule{Selector: "default == ''"},
-		}}
-		_, err := client.Profiles().Create(utils.Ctx, defaultProfile, utils.NoOptions)
-		Expect(err).NotTo(HaveOccurred())
-
+		infrastructure.CreateDefaultProfile(client, "default", map[string]string{"default": ""}, "default == ''")
 		// Create some workloads, using that profile.
 		for ii := range w {
 			iiStr := strconv.Itoa(ii)
@@ -143,7 +139,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 			w[ii].Configure(client)
 		}
 
-		cc = &workload.ConnectivityChecker{
+		cc = &connectivity.Checker{
 			ReverseDirection: testSourcePorts,
 			Protocol:         protocol,
 		}
@@ -193,6 +189,10 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 					utils.AddToTestOutput(fmt.Sprintf("%v\n", n))
 				}
 			}
+
+			felix.Exec("calico-bpf", "ipsets", "dump")
+			felix.Exec("bpftool", "map")
+			felix.Exec("bpftool", "prog")
 		}
 
 		for ii := range w {
@@ -381,7 +381,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 		// Non-negated named port match.  The rule will allow traffic to the named port.
 
 		// No numeric ports in the rule, the IP set match will be rendered in the main rule.
-		Entry("(positive) ingress, no-numeric", false, applyAtW0, 0, false),
+		Entry("(positive) ingress, no-numeric _CANARY_", false, applyAtW0, 0, false),
 		Entry("(positive) egress, no-numeric", false, applyAtOthers, 0, false),
 		// Adding a numeric port changes the way we render iptables rules to use blocks.
 		Entry("(positive) ingress, 1 numeric", false, applyAtW0, 1, false),
@@ -705,7 +705,7 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 }
 
 // This test reproduces a particular Kubernetes failure scenario seen during FV testing named ports.
-var _ = Describe("with a simulated kubernetes nginx and client", func() {
+var _ = Describe("TCP: named port with a simulated kubernetes nginx and client", func() {
 	var (
 		etcd              *containers.Container
 		felix             *infrastructure.Felix
@@ -714,21 +714,13 @@ var _ = Describe("with a simulated kubernetes nginx and client", func() {
 		nginxClient       *workload.Workload
 		defaultDenyPolicy *api.NetworkPolicy
 		allowHTTPPolicy   *api.NetworkPolicy
-		cc                *workload.ConnectivityChecker
+		cc                *connectivity.Checker
 	)
 
 	BeforeEach(func() {
 		felix, etcd, client = infrastructure.StartSingleNodeEtcdTopology(infrastructure.DefaultTopologyOptions())
-
 		// Create a namespace profile and write to the datastore.
-		defaultProfile := api.NewProfile()
-		defaultProfile.Name = "kns.test"
-		defaultProfile.Labels = map[string]string{"name": "test"}
-		defaultProfile.Spec.Egress = []api.Rule{{Action: api.Allow}}
-		defaultProfile.Spec.Ingress = []api.Rule{{Action: api.Allow}}
-		_, err := client.Profiles().Create(utils.Ctx, defaultProfile, utils.NoOptions)
-		Expect(err).NotTo(HaveOccurred())
-
+		infrastructure.CreateDefaultProfile(client, "kns.test", map[string]string{"name": "test"}, "")
 		// Create nginx workload.
 		nginx = workload.Run(
 			felix,
@@ -795,7 +787,7 @@ var _ = Describe("with a simulated kubernetes nginx and client", func() {
 		allowHTTPPolicy.Spec.Selector = "name == 'nginx'"
 		allowHTTPPolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
 
-		cc = &workload.ConnectivityChecker{}
+		cc = &connectivity.Checker{}
 	})
 
 	AfterEach(func() {
@@ -842,161 +834,180 @@ var _ = Describe("with a simulated kubernetes nginx and client", func() {
 	})
 })
 
-var _ = infrastructure.DatastoreDescribe("named port host endpoint",
-	[]apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+// describeNamedPortHostEndpointTests describes tests for named ports with
+// hostendpoints. If namedHostEndpoint is true, a named hostendpoint using eth0
+// is created for each felix. Otherwise, an all-interfaces host endpoint is
+// created for the felixes.
+func describeNamedPortHostEndpointTests(getInfra infrastructure.InfraFactory, namedHostEndpoint bool) {
+	var (
+		infra   infrastructure.DatastoreInfra
+		felixes []*infrastructure.Felix
+		client  client.Interface
+		hostW   [2]*workload.Workload
+		cc      *connectivity.Checker
+	)
 
-		var (
-			infra   infrastructure.DatastoreInfra
-			felixes []*infrastructure.Felix
-			client  client.Interface
-			hostW   [2]*workload.Workload
-			cc      *workload.ConnectivityChecker
-		)
+	tcp := numorstring.ProtocolFromString("TCP")
 
-		tcp := numorstring.ProtocolFromString("TCP")
+	BeforeEach(func() {
+		infra = getInfra()
 
-		BeforeEach(func() {
-			infra = getInfra()
+		felixes, client = infrastructure.StartNNodeTopology(2, infrastructure.DefaultTopologyOptions(), infra)
 
-			felixes, client = infrastructure.StartNNodeTopology(2, infrastructure.DefaultTopologyOptions(), infra)
+		err := infra.AddAllowToDatastore("host-endpoint=='true'")
+		Expect(err).NotTo(HaveOccurred())
 
-			err := infra.AddAllowToDatastore("host-endpoint=='true'")
-			Expect(err).NotTo(HaveOccurred())
+		// Start a host-networked workload on each host so we have something to connect to.
+		for ii, felix := range felixes {
+			hostW[ii] = workload.Run(
+				felixes[ii],
+				fmt.Sprintf("host%d", ii),
+				"",
+				felixes[ii].IP,
+				"8055,8056",
+				"tcp")
 
-			// Start a host-networked workload on each host so we have something to connect to.
-			for ii, felix := range felixes {
-				hostW[ii] = workload.Run(
-					felixes[ii],
-					fmt.Sprintf("host%d", ii),
-					"",
-					felixes[ii].IP,
-					"8055,8056",
-					"tcp")
+			hostEp := api.NewHostEndpoint()
+			hostEp.Name = fmt.Sprintf("host-endpoint-%d", ii)
+			hostEp.Labels = map[string]string{
+				"host-endpoint": "true",
+				"host":          fmt.Sprint(ii),
+			}
+			hostEp.Spec.Node = felix.Hostname
 
-				hostEp := api.NewHostEndpoint()
-				hostEp.Name = fmt.Sprintf("host-endpoint-%d", ii)
-				hostEp.Labels = map[string]string{
-					"host-endpoint": "true",
-					"host":          fmt.Sprint(ii),
-				}
-				hostEp.Spec.Node = felix.Hostname
+			if namedHostEndpoint {
 				hostEp.Spec.InterfaceName = "eth0"
-				hostEp.Spec.ExpectedIPs = []string{felix.IP}
-				hostEp.Spec.Ports = []api.EndpointPort{
-					{
-						Name:     "http",
-						Protocol: tcp,
-						Port:     8055,
-					},
-				}
-				_, err = client.HostEndpoints().Create(utils.Ctx, hostEp, utils.NoOptions)
-				Expect(err).NotTo(HaveOccurred())
+			} else {
+				hostEp.Spec.InterfaceName = "*"
 			}
 
-			cc = &workload.ConnectivityChecker{}
-		})
-
-		AfterEach(func() {
-			if CurrentGinkgoTestDescription().Failed {
-				for _, felix := range felixes {
-					felix.Exec("iptables-save", "-c")
-					felix.Exec("ipset", "list")
-					felix.Exec("ip", "r")
-					felix.Exec("ip", "a")
-				}
+			hostEp.Spec.ExpectedIPs = []string{felix.IP}
+			hostEp.Spec.Ports = []api.EndpointPort{
+				{
+					Name:     "http",
+					Protocol: tcp,
+					Port:     8055,
+				},
 			}
+			_, err = client.HostEndpoints().Create(utils.Ctx, hostEp, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
+		}
 
-			for _, wl := range hostW {
-				wl.Stop()
-			}
+		cc = &connectivity.Checker{}
+	})
+
+	AfterEach(func() {
+		if CurrentGinkgoTestDescription().Failed {
 			for _, felix := range felixes {
-				felix.Stop()
+				felix.Exec("iptables-save", "-c")
+				felix.Exec("ipset", "list")
+				felix.Exec("ip", "r")
+				felix.Exec("ip", "a")
 			}
-
-			infra.Stop()
-		})
-
-		expectNoConnectivity := func() {
-			cc.ExpectNone(felixes[0], hostW[1].Port(8055))
-			cc.ExpectNone(felixes[1], hostW[0].Port(8055))
-			cc.ExpectNone(felixes[0], hostW[1].Port(8056))
-			cc.ExpectNone(felixes[1], hostW[0].Port(8056))
-			cc.CheckConnectivityOffset(1)
-			cc.ResetExpectations()
 		}
 
-		expectNamedPortOpen := func() {
-			cc.ExpectSome(felixes[0], hostW[1].Port(8055))
-			cc.ExpectSome(felixes[1], hostW[0].Port(8055))
-			cc.ExpectNone(felixes[0], hostW[1].Port(8056))
-			cc.ExpectNone(felixes[1], hostW[0].Port(8056))
-			cc.CheckConnectivityOffset(1)
-			cc.ResetExpectations()
+		for _, wl := range hostW {
+			wl.Stop()
+		}
+		for _, felix := range felixes {
+			felix.Stop()
 		}
 
-		It("should have expected initial connectivity", func() {
-			expectNoConnectivity()
-		})
+		infra.Stop()
+	})
 
-		It("should have expected connectivity with named port policies", func() {
-			pol := api.NewGlobalNetworkPolicy()
-			pol.Name = "test-policy"
-			pol.Spec.Selector = "host == '1' || host == '0'"
-			pol.Spec.Types = []api.PolicyType{api.PolicyTypeEgress}
-			pol.Spec.Egress = []api.Rule{
-				{
-					Action:   api.Allow,
-					Protocol: &tcp,
-					Destination: api.EntityRule{
-						Ports: []numorstring.Port{numorstring.NamedPort("http")},
-					},
+	expectNoConnectivity := func() {
+		cc.ExpectNone(felixes[0], hostW[1].Port(8055))
+		cc.ExpectNone(felixes[1], hostW[0].Port(8055))
+		cc.ExpectNone(felixes[0], hostW[1].Port(8056))
+		cc.ExpectNone(felixes[1], hostW[0].Port(8056))
+		cc.CheckConnectivityOffset(1)
+		cc.ResetExpectations()
+	}
+
+	expectNamedPortOpen := func() {
+		cc.ExpectSome(felixes[0], hostW[1].Port(8055))
+		cc.ExpectSome(felixes[1], hostW[0].Port(8055))
+		cc.ExpectNone(felixes[0], hostW[1].Port(8056))
+		cc.ExpectNone(felixes[1], hostW[0].Port(8056))
+		cc.CheckConnectivityOffset(1)
+		cc.ResetExpectations()
+	}
+
+	It("should have expected initial connectivity", func() {
+		expectNoConnectivity()
+	})
+
+	It("should have expected connectivity with named port policies", func() {
+		pol := api.NewGlobalNetworkPolicy()
+		pol.Name = "test-policy"
+		pol.Spec.Selector = "host == '1' || host == '0'"
+		pol.Spec.Types = []api.PolicyType{api.PolicyTypeEgress}
+		pol.Spec.Egress = []api.Rule{
+			{
+				Action:   api.Allow,
+				Protocol: &tcp,
+				Destination: api.EntityRule{
+					Ports: []numorstring.Port{numorstring.NamedPort("http")},
 				},
-			}
-			pol, err := client.GlobalNetworkPolicies().Create(utils.Ctx, pol, options.SetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			expectNoConnectivity()
+			},
+		}
+		pol, err := client.GlobalNetworkPolicies().Create(utils.Ctx, pol, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
 
-			pol2 := api.NewGlobalNetworkPolicy()
-			pol2.Name = "test-policy-2"
-			pol2.Spec.Selector = "host == '1' || host == '0'"
-			pol2.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
-			pol2.Spec.Ingress = []api.Rule{
-				{
-					Action:   api.Allow,
-					Protocol: &tcp,
-					Destination: api.EntityRule{
-						Ports: []numorstring.Port{numorstring.NamedPort("http")},
-					},
+		expectNoConnectivity()
+
+		pol2 := api.NewGlobalNetworkPolicy()
+		pol2.Name = "test-policy-2"
+		pol2.Spec.Selector = "host == '1' || host == '0'"
+		pol2.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
+		pol2.Spec.Ingress = []api.Rule{
+			{
+				Action:   api.Allow,
+				Protocol: &tcp,
+				Destination: api.EntityRule{
+					Ports: []numorstring.Port{numorstring.NamedPort("http")},
 				},
-			}
-			pol2, err = client.GlobalNetworkPolicies().Create(utils.Ctx, pol2, options.SetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			expectNamedPortOpen()
+			},
+		}
+		pol2, err = client.GlobalNetworkPolicies().Create(utils.Ctx, pol2, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		expectNamedPortOpen()
 
-			// Switch to incorrect numeric port, should fail.
-			pol.Spec.Egress[0].Destination.Ports[0] = numorstring.SinglePort(80)
-			pol, err = client.GlobalNetworkPolicies().Update(utils.Ctx, pol, options.SetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			expectNoConnectivity()
+		// Switch to incorrect numeric port, should fail.
+		pol.Spec.Egress[0].Destination.Ports[0] = numorstring.SinglePort(80)
+		pol, err = client.GlobalNetworkPolicies().Update(utils.Ctx, pol, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		expectNoConnectivity()
 
-			// Switch to correct numeric port, should work.
-			pol.Spec.Egress[0].Destination.Ports[0] = numorstring.SinglePort(8055)
-			pol, err = client.GlobalNetworkPolicies().Update(utils.Ctx, pol, options.SetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			expectNamedPortOpen()
+		// Switch to correct numeric port, should work.
+		pol.Spec.Egress[0].Destination.Ports[0] = numorstring.SinglePort(8055)
+		pol, err = client.GlobalNetworkPolicies().Update(utils.Ctx, pol, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		expectNamedPortOpen()
 
-			// Switch to incorrect named port, should fail.
-			pol.Spec.Egress[0].Destination.Ports[0] = numorstring.NamedPort("wrong")
-			pol, err = client.GlobalNetworkPolicies().Update(utils.Ctx, pol, options.SetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			expectNoConnectivity()
+		// Switch to incorrect named port, should fail.
+		pol.Spec.Egress[0].Destination.Ports[0] = numorstring.NamedPort("wrong")
+		pol, err = client.GlobalNetworkPolicies().Update(utils.Ctx, pol, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		expectNoConnectivity()
 
-			// Switch to correct named port, should work.
-			pol.Spec.Egress[0].Destination.Ports[0] = numorstring.NamedPort("http")
-			pol, err = client.GlobalNetworkPolicies().Update(utils.Ctx, pol, options.SetOptions{})
-			Expect(err).NotTo(HaveOccurred())
-			expectNamedPortOpen()
-		})
+		// Switch to correct named port, should work.
+		pol.Spec.Egress[0].Destination.Ports[0] = numorstring.NamedPort("http")
+		pol, err = client.GlobalNetworkPolicies().Update(utils.Ctx, pol, options.SetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		expectNamedPortOpen()
+	})
+}
+
+var _ = infrastructure.DatastoreDescribe("named port, named host endpoint",
+	[]apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+		describeNamedPortHostEndpointTests(getInfra, true)
+	})
+
+var _ = infrastructure.DatastoreDescribe("named port, all-interfaces host endpoint",
+	[]apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+		describeNamedPortHostEndpointTests(getInfra, false)
 	})
 
 // This test verifies that TCP named ports aren't matched by UDP rules and vice versa.
@@ -1009,20 +1020,13 @@ var _ = Describe("tests with mixed TCP/UDP", func() {
 		targetUDPWorkload           *workload.Workload
 		clientWorkload              *workload.Workload
 		allowConfusedProtocolPolicy *api.NetworkPolicy
-		udpCC                       *workload.ConnectivityChecker
-		tcpCC                       *workload.ConnectivityChecker
+		udpCC                       *connectivity.Checker
+		tcpCC                       *connectivity.Checker
 	)
 
 	BeforeEach(func() {
 		felix, etcd, client = infrastructure.StartSingleNodeEtcdTopology(infrastructure.DefaultTopologyOptions())
-
-		// Create a profile that opens up traffic by default.
-		defaultProfile := api.NewProfile()
-		defaultProfile.Name = "open"
-		defaultProfile.Spec.Egress = []api.Rule{{Action: api.Allow}}
-		defaultProfile.Spec.Ingress = []api.Rule{{Action: api.Allow}}
-		_, err := client.Profiles().Create(utils.Ctx, defaultProfile, utils.NoOptions)
-		Expect(err).NotTo(HaveOccurred())
+		infrastructure.CreateDefaultProfile(client, "open", map[string]string{"default": ""}, "")
 
 		createTarget := func(ip, protocol string) *workload.Workload {
 			// Create target workloads.
@@ -1098,8 +1102,8 @@ var _ = Describe("tests with mixed TCP/UDP", func() {
 		allowConfusedProtocolPolicy.Spec.Selector = "name == 'nginx'"
 		allowConfusedProtocolPolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
 
-		udpCC = &workload.ConnectivityChecker{Protocol: "udp"}
-		tcpCC = &workload.ConnectivityChecker{Protocol: "tcp"}
+		udpCC = &connectivity.Checker{Protocol: "udp"}
+		tcpCC = &connectivity.Checker{Protocol: "tcp"}
 	})
 
 	AfterEach(func() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -101,14 +101,14 @@ func (r *DefaultRuleRenderer) StaticFilterInputForwardCheckChain(ipVersion uint8
 					DestPortRanges(portSplit).
 					DestIPSet(hostIPSet),
 				Action:  GotoAction{Target: ChainDispatchSetEndPointMark},
-				Comment: "To kubernetes NodePort service",
+				Comment: []string{"To kubernetes NodePort service"},
 			},
 			Rule{
 				Match: Match().Protocol("udp").
 					DestPortRanges(portSplit).
 					DestIPSet(hostIPSet),
 				Action:  GotoAction{Target: ChainDispatchSetEndPointMark},
-				Comment: "To kubernetes NodePort service",
+				Comment: []string{"To kubernetes NodePort service"},
 			},
 		)
 	}
@@ -118,7 +118,7 @@ func (r *DefaultRuleRenderer) StaticFilterInputForwardCheckChain(ipVersion uint8
 		Rule{
 			Match:   Match().NotDestIPSet(hostIPSet),
 			Action:  JumpAction{Target: ChainDispatchSetEndPointMark},
-			Comment: "To kubernetes service",
+			Comment: []string{"To kubernetes service"},
 		},
 	)
 
@@ -193,7 +193,7 @@ func (r *DefaultRuleRenderer) StaticFilterOutputForwardEndpointMarkChain() *Chai
 		Rule{
 			Match:   Match().MarkSingleBitSet(r.IptablesMarkAccept),
 			Action:  r.filterAllowAction,
-			Comment: "Policy explicitly accepted packet.",
+			Comment: []string{"Policy explicitly accepted packet."},
 		},
 	)
 
@@ -216,12 +216,12 @@ func (r *DefaultRuleRenderer) filterInputChain(ipVersion uint8) *Chain {
 					SourceIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllHostNets)).
 					DestAddrType(AddrTypeLocal),
 				Action:  r.filterAllowAction,
-				Comment: "Allow IPIP packets from Calico hosts",
+				Comment: []string{"Allow IPIP packets from Calico hosts"},
 			},
 			Rule{
 				Match:   Match().ProtocolNum(ProtoIPIP),
 				Action:  r.dropActionOverride,
-				Comment: fmt.Sprintf("%s IPIP packets from non-Calico hosts", r.dropActionOverride),
+        Comment: []string{fmt.Sprintf("%s IPIP packets from non-Calico hosts", r.dropActionOverride)},
 			},
 		)
 	}
@@ -236,14 +236,14 @@ func (r *DefaultRuleRenderer) filterInputChain(ipVersion uint8) *Chain {
 					SourceIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllVXLANSourceNets)).
 					DestAddrType(AddrTypeLocal),
 				Action:  r.filterAllowAction,
-				Comment: "Allow VXLAN packets from whitelisted hosts",
+				Comment: []string{"Allow VXLAN packets from whitelisted hosts"},
 			},
 			Rule{
 				Match: Match().ProtocolNum(ProtoUDP).
 					DestPorts(uint16(r.Config.VXLANPort)).
 					DestAddrType(AddrTypeLocal),
 				Action:  r.dropActionOverride,
-				Comment: fmt.Sprintf("%s VXLAN packets from non-whitelisted hosts", r.dropActionOverride),
+        Comment: []string{fmt.Sprintf("%s VXLAN packets from non-whitelisted hosts", r.dropActionOverride)},
 			},
 		)
 	}
@@ -291,7 +291,7 @@ func (r *DefaultRuleRenderer) filterInputChain(ipVersion uint8) *Chain {
 		Rule{
 			Match:   Match().MarkSingleBitSet(r.IptablesMarkAccept),
 			Action:  r.filterAllowAction,
-			Comment: "Host endpoint policy accepted packet.",
+			Comment: []string{"Host endpoint policy accepted packet."},
 		},
 	)
 
@@ -386,7 +386,7 @@ func (r *DefaultRuleRenderer) filterWorkloadToHostChain(ipVersion uint8) *Chain 
 	for _, action := range r.inputAcceptActions {
 		rules = append(rules, Rule{
 			Action:  action,
-			Comment: "Configured DefaultEndpointToHostAction",
+			Comment: []string{"Configured DefaultEndpointToHostAction"},
 		})
 	}
 
@@ -518,7 +518,7 @@ func (r *DefaultRuleRenderer) StaticFilterForwardChains() []*Chain {
 		Rule{
 			Match:   Match().MarkSingleBitSet(r.IptablesMarkAccept),
 			Action:  r.filterAllowAction,
-			Comment: "Policy explicitly accepted packet.",
+			Comment: []string{"Policy explicitly accepted packet."},
 		},
 	)
 
@@ -596,7 +596,7 @@ func (r *DefaultRuleRenderer) filterOutputChain(ipVersion uint8) *Chain {
 					DestIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllHostNets)).
 					SrcAddrType(AddrTypeLocal, false),
 				Action:  r.filterAllowAction,
-				Comment: "Allow IPIP packets to other Calico hosts",
+				Comment: []string{"Allow IPIP packets to other Calico hosts"},
 			},
 		)
 	}
@@ -612,7 +612,7 @@ func (r *DefaultRuleRenderer) filterOutputChain(ipVersion uint8) *Chain {
 					SrcAddrType(AddrTypeLocal, false).
 					DestIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllVXLANSourceNets)),
 				Action:  r.filterAllowAction,
-				Comment: "Allow VXLAN packets to other whitelisted hosts",
+				Comment: []string{"Allow VXLAN packets to other whitelisted hosts"},
 			},
 		)
 	}
@@ -628,7 +628,7 @@ func (r *DefaultRuleRenderer) filterOutputChain(ipVersion uint8) *Chain {
 		Rule{
 			Match:   Match().MarkSingleBitSet(r.IptablesMarkAccept),
 			Action:  r.filterAllowAction,
-			Comment: "Host endpoint policy accepted packet.",
+			Comment: []string{"Host endpoint policy accepted packet."},
 		},
 	)
 
@@ -792,7 +792,7 @@ func (r *DefaultRuleRenderer) StaticManglePreroutingChain(ipVersion uint8) *Chai
 		Rule{
 			Match:   Match().MarkSingleBitSet(r.IptablesMarkAccept),
 			Action:  r.mangleAllowAction,
-			Comment: "Host endpoint policy accepted packet.",
+			Comment: []string{"Host endpoint policy accepted packet."},
 		},
 	)
 
@@ -829,19 +829,12 @@ func (r *DefaultRuleRenderer) StaticRawPreroutingChain(ipVersion uint8) *Chain {
 		})
 	}
 
-	if ipVersion == 6 {
-		// Apply strict RPF check to packets from workload interfaces.  This prevents
-		// workloads from spoofing their IPs.  Note: non-privileged containers can't
-		// usually spoof but privileged containers and VMs can.
-		//
-		// We only do this for IPv6 because the IPv4 RPF check is handled via a sysctl.
-		// In addition, the IPv4 check is complicated by the fact that we have special
-		// case handling for DHCP to the host, which would require an exclusion.
-		rules = append(rules, Rule{
-			Match:  Match().MarkSingleBitSet(markFromWorkload).RPFCheckFailed(),
-			Action: r.dropActionOverride,
-		})
-	}
+	// Apply strict RPF check to packets from workload interfaces.  This prevents
+	// workloads from spoofing their IPs.  Note: non-privileged containers can't
+	// usually spoof but privileged containers and VMs can.
+	//
+	rules = append(rules,
+		RPFilter(ipVersion, markFromWorkload, markFromWorkload, r.OpenStackSpecialCasesEnabled, false)...)
 
 	rules = append(rules,
 		// Send non-workload traffic to the untracked policy chains.
@@ -858,6 +851,50 @@ func (r *DefaultRuleRenderer) StaticRawPreroutingChain(ipVersion uint8) *Chain {
 		Name:  ChainRawPrerouting,
 		Rules: rules,
 	}
+}
+
+// RPFilter returns rules that implement RPF
+func RPFilter(ipVersion uint8, mark, mask uint32, openStackSpecialCasesEnabled, acceptLocal bool) []Rule {
+	rules := make([]Rule, 0, 2)
+
+	// For OpenStack, allow DHCP v4 packets with source 0.0.0.0.  These must be allowed before
+	// checking against the iptables rp_filter module, because the rp_filter module in some
+	// kernel versions does not allow for DHCP with source 0.0.0.0 (whereas the rp_filter sysctl
+	// setting _did_).
+	//
+	// Initial DHCP requests (DHCPDISCOVER) have source 0.0.0.0, and so will be allowed through
+	// by the specific rule just following.  Later DHCP requests (DHCPREQUEST) may have source
+	// 0.0.0.0, or the client's actual IP (as discovered through the DHCP process).  The 0.0.0.0
+	// case will again be allowed by the following specific rule; the actual IP case should be
+	// allowed by the general RPF check.  (Ref: https://www.ietf.org/rfc/rfc2131.txt page 37)
+	//
+	// Note: in DHCPv6, the initial request is sent with a link-local IPv6 address, which should
+	// pass RPF, hence no special case is needed for DHCPv6.
+	//
+	// Here we are only focussing on anti-spoofing, and note that we ACCEPT a correct packet for
+	// the current raw table, but don't mark it (with our Accept bit) as automatically accepted
+	// for later tables.  Hence - for the policy level - we still have an OpenStack DHCP special
+	// case again in filterWorkloadToHostChain.
+	if openStackSpecialCasesEnabled && ipVersion == 4 {
+		log.Info("Add OpenStack special-case rule for DHCP with source 0.0.0.0")
+		rules = append(rules,
+			Rule{
+				Match: Match().
+					Protocol("udp").
+					SourceNet("0.0.0.0").
+					SourcePorts(68).
+					DestPorts(67),
+				Action: AcceptAction{},
+			},
+		)
+	}
+
+	rules = append(rules, Rule{
+		Match:  Match().MarkMatchesWithMask(mark, mask).RPFCheckFailed(acceptLocal),
+		Action: r.dropActionOverride,
+	})
+
+	return rules
 }
 
 func (r *DefaultRuleRenderer) allCalicoMarkBits() uint32 {

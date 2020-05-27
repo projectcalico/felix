@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2017,2019-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,10 @@
 package ip
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/bits"
 	"net"
 	"strings"
 
@@ -64,6 +66,14 @@ func (a V4Addr) AsCIDR() CIDR {
 		addr:   a,
 		prefix: 32,
 	}
+}
+
+func (a V4Addr) AsUint32() uint32 {
+	return binary.BigEndian.Uint32(a[:])
+}
+
+func (a V4Addr) NthBit(n uint) int {
+	return int(a.AsUint32() >> (32 - n) & 1)
 }
 
 func (a V4Addr) String() string {
@@ -125,6 +135,14 @@ func (c V4CIDR) ToIPNet() net.IPNet {
 		IP:   c.Addr().AsNetIP(),
 		Mask: net.CIDRMask(int(c.Prefix()), 32),
 	}
+}
+
+func (c V4CIDR) ContainsV4(addr V4Addr) bool {
+	a32 := c.addr.AsUint32()
+	b32 := addr.AsUint32()
+	xored := a32 ^ b32 // Has a zero bit wherever the two values are the same.
+	commonPrefixLen := uint8(bits.LeadingZeros32(xored))
+	return commonPrefixLen >= c.prefix
 }
 
 func (c V4CIDR) String() string {
@@ -192,6 +210,10 @@ func CIDRFromCalicoNet(ipNet calinet.IPNet) CIDR {
 	return CIDRFromIPNet(&ipNet.IPNet)
 }
 
+func FromCalicoIP(ip calinet.IP) Addr {
+	return FromNetIP(ip.IP)
+}
+
 func CIDRFromIPNet(ipNet *net.IPNet) CIDR {
 	ones, _ := ipNet.Mask.Size()
 	// Mask the IP before creating the CIDR so that we have it in canonical format.
@@ -207,6 +229,16 @@ func CIDRFromIPNet(ipNet *net.IPNet) CIDR {
 			prefix: uint8(ones),
 		}
 	}
+}
+
+// CIDRFromAddrAndPrefix.
+func CIDRFromAddrAndPrefix(addr Addr, prefixLen int) CIDR {
+	netIP := addr.AsNetIP()
+	ipNet := net.IPNet{
+		IP:   netIP,
+		Mask: net.CIDRMask(prefixLen, len(netIP)*8),
+	}
+	return CIDRFromIPNet(&ipNet)
 }
 
 // CIDRFromNetIP converts the given IP into our CIDR representation as a /32 or /128.
@@ -239,4 +271,16 @@ func ParseCIDROrIP(s string) (CIDR, error) {
 		return nil, err
 	}
 	return CIDRFromIPNet(netCIDR), nil
+}
+
+func IPNetsEqual(net1, net2 *net.IPNet) bool {
+	if net1 == nil && net2 == nil {
+		// Both are nil, therefore equal.
+		return true
+	}
+	if net1 == nil || net2 == nil {
+		// Only one is nil, therefore not equal.
+		return false
+	}
+	return CIDRFromIPNet(net1) == CIDRFromIPNet(net2)
 }

@@ -1,5 +1,5 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
-
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -30,6 +30,8 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/libcalico-go/lib/names"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
+
+	"github.com/projectcalico/felix/idalloc"
 )
 
 var (
@@ -66,9 +68,10 @@ const (
 	DatastorePerHost
 	ConfigFile
 	EnvironmentVariable
+	InternalOverride
 )
 
-var SourcesInDescendingOrder = []Source{EnvironmentVariable, ConfigFile, DatastorePerHost, DatastoreGlobal}
+var SourcesInDescendingOrder = []Source{InternalOverride, EnvironmentVariable, ConfigFile, DatastorePerHost, DatastoreGlobal}
 
 func (source Source) String() string {
 	switch source {
@@ -82,13 +85,15 @@ func (source Source) String() string {
 		return "config file"
 	case EnvironmentVariable:
 		return "environment variable"
+	case InternalOverride:
+		return "internal override"
 	}
 	return fmt.Sprintf("<unknown(%v)>", uint8(source))
 }
 
 func (source Source) Local() bool {
 	switch source {
-	case Default, ConfigFile, EnvironmentVariable:
+	case Default, ConfigFile, EnvironmentVariable, InternalOverride:
 		return true
 	default:
 		return false
@@ -101,6 +106,30 @@ type Config struct {
 	// Configuration parameters.
 	UseInternalDataplaneDriver bool   `config:"bool;true"`
 	DataplaneDriver            string `config:"file(must-exist,executable);calico-iptables-plugin;non-zero,die-on-fail,skip-default-validation"`
+
+	// Wireguard configuration
+	WireguardEnabled             bool   `config:"bool;false"`
+	WireguardListeningPort       int    `config:"int;51820"`
+	WireguardRoutingRulePriority int    `config:"int;99"`
+	WireguardInterfaceName       string `config:"iface-param;wireguard.cali;non-zero"`
+	WireguardMTU                 int    `config:"int;1420;non-zero"`
+
+	BPFEnabled                         bool           `config:"bool;false"`
+	BPFDisableUnprivileged             bool           `config:"bool;true"`
+	BPFLogLevel                        string         `config:"oneof(off,info,debug);off;non-zero"`
+	BPFDataIfacePattern                *regexp.Regexp `config:"regexp;^(en.*|eth.*|tunl0$)"`
+	BPFConnectTimeLoadBalancingEnabled bool           `config:"bool;true"`
+	BPFExternalServiceMode             string         `config:"oneof(tunnel,dsr);tunnel;non-zero"`
+	BPFKubeProxyIptablesCleanupEnabled bool           `config:"bool;true"`
+	BPFKubeProxyMinSyncPeriod          time.Duration  `config:"seconds;1"`
+
+	// DebugBPFCgroupV2 controls the cgroup v2 path that we apply the connect-time load balancer to.  Most distros
+	// are configured for cgroup v1, which prevents all but hte root cgroup v2 from working so this is only useful
+	// for development right now.
+	DebugBPFCgroupV2 string `config:"string;;local"`
+	// DebugBPFMapRepinEnabled can be used to prevent Felix from repinning its BPF maps at startup.  This is useful for
+	// testing with multiple Felix instances running on one host.
+	DebugBPFMapRepinEnabled bool `config:"bool;true;local"`
 
 	DatastoreType string `config:"oneof(kubernetes,etcdv3);etcdv3;non-zero,die-on-fail,local"`
 
@@ -130,10 +159,9 @@ type Config struct {
 	TyphaCN       string `config:"string;;local"`
 	TyphaURISAN   string `config:"string;;local"`
 
-	Ipv6Support    bool `config:"bool;true"`
-	IgnoreLooseRPF bool `config:"bool;false"`
+	Ipv6Support bool `config:"bool;true"`
 
-	IptablesBackend                    string        `config:"oneof(legacy,nft);legacy"`
+	IptablesBackend                    string        `config:"oneof(legacy,nft,auto);legacy"`
 	RouteRefreshInterval               time.Duration `config:"seconds;90"`
 	DeviceRouteSourceAddress           net.IP        `config:"ipv4;"`
 	DeviceRouteProtocol                int           `config:"int;3"`
@@ -202,8 +230,8 @@ type Config struct {
 	PrometheusGoMetricsEnabled      bool   `config:"bool;true"`
 	PrometheusProcessMetricsEnabled bool   `config:"bool;true"`
 
-	FailsafeInboundHostPorts  []ProtoPort `config:"port-list;tcp:22,udp:68,tcp:179,tcp:2379,tcp:2380,tcp:6666,tcp:6667;die-on-fail"`
-	FailsafeOutboundHostPorts []ProtoPort `config:"port-list;udp:53,udp:67,tcp:179,tcp:2379,tcp:2380,tcp:6666,tcp:6667;die-on-fail"`
+	FailsafeInboundHostPorts  []ProtoPort `config:"port-list;tcp:22,udp:68,tcp:179,tcp:2379,tcp:2380,tcp:6443,tcp:6666,tcp:6667;die-on-fail"`
+	FailsafeOutboundHostPorts []ProtoPort `config:"port-list;udp:53,udp:67,tcp:179,tcp:2379,tcp:2380,tcp:6443,tcp:6666,tcp:6667;die-on-fail"`
 
 	KubeNodePortRanges []numorstring.Port `config:"portrange-list;30000:32767"`
 	NATPortRange       numorstring.Port   `config:"portrange;"`
@@ -224,18 +252,30 @@ type Config struct {
 	DebugSimulateCalcGraphHangAfter time.Duration `config:"seconds;0"`
 	DebugSimulateDataplaneHangAfter time.Duration `config:"seconds;0"`
 
-	// State tracking.
+	// Configure where Felix gets its routing information.
+	// - workloadIPs: use workload endpoints to construct routes.
+	// - calicoIPAM: use IPAM data to contruct routes.
+	RouteSource string `config:"oneof(WorkloadIPs,CalicoIPAM);CalicoIPAM"`
 
-	// nameToSource tracks where we loaded each config param from.
-	sourceToRawConfig map[Source]map[string]string
-	rawValues         map[string]string
-	Err               error
+	RouteTableRange idalloc.IndexRange `config:"route-table-range;1-250;die-on-fail"`
 
 	IptablesNATOutgoingInterfaceFilter string `config:"iface-param;"`
 
 	SidecarAccelerationEnabled bool `config:"bool;false"`
 	XDPEnabled                 bool `config:"bool;true"`
 	GenericXDPEnabled          bool `config:"bool;false"`
+
+	// State tracking.
+
+	// internalOverrides contains our highest priority config source, generated from internal constraints
+	// such as kernel version support.
+	internalOverrides map[string]string
+	// sourceToRawConfig maps each source to the set of config that was give to us via UpdateFrom.
+	sourceToRawConfig map[Source]map[string]string
+	// rawValues maps keys to the current highest-priority raw value.
+	rawValues map[string]string
+	// Err holds the most recent error from a config update.
+	Err error
 
 	loadClientConfigFromEnvironment func() (*apiconfig.CalicoAPIConfig, error)
 
@@ -306,19 +346,23 @@ func (config *Config) OpenstackActive() bool {
 
 func (config *Config) resolve() (changed bool, err error) {
 	newRawValues := make(map[string]string)
+	// Map from lower-case version of name to the highest-priority source found so far.
+	// We use the lower-case version of the name since we can calculate it both for
+	// expected and "raw" parameters, which may be used by plugins.
 	nameToSource := make(map[string]Source)
 	for _, source := range SourcesInDescendingOrder {
 	valueLoop:
 		for rawName, rawValue := range config.sourceToRawConfig[source] {
-			currentSource := nameToSource[rawName]
-			param, ok := knownParams[strings.ToLower(rawName)]
+			lowerCaseName := strings.ToLower(rawName)
+			currentSource := nameToSource[lowerCaseName]
+			param, ok := knownParams[lowerCaseName]
 			if !ok {
 				if source >= currentSource {
-					// Stash the raw value in case it's useful for
-					// a plugin.  Since we don't know the canonical
-					// name, use the raw name.
+					// Stash the raw value in case it's useful for an external
+					// dataplane driver.  Use the raw name since the driver may
+					// want it.
 					newRawValues[rawName] = rawValue
-					nameToSource[rawName] = source
+					nameToSource[lowerCaseName] = source
 				}
 				log.WithField("raw name", rawName).Info(
 					"Ignoring unknown config param.")
@@ -341,7 +385,7 @@ func (config *Config) resolve() (changed bool, err error) {
 				// the default value.  Typically, the zero value means "turn off
 				// the feature".
 				if metadata.NonZero {
-					err = errors.New("Non-zero field cannot be set to none")
+					err = errors.New("non-zero field cannot be set to none")
 					log.Errorf(
 						"Failed to parse value for %v: %v from source %v. %v",
 						name, rawValue, source, err)
@@ -379,7 +423,7 @@ func (config *Config) resolve() (changed bool, err error) {
 			field := reflect.ValueOf(config).Elem().FieldByName(name)
 			field.Set(reflect.ValueOf(value))
 			newRawValues[name] = rawValue
-			nameToSource[name] = source
+			nameToSource[lowerCaseName] = source
 		}
 	}
 	changed = !reflect.DeepEqual(newRawValues, config.rawValues)
@@ -450,7 +494,7 @@ func (config *Config) DatastoreConfig() apiconfig.CalicoAPIConfig {
 		cfg.Spec.EtcdCACertFile = config.EtcdCaFile
 	}
 
-	if !config.IpInIpEnabled && !config.VXLANEnabled {
+	if !(config.IpInIpEnabled || config.VXLANEnabled || config.BPFEnabled) {
 		// Polling k8s for node updates is expensive (because we get many superfluous
 		// updates) so disable if we don't need it.
 		log.Info("Encap disabled, disabling node poll (if KDD is in use).")
@@ -562,6 +606,8 @@ func loadParams() {
 				Delimiter:           ",",
 				Msg:                 "list contains invalid Linux interface name or regex pattern",
 			}
+		case "regexp":
+			param = &RegexpPatternParam{}
 		case "iface-param":
 			param = &RegexpParam{Regexp: IfaceParamRegexp,
 				Msg: "invalid Linux interface parameter"}
@@ -604,6 +650,8 @@ func loadParams() {
 				Msg: "invalid string"}
 		case "cidr-list":
 			param = &CIDRListParam{}
+		case "route-table-range":
+			param = &RouteTableRangeParam{}
 		default:
 			log.Panicf("Unknown type of parameter: %v", kind)
 		}
@@ -656,13 +704,22 @@ func (config *Config) SetLoadClientConfigFromEnvironmentFunction(fnc func() (*ap
 	config.loadClientConfigFromEnvironment = fnc
 }
 
+// OverrideParam installs a maximum priority parameter override for the given parameter.  This is useful for
+// disabling features that are found to be unsupported, for example. By using an extra priority class, the
+// override will persist even if the host/global config is updated.
+func (config *Config) OverrideParam(name, value string) (bool, error) {
+	config.internalOverrides[name] = value
+	return config.UpdateFrom(config.internalOverrides, InternalOverride)
+}
+
 func New() *Config {
 	if knownParams == nil {
 		loadParams()
 	}
 	p := &Config{
-		rawValues:         make(map[string]string),
-		sourceToRawConfig: make(map[Source]map[string]string),
+		rawValues:         map[string]string{},
+		sourceToRawConfig: map[Source]map[string]string{},
+		internalOverrides: map[string]string{},
 	}
 	for _, param := range knownParams {
 		param.setDefault(p)

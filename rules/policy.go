@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 package rules
 
 import (
-	"errors"
+	"fmt"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -59,7 +59,6 @@ func (r *DefaultRuleRenderer) ProtoRulesToIptablesRules(protoRules []*proto.Rule
 	}
 	return rules
 }
-
 func filterNets(mixedCIDRs []string, ipVersion uint8) (filtered []string, filteredAll bool) {
 	if len(mixedCIDRs) == 0 {
 		return nil, false
@@ -77,7 +76,10 @@ func filterNets(mixedCIDRs []string, ipVersion uint8) (filtered []string, filter
 	return
 }
 
-func (r *DefaultRuleRenderer) ProtoRuleToIptablesRules(pRule *proto.Rule, ipVersion uint8) []iptables.Rule {
+// FilterRuleToIPVersion: If the rule applies to the given IP version, returns a copy of the rule
+// excluding the CIDRs that are not of the given IP version. If the rule does not apply to the
+// given IP version at all, returns nil.
+func FilterRuleToIPVersion(ipVersion uint8, pRule *proto.Rule) *proto.Rule {
 	// Filter the CIDRs to the IP version that we're rendering.  In general, we should have an
 	// explicit IP version in the rule and all CIDRs should match it (and calicoctl, for
 	// example, enforces that).  However, we try to handle a rule gracefully if it's missing a
@@ -92,8 +94,20 @@ func (r *DefaultRuleRenderer) ProtoRuleToIptablesRules(pRule *proto.Rule, ipVers
 	// It also handles rules like "allow from 10.0.0.1,feed::beef" in an intuitive way.  Only
 	// rules of the form "allow from 10.0.0.1,feed::beef to 10.0.0.2" will get filtered out,
 	// and only for IPv6, where there's no obvious meaning to the rule.
+
 	ruleCopy := *pRule
 	var filteredAll bool
+
+	logCxt := log.WithFields(log.Fields{
+		"ipVersion": ipVersion,
+		"rule":      pRule,
+	})
+
+	if pRule.IpVersion != 0 && pRule.IpVersion != proto.IPVersion(ipVersion) {
+		logCxt.Debug("Skipping rule because it is for a different IP version.")
+		return nil
+	}
+
 	ruleCopy.SrcNet, filteredAll = filterNets(pRule.SrcNet, ipVersion)
 	if filteredAll {
 		return nil
@@ -110,7 +124,15 @@ func (r *DefaultRuleRenderer) ProtoRuleToIptablesRules(pRule *proto.Rule, ipVers
 	if filteredAll {
 		return nil
 	}
+	return &ruleCopy
+}
 
+func (r *DefaultRuleRenderer) ProtoRuleToIptablesRules(pRule *proto.Rule, ipVersion uint8) []iptables.Rule {
+
+	ruleCopy := FilterRuleToIPVersion(ipVersion, pRule)
+	if ruleCopy == nil {
+		return nil
+	}
 	// There are a few areas where our data model doesn't fit with iptables, requiring us to
 	// render multiple iptables rules for one of our rules:
 	//
@@ -135,7 +157,7 @@ func (r *DefaultRuleRenderer) ProtoRuleToIptablesRules(pRule *proto.Rule, ipVers
 	//     positive matches on dest address
 	//     negated matches on source address
 	//     negated matches on dest address
-	//     rule containing rest of match critera
+	//     rule containing rest of match criteria
 	//
 	// We use one match bit to record whether all the blocks accept the packet and one as a
 	// scratch bit for each block to use.  As an invariant, at the end of each block, the
@@ -229,22 +251,15 @@ func (r *DefaultRuleRenderer) ProtoRuleToIptablesRules(pRule *proto.Rule, ipVers
 	}
 
 	// Render the rest of the rule.
-	logCxt := log.WithFields(log.Fields{
-		"ipVersion": ipVersion,
-		"rule":      ruleCopy,
-	})
-	match, err := r.CalculateRuleMatch(&ruleCopy, ipVersion)
-	if err == SkipRule {
-		logCxt.Debug("Rule skipped.")
-		return nil
-	}
+	match := r.CalculateRuleMatch(ruleCopy, ipVersion)
+
 	if matchBlockBuilder.UsingMatchBlocks {
 		// The CIDR or port matches in the rule overflowed and we rendered them
 		// as additional rules, which set the markAllBlocksPass bit on
 		// success.  Add a match on that bit to the calculated rule.
 		match = match.MarkSingleBitSet(matchBlockBuilder.markAllBlocksPass)
 	}
-	markBit, actions := r.CalculateActions(&ruleCopy, ipVersion)
+	markBit, actions := r.CalculateActions(ruleCopy, ipVersion)
 	rs := matchBlockBuilder.Rules
 	if markBit != 0 {
 		// The rule needs to do more than one action. Render a rule that
@@ -261,6 +276,13 @@ func (r *DefaultRuleRenderer) ProtoRuleToIptablesRules(pRule *proto.Rule, ipVers
 			Match:  match,
 			Action: action,
 		})
+	}
+
+	// Render rule annotations as comments on each rule.
+	for i := range rs {
+		for k, v := range pRule.GetMetadata().GetAnnotations() {
+			rs[i].Comment = append(rs[i].Comment, fmt.Sprintf("%s=%s", k, v))
+		}
 	}
 
 	return rs
@@ -508,8 +530,6 @@ func (r *DefaultRuleRenderer) CalculateActions(pRule *proto.Rule, ipVersion uint
 	return
 }
 
-var SkipRule = errors.New("Rule skipped")
-
 func appendProtocolMatch(match iptables.MatchCriteria, protocol *proto.Protocol, logCxt *log.Entry) iptables.MatchCriteria {
 	if protocol == nil {
 		return match
@@ -527,18 +547,13 @@ func appendProtocolMatch(match iptables.MatchCriteria, protocol *proto.Protocol,
 	return match
 }
 
-func (r *DefaultRuleRenderer) CalculateRuleMatch(pRule *proto.Rule, ipVersion uint8) (iptables.MatchCriteria, error) {
+func (r *DefaultRuleRenderer) CalculateRuleMatch(pRule *proto.Rule, ipVersion uint8) iptables.MatchCriteria {
 	match := iptables.Match()
 
 	logCxt := log.WithFields(log.Fields{
 		"ipVersion": ipVersion,
 		"rule":      pRule,
 	})
-
-	if pRule.IpVersion != 0 && pRule.IpVersion != proto.IPVersion(ipVersion) {
-		logCxt.Debug("Skipping rule because it is for a different IP version.")
-		return nil, SkipRule
-	}
 
 	// First, process positive (non-negated) match criteria.
 	match = appendProtocolMatch(match, pRule.Protocol, logCxt)
@@ -749,7 +764,7 @@ func (r *DefaultRuleRenderer) CalculateRuleMatch(pRule *proto.Rule, ipVersion ui
 			match = match.NotICMPV6Type(uint8(icmp.NotIcmpType))
 		}
 	}
-	return match, nil
+	return match
 }
 
 func PolicyChainName(prefix PolicyChainNamePrefix, polID *proto.PolicyID) string {
