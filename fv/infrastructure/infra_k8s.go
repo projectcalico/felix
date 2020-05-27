@@ -262,7 +262,7 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 		TearDownK8sInfra(kds)
 		return nil, err
 	}
-	err = kds.k8sApiContainer.ExecMayFail("kubectl", "apply", "-f", "/crds/")
+	err = kds.k8sApiContainer.ExecMayFail("kubectl", "apply", "-k", "/crds/")
 	if err != nil {
 		TearDownK8sInfra(kds)
 		return nil, err
