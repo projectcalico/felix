@@ -15,6 +15,7 @@
 package conntrack
 
 import (
+	"net"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -174,4 +175,79 @@ func (l *LivenessScanner) EntryExpired(nowNanos int64, proto uint8, entry Value)
 		}
 	}
 	return "", false
+}
+
+// ClearDNATEntriesForFrontendIP deletes clear all entries that do DNAT for the given IP
+func ClearDNATEntriesForFrontendIP(ip net.IP, ctMap bpf.Map, cachedMap MapMem) {
+	for k, v := range cachedMap {
+		switch v.Type() {
+		case TypeNormal:
+			// skip non-NAT entry
+
+		case TypeNATReverse:
+			if ip.Equal(v.OrigIP()) {
+				err := ctMap.Delete(k.AsBytes())
+				log.WithError(err).Debug("Deletion result")
+				if err != nil && !bpf.IsNotExists(err) {
+					log.WithError(err).Warn("Failed to delete expired conntrack forward-NAT entry.")
+				}
+			}
+
+		case TypeNATForward:
+			if ip.Equal(k.AddrA()) || ip.Equal(k.AddrB()) {
+				err := ctMap.Delete(k.AsBytes())
+				log.WithError(err).Debug("Deletion result")
+				if err != nil && !bpf.IsNotExists(err) {
+					log.WithError(err).Warn("Failed to delete expired conntrack forward-NAT entry.")
+				}
+				err = ctMap.Delete(v.ReverseNATKey().AsBytes())
+				log.WithError(err).Debug("Deletion result")
+				if err != nil && !bpf.IsNotExists(err) {
+					log.WithError(err).Warn("Failed to delete expired conntrack reverse-NAT entry.")
+				}
+			}
+		default:
+			log.WithField("conntrack.Value.Type()", v.Type()).Warn("Unknown type")
+		}
+
+	}
+}
+
+// Cleaner is an interface to cleaning conntrack table
+type Cleaner interface {
+	// Init initializes the cleaner to the current state of the conntrack map
+	// and caches any necessary data. Needs to be called at the beginning of a
+	// cleaning iteration
+	Init() error
+	// Release releases any cached data at the end of a cleaning iteration
+	Release()
+	ClearDNATEntriesForFrontendIP(ip net.IP)
+}
+
+// NewCleaner return a new cleaner for the given conntrack map
+func NewCleaner(ctMap bpf.Map) Cleaner {
+	return &cleaner{
+		ctMap: ctMap,
+	}
+}
+
+type cleaner struct {
+	ctMap bpf.Map
+	cache MapMem
+}
+
+func (c *cleaner) Init() error {
+	var err error
+
+	c.cache, err = LoadMapMem(c.ctMap)
+
+	return err
+}
+
+func (c *cleaner) Release() {
+	c.cache = nil
+}
+
+func (c *cleaner) ClearDNATEntriesForFrontendIP(ip net.IP) {
+	ClearDNATEntriesForFrontendIP(ip, c.ctMap, c.cache)
 }
