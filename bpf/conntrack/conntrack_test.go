@@ -30,6 +30,10 @@ import (
 	"github.com/projectcalico/felix/bpf/mock"
 )
 
+func log(format string, a ...interface{}) {
+	fmt.Fprintf(GinkgoWriter, format, a...)
+}
+
 const now = 1000 * time.Hour
 
 var (
@@ -141,5 +145,93 @@ var _ = Describe("BPF Conntrack LivenessCalculator", func() {
 		Entry("icmp just created", icmpKey, icmpJustCreated, false),
 		Entry("icmp almost timed out", icmpKey, icmpAlmostTimedOut, false),
 		Entry("icmp timed out", icmpKey, icmpTimedOut, true),
+	)
+})
+
+var _ = Describe("BPF Conntrack Cleaner", func() {
+	var ctMap *mock.Map
+	var cl conntrack.Cleaner
+
+	BeforeEach(func() {
+		ctMap = mock.NewMockMap(conntrack.MapParams)
+		cl = conntrack.NewCleaner(ctMap)
+	})
+
+	JustAfterEach(func() {
+		if CurrentGinkgoTestDescription().Failed {
+			if len(ctMap.Contents) > 0 {
+				log("CT-MAP size %d\n", len(ctMap.Contents))
+				for k, v := range ctMap.Contents {
+					log("%20s : %s\n", conntrack.StringToKey(k), conntrack.StringToValue(v))
+				}
+			}
+		}
+	})
+
+	type entry struct {
+		key     conntrack.Key
+		val     conntrack.Value
+		cleared bool
+	}
+
+	DescribeTable("ClearDNATEntriesForIP",
+		func(entries []entry, ip net.IP) {
+			for _, e := range entries {
+				err := ctMap.Update(e.key.AsBytes(), e.val.AsBytes())
+				Expect(err).NotTo(HaveOccurred(), "Test failed to populate ct map")
+			}
+
+			_ = cl.Init()
+			cl.ClearDNATEntriesForFrontendIP(ip)
+			cl.Release()
+
+			for _, e := range entries {
+				_, err := ctMap.Get(e.key.AsBytes())
+				if e.cleared {
+					Expect(err).To(HaveOccurred(), "Entry exists")
+				} else {
+					Expect(err).NotTo(HaveOccurred(), "Entry does not exist")
+				}
+			}
+		},
+		Entry("normal ignored", []entry{
+			{
+				key:     conntrack.NewKey(conntrack.ProtoUDP, net.ParseIP("15.0.0.5"), 123, net.ParseIP("10.0.0.1"), 456),
+				val:     conntrack.NewValueNormal(0, 0, 0, conntrack.Leg{}, conntrack.Leg{}),
+				cleared: false,
+			},
+		}, net.ParseIP("10.0.0.1").To4()),
+		Entry("forward cleared - missing rev", []entry{
+			{
+				key: conntrack.NewKey(conntrack.ProtoUDP, net.ParseIP("15.0.0.5"), 123, net.ParseIP("10.0.0.1"), 456),
+				val: conntrack.NewValueNATForward(0, 0, 0,
+					conntrack.NewKey(conntrack.ProtoUDP, net.ParseIP("15.0.0.5"), 123, net.ParseIP("123.0.0.1"), 456),
+				),
+				cleared: true,
+			},
+		}, net.ParseIP("10.0.0.1").To4()),
+		Entry("rev cleared - missing forward", []entry{
+			{
+				key: conntrack.NewKey(conntrack.ProtoUDP, net.ParseIP("15.0.0.5"), 123, net.ParseIP("123.0.0.1"), 456),
+				val: conntrack.NewValueNATReverse(0, 0, 0, conntrack.Leg{}, conntrack.Leg{},
+					net.ParseIP("0.0.0.0"), net.ParseIP("10.0.0.1"), 6789),
+				cleared: true,
+			},
+		}, net.ParseIP("10.0.0.1").To4()),
+		Entry("forward and rev cleared", []entry{
+			{
+				key: conntrack.NewKey(conntrack.ProtoUDP, net.ParseIP("15.0.0.5"), 123, net.ParseIP("10.0.0.1"), 456),
+				val: conntrack.NewValueNATForward(0, 0, 0,
+					conntrack.NewKey(conntrack.ProtoUDP, net.ParseIP("15.0.0.5"), 123, net.ParseIP("123.0.0.1"), 456),
+				),
+				cleared: true,
+			},
+			{
+				key: conntrack.NewKey(conntrack.ProtoUDP, net.ParseIP("15.0.0.5"), 123, net.ParseIP("123.0.0.1"), 456),
+				val: conntrack.NewValueNATReverse(0, 0, 0, conntrack.Leg{}, conntrack.Leg{},
+					net.ParseIP("0.0.0.0"), net.ParseIP("10.0.0.1"), 6789),
+				cleared: true,
+			},
+		}, net.ParseIP("10.0.0.1").To4()),
 	)
 })
