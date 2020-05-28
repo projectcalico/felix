@@ -542,6 +542,12 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			log.WithError(err).Panic("Failed to create routes BPF map.")
 		}
 
+		ctMap := conntrack.Map(bpfMapContext)
+		err = ctMap.EnsureExists()
+		if err != nil {
+			log.WithError(err).Panic("Failed to create conntrack BPF map.")
+		}
+
 		bpfproxyOpts := []bpfproxy.Option{
 			bpfproxy.WithMinSyncPeriod(config.KubeProxyMinSyncPeriod),
 		}
@@ -558,6 +564,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 				frontendMap,
 				backendMap,
 				backendAffinityMap,
+				ctMap,
 				bpfproxyOpts...,
 			)
 			if err != nil {
