@@ -536,7 +536,7 @@ func (m *bpfEndpointManager) ensureQdisc(ifaceName string) {
 	tc.EnsureQdisc(ifaceName)
 }
 
-var calicoRouterIP = net.IPv4(169, 254, 1, 1).To4()
+const calicoRouterIP = net.IPv4(169, 254, 1, 1).To4()
 
 func (m *bpfEndpointManager) attachWorkloadProgram(endpoint *proto.WorkloadEndpoint, polDirection PolDirection) error {
 	ap := m.calculateTCAttachPoint(tc.EpTypeWorkload, polDirection, endpoint.Name)
