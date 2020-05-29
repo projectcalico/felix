@@ -839,7 +839,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 
 					testSvcName := "test-lb-service"
 					tgtPort := 8055
-					srcIPRange := []string{"10.65.0.3/24"}
+					srcIPRange := []string{"10.65.0.3/24","10.65.1.2/32"}
 					//var srcIPRange []string
 
 					BeforeEach(func() {
@@ -856,7 +856,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 
                                                 cc.ExpectSome(w[0][1], TargetIP(ip), port)
                                                 cc.ExpectSome(w[1][0], TargetIP(ip), port)
-                                                cc.ExpectSome(w[1][1], TargetIP(ip), port)
+                                                cc.ExpectNone(w[1][1], TargetIP(ip), port)
                                                 cc.CheckConnectivity()
                                         })
                                        It("should not have connectivity from external to w[0] via local/remote node", func() {
@@ -864,6 +864,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
                                                 port := uint16(testSvc.Spec.Ports[0].Port)
                                                 cc.ExpectNone(externalClient, TargetIP(ip), port)
                                                 cc.ExpectNone(externalClient, TargetIP(ip), port)
+                                                cc.CheckConnectivity()
                                                 // Include a check that goes via the local nodeport to make sure the dataplane has converged.
                                         })
 
