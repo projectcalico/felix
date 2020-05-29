@@ -831,6 +831,45 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 					})
 				})
 
+				Context("with LB test-service configured", func() {
+					var (
+						testSvc          *v1.Service
+						testSvcNamespace string
+					)
+
+					testSvcName := "test-lb-service"
+					tgtPort := 8055
+					srcIPRange := []string{"10.65.0.3/24","10.65.1.2/32"}
+					//var srcIPRange []string
+
+					BeforeEach(func() {
+						testSvc = k8sLBService(testSvcName, "10.101.0.10", w[0][0], 80, tgtPort, testOpts.protocol, srcIPRange)
+						testSvcNamespace = testSvc.ObjectMeta.Namespace
+						_, err := k8sClient.CoreV1().Services(testSvcNamespace).Create(testSvc)
+						Expect(err).NotTo(HaveOccurred())
+						Eventually(k8sGetEpsForServiceFunc(k8sClient, testSvc), "10s").Should(HaveLen(1),
+							"Service endpoints didn't get created? Is controller-manager happy?")
+					})
+                                       It("should have connectivity from all workloads via a service to workload 0", func() {
+                                                ip := testSvc.Spec.ClusterIP
+                                                port := uint16(testSvc.Spec.Ports[0].Port)
+
+                                                cc.ExpectSome(w[0][1], TargetIP(ip), port)
+                                                cc.ExpectSome(w[1][0], TargetIP(ip), port)
+                                                cc.ExpectNone(w[1][1], TargetIP(ip), port)
+                                                cc.CheckConnectivity()
+                                        })
+                                       It("should not have connectivity from external to w[0] via local/remote node", func() {
+                                                ip := testSvc.Spec.ClusterIP
+                                                port := uint16(testSvc.Spec.Ports[0].Port)
+                                                cc.ExpectNone(externalClient, TargetIP(ip), port)
+                                                cc.ExpectNone(externalClient, TargetIP(ip), port)
+                                                cc.CheckConnectivity()
+                                                // Include a check that goes via the local nodeport to make sure the dataplane has converged.
+                                        })
+
+
+				})
 				Context("with test-service configured 10.101.0.10:80 -> w[0][0].IP:8055", func() {
 					var (
 						testSvc          *v1.Service
@@ -1761,6 +1800,36 @@ func k8sService(name, clusterIP string, w *workload.Workload, port,
 			},
 		},
 	}
+}
+
+func k8sLBService(name, clusterIP string, w *workload.Workload, port,
+	tgtPort int, protocol string, srcRange []string) *v1.Service {
+	k8sProto := v1.ProtocolTCP
+        if protocol == "udp" {
+                k8sProto = v1.ProtocolUDP
+        }
+
+        svcType := v1.ServiceTypeLoadBalancer
+	return &v1.Service{
+                TypeMeta:   typeMetaV1("Service"),
+                ObjectMeta: objectMetaV1(name),
+                Spec: v1.ServiceSpec{
+                        ClusterIP: clusterIP,
+                        Type:      svcType,
+			LoadBalancerSourceRanges: srcRange,
+                        Selector: map[string]string{
+                                "name": w.Name,
+                        },
+                        Ports: []v1.ServicePort{
+                                {
+                                        Protocol:   k8sProto,
+                                        Port:       int32(port),
+                                        Name:       fmt.Sprintf("port-%d", tgtPort),
+                                        TargetPort: intstr.FromInt(tgtPort),
+                                },
+                        },
+                },
+        }
 }
 
 func k8sGetEpsForService(k8s kubernetes.Interface, svc *v1.Service) []v1.EndpointSubset {
