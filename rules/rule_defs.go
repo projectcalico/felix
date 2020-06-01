@@ -57,9 +57,10 @@ const (
 	IPSetIDNATOutgoingAllPools  = "all-ipam-pools"
 	IPSetIDNATOutgoingMasqPools = "masq-ipam-pools"
 
-	IPSetIDAllHostNets        = "all-hosts-net"
-	IPSetIDAllVXLANSourceNets = "all-vxlan-net"
-	IPSetIDThisHostIPs        = "this-host"
+	IPSetIDAllHostNets          = "all-hosts-net"
+	IPSetIDAllWireguardHostNets = "all-wg-hosts-net"
+	IPSetIDAllVXLANSourceNets   = "all-vxlan-net"
+	IPSetIDThisHostIPs          = "this-host"
 
 	ChainFIPDnat = ChainNamePrefix + "fip-dnat"
 	ChainFIPSnat = ChainNamePrefix + "fip-snat"
@@ -260,6 +261,9 @@ type Config struct {
 	IPIPTunnelAddress net.IP
 	// Same for VXLAN.
 	VXLANTunnelAddress net.IP
+
+	WireguardEnabled       bool
+	WireguardInterfaceName string
 
 	IptablesLogPrefix         string
 	EndpointToHostAction      string
