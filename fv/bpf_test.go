@@ -854,31 +854,32 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
                                        It("should have connectivity from all workloads via a service to workload 0", func() {
                                                 ip := testSvc.Spec.ExternalIPs
                                                 port := uint16(testSvc.Spec.Ports[0].Port)
-				       /*
-						Eventually(func() bool {
-							natmaps,_ := dumpNATmaps(felixes)
-							m := natmaps[0]
-							natKey := nat.NewNATKey(net.ParseIP(ip[0]), port, numericProto)
-							v,ok := m[natKey]
-							return ok && v.Count() == 0xffffffff
-						}, 5*time.Second).Should(BeTrue())*/
 						felixes[1].Exec("ip", "route", "add", "35.1.2.0/24", "via", felixes[1].IP)
 						felixes[0].Exec("ip", "route", "add", "35.1.2.0/24", "dev", "eth0")
-						//cc.ExpectNone(felixes[1], TargetIP(ip[0]), port)
 						cc.ExpectNone(w[1][0], TargetIP(ip[0]), port)
                                                 cc.CheckConnectivity()
-                                                //cc.ExpectSome(w[1][0], TargetIP(ip[0]), port)
-                                                //cc.ExpectNone(w[1][1], TargetIP(ip[0]), port)
                                         })
-					/*
+/*
                                        It("should not have connectivity from external to w[0] via local/remote node", func() {
                                                 ip := testSvc.Spec.ExternalIPs
-                                                port := uint16(testSvc.Spec.Ports[0].Port)
-                                                cc.ExpectSome(externalClient, TargetIP(ip[0]), port)
-                                                cc.ExpectNone(externalClient, TargetIP(ip[0]), port)
-                                                cc.CheckConnectivity()
-                                                // Include a check that goes via the local nodeport to make sure the dataplane has converged.
-                                        })*/
+                                                //port := uint16(testSvc.Spec.Ports[0].Port)
+						tcpdump := w[0][0].AttachTCPDump()
+                                                tcpdump.SetLogEnabled(true)
+                                                matcher := fmt.Sprintf("IP %s\\.30444 > %s\\.30444: UDP", "2.2.2.2", w[0][0].IP)
+                                                tcpdump.AddMatcher("UDP-30444", regexp.MustCompile(matcher))
+                                                tcpdump.Start(testOpts.protocol, "port", "30444", "or", "port", "30445")
+                                                defer tcpdump.Stop()
+
+                                                // send a packet from the correct workload to create a conntrack entry
+                                                _, err := w[1][0].RunCmd("/pktgen", "2.2.2.2", ip[0], "udp",
+                                                        "--port-src", "30444", "--port-dst", "30444")
+                                                Expect(err).NotTo(HaveOccurred())
+
+                                                // We must eventually see the packet at the target
+                                                Eventually(func() int { return tcpdump.MatchCount("UDP-30444") }).
+                                                        Should(BeNumerically("==", 1), matcher)
+
+                                        }) */
 
 
 				})
