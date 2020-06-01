@@ -839,7 +839,8 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 
 					testSvcName := "test-lb-service"
 					tgtPort := 8055
-					srcIPRange := []string{"10.65.0.3/24","10.65.1.2/32"}
+					//srcIPRange := []string{"10.65.0.3/24","10.65.1.2/32"}
+					srcIPRange := []string{"2.2.2.2/32"}
 					externalIP := []string{"35.1.2.3"}
 
 					BeforeEach(func() {
@@ -853,12 +854,23 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
                                        It("should have connectivity from all workloads via a service to workload 0", func() {
                                                 ip := testSvc.Spec.ExternalIPs
                                                 port := uint16(testSvc.Spec.Ports[0].Port)
-
-                                                cc.ExpectSome(w[0][1], TargetIP(ip[0]), port)
-                                                cc.ExpectSome(w[1][0], TargetIP(ip[0]), port)
-                                                cc.ExpectNone(w[1][1], TargetIP(ip[0]), port)
+				       /*
+						Eventually(func() bool {
+							natmaps,_ := dumpNATmaps(felixes)
+							m := natmaps[0]
+							natKey := nat.NewNATKey(net.ParseIP(ip[0]), port, numericProto)
+							v,ok := m[natKey]
+							return ok && v.Count() == 0xffffffff
+						}, 5*time.Second).Should(BeTrue())*/
+						felixes[1].Exec("ip", "route", "add", "35.1.2.0/24", "via", felixes[1].IP)
+						felixes[0].Exec("ip", "route", "add", "35.1.2.0/24", "dev", "eth0")
+						//cc.ExpectNone(felixes[1], TargetIP(ip[0]), port)
+						cc.ExpectNone(w[1][0], TargetIP(ip[0]), port)
                                                 cc.CheckConnectivity()
+                                                //cc.ExpectSome(w[1][0], TargetIP(ip[0]), port)
+                                                //cc.ExpectNone(w[1][1], TargetIP(ip[0]), port)
                                         })
+					/*
                                        It("should not have connectivity from external to w[0] via local/remote node", func() {
                                                 ip := testSvc.Spec.ExternalIPs
                                                 port := uint16(testSvc.Spec.Ports[0].Port)
@@ -866,7 +878,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
                                                 cc.ExpectNone(externalClient, TargetIP(ip[0]), port)
                                                 cc.CheckConnectivity()
                                                 // Include a check that goes via the local nodeport to make sure the dataplane has converged.
-                                        })
+                                        })*/
 
 
 				})
