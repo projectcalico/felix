@@ -98,11 +98,11 @@ struct calico_ct_value {
 			struct calico_ct_leg b_to_a; // 36
 
 			// CALI_CT_TYPE_NAT_REV
-			__u32 orig_ip;                     // 44
-			__u16 orig_port;                   // 48
-			__u8 pad1[2];                      // 50
-			__u32 tun_ip;                      // 52
-			__u32 pad3;                        // 56
+			__u32 orig_ip;                     // 48
+			__u16 orig_port;                   // 52
+			__u8 pad1[2];                      // 54
+			__u32 tun_ip;                      // 56
+			__u32 pad3;                        // 60
 		};
 
 		// CALI_CT_TYPE_NAT_FWD; key for the CALI_CT_TYPE_NAT_REV entry.
