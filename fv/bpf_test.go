@@ -839,7 +839,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 
 					testSvcName := "test-lb-service"
 					tgtPort := 8055
-					srcIPRange := []string{"2.2.2.2/32"}
+					srcIPRange := []string{"10.65.1.0/24"}
 					externalIP := []string{"35.1.2.3"}
 
 					BeforeEach(func() {
@@ -855,30 +855,31 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
                                                 port := uint16(testSvc.Spec.Ports[0].Port)
 						felixes[1].Exec("ip", "route", "add", "35.1.2.0/24", "via", felixes[1].IP)
 						felixes[0].Exec("ip", "route", "add", "35.1.2.0/24", "dev", "eth0")
-						cc.ExpectNone(w[1][0], TargetIP(ip[0]), port)
+						cc.ExpectSome(w[1][0], TargetIP(ip[0]), port)
+						cc.ExpectNone(w[0][1], TargetIP(ip[0]), port)
                                                 cc.CheckConnectivity()
                                         })
-
+/*
                                        It("should not have connectivity from external to w[0] via local/remote node", func() {
                                                 ip := testSvc.Spec.ExternalIPs
                                                 //port := uint16(testSvc.Spec.Ports[0].Port)
 						tcpdump := w[0][0].AttachTCPDump()
                                                 tcpdump.SetLogEnabled(true)
-                                                matcher := fmt.Sprintf("IP %s\\.30444 > %s\\.30444: UDP", "2.2.2.2", w[0][0].IP)
+                                                matcher := fmt.Sprintf("IP %s\\.30444 > %s\\.8055: UDP", "2.2.2.2", w[0][0].IP)
                                                 tcpdump.AddMatcher("UDP-30444", regexp.MustCompile(matcher))
                                                 tcpdump.Start(testOpts.protocol, "port", "30444", "or", "port", "30445")
                                                 defer tcpdump.Stop()
 
                                                 // send a packet from the correct workload to create a conntrack entry
                                                 _, err := w[1][0].RunCmd("/pktgen", "2.2.2.2", ip[0], "udp",
-                                                        "--port-src", "30444", "--port-dst", "30444")
+                                                        "--port-src", "30444", "--port-dst", "80")
                                                 Expect(err).NotTo(HaveOccurred())
 
                                                 // We must eventually see the packet at the target
                                                 Eventually(func() int { return tcpdump.MatchCount("UDP-30444") }).
                                                         Should(BeNumerically("==", 1), matcher)
 
-                                        }) 
+                                        })*/
 
 
 				})
