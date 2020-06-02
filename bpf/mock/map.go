@@ -75,6 +75,11 @@ func (m Map) Delete(k []byte) error {
 	if len(k) != m.KeySize {
 		m.logCxt.Panicf("Key had wrong size (%d)", len(k))
 	}
+
+	if _, ok := m.Contents[string(k)]; !ok {
+		return unix.ENOENT
+	}
+
 	delete(m.Contents, string(k))
 	return nil
 }
