@@ -839,7 +839,6 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 
 					testSvcName := "test-lb-service"
 					tgtPort := 8055
-					//srcIPRange := []string{"10.65.0.3/24","10.65.1.2/32"}
 					srcIPRange := []string{"2.2.2.2/32"}
 					externalIP := []string{"35.1.2.3"}
 
@@ -859,7 +858,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						cc.ExpectNone(w[1][0], TargetIP(ip[0]), port)
                                                 cc.CheckConnectivity()
                                         })
-/*
+
                                        It("should not have connectivity from external to w[0] via local/remote node", func() {
                                                 ip := testSvc.Spec.ExternalIPs
                                                 //port := uint16(testSvc.Spec.Ports[0].Port)
@@ -879,7 +878,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
                                                 Eventually(func() int { return tcpdump.MatchCount("UDP-30444") }).
                                                         Should(BeNumerically("==", 1), matcher)
 
-                                        }) */
+                                        }) 
 
 
 				})
