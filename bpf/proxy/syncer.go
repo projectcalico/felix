@@ -298,7 +298,6 @@ func (s *Syncer) applySvc(skey svcKey, sinfo k8sp.ServicePort, eps []k8sp.Endpoi
 				return err
 			}
 
-			delete(s.prevSvcMap, skey)
 			if cleanupDerived != nil {
 				if err := cleanupDerived(old.id); err != nil {
 					return errors.WithMessage(err, "cleanupDerived")
