@@ -29,6 +29,7 @@ import (
 	k8sp "k8s.io/kubernetes/pkg/proxy"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/conntrack"
 	"github.com/projectcalico/felix/bpf/nat"
 	"github.com/projectcalico/felix/bpf/routes"
 	"github.com/projectcalico/felix/ip"
@@ -101,6 +102,8 @@ type Syncer struct {
 	bpfEps  bpf.Map
 	bpfAff  bpf.Map
 
+	connCleaner conntrack.Cleaner
+
 	nextSvcID uint32
 
 	nodePortIPs []net.IP
@@ -161,11 +164,12 @@ func uniqueIPs(ips []net.IP) []net.IP {
 }
 
 // NewSyncer returns a new Syncer that uses the 2 provided maps
-func NewSyncer(nodePortIPs []net.IP, svcsmap, epsmap, affmap bpf.Map, rt Routes) (*Syncer, error) {
+func NewSyncer(nodePortIPs []net.IP, svcsmap, epsmap, affmap, ctmap bpf.Map, rt Routes) (*Syncer, error) {
 	s := &Syncer{
 		bpfSvcs:     svcsmap,
 		bpfEps:      epsmap,
 		bpfAff:      affmap,
+		connCleaner: conntrack.NewCleaner(ctmap),
 		rt:          rt,
 		nodePortIPs: uniqueIPs(nodePortIPs),
 		prevSvcMap:  make(map[svcKey]svcInfo),
@@ -510,6 +514,29 @@ func (s *Syncer) apply(state DPSyncerState) error {
 	log.Debugf("new state written")
 
 	s.runExpandNPFixup(expNPMisses)
+
+	if err := s.connCleaner.Init(); err != nil {
+		return errors.WithMessage(err, "conntrack Cleaner initialization")
+	}
+	// all conntrack cleaning must happen before we release the cleaner
+
+	for staleUDPClusterIP := range state.StaleUDPSvcs {
+		ip := net.ParseIP(staleUDPClusterIP)
+		if ip == nil {
+			log.WithField("staleUDPClusterIP", staleUDPClusterIP).Warn("cannot parse IP")
+			continue
+		}
+
+		ipv4 := ip.To4()
+		if ipv4 == nil {
+			log.WithField("staleUDPClusterIP", staleUDPClusterIP).Warn("not IPv4")
+			continue
+		}
+
+		s.connCleaner.ClearDNATEntriesForFrontendIP(ipv4)
+	}
+
+	s.connCleaner.Release()
 
 	return nil
 }
