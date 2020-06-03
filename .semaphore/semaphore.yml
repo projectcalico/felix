@@ -59,8 +59,8 @@ blocks:
     jobs:
     - name: FV Test matrix
       commands:
-      - make fv FV_BATCHES_TO_RUN="${SEMAPHORE_JOB_INDEX}" FV_NUM_BATCHES=${SEMAPHORE_JOB_COUNT}
-      parallelism: 5
+      - make fv FV_BATCHES_TO_RUN="5" FV_NUM_BATCHES=10
+      parallelism: 20
     epilogue:
       always:
         commands:
