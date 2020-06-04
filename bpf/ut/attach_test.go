@@ -61,7 +61,7 @@ func TestJumpMapCleanup(t *testing.T) {
 		t.Log("Adding program, should add one dir and one map.")
 		startingJumpMaps := countJumpMaps()
 		startingTCDirs := countTCDirs()
-		ap.IP = net.ParseIP("10.0.0.1")
+		ap.HostIP = net.ParseIP("10.0.0.1")
 		err := ap.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
@@ -69,7 +69,7 @@ func TestJumpMapCleanup(t *testing.T) {
 
 		t.Log("Replacing program should add another map and dir.")
 		tc.EnsureQdisc(vethName)
-		ap.IP = net.ParseIP("10.0.0.2")
+		ap.HostIP = net.ParseIP("10.0.0.2")
 		err = ap.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+2), "unexpected number of jump maps after replacing program")
