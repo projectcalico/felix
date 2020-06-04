@@ -512,6 +512,9 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						"8055",
 						testOpts.protocol)
 
+					hostW[ii].WorkloadEndpoint.Labels = map[string]string{"name": hostW[ii].Name}
+					hostW[ii].ConfigureInDatastore(infra)
+
 					// Two workloads on each host so we can check the same host and other host cases.
 					w[ii][0] = addWorkload(true, ii, 0, 8055, map[string]string{"port": "8055"})
 					w[ii][1] = addWorkload(true, ii, 1, 8056, nil)
