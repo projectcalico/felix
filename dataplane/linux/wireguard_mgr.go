@@ -75,7 +75,7 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 			log.Debug("RouteUpdate is a tunnel update")
 
 			// We treat tunnel addresses like workloads (in that we route over wireguard to and from these addresses).
-			if msg.TunnelType.Wireguard {
+			if msg.TunnelType != nil && msg.TunnelType.Wireguard {
 				m.wireguardRouteTable.RouteUpdate(msg.DstNodeName, cidr)
 			} else {
 				m.wireguardRouteTable.RouteRemove(cidr)

@@ -115,10 +115,10 @@ func (c *L3RouteResolver) RegisterWith(allUpdDispatcher, localDispatcher *dispat
 	// need all WEPs, or only local WEPs.
 	logrus.WithField("routeSource", c.routeSource).Info("Registering for L3 route updates")
 	if c.routeSource == "WorkloadIPs" {
-		// Driven off of workload IP addressess. Register for all Ref udpates.
+		// Driven off of workload IP addressess. Register for all WEP udpates.
 		allUpdDispatcher.Register(model.WorkloadEndpointKey{}, c.OnWorkloadUpdate)
 	} else {
-		// Driven off of IPAM data. Register for blocks and local Ref updates.
+		// Driven off of IPAM data. Register for blocks and local WEP updates.
 		allUpdDispatcher.Register(model.BlockKey{}, c.OnBlockUpdate)
 		localDispatcher.Register(model.WorkloadEndpointKey{}, c.OnWorkloadUpdate)
 	}
@@ -632,6 +632,7 @@ func (c *L3RouteResolver) flush() {
 						rt.Type = proto.RouteType_REMOTE_TUNNEL
 					}
 
+					rt.TunnelType = &proto.TunnelType{}
 					for _, ref := range ri.Refs {
 						if ref.NodeName != ri.Refs[0].NodeName {
 							// This reference is on a different node to entry 0, so don't include.
