@@ -831,6 +831,203 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 					})
 				})
 
+				Context("Test LB-service with external IP", func() {
+					var (
+						testSvc          *v1.Service
+						testSvcNamespace string
+					)
+					testSvcName := "test-lb-service-extip"
+					tgtPort := 8055
+					externalIP := []string{"10.1.2.3"}
+					srcIPRange := []string{}
+
+					BeforeEach(func() {
+						testSvc = k8sLBService(testSvcName, "10.101.0.10", w[0][0], 80, tgtPort, testOpts.protocol, externalIP, srcIPRange)
+						testSvcNamespace = testSvc.ObjectMeta.Namespace
+						_, err := k8sClient.CoreV1().Services(testSvcNamespace).Create(testSvc)
+						Expect(err).NotTo(HaveOccurred())
+						Eventually(k8sGetEpsForServiceFunc(k8sClient, testSvc), "10s").Should(HaveLen(1),
+							"Service endpoints didn't get created? Is controller-manager happy?")
+
+					})
+					It("should have connectivity from workloads[1][0],[1][1] and [0][1] via a service to workload 0", func() {
+						ip := testSvc.Spec.ExternalIPs
+						port := uint16(testSvc.Spec.Ports[0].Port)
+						felixes[1].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						felixes[0].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						cc.ExpectSome(w[1][0], TargetIP(ip[0]), port)
+						cc.ExpectSome(w[1][1], TargetIP(ip[0]), port)
+						cc.ExpectSome(w[0][1], TargetIP(ip[0]), port)
+						cc.CheckConnectivity()
+					})
+
+				})
+				Context("Test LB-service with external IP and external Client", func() {
+					var (
+						testSvc          *v1.Service
+						testSvcNamespace string
+					)
+					testSvcName := "test-lb-service-extip"
+					tgtPort := 8055
+					externalIP := []string{"10.1.2.3"}
+
+					BeforeEach(func() {
+						srcIPRange := []string{}
+						testSvc = k8sLBService(testSvcName, "10.101.0.10", w[0][0], 80, tgtPort, testOpts.protocol, externalIP, srcIPRange)
+						testSvcNamespace = testSvc.ObjectMeta.Namespace
+						_, err := k8sClient.CoreV1().Services(testSvcNamespace).Create(testSvc)
+						Expect(err).NotTo(HaveOccurred())
+						Eventually(k8sGetEpsForServiceFunc(k8sClient, testSvc), "10s").Should(HaveLen(1),
+							"Service endpoints didn't get created? Is controller-manager happy?")
+						if testOpts.connTimeEnabled {
+							Skip("FIXME externalClient also does conntime balancing")
+						}
+						pol.Spec.Ingress = []api.Rule{
+							{
+								Action: "Allow",
+								Source: api.EntityRule{
+									Nets: []string{
+										externalClient.IP + "/32",
+									},
+								},
+							},
+						}
+						pol = updatePolicy(pol)
+
+					})
+					It("should have connectivity from external Client via a service to workload 0", func() {
+						ip := testSvc.Spec.ExternalIPs
+						port := uint16(testSvc.Spec.Ports[0].Port)
+						felixes[1].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						felixes[0].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						externalClient.Exec("ip", "route", "add", "10.1.2.3", "via", felixes[0].IP)
+						externalClient.EnsureBinary("test-connection")
+						cc.ExpectSome(externalClient, TargetIP(ip[0]), port)
+						cc.CheckConnectivity()
+					})
+				})
+
+				Context("Test LB-service with src ranges", func() {
+					var (
+						testSvc          *v1.Service
+						testSvcNamespace string
+					)
+					testSvcName := "test-lb-service-extip"
+					tgtPort := 8055
+					externalIP := []string{"10.1.2.3"}
+					srcIPRange := []string{"10.65.1.3/24"}
+
+					BeforeEach(func() {
+						testSvc = k8sLBService(testSvcName, "10.101.0.10", w[0][0], 80, tgtPort, testOpts.protocol, externalIP, srcIPRange)
+						testSvcNamespace = testSvc.ObjectMeta.Namespace
+						_, err := k8sClient.CoreV1().Services(testSvcNamespace).Create(testSvc)
+						Expect(err).NotTo(HaveOccurred())
+						Eventually(k8sGetEpsForServiceFunc(k8sClient, testSvc), "10s").Should(HaveLen(1),
+							"Service endpoints didn't get created? Is controller-manager happy?")
+
+					})
+					It("should have connectivity from workloads[1][0],[1][1] via a service to workload 0", func() {
+						ip := testSvc.Spec.ExternalIPs
+						port := uint16(testSvc.Spec.Ports[0].Port)
+						felixes[1].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						felixes[0].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						cc.ExpectSome(w[1][0], TargetIP(ip[0]), port)
+						cc.ExpectSome(w[1][1], TargetIP(ip[0]), port)
+						cc.ExpectNone(w[0][1], TargetIP(ip[0]), port)
+						cc.CheckConnectivity()
+					})
+				})
+
+				Context("Test LB-service with external Client, LB src ranges", func() {
+					var (
+						testSvc          *v1.Service
+						testSvcNamespace string
+					)
+					testSvcName := "test-lb-service-extip"
+					tgtPort := 8055
+					externalIP := []string{"10.1.2.3"}
+
+					BeforeEach(func() {
+						srcIPRange := []string{"10.65.1.3/24"}
+						testSvc = k8sLBService(testSvcName, "10.101.0.10", w[0][0], 80, tgtPort, testOpts.protocol, externalIP, srcIPRange)
+						testSvcNamespace = testSvc.ObjectMeta.Namespace
+						_, err := k8sClient.CoreV1().Services(testSvcNamespace).Create(testSvc)
+						Expect(err).NotTo(HaveOccurred())
+						Eventually(k8sGetEpsForServiceFunc(k8sClient, testSvc), "10s").Should(HaveLen(1),
+							"Service endpoints didn't get created? Is controller-manager happy?")
+						if testOpts.connTimeEnabled {
+							Skip("FIXME externalClient also does conntime balancing")
+						}
+						pol.Spec.Ingress = []api.Rule{
+							{
+								Action: "Allow",
+								Source: api.EntityRule{
+									Nets: []string{
+										externalClient.IP + "/32",
+									},
+								},
+							},
+						}
+						pol = updatePolicy(pol)
+
+					})
+					It("should have connectivity from external Client via a service to workload 0", func() {
+						ip := testSvc.Spec.ExternalIPs
+						port := uint16(testSvc.Spec.Ports[0].Port)
+						felixes[1].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						felixes[0].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						externalClient.Exec("ip", "route", "add", "10.1.2.3", "via", felixes[0].IP)
+						externalClient.EnsureBinary("test-connection")
+						cc.ExpectNone(externalClient, TargetIP(ip[0]), port)
+						cc.CheckConnectivity()
+					})
+				})
+
+				Context("Test LB-service with external Client, LB src ranges with ext client IP ", func() {
+					var (
+						testSvc          *v1.Service
+						testSvcNamespace string
+					)
+					testSvcName := "test-lb-service-extip"
+					tgtPort := 8055
+					externalIP := []string{"10.1.2.3"}
+
+					BeforeEach(func() {
+						srcIPRange := []string{externalClient.IP + "/32"}
+						testSvc = k8sLBService(testSvcName, "10.101.0.10", w[0][0], 80, tgtPort, testOpts.protocol, externalIP, srcIPRange)
+						testSvcNamespace = testSvc.ObjectMeta.Namespace
+						_, err := k8sClient.CoreV1().Services(testSvcNamespace).Create(testSvc)
+						Expect(err).NotTo(HaveOccurred())
+						Eventually(k8sGetEpsForServiceFunc(k8sClient, testSvc), "10s").Should(HaveLen(1),
+							"Service endpoints didn't get created? Is controller-manager happy?")
+						if testOpts.connTimeEnabled {
+							Skip("FIXME externalClient also does conntime balancing")
+						}
+						pol.Spec.Ingress = []api.Rule{
+							{
+								Action: "Allow",
+								Source: api.EntityRule{
+									Nets: []string{
+										externalClient.IP + "/32",
+									},
+								},
+							},
+						}
+						pol = updatePolicy(pol)
+
+					})
+					It("should have connectivity from external Client via a service to workload 0", func() {
+						ip := testSvc.Spec.ExternalIPs
+						port := uint16(testSvc.Spec.Ports[0].Port)
+						felixes[1].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						felixes[0].Exec("ip", "route", "add", "local", "10.1.2.3", "dev", "eth0")
+						externalClient.Exec("ip", "route", "add", "10.1.2.3", "via", felixes[0].IP)
+						externalClient.EnsureBinary("test-connection")
+						cc.ExpectSome(externalClient, TargetIP(ip[0]), port)
+						cc.CheckConnectivity()
+					})
+				})
+
 				Context("with test-service configured 10.101.0.10:80 -> w[0][0].IP:8055", func() {
 					var (
 						testSvc          *v1.Service
@@ -1755,6 +1952,37 @@ func k8sService(name, clusterIP string, w *workload.Workload, port,
 					Protocol:   k8sProto,
 					Port:       int32(port),
 					NodePort:   nodePort,
+					Name:       fmt.Sprintf("port-%d", tgtPort),
+					TargetPort: intstr.FromInt(tgtPort),
+				},
+			},
+		},
+	}
+}
+
+func k8sLBService(name, clusterIP string, w *workload.Workload, port,
+	tgtPort int, protocol string, externalIPs, srcRange []string) *v1.Service {
+	k8sProto := v1.ProtocolTCP
+	if protocol == "udp" {
+		k8sProto = v1.ProtocolUDP
+	}
+
+	svcType := v1.ServiceTypeLoadBalancer
+	return &v1.Service{
+		TypeMeta:   typeMetaV1("Service"),
+		ObjectMeta: objectMetaV1(name),
+		Spec: v1.ServiceSpec{
+			ClusterIP:                clusterIP,
+			Type:                     svcType,
+			LoadBalancerSourceRanges: srcRange,
+			ExternalIPs:              externalIPs,
+			Selector: map[string]string{
+				"name": w.Name,
+			},
+			Ports: []v1.ServicePort{
+				{
+					Protocol:   k8sProto,
+					Port:       int32(port),
 					Name:       fmt.Sprintf("port-%d", tgtPort),
 					TargetPort: intstr.FromInt(tgtPort),
 				},
