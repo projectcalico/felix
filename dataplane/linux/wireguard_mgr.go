@@ -70,6 +70,16 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 			// CIDR is for a workload.
 			log.Debug("RouteUpdate is a workload update")
 			m.wireguardRouteTable.RouteUpdate(msg.DstNodeName, cidr)
+		case proto.RouteType_LOCAL_TUNNEL, proto.RouteType_REMOTE_TUNNEL:
+			// CIDR is for a tunnel address.
+			log.Debug("RouteUpdate is a tunnel update")
+
+			// We treat tunnel addresses like workloads (in that we route over wireguard to and from these addresses).
+			if msg.TunnelType != nil && msg.TunnelType.Wireguard {
+				m.wireguardRouteTable.RouteUpdate(msg.DstNodeName, cidr)
+			} else {
+				m.wireguardRouteTable.RouteRemove(cidr)
+			}
 		default:
 			// It is not a workload CIDR - treat this as a route deletion.
 			log.Debug("RouteUpdate is not a workload update, treating as a deletion")

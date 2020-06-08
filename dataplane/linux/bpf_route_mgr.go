@@ -472,6 +472,12 @@ func (m *bpfRouteManager) onRouteUpdate(update *proto.RouteUpdate) {
 		return
 	}
 
+	// For now don't handle the tunnel addresses, which were previously not being included in the route updates.
+	if update.Type == proto.RouteType_REMOTE_TUNNEL || update.Type == proto.RouteType_LOCAL_TUNNEL {
+		m.onRouteRemove(&proto.RouteRemove{Dst: update.Dst})
+		return
+	}
+
 	if m.cidrToRoute[v4CIDR] == *update {
 		return
 	}
