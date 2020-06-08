@@ -3,6 +3,7 @@ module github.com/projectcalico/felix
 go 1.13
 
 require (
+	github.com/aws/aws-sdk-go v1.31.15
 	github.com/containernetworking/plugins v0.8.2
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
