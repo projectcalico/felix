@@ -509,7 +509,7 @@ func (w *Wireguard) EndpointWireguardUpdate(name string, publicKey wgtypes.Key, 
 		logCxt.Debug("Wireguard interface address unchanged from programmed")
 		update.ipv4InterfaceAddr = nil
 	} else {
-		// Wireguard interface address not updated (or this is a previously unseen node)
+		// Wireguard interface address updated (or this is a previously unseen node)
 		logCxt.Debug("Storing updated wireguard interface address")
 		update.ipv4InterfaceAddr = &ipv4InterfaceAddr
 	}
