@@ -19,6 +19,7 @@ import (
 	"fmt"
 
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -114,6 +115,9 @@ type Syncer struct {
 	newEpsMap  k8sp.EndpointsMap
 	prevSvcMap map[svcKey]svcInfo
 	prevEpsMap k8sp.EndpointsMap
+	// active Maps contain all active svcs endpoints at the end of an iteration
+	activeSvcsMap map[ipPortProto]uint32
+	activeEpsMap  map[uint32]map[ipPort]struct{}
 
 	// We never have more than one thread accessing the [prev|new][Svc|Eps]Map,
 	// this is to just make sure and to make the --race checker happy
@@ -134,6 +138,26 @@ type Syncer struct {
 	stickySvcs       map[nat.FrontEndAffinityKey]stickyFrontend
 	stickyEps        map[uint32]map[nat.BackendValue]struct{}
 	stickySvcDeleted bool
+}
+
+type ipPort struct {
+	ip   string
+	port int
+}
+
+type ipPortProto struct {
+	ipPort
+	proto uint8
+}
+
+func servicePortToIPPortProto(sp k8sp.ServicePort) ipPortProto {
+	return ipPortProto{
+		ipPort: ipPort{
+			ip:   sp.ClusterIP().String(),
+			port: sp.Port(),
+		},
+		proto: ProtoV1ToIntPanic(sp.Protocol()),
+	}
 }
 
 func uniqueIPs(ips []net.IP) []net.IP {
@@ -161,7 +185,7 @@ func uniqueIPs(ips []net.IP) []net.IP {
 	return ret
 }
 
-// NewSyncer returns a new Syncer that uses the 2 provided maps
+// NewSyncer returns a new Syncer
 func NewSyncer(nodePortIPs []net.IP, svcsmap, epsmap, affmap bpf.Map, rt Routes) (*Syncer, error) {
 	s := &Syncer{
 		bpfSvcs:     svcsmap,
@@ -300,7 +324,7 @@ func (s *Syncer) applySvc(skey svcKey, sinfo k8sp.ServicePort, eps []k8sp.Endpoi
 
 	old, exists := s.prevSvcMap[skey]
 	if exists {
-		if old.svc == sinfo {
+		if ServicePortEqual(old.svc, sinfo) {
 			id = old.id
 			count, local, err = s.updateExistingSvc(skey.sname, sinfo, id, old.count, eps)
 		} else {
@@ -308,7 +332,6 @@ func (s *Syncer) applySvc(skey svcKey, sinfo k8sp.ServicePort, eps []k8sp.Endpoi
 				return err
 			}
 
-			delete(s.prevSvcMap, skey)
 			if cleanupDerived != nil {
 				if err := cleanupDerived(old.id); err != nil {
 					return errors.WithMessage(err, "cleanupDerived")
@@ -333,9 +356,31 @@ func (s *Syncer) applySvc(skey svcKey, sinfo k8sp.ServicePort, eps []k8sp.Endpoi
 		svc:        sinfo,
 	}
 
+	s.newEpsMap[skey.sname] = eps
+
 	log.Debugf("applied a service %s update: sinfo=%+v", skey, s.newSvcMap[skey])
 
 	return nil
+}
+
+func (s *Syncer) addActiveEps(id uint32, svc k8sp.ServicePort, eps []k8sp.Endpoint) {
+	svcKey := servicePortToIPPortProto(svc)
+
+	s.activeSvcsMap[svcKey] = id
+
+	if len(eps) == 0 {
+		return
+	}
+
+	epsmap := make(map[ipPort]struct{})
+	s.activeEpsMap[id] = epsmap
+	for _, ep := range eps {
+		port, _ := ep.Port() // it is error free by this point
+		epsmap[ipPort{
+			ip:   ep.IP(),
+			port: port,
+		}] = struct{}{}
+	}
 }
 
 func (s *Syncer) applyExpandedNP(sname k8sp.ServicePortName, sinfo k8sp.ServicePort,
@@ -453,6 +498,17 @@ func (s *Syncer) apply(state DPSyncerState) error {
 	s.newSvcMap = make(map[svcKey]svcInfo)
 	s.newEpsMap = make(k8sp.EndpointsMap)
 
+	s.activeSvcsMap = make(map[ipPortProto]uint32)
+	s.activeEpsMap = make(map[uint32]map[ipPort]struct{})
+
+	defer func() {
+		log.WithField("activeSvcsMap", s.activeSvcsMap).Info("Syncer")
+		log.WithField("activeEpsMap", s.activeEpsMap).Info("Syncer")
+		// free the maps when the iteration is complete
+		s.activeSvcsMap = nil
+		s.activeEpsMap = nil
+	}()
+
 	var expNPMisses []*expandMiss
 
 	// insert or update existing services
@@ -522,6 +578,19 @@ func (s *Syncer) apply(state DPSyncerState) error {
 		}
 
 		log.Infof("removed stale service %q", skey)
+	}
+
+	// build active maps for conntrack cleaning
+	for skey, sinfo := range s.newSvcMap {
+		if sinfo.count == 0 {
+			continue
+		}
+
+		if isSvcKeyDerived(skey) {
+			s.addActiveEps(sinfo.id, sinfo.svc, nil)
+		} else {
+			s.addActiveEps(sinfo.id, sinfo.svc, s.newEpsMap[skey.sname])
+		}
 	}
 
 	log.Debugf("new state written")
@@ -1046,6 +1115,43 @@ func (s *Syncer) cleanupSticky() error {
 	return nil
 }
 
+func (s *Syncer) activeBackends(ip net.IP, port uint16, proto uint8) map[ipPort]struct{} {
+	id, ok := s.activeSvcsMap[ipPortProto{ipPort{ip.String(), int(port)}, proto}]
+	if ok {
+		return s.activeEpsMap[id]
+	}
+	return nil
+}
+
+// FrontendHasBackend answers if there is a given backend for the given frontned
+func (s *Syncer) FrontendHasBackend(ip net.IP, port uint16, backendIP net.IP, backendPort uint16, proto uint8) bool {
+	id, ok := s.activeSvcsMap[ipPortProto{ipPort{ip.String(), int(port)}, proto}]
+	if !ok {
+		return false
+	}
+
+	backends := s.activeEpsMap[id]
+	if backends == nil {
+		return false
+	}
+
+	_, ok = backends[ipPort{backendIP.String(), int(backendPort)}]
+
+	return ok
+}
+
+func epInEps(ep k8sp.Endpoint, eps []k8sp.Endpoint) bool {
+	for _, x := range eps {
+		// XXX possibly benign changes like IsLocal()=true vs undefined or vise
+		// versa are reflected here.
+		if ep.Equal(x) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func serviceInfoFromK8sServicePort(sport k8sp.ServicePort) *serviceInfo {
 	sinfo := new(serviceInfo)
 
@@ -1057,6 +1163,7 @@ func serviceInfoFromK8sServicePort(sport k8sp.ServicePort) *serviceInfo {
 	sinfo.sessionAffinityType = sport.SessionAffinityType()
 	sinfo.stickyMaxAgeSeconds = sport.StickyMaxAgeSeconds()
 	sinfo.externalIPs = sport.ExternalIPStrings()
+	sinfo.loadBalancerIPStrings = sport.LoadBalancerIPStrings()
 	sinfo.loadBalancerSourceRanges = sport.LoadBalancerSourceRanges()
 	sinfo.healthCheckNodePort = sport.HealthCheckNodePort()
 	sinfo.onlyNodeLocalEndpoints = sport.OnlyNodeLocalEndpoints()
@@ -1074,6 +1181,7 @@ type serviceInfo struct {
 	stickyMaxAgeSeconds      int
 	externalIPs              []string
 	loadBalancerSourceRanges []string
+	loadBalancerIPStrings    []string
 	healthCheckNodePort      int
 	onlyNodeLocalEndpoints   bool
 	topologyKeys             []string
@@ -1136,7 +1244,7 @@ func (info *serviceInfo) ExternalIPStrings() []string {
 
 // LoadBalancerIPStrings is part of ServicePort interface.
 func (info *serviceInfo) LoadBalancerIPStrings() []string {
-	panic("NOT IMPLEMENTED")
+	return info.loadBalancerIPStrings
 }
 
 // OnlyNodeLocalEndpoints is part of ServicePort interface.
@@ -1161,6 +1269,43 @@ func NewK8sServicePort(clusterIP net.IP, port int, proto v1.Protocol,
 		o(x)
 	}
 	return x
+}
+
+// ServicePortEqual compares if two k8sp.ServicePort are equal, that is all of
+// their methods return equal values, i.e., they may differ in implementation,
+// but present themselves equaly. String() is not considered as thay may differ
+// for debugging reasons.
+func ServicePortEqual(a, b k8sp.ServicePort) bool {
+	return a.ClusterIP().Equal(b.ClusterIP()) &&
+		a.Port() == b.Port() &&
+		a.SessionAffinityType() == b.SessionAffinityType() &&
+		a.StickyMaxAgeSeconds() == b.StickyMaxAgeSeconds() &&
+		a.Protocol() == b.Protocol() &&
+		a.HealthCheckNodePort() == b.HealthCheckNodePort() &&
+		a.NodePort() == b.NodePort() &&
+		a.OnlyNodeLocalEndpoints() == b.OnlyNodeLocalEndpoints() &&
+		stringsEqual(a.ExternalIPStrings(), b.ExternalIPStrings()) &&
+		stringsEqual(a.LoadBalancerIPStrings(), b.LoadBalancerIPStrings()) &&
+		stringsEqual(a.LoadBalancerSourceRanges(), b.LoadBalancerSourceRanges()) &&
+		stringsEqual(a.TopologyKeys(), b.TopologyKeys())
+}
+
+func stringsEqual(a, b []string) bool {
+
+	if len(a) != len(b) {
+		return false
+	}
+
+	sort.Strings(a)
+	sort.Strings(b)
+
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // K8sSvcWithLBSourceRangeIPs sets LBSourcePortRangeIPs
