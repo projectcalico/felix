@@ -72,3 +72,5 @@ replace (
 	k8s.io/metrics => k8s.io/metrics v0.17.2
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.17.2
 )
+
+replace github.com/projectcalico/libcalico-go => github.com/caseydavenport/libcalico-go v0.0.0-20200608223135-5f67d0e1b52e
