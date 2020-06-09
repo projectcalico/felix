@@ -272,6 +272,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				Eventually(getWireguardRouteEntry(felix), "10s", "100ms").Should(ContainSubstring(routeEntries[i]))
 			}
 
+			tcpdumps = nil
 			for _, felix := range felixes {
 				// felix tcpdump
 				tcpdump := felix.AttachTCPDump("eth0")
@@ -331,10 +332,30 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 
 		It("between pod to pod should be encrypted using wg tunnel with egress policy applied", func() {
 			policy := api.NewGlobalNetworkPolicy()
+
+			policy.Name = "f01-egress-deny"
+			policy.Spec.Egress = []api.Rule{{Action: api.Deny}}
+			policy.Spec.Selector = fmt.Sprintf("name in { '%s', '%s'}", wls[0].Name, wls[1].Name)
+			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Workload connectivity reinstated.
+			cc.ExpectNone(wls[0], wls[1])
+			cc.ExpectNone(wls[1], wls[0])
+			cc.CheckConnectivity()
+
+			By("verifying tunnelled packet count is non-zero")
+			for i := range felixes {
+				Consistently(tcpdumpMatchCount(tcpdumps[i], "numInTunnelPackets"), "10s", "100ms").Should(BeNumerically("==", 0))
+				Consistently(tcpdumpMatchCount(tcpdumps[i], "numOutTunnelPackets"), "10s", "100ms").Should(BeNumerically("==", 0))
+			}
+
+			cc.ResetExpectations()
+
 			policy.Name = "f01-egress-allow"
 			policy.Spec.Egress = []api.Rule{{Action: api.Allow}}
 			policy.Spec.Selector = fmt.Sprintf("name in { '%s', '%s'}", wls[0].Name, wls[1].Name)
-			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+			_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Workload connectivity reinstated.
@@ -599,6 +620,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported 3 node cluster", [
 				Eventually(getWireguardRouteEntry(felixes[i]), "10s", "100ms").Should(ContainSubstring("dev wireguard.cali scope link"))
 			}
 
+			tcpdumps = nil
 			for _, felix := range felixes {
 				tcpdump := felix.AttachTCPDump("eth0")
 
