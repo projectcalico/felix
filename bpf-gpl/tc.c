@@ -336,7 +336,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 		.reason = CALI_REASON_UNKNOWN,
 	};
 	struct calico_nat_dest *nat_dest = NULL;
-	bool nat_lvl1_drop = 0;
+	int res = 0;
 
 	/* we assume we do FIB and from this point on, we only set it to false
 	 * if we decide not to do it.
@@ -596,9 +596,9 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	/* No conntrack entry, check if we should do NAT */
 	nat_dest = calico_v4_nat_lookup2(state.ip_src, state.ip_dst,
 					 state.ip_proto, state.dport,
-					 state.tun_ip != 0, &nat_lvl1_drop);
+					 state.tun_ip != 0, &res);
 
-	if (nat_lvl1_drop) {
+	if (res == NAT_FE_LOOKUP_DROP) {
 		CALI_DEBUG("Packet is from an unauthorised source: DROP\n");
 		fwd.reason = CALI_REASON_UNAUTH_SOURCE;
 		goto deny;
@@ -607,6 +607,10 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 		state.post_nat_ip_dst = nat_dest->addr;
 		state.post_nat_dport = nat_dest->port;
 	} else {
+		if (res == NAT_NO_BACKEND){
+			icmp_v4_port_unreachable(skb);
+			goto allow;
+		}
 		state.post_nat_ip_dst = state.ip_dst;
 		state.post_nat_dport = state.dport;
 	}
