@@ -193,6 +193,13 @@ static CALI_BPF_INLINE int icmp_v4_ttl_exceeded(struct __sk_buff *skb)
 	return icmp_v4_reply(skb, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL, 0);
 }
 
+static CALI_BPF_INLINE int icmp_v4_port_unreachable(struct __sk_buff *skb)
+{
+	if (skb_too_short(skb))
+		return -1;
+        return icmp_v4_reply(skb, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL, 0);
+}
+
 static CALI_BPF_INLINE bool icmp_type_is_err(__u8 type)
 {
 	switch (type) {
