@@ -169,6 +169,12 @@ bin/calico-felix-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	     sh -c 'go build -race -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix"'; \
 	fi
 
+bin/crash-repro: $(SRC_FILES) $(LOCAL_BUILD_DEP)
+	@echo Building crash-repro
+	mkdir -p bin
+	$(DOCKER_GO_BUILD_CGO) \
+	  sh -c 'go build -race -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/crash-repro"';
+
 # Generate the protobuf bindings for go. The proto/felixbackend.pb.go file is included in SRC_FILES
 protobuf proto/felixbackend.pb.go: proto/felixbackend.proto
 	docker run --rm --user $(LOCAL_USER_ID):$(LOCAL_GROUP_ID) \
