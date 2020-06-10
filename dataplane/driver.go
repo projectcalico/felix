@@ -121,6 +121,17 @@ func StartDataplaneDriver(configParams *config.Config,
 			log.WithError(err).Warning("Unable to assign table index for wireguard")
 		}
 
+		// If wireguard is enabled, update the failsafe inbound ports to inculde the wireguard port.
+		failsafeInboundHostPorts := configParams.FailsafeInboundHostPorts
+		if configParams.WireguardEnabled {
+			failsafeInboundHostPorts = make([]config.ProtoPort, len(configParams.FailsafeInboundHostPorts)+1)
+			copy(failsafeInboundHostPorts, configParams.FailsafeInboundHostPorts)
+			failsafeInboundHostPorts[len(configParams.FailsafeInboundHostPorts)] = config.ProtoPort{
+				Port:     uint16(configParams.WireguardListeningPort),
+				Protocol: "udp",
+			}
+		}
+
 		dpConfig := intdataplane.Config{
 			Hostname: configParams.FelixHostname,
 			IfaceMonitorConfig: ifacemonitor.Config{
@@ -164,12 +175,15 @@ func StartDataplaneDriver(configParams *config.Config,
 				IPIPTunnelAddress:  configParams.IpInIpTunnelAddr,
 				VXLANTunnelAddress: configParams.IPv4VXLANTunnelAddr,
 
+				WireguardEnabled:       configParams.WireguardEnabled,
+				WireguardInterfaceName: configParams.WireguardInterfaceName,
+
 				IptablesLogPrefix:         configParams.LogPrefix,
 				EndpointToHostAction:      configParams.DefaultEndpointToHostAction,
 				IptablesFilterAllowAction: configParams.IptablesFilterAllowAction,
 				IptablesMangleAllowAction: configParams.IptablesMangleAllowAction,
 
-				FailsafeInboundHostPorts:  configParams.FailsafeInboundHostPorts,
+				FailsafeInboundHostPorts:  failsafeInboundHostPorts,
 				FailsafeOutboundHostPorts: configParams.FailsafeOutboundHostPorts,
 
 				DisableConntrackInvalid: configParams.DisableConntrackInvalidCheck,
