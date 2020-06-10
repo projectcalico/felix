@@ -30,12 +30,14 @@ import (
 	"github.com/projectcalico/felix/fv/connectivity"
 	"github.com/projectcalico/felix/fv/infrastructure"
 	"github.com/projectcalico/felix/fv/tcpdump"
+	"github.com/projectcalico/felix/fv/utils"
 	"github.com/projectcalico/felix/fv/workload"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
 	"github.com/projectcalico/libcalico-go/lib/net"
+	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	"github.com/projectcalico/libcalico-go/lib/options"
 )
 
@@ -43,7 +45,7 @@ const (
 	wireguardInterfaceNameDefault       = "wireguard.cali"
 	wireguardMTUDefault                 = 1420
 	wireguardRoutingRulePriorityDefault = "99"
-	wireguardListeningPortDefault       = "51820"
+	wireguardListeningPortDefault       = 51820
 
 	fakeWireguardPubKey = "jlkVyQYooZYzI2wFfNhSZez5eWh44yfq1wKVjLvSXgY="
 )
@@ -348,6 +350,73 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			Expect(rcvd[1]).NotTo(BeEmpty())
 			Expect(rcvd[1]).To(Equal(sent[0]))
 		})
+
+		for _, ai := range []bool{true, false} {
+			allInterfaces := ai
+			desc := "should add wireguard port as a failsafe"
+			if ai {
+				desc += " (using * HostEndpoint)"
+			} else {
+				desc += " (using eth0 HostEnpoint"
+			}
+			It(desc, func() {
+				By("Creating policy to deny wireguard port on main felix host endpoint")
+				policy := api.NewGlobalNetworkPolicy()
+				policy.Name = "deny-wg-port"
+				prot := numorstring.ProtocolFromString(numorstring.ProtocolUDP)
+				policy.Spec.Egress = []api.Rule{
+					{
+						Action:   api.Deny,
+						Protocol: &prot,
+						Destination: api.EntityRule{
+							Selector: "has(host-endpoint)",
+							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
+						},
+					},
+					{Action: api.Allow},
+				}
+				policy.Spec.Ingress = []api.Rule{
+					{
+						Action:   api.Deny,
+						Protocol: &prot,
+						Destination: api.EntityRule{
+							Selector: "has(host-endpoint)",
+							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
+						},
+					},
+					{Action: api.Allow},
+				}
+				policy.Spec.Selector = "all()"
+				policy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress, api.PolicyTypeEgress}
+				_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+				Expect(err).NotTo(HaveOccurred())
+
+				By("Creating a HostEndpoint for each Felix")
+				for _, f := range felixes {
+					hep := api.NewHostEndpoint()
+					hep.Name = "hep-" + f.Name
+					hep.Labels = map[string]string{
+						"name":          hep.Name,
+						"hostname":      f.Hostname,
+						"host-endpoint": "true",
+					}
+					hep.Spec.Node = f.Hostname
+					hep.Spec.ExpectedIPs = []string{f.IP}
+					if allInterfaces {
+						hep.Spec.InterfaceName = "*"
+					} else {
+						hep.Spec.InterfaceName = "eth0"
+					}
+					_, err := client.HostEndpoints().Create(utils.Ctx, hep, options.SetOptions{})
+					Expect(err).NotTo(HaveOccurred())
+				}
+
+				By("Checking there is connectivity between the workloads")
+				cc.ExpectSome(wls[0], wls[1])
+				cc.ExpectSome(wls[1], wls[0])
+				Consistently(cc.CheckConnectivity).ShouldNot(Panic())
+			})
+		}
 	})
 
 	Context("with Wireguard disabled", func() {
@@ -465,6 +534,8 @@ func wireguardTopologyOptions() infrastructure.TopologyOptions {
 	topologyOptions.EnableIPv6 = false
 	// Assigning workload IPs using IPAM API.
 	topologyOptions.IPIPRoutesEnabled = false
+	// Indicate wireguard is enabled
+	topologyOptions.WireguardEnabled = true
 
 	// Enable Wireguard.
 	felixConfig := api.NewFelixConfiguration()
