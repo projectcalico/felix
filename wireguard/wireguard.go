@@ -489,10 +489,10 @@ func (w *Wireguard) EndpointWireguardUpdate(name string, publicKey wgtypes.Key, 
 		return
 	}
 
-	// Update the public key and interface addresses for the remote nodes.
+	// Only update the public key in the node data for nodes.  The local node will not have this set, this prevents the
+	// wireguard config processing from attempting to add the local node as a peer.
 	update := w.getOrInitNodeUpdateData(name)
-	existing, ok := w.nodes[name]
-	if ok && existing.publicKey == publicKey {
+	if existing, ok := w.nodes[name]; ok && existing.publicKey == publicKey {
 		// Public key not updated
 		logCxt.Debug("Public key unchanged from programmed")
 		update.publicKey = nil
