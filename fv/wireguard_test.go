@@ -30,12 +30,14 @@ import (
 	"github.com/projectcalico/felix/fv/connectivity"
 	"github.com/projectcalico/felix/fv/infrastructure"
 	"github.com/projectcalico/felix/fv/tcpdump"
+	"github.com/projectcalico/felix/fv/utils"
 	"github.com/projectcalico/felix/fv/workload"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
 	"github.com/projectcalico/libcalico-go/lib/net"
+	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	"github.com/projectcalico/libcalico-go/lib/options"
 )
 
@@ -43,13 +45,13 @@ const (
 	wireguardInterfaceNameDefault       = "wireguard.cali"
 	wireguardMTUDefault                 = 1420
 	wireguardRoutingRulePriorityDefault = "99"
-	wireguardListeningPortDefault       = "51820"
+	wireguardListeningPortDefault       = 51820
 
 	fakeWireguardPubKey = "jlkVyQYooZYzI2wFfNhSZez5eWh44yfq1wKVjLvSXgY="
 )
 
 var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
-	const nodeCount= 2
+	const nodeCount = 2
 
 	var (
 		infra        infrastructure.DatastoreInfra
@@ -361,10 +363,31 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				By("Creating policy to deny wireguard port on main felix host endpoint")
 				policy := api.NewGlobalNetworkPolicy()
 				policy.Name = "deny-wg-port"
+				prot := numorstring.ProtocolFromString(numorstring.ProtocolUDP)
 				policy.Spec.Egress = []api.Rule{
-					{Action: api.Deny, Destination: api.EntityRule{Selector: "has(host-endpoint)"}},
-					{Action: api.Allow}}
+					{
+						Action:   api.Deny,
+						Protocol: &prot,
+						Destination: api.EntityRule{
+							Selector: "has(host-endpoint)",
+							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
+						},
+					},
+					{Action: api.Allow},
+				}
+				policy.Spec.Ingress = []api.Rule{
+					{
+						Action:   api.Deny,
+						Protocol: &prot,
+						Destination: api.EntityRule{
+							Selector: "has(host-endpoint)",
+							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
+						},
+					},
+					{Action: api.Allow},
+				}
 				policy.Spec.Selector = "all()"
+				policy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress, api.PolicyTypeEgress}
 				_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 				Expect(err).NotTo(HaveOccurred())
 
