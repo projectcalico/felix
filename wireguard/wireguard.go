@@ -92,9 +92,9 @@ type nodeUpdateData struct {
 	cidrsDeleted set.Set
 
 	// Only used for nodes.
-	deleted           bool
-	ipv4EndpointAddr  *ip.Addr
-	publicKey         *wgtypes.Key
+	deleted          bool
+	ipv4EndpointAddr *ip.Addr
+	publicKey        *wgtypes.Key
 }
 
 func newNodeUpdateData() *nodeUpdateData {
