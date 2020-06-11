@@ -37,7 +37,6 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
 	"github.com/projectcalico/libcalico-go/lib/net"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	"github.com/projectcalico/libcalico-go/lib/options"
 )
 
@@ -360,27 +359,27 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				By("Creating policy to deny wireguard port on main felix host endpoint")
 				policy := api.NewGlobalNetworkPolicy()
 				policy.Name = "deny-wg-port"
-				prot := numorstring.ProtocolFromString(numorstring.ProtocolUDP)
+				//prot := numorstring.ProtocolFromString(numorstring.ProtocolUDP)
 				policy.Spec.Egress = []api.Rule{
-					{
-						Action:   api.Deny,
-						Protocol: &prot,
-						Destination: api.EntityRule{
-							Selector: "has(host-endpoint)",
-							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
-						},
-					},
+					//{
+					//	Action:   api.Deny,
+					//	Protocol: &prot,
+					//	Destination: api.EntityRule{
+					//		Selector: "has(host-endpoint)",
+					//		Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
+					//	},
+					//},
 					{Action: api.Allow},
 				}
 				policy.Spec.Ingress = []api.Rule{
-					{
-						Action:   api.Deny,
-						Protocol: &prot,
-						Destination: api.EntityRule{
-							Selector: "has(host-endpoint)",
-							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
-						},
-					},
+					//{
+					//	Action:   api.Deny,
+					//	Protocol: &prot,
+					//	Destination: api.EntityRule{
+					//		Selector: "has(host-endpoint)",
+					//		Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
+					//	},
+					//},
 					{Action: api.Allow},
 				}
 				policy.Spec.Selector = "all()"
@@ -411,7 +410,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				By("Checking there is connectivity between the workloads")
 				cc.ExpectSome(wls[0], wls[1])
 				cc.ExpectSome(wls[1], wls[0])
-				Consistently(cc.CheckConnectivity).ShouldNot(Panic())
+				cc.CheckConnectivity()
 			})
 		}
 	})
