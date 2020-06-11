@@ -125,6 +125,14 @@ func (t *TCPDump) MatchCount(name string) int {
 	return c
 }
 
+func (t *TCPDump) ResetCount(name string) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	t.matchers[name].count = 0
+	logrus.Infof("[%s] Reset count for %s", t.contName, name)
+}
+
 func (t *TCPDump) Start(expr ...string) {
 	args := append(t.args, expr...)
 	t.cmd = utils.Command(t.exe, args...)
@@ -169,9 +177,12 @@ func (t *TCPDump) readStdout() {
 			logrus.Infof("[%s] %s", t.contName, line)
 		}
 		t.lock.Lock()
-		for _, m := range t.matchers {
+		for n, m := range t.matchers {
 			if m.regex.MatchString(line) {
+				logrus.Infof("[%s] [%s]: Matches", n, line)
 				m.count++
+			} else {
+				logrus.Infof("[%s] [%s]: Does not match", n, line)
 			}
 		}
 		t.lock.Unlock()
