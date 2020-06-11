@@ -262,6 +262,9 @@ var _ = DescribeTable("Config parsing",
 	Entry("ChainInsertMode append", "ChainInsertMode", "append", "append"),
 	Entry("ChainInsertMode append", "ChainInsertMode", "Append", "append"),
 
+	Entry("AWSSrcDstCheck donothing", "AWSSrcDstCheck", "donothing", "donothing"),
+	Entry("AWSSrcDstCheck donothing", "AWSSrcDstCheck", "DoNothing", "donothing"),
+
 	Entry("IptablesPostWriteCheckIntervalSecs", "IptablesPostWriteCheckIntervalSecs",
 		"1.5", 1500*time.Millisecond),
 	Entry("IptablesLockFilePath", "IptablesLockFilePath",
