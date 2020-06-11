@@ -101,6 +101,9 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 		routeEntries[0], routeEntries[1] = routeEntries[1], routeEntries[0]
 
 		cc = &connectivity.Checker{}
+
+		// Reset the set of tcp dumps between runs.
+		tcpdumps = nil
 	})
 
 	AfterEach(func() {
@@ -216,7 +219,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 					out, err := felix.ExecOutput("ip", "rule", "show", "pref", fmt.Sprintf("%d", rule))
 					Expect(err).NotTo(HaveOccurred())
 					return out
-				}, "10s", "100ms").ShouldNot(BeEmpty())
+				}, " 10s", "100ms").ShouldNot(BeEmpty())
 			}
 		})
 
@@ -291,13 +294,12 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				outTunnelPacketsPattern := fmt.Sprintf("IP \\d+\\.\\d+\\.\\d+\\.\\d+\\.51820 > %s\\.51820: UDP", felix.IP)
 				tcpdump.AddMatcher("numOutTunnelPackets", regexp.MustCompile(outTunnelPacketsPattern))
 				workload01PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[0].IP, wls[1].IP)
-				tcpdump.AddMatcher("numWorkload01Packets", regexp.MustCompile(workload01PacketsPattern))
+				tcpdump.AddMatcher("numWorkload0to1Packets", regexp.MustCompile(workload01PacketsPattern))
 				workload10PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[1].IP, wls[0].IP)
-				tcpdump.AddMatcher("numWorkload10Packets", regexp.MustCompile(workload10PacketsPattern))
+				tcpdump.AddMatcher("numWorkload1to0Packets", regexp.MustCompile(workload10PacketsPattern))
 
 				tcpdump.Start()
 				tcpdumps = append(tcpdumps, tcpdump)
-
 			}
 		})
 
@@ -315,10 +317,10 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 					return tcpdumps[i].MatchCount("numOutTunnelPackets")
 				}, "10s", "100ms").Should(BeNumerically(">", 0))
 				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numWorkload01Packets")
+					return tcpdumps[i].MatchCount("numWorkload0to1Packets")
 				}, "10s", "100ms").Should(BeNumerically("==", 0))
 				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numWorkload10Packets")
+					return tcpdumps[i].MatchCount("numWorkload1to0Packets")
 				}, "10s", "100ms").Should(BeNumerically("==", 0))
 			}
 		})
@@ -346,6 +348,58 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			Expect(rcvd[0]).To(Equal(sent[1]))
 			Expect(rcvd[1]).NotTo(BeEmpty())
 			Expect(rcvd[1]).To(Equal(sent[0]))
+		})
+
+		It("between pod to pod should be allowed and encrypted", func() {
+			waitForPackets := func(t *tcpdump.TCPDump, name string, num int) error {
+				for i := 0; i < 100; i++ {
+					if i != 0 {
+						time.Sleep(100 * time.Millisecond)
+					}
+					if t.MatchCount(name) == num {
+						return nil
+					}
+				}
+				return fmt.Errorf("incorrect packet count for %s; expected=%d actual=%d", name, num, t.MatchCount(name))
+			}
+
+			checkConn := func() error {
+				// Reset TCP packet counts.
+				By("Resetting the TCP dump counts")
+				for i := range felixes {
+					tcpdumps[i].ResetCount("numInTunnelPackets")
+					tcpdumps[i].ResetCount("numOutTunnelPackets")
+					tcpdumps[i].ResetCount("numWorkload0to1Packets")
+					tcpdumps[i].ResetCount("numWorkload1to0Packets")
+				}
+
+				// Send packets to and from workloads on each felix.
+				By("Sending packets W1->W2 and W2->W1")
+				if err, _ := wls[0].SendPacketsTo(wls[1].IP, 10, 56); err != nil {
+					return err
+				}
+				if err, _ := wls[1].SendPacketsTo(wls[0].IP, 10, 56); err != nil {
+					return err
+				}
+
+				// Now check the packet counts are as expected. We should have no WL->WL traffic visible on eth0, but
+				// we should be able to see tunnel traffic.
+				By("Checking the packet stats from tcpdump")
+				for i := range felixes {
+					if err := waitForPackets(tcpdumps[i], "numInTunnelPackets", 2); err != nil {
+						return err
+					} else if err := waitForPackets(tcpdumps[i], "numOutTunnelPackets", 2); err != nil {
+						return err
+					} else if err := waitForPackets(tcpdumps[i], "numWorkload0to1Packets", 0); err != nil {
+						return err
+					} else if err := waitForPackets(tcpdumps[i], "numWorkload1to0Packets", 0); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+
+			Eventually(checkConn, "5s", "100ms").ShouldNot(HaveOccurred())
 		})
 
 		for _, ai := range []bool{true, false} {
