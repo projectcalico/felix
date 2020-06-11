@@ -348,6 +348,58 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			Expect(rcvd[1]).To(Equal(sent[0]))
 		})
 
+		It("between pod to pod should be allowed and encrypted", func() {
+			waitForPackets := func(t *tcpdump.TCPDump, name string, num int) error {
+				for i := 0; i < 100; i++ {
+					if i != 0 {
+						time.Sleep(100 * time.Millisecond)
+					}
+					if t.MatchCount(name) == num {
+						return nil
+					}
+				}
+				return fmt.Errorf("incorrect packet count for %s; expected=%d actual=%d", name, num, t.MatchCount(name))
+			}
+
+			checkConn := func() error {
+				// Reset TCP packet counts.
+				By("Resetting the TCP dump counts")
+				for i := range felixes {
+					tcpdumps[i].ResetCount("numInTunnelPackets")
+					tcpdumps[i].ResetCount("numOutTunnelPackets")
+					tcpdumps[i].ResetCount("numWorkload01Packets")
+					tcpdumps[i].ResetCount("numWorkload10Packets")
+				}
+
+				// Send packets to and from workloads on each felix.
+				By("Sending packets W1->W2 and W2->W1")
+				if err, _ := wls[0].SendPacketsTo(wls[1].IP, 10, 56); err != nil {
+					return err
+				}
+				if err, _ := wls[1].SendPacketsTo(wls[0].IP, 10, 56); err != nil {
+					return err
+				}
+
+				// Now check the packet counts are as expected. We should have no WL->WL traffic visible on eth0, but
+				// we should be able to see tunnel traffic.
+				By("Checking the packet stats from tcpdump")
+				for i := range felixes {
+					if err := waitForPackets(tcpdumps[i], "numInTunnelPackets", 2); err != nil {
+						return err
+					} else if err := waitForPackets(tcpdumps[i], "numOutTunnelPackets", 2); err != nil {
+						return err
+					} else if err := waitForPackets(tcpdumps[i], "numWorkload01Packets", 0); err != nil {
+						return err
+					} else if err := waitForPackets(tcpdumps[i], "numWorkload10Packets", 0); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+
+			Eventually(checkConn, "5s", "100ms").ShouldNot(HaveOccurred())
+		})
+
 		for _, ai := range []bool{true, false} {
 			allInterfaces := ai
 			desc := "should add wireguard port as a failsafe"
