@@ -56,7 +56,6 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 		felixes      []*infrastructure.Felix
 		client       clientv3.Interface
 		tcpdumps     []*tcpdump.TCPDump
-		wlTcpdumps   []*tcpdump.TCPDump
 		wls          [nodeCount]*workload.Workload // simulated host workloads
 		cc           *connectivity.Checker
 		routeEntries [nodeCount]string
@@ -108,7 +107,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 	AfterEach(func() {
 		if CurrentGinkgoTestDescription().Failed {
 			for _, felix := range felixes {
-				felix.Exec("ip", "link", "show")
+				felix.Exec("ip", "addr")
 				felix.Exec("ip", "rule", "list")
 				felix.Exec("ip", "route", "show", "table", "all")
 				felix.Exec("ip", "route", "show", "cached")
@@ -151,23 +150,22 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 
 		It("the Wireguard routing rule should exist", func() {
 			for i, felix := range felixes {
-				Eventually(getWireguardRoutingRule(felix), "5s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from %s fwmark 0/0x\\d+ lookup \\d+", ruleCIDRs[i])))
+				Eventually(func() string {
+					return getWireguardRoutingRule(felix)
+				}, "5s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from %s fwmark 0/0x\\d+ lookup \\d+", ruleCIDRs[i])))
 			}
 		})
 
 		It("the Wireguard route-table entry should exist", func() {
 			for i, felix := range felixes {
-				Eventually(getWireguardRouteEntry(felix), "5s", "100ms").Should(ContainSubstring(routeEntries[i]))
+				Eventually(func() string {
+					return getWireguardRouteEntry(felix)
+				}, "5s", "100ms").Should(ContainSubstring(routeEntries[i]))
 			}
 		})
 
 		It("the Wireguard device should be configurable", func() {
-			felixPID0 := felixes[0].GetFelixPID()
-			felixPID1 := felixes[1].GetFelixPID()
 			disableWireguard(client)
-			// Wait for felix to restart.
-			Eventually(felixes[0].GetFelixPID, "5s", "100ms").ShouldNot(Equal(felixPID0))
-			Eventually(felixes[1].GetFelixPID, "5s", "100ms").ShouldNot(Equal(felixPID1))
 
 			// Old configuration should disappear.
 			for _, felix := range felixes {
@@ -198,12 +196,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			_, err = client.FelixConfigurations().Update(ctx, fc, options.SetOptions{})
 			Expect(err).NotTo(HaveOccurred())
 
-			felixPID0 = felixes[0].GetFelixPID()
-			felixPID1 = felixes[1].GetFelixPID()
 			enableWireguard(client)
-			// Wait for felix to restart.
-			Eventually(felixes[0].GetFelixPID, "5s", "100ms").ShouldNot(Equal(felixPID0))
-			Eventually(felixes[1].GetFelixPID, "5s", "100ms").ShouldNot(Equal(felixPID1))
 
 			// New Wireguard device should appear with default MTU, etc.
 			for _, felix := range felixes {
@@ -278,15 +271,19 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 
 			for i, felix := range felixes {
 				// Check the rule exists.
-				Eventually(getWireguardRoutingRule(felix), "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from %s fwmark 0/0x\\d+ lookup \\d+", ruleCIDRs[i])))
+				Eventually(func() string {
+					return getWireguardRoutingRule(felix)
+				}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from %s fwmark 0/0x\\d+ lookup \\d+", ruleCIDRs[i])))
 			}
 
 			for i, felix := range felixes {
 				// Check the route entry exists.
-				Eventually(getWireguardRouteEntry(felix), "10s", "100ms").Should(ContainSubstring(routeEntries[i]))
+				Eventually(func() string {
+					return getWireguardRouteEntry(felix)
+				}, "10s", "100ms").Should(ContainSubstring(routeEntries[i]))
 			}
 
-			for i, felix := range felixes {
+			for _, felix := range felixes {
 				// Felix tcpdump
 				tcpdump := felix.AttachTCPDump("eth0")
 
@@ -294,22 +291,14 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				tcpdump.AddMatcher("numInTunnelPackets", regexp.MustCompile(inTunnelPacketsPattern))
 				outTunnelPacketsPattern := fmt.Sprintf("IP \\d+\\.\\d+\\.\\d+\\.\\d+\\.51820 > %s\\.51820: UDP", felix.IP)
 				tcpdump.AddMatcher("numOutTunnelPackets", regexp.MustCompile(outTunnelPacketsPattern))
+				workload01PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[0].IP, wls[1].IP)
+				tcpdump.AddMatcher("numWorkload01Packets", regexp.MustCompile(workload01PacketsPattern))
+				workload10PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[1].IP, wls[0].IP)
+				tcpdump.AddMatcher("numWorkload10Packets", regexp.MustCompile(workload10PacketsPattern))
 
 				tcpdump.Start()
-
 				tcpdumps = append(tcpdumps, tcpdump)
 
-				// Workload tcpdump
-				wlTcpdump := wls[i].AttachTCPDump()
-
-				workload01PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[0].IP, wls[1].IP)
-				wlTcpdump.AddMatcher("numWorkload01Packets", regexp.MustCompile(workload01PacketsPattern))
-				workload10PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[1].IP, wls[0].IP)
-				wlTcpdump.AddMatcher("numWorkload10Packets", regexp.MustCompile(workload10PacketsPattern))
-
-				wlTcpdump.Start()
-
-				wlTcpdumps = append(wlTcpdumps, wlTcpdump)
 			}
 		})
 
@@ -320,10 +309,18 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 
 			By("verifying tunnelled packet count is zero and no direct traffic between pod to pod exists")
 			for i := range felixes {
-				Eventually(tcpdumpMatchCount(tcpdumps[i], "numInTunnelPackets"), "10s", "100ms").Should(BeNumerically(">", 0))
-				Eventually(tcpdumpMatchCount(tcpdumps[i], "numOutTunnelPackets"), "10s", "100ms").Should(BeNumerically(">", 0))
-				Eventually(tcpdumpMatchCount(wlTcpdumps[i], "numWorkload01Packets"), "10s", "100ms").Should(BeNumerically("==", 0))
-				Eventually(tcpdumpMatchCount(wlTcpdumps[i], "numWorkload10Packets"), "10s", "100ms").Should(BeNumerically("==", 0))
+				Eventually(func() int {
+					return tcpdumps[i].MatchCount("numInTunnelPackets")
+				}, "10s", "100ms").Should(BeNumerically(">", 0))
+				Eventually(func() int {
+					return tcpdumps[i].MatchCount("numOutTunnelPackets")
+				}, "10s", "100ms").Should(BeNumerically(">", 0))
+				Eventually(func() int {
+					return tcpdumps[i].MatchCount("numWorkload01Packets")
+				}, "10s", "100ms").Should(BeNumerically("==", 0))
+				Eventually(func() int {
+					return tcpdumps[i].MatchCount("numWorkload10Packets")
+				}, "10s", "100ms").Should(BeNumerically("==", 0))
 			}
 		})
 
@@ -355,16 +352,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 
 	Context("with Wireguard disabled", func() {
 		BeforeEach(func() {
-			var felixPIDs [nodeCount]int
-			for i, felix := range felixes {
-				felixPIDs[i] = felix.GetFelixPID()
-			}
 			disableWireguard(client)
-
-			// Wait for felix to restart.
-			for i, felix := range felixes {
-				Eventually(felix.GetFelixPID, "10s", "100ms").ShouldNot(Equal(felixPIDs[i]))
-			}
 
 			// Check Wireguard device doesn't exist.
 			for _, felix := range felixes {
@@ -376,12 +364,16 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 
 			// Check that Wireguard routing rule doesn't exist.
 			for _, felix := range felixes {
-				Eventually(getWireguardRoutingRule(felix), "10s", "100ms").Should(BeEmpty())
+				Eventually(func() string {
+					return getWireguardRoutingRule(felix)
+				}, "10s", "100ms").Should(BeEmpty())
 			}
 
 			// Check Wireguard route table entry doesn't exist.
 			for i, felix := range felixes {
-				Eventually(getWireguardRouteEntry(felix), "10s", "100ms").ShouldNot(ContainSubstring(routeEntries[i]))
+				Eventually(func() string {
+					return getWireguardRouteEntry(felix)
+				}, "10s", "100ms").ShouldNot(ContainSubstring(routeEntries[i]))
 			}
 		})
 
@@ -527,10 +519,4 @@ func getWireguardRouteEntry(felix *infrastructure.Felix) string {
 	Expect(err).NotTo(HaveOccurred())
 
 	return routes
-}
-
-func tcpdumpMatchCount(tdump *tcpdump.TCPDump, matcherName string) func() int {
-	return func() int {
-		return tdump.MatchCount(matcherName)
-	}
 }
