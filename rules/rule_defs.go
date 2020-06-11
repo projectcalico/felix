@@ -215,6 +215,7 @@ type DefaultRuleRenderer struct {
 	inputAcceptActions []iptables.Action
 	filterAllowAction  iptables.Action
 	mangleAllowAction  iptables.Action
+	dropActionOverride iptables.Action
 }
 
 func (r *DefaultRuleRenderer) ipSetConfig(ipVersion uint8) *ipsets.IPVersionConfig {
@@ -265,6 +266,7 @@ type Config struct {
 	EndpointToHostAction      string
 	IptablesFilterAllowAction string
 	IptablesMangleAllowAction string
+	DropActionOverride        string
 
 	FailsafeInboundHostPorts  []config.ProtoPort
 	FailsafeOutboundHostPorts []config.ProtoPort
@@ -310,13 +312,25 @@ func (c *Config) validate() {
 func NewRenderer(config Config) RuleRenderer {
 	log.WithField("config", config).Info("Creating rule renderer.")
 	config.validate()
+
+	// First, what should we do when packets are not accepted.
+	var dropActionOverride iptables.Action
+	switch config.DropActionOverride {
+	case "REJECT":
+		log.Info("packets that are not passed by any policy or profile will be rejected.")
+		dropActionOverride = iptables.RejectAction{}
+	default:
+		log.Info("packets that are not passed by any policy or profile will be dropped.")
+		dropActionOverride = iptables.DropAction{}
+	}
+
 	// Convert configured actions to rule slices.
-	// First, what should we do with packets that come from workloads to the host itself.
+	// What should we do with packets that come from workloads to the host itself.
 	var inputAcceptActions []iptables.Action
 	switch config.EndpointToHostAction {
 	case "DROP":
 		log.Info("Workload to host packets will be dropped.")
-		inputAcceptActions = []iptables.Action{iptables.DropAction{}}
+		inputAcceptActions = []iptables.Action{dropActionOverride}
 	case "ACCEPT":
 		log.Info("Workload to host packets will be accepted.")
 		inputAcceptActions = []iptables.Action{iptables.AcceptAction{}}
@@ -349,5 +363,6 @@ func NewRenderer(config Config) RuleRenderer {
 		inputAcceptActions: inputAcceptActions,
 		filterAllowAction:  filterAllowAction,
 		mangleAllowAction:  mangleAllowAction,
+		dropActionOverride: dropActionOverride,
 	}
 }
