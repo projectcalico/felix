@@ -275,7 +275,9 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			out, err := felix.ExecOutput("wg")
 			Expect(err).NotTo(HaveOccurred())
 			matches := xferRegExp.FindStringSubmatch(out)
-			Expect(len(matches)).To(BeNumerically("==", 3))
+			if len(matches) != 3 {
+				return
+			}
 			rcvd, err = strconv.ParseInt(matches[1], 10, 32)
 			Expect(err).NotTo(HaveOccurred())
 			sent, err = strconv.ParseInt(matches[2], 10, 32)
@@ -394,13 +396,9 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			if ai {
 				desc += " (using * HostEndpoint)"
 			} else {
-				desc += " (using eth0 HostEnpoint"
+				desc += " (using eth0 HostEndpoint)"
 			}
 			It(desc, func() {
-				By("Checking for allowed wep to host traffic")
-				err, _ := wls[0].SendPacketsTo(felixes[1].IP, 1, 56)
-				Expect(err).NotTo(HaveOccurred())
-
 				By("Creating policy to deny wireguard port on main felix host endpoint")
 				policy := api.NewGlobalNetworkPolicy()
 				policy.Name = "deny-wg-port"
@@ -424,13 +422,14 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 						Protocol: &prot,
 						Destination: api.EntityRule{
 							Selector: "has(host-endpoint)",
+							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
 						},
 					},
 					{Action: api.Allow},
 				}
 				policy.Spec.Selector = "all()"
 				policy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress, api.PolicyTypeEgress}
-				_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+				_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Creating a HostEndpoint for each Felix")
@@ -453,18 +452,9 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 					Expect(err).NotTo(HaveOccurred())
 				}
 
-				By("Checking the policy has been applied by looking for denied traffic")
-				Eventually(func() error {
-					err, _ := wls[0].SendPacketsTo(felixes[1].IP, 1, 56)
-					return err
-				}).Should(HaveOccurred())
-				Consistently(func() error {
-					err, _ := wls[0].SendPacketsTo(felixes[1].IP, 1, 56)
-					return err
-				}).Should(HaveOccurred())
-
-				By("Checking there is connectivity between the workloads using wg")
+				By("Checking there is eventually and consistently connectivity between the workloads using wg")
 				Eventually(checkConn, "5s", "100ms").ShouldNot(HaveOccurred())
+				Consistently(checkConn, "2s", "100ms").ShouldNot(HaveOccurred())
 			})
 		}
 	})
