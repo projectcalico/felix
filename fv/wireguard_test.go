@@ -564,7 +564,7 @@ func wireguardTopologyOptions() infrastructure.TopologyOptions {
 	// Assigning workload IPs using IPAM API.
 	topologyOptions.IPIPRoutesEnabled = false
 	// Indicate wireguard is enabled
-	topologyOptions.WireguardEnabled = true
+	topologyOptions.WireguardEnabled = false
 
 	// Enable Wireguard.
 	felixConfig := api.NewFelixConfiguration()
