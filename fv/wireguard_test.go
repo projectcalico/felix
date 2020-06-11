@@ -19,6 +19,7 @@ package fv_test
 import (
 	"context"
 	"fmt"
+	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	"os"
 	"regexp"
 	"strings"
@@ -359,27 +360,27 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				By("Creating policy to deny wireguard port on main felix host endpoint")
 				policy := api.NewGlobalNetworkPolicy()
 				policy.Name = "deny-wg-port"
-				//prot := numorstring.ProtocolFromString(numorstring.ProtocolUDP)
+				prot := numorstring.ProtocolFromString(numorstring.ProtocolUDP)
 				policy.Spec.Egress = []api.Rule{
-					//{
-					//	Action:   api.Deny,
-					//	Protocol: &prot,
-					//	Destination: api.EntityRule{
-					//		Selector: "has(host-endpoint)",
-					//		Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
-					//	},
-					//},
+					{
+						Action:   api.Deny,
+						Protocol: &prot,
+						Destination: api.EntityRule{
+							Selector: "has(host-endpoint)",
+							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
+						},
+					},
 					{Action: api.Allow},
 				}
 				policy.Spec.Ingress = []api.Rule{
-					//{
-					//	Action:   api.Deny,
-					//	Protocol: &prot,
-					//	Destination: api.EntityRule{
-					//		Selector: "has(host-endpoint)",
-					//		Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
-					//	},
-					//},
+					{
+						Action:   api.Deny,
+						Protocol: &prot,
+						Destination: api.EntityRule{
+							Selector: "has(host-endpoint)",
+							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
+						},
+					},
 					{Action: api.Allow},
 				}
 				policy.Spec.Selector = "all()"
