@@ -59,7 +59,6 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 		wls          [nodeCount]*workload.Workload // simulated host workloads
 		cc           *connectivity.Checker
 		routeEntries [nodeCount]string
-		ruleCIDRs    [nodeCount]string
 	)
 
 	BeforeEach(func() {
@@ -91,8 +90,6 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			wls[i] = workload.Run(felixes[i], wlName, "default", wlIP, "8055", "tcp")
 			wls[i].ConfigureInDatastore(infra)
 
-			// Prepare substring to match in rule.
-			ruleCIDRs[i] = fmt.Sprintf("10.65.%d.0/26", i)
 			// Prepare route entry.
 			routeEntries[i] = fmt.Sprintf("10.65.%d.0/26 dev %s scope link", i, wireguardInterfaceNameDefault)
 
@@ -149,10 +146,10 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 		})
 
 		It("the Wireguard routing rule should exist", func() {
-			for i, felix := range felixes {
+			for _, felix := range felixes {
 				Eventually(func() string {
 					return getWireguardRoutingRule(felix)
-				}, "5s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from %s fwmark 0/0x\\d+ lookup \\d+", ruleCIDRs[i])))
+				}, "5s", "100ms").Should(MatchRegexp("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+"))
 			}
 		})
 
@@ -269,11 +266,11 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				}, "10s", "100ms").ShouldNot(HaveOccurred())
 			}
 
-			for i, felix := range felixes {
+			for _, felix := range felixes {
 				// Check the rule exists.
 				Eventually(func() string {
 					return getWireguardRoutingRule(felix)
-				}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from %s fwmark 0/0x\\d+ lookup \\d+", ruleCIDRs[i])))
+				}, "10s", "100ms").Should(MatchRegexp("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+"))
 			}
 
 			for i, felix := range felixes {
@@ -465,6 +462,8 @@ func wireguardTopologyOptions() infrastructure.TopologyOptions {
 	topologyOptions.EnableIPv6 = false
 	// Assigning workload IPs using IPAM API.
 	topologyOptions.IPIPRoutesEnabled = false
+	// Indicate wireguard is enabled
+	topologyOptions.WireguardEnabled = true
 
 	// Enable Wireguard.
 	felixConfig := api.NewFelixConfiguration()
