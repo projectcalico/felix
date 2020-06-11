@@ -15,20 +15,119 @@
 package aws
 
 import (
-	//"github.com/projectcalico/felix/config"
+	"fmt"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
+	"github.com/aws/aws-sdk-go/aws/ec2metadata"
+	"github.com/aws/aws-sdk-go/aws/request"
+	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
+
+	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
 
+const (
+	testRegion = "us-west-2"
+	testEniId  = "eni-i-000"
+	testInstId = "i-000"
+)
+
+type mockClient struct {
+	ec2iface.EC2API
+	UsageCounter int
+}
+
+func NewMockClient() *mockClient {
+	return &mockClient{UsageCounter: 0}
+}
+
+func (c *mockClient) GetInstanceIdentityDocumentWithContext(ctx aws.Context) (ec2metadata.EC2InstanceIdentityDocument, error) {
+	c.UsageCounter++
+
+	return ec2metadata.EC2InstanceIdentityDocument{
+		InstanceID: testInstId,
+	}, nil
+}
+
+func (c *mockClient) RegionWithContext(ctx aws.Context) (string, error) {
+	c.UsageCounter++
+
+	return testRegion, nil
+}
+
+func (c *mockClient) ModifyNetworkInterfaceAttributeWithContext(ctx aws.Context, input *ec2.ModifyNetworkInterfaceAttributeInput, opts ...request.Option) (*ec2.ModifyNetworkInterfaceAttributeOutput, error) {
+	c.UsageCounter++
+
+	return nil, nil
+}
+
+func (c *mockClient) DescribeInstancesWithContext(ctx aws.Context, input *ec2.DescribeInstancesInput, opts ...request.Option) (*ec2.DescribeInstancesOutput, error) {
+	c.UsageCounter++
+
+	deviceIndexZero := int64(0)
+	eniId := testEniId
+
+	return &ec2.DescribeInstancesOutput{
+		Reservations: []*ec2.Reservation{
+			{
+				Instances: []*ec2.Instance{
+					{
+						NetworkInterfaces: []*ec2.InstanceNetworkInterface{
+							{
+								Attachment: &ec2.InstanceNetworkInterfaceAttachment{
+									DeviceIndex: &deviceIndexZero,
+								},
+								NetworkInterfaceId: &eniId,
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
 var _ = Describe("AWS Tests", func() {
-	BeforeEach(func() {
+	It("should correctly convert between errors and awserrors", func() {
+		fakeCode := "fakeCode"
+		fakeMsg := "fakeMsg"
+
+		awsErr := awserr.New(fakeCode, fakeMsg, nil)
+		errMsg := convertError(awsErr)
+		Expect(errMsg).To(Equal(fmt.Sprintf("%s: %s", fakeCode, fakeMsg)))
+
+		fakeMsg = "fake non-aws error"
+		err := fmt.Errorf(fakeMsg)
+		errMsg = convertError(err)
+		Expect(errMsg).To(Equal(fakeMsg))
+	})
+
+	It("should handle retriable server error", func() {
+		internalErrCode := "InternalError"
+		internalErrMsg := "internal error"
+
+		awsErr := awserr.New(internalErrCode, internalErrMsg, nil)
+		Expect(retriable(awsErr)).To(BeTrue())
+
+		fakeCode := "fakeCode"
+		fakeMsg := "fakeMsg"
+
+		awsErr = awserr.New(fakeCode, fakeMsg, nil)
+		Expect(retriable(awsErr)).To(BeFalse())
+
+		fakeMsg = "non-aws error"
+		err := fmt.Errorf(fakeMsg)
+		Expect(retriable(err)).To(BeFalse())
 	})
 
 	It("should return correct src-dst-check API value to set", func() {
-		val := checkSourceDestinationValueIsDisable("disable")
+		val := checkSourceDestinationValueIsDisable(apiv3.AWSSrcDstCheckOptionDisable)
 		Expect(val).To(BeTrue())
-		val = checkSourceDestinationValueIsDisable("enable")
+		val = checkSourceDestinationValueIsDisable(apiv3.AWSSrcDstCheckOptionEnable)
 		Expect(val).To(BeFalse())
 		val = checkSourceDestinationValueIsDisable("foobar")
 		Expect(val).To(BeFalse())
