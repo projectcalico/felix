@@ -289,27 +289,15 @@ func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 			}
 
 			if node.Spec.Wireguard != nil && node.Spec.Wireguard.InterfaceIPv4Address != "" {
-				ipv4 := cnet.ParseIP(node.Spec.Wireguard.InterfaceIPv4Address)
-				if ipv4 == nil {
-					logrus.Panicf("Failed to parse already-validated IP address: %s", node.Spec.Wireguard.InterfaceIPv4Address)
-				}
-				nodeInfo.WireguardAddr = ip.FromCalicoIP(*ipv4)
+				nodeInfo.WireguardAddr = ip.FromString(node.Spec.Wireguard.InterfaceIPv4Address)
 			}
 
 			if node.Spec.BGP != nil && node.Spec.BGP.IPv4IPIPTunnelAddr != "" {
-				ipv4 := cnet.ParseIP(node.Spec.BGP.IPv4IPIPTunnelAddr)
-				if ipv4 == nil {
-					logrus.Panicf("Failed to parse already-validated IP address: %s", node.Spec.BGP.IPv4IPIPTunnelAddr)
-				}
-				nodeInfo.IPIPAddr = ip.FromCalicoIP(*ipv4)
+				nodeInfo.IPIPAddr = ip.FromString(node.Spec.BGP.IPv4IPIPTunnelAddr)
 			}
 
 			if node.Spec.IPv4VXLANTunnelAddr != "" {
-				ipv4 := cnet.ParseIP(node.Spec.IPv4VXLANTunnelAddr)
-				if ipv4 == nil {
-					logrus.Panicf("Failed to parse already-validated IP address: %s", node.Spec.IPv4VXLANTunnelAddr)
-				}
-				nodeInfo.VXLANAddr = ip.FromCalicoIP(*ipv4)
+				nodeInfo.VXLANAddr = ip.FromString(node.Spec.IPv4VXLANTunnelAddr)
 			}
 		}
 	}
@@ -822,11 +810,14 @@ func (r *RouteTrie) AddRef(cidr ip.V4CIDR, nodename string, rt RefType) {
 		}
 
 		// If it doesn't already exist, add it to the slice and
-		// sort the slice based on nodename to make sure we are not dependent
+		// sort the slice based on nodename and ref type to make sure we are not dependent
 		// on event ordering.
 		ref := Ref{NodeName: nodename, RefCount: 1, RefType: rt}
 		ri.Refs = append(ri.Refs, ref)
 		sort.Slice(ri.Refs, func(i, j int) bool {
+			if ri.Refs[i].NodeName == ri.Refs[j].NodeName {
+				return ri.Refs[i].RefType < ri.Refs[j].RefType
+			}
 			return ri.Refs[i].NodeName < ri.Refs[j].NodeName
 		})
 	})
