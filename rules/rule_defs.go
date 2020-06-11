@@ -58,7 +58,6 @@ const (
 	IPSetIDNATOutgoingMasqPools = "masq-ipam-pools"
 
 	IPSetIDAllHostNets          = "all-hosts-net"
-	IPSetIDAllWireguardHostNets = "all-wg-hosts-net"
 	IPSetIDAllVXLANSourceNets   = "all-vxlan-net"
 	IPSetIDThisHostIPs          = "this-host"
 

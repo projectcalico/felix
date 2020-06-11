@@ -22,6 +22,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,6 +102,9 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 		routeEntries[0], routeEntries[1] = routeEntries[1], routeEntries[0]
 
 		cc = &connectivity.Checker{}
+
+		// Reset the set of tcp dumps between runs.
+		tcpdumps = nil
 	})
 
 	AfterEach(func() {
@@ -216,7 +220,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 					out, err := felix.ExecOutput("ip", "rule", "show", "pref", fmt.Sprintf("%d", rule))
 					Expect(err).NotTo(HaveOccurred())
 					return out
-				}, "10s", "100ms").ShouldNot(BeEmpty())
+				}, " 10s", "100ms").ShouldNot(BeEmpty())
 			}
 		})
 
@@ -252,6 +256,85 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 	})
 
 	Context("traffic with Wireguard enabled", func() {
+		// Checks the TCP dump for a count value. Retries until count is correct, or fails after 3s.
+		waitForPackets := func(t *tcpdump.TCPDump, name string, num int) error {
+			for i := 0; i < 30; i++ {
+				if i != 0 {
+					time.Sleep(100 * time.Millisecond)
+				}
+				if t.MatchCount(name) == num {
+					return nil
+				}
+			}
+			return fmt.Errorf("incorrect packet count for %s; expected=%d actual=%d", name, num, t.MatchCount(name))
+		}
+
+		// Runs wg and extracts the received and sent packet counts.
+		getWgStatistics := func(felix *infrastructure.Felix) (sent, rcvd int64) {
+			xferRegExp := regexp.MustCompile(`transfer:\s+([0-9a-zA-Z. ]+)\s+received,\s+([0-9a-zA-Z. ]+)\s+sent`)
+			out, err := felix.ExecOutput("wg")
+			Expect(err).NotTo(HaveOccurred())
+			matches := xferRegExp.FindStringSubmatch(out)
+			Expect(len(matches)).To(BeNumerically("==", 3))
+			rcvd, err = strconv.ParseInt(matches[1], 10, 32)
+			Expect(err).NotTo(HaveOccurred())
+			sent, err = strconv.ParseInt(matches[2], 10, 32)
+			Expect(err).NotTo(HaveOccurred())
+			return
+		}
+
+		// Checks connectivity between workloads 0 and 1, checking that eth0 traffic is via wireguard port and that
+		// wireguard statistics match.
+		checkConn := func() error {
+			// Reset TCP packet counts.
+			By("Resetting the TCP dump counts")
+			for i := range felixes {
+				tcpdumps[i].ResetCount("numInTunnelPackets")
+				tcpdumps[i].ResetCount("numOutTunnelPackets")
+				tcpdumps[i].ResetCount("numWorkload0to1Packets")
+				tcpdumps[i].ResetCount("numWorkload1to0Packets")
+			}
+
+			By("Checking wireguard statistics before sending packets")
+			sent := [nodeCount]int64{}
+			rcvd := [nodeCount]int64{}
+			for i := range felixes {
+				sent[i], rcvd[i] = getWgStatistics(felixes[i])
+			}
+
+			// Send packets to and from workloads on each felix.
+			By("Sending packets W1->W2 and W2->W1")
+			if err, _ := wls[0].SendPacketsTo(wls[1].IP, 5, 56); err != nil {
+				return err
+			}
+			if err, _ := wls[1].SendPacketsTo(wls[0].IP, 5, 56); err != nil {
+				return err
+			}
+
+			// Now check the packet counts are as expected. We should have no WL->WL traffic visible on eth0, but
+			// we should be able to see tunnel traffic.
+			By("Checking the packet stats from tcpdump")
+			for i := range felixes {
+				if err := waitForPackets(tcpdumps[i], "numInTunnelPackets", 10); err != nil {
+					return err
+				} else if err := waitForPackets(tcpdumps[i], "numOutTunnelPackets", 10); err != nil {
+					return err
+				} else if err := waitForPackets(tcpdumps[i], "numWorkload0to1Packets", 0); err != nil {
+					return err
+				} else if err := waitForPackets(tcpdumps[i], "numWorkload1to0Packets", 0); err != nil {
+					return err
+				}
+			}
+
+			By("Checking the packet stats from wg")
+			for i := range felixes {
+				newRcvd, newSent := getWgStatistics(felixes[i])
+				Expect(newRcvd - rcvd[i]).To(Equal(10))
+				Expect(newSent - sent[i]).To(Equal(10))
+			}
+			return nil
+		}
+
 		BeforeEach(func() {
 			// Tunnel readiness checks.
 			for i, felix := range felixes {
@@ -282,7 +365,8 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				}, "10s", "100ms").Should(ContainSubstring(routeEntries[i]))
 			}
 
-			for _, felix := range felixes {
+			tcpdumps = make([]*tcpdump.TCPDump, len(felixes))
+			for i, felix := range felixes {
 				// Felix tcpdump
 				tcpdump := felix.AttachTCPDump("eth0")
 
@@ -291,61 +375,17 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				outTunnelPacketsPattern := fmt.Sprintf("IP \\d+\\.\\d+\\.\\d+\\.\\d+\\.51820 > %s\\.51820: UDP", felix.IP)
 				tcpdump.AddMatcher("numOutTunnelPackets", regexp.MustCompile(outTunnelPacketsPattern))
 				workload01PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[0].IP, wls[1].IP)
-				tcpdump.AddMatcher("numWorkload01Packets", regexp.MustCompile(workload01PacketsPattern))
+				tcpdump.AddMatcher("numWorkload0to1Packets", regexp.MustCompile(workload01PacketsPattern))
 				workload10PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[1].IP, wls[0].IP)
-				tcpdump.AddMatcher("numWorkload10Packets", regexp.MustCompile(workload10PacketsPattern))
+				tcpdump.AddMatcher("numWorkload1to0Packets", regexp.MustCompile(workload10PacketsPattern))
 
 				tcpdump.Start()
-				tcpdumps = append(tcpdumps, tcpdump)
-
+				tcpdumps[i] = tcpdump
 			}
 		})
 
-		It("between pod to pod should be allowed and encrypted", func() {
-			cc.ExpectSome(wls[0], wls[1])
-			cc.ExpectSome(wls[1], wls[0])
-			cc.CheckConnectivity()
-
-			By("verifying tunnelled packet count is zero and no direct traffic between pod to pod exists")
-			for i := range felixes {
-				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numInTunnelPackets")
-				}, "10s", "100ms").Should(BeNumerically(">", 0))
-				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numOutTunnelPackets")
-				}, "10s", "100ms").Should(BeNumerically(">", 0))
-				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numWorkload01Packets")
-				}, "10s", "100ms").Should(BeNumerically("==", 0))
-				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numWorkload10Packets")
-				}, "10s", "100ms").Should(BeNumerically("==", 0))
-			}
-		})
-
-		It("between pod to pod should be encrypted using wg tunnel", func() {
-			By("verifying wg stats")
-			// Send 10 ping packets from/to workloads.
-			err, _ := wls[0].SendPacketsTo(wls[1].IP, 10, 56)
-			Expect(err).NotTo(HaveOccurred())
-			err, _ = wls[1].SendPacketsTo(wls[0].IP, 10, 56)
-			Expect(err).NotTo(HaveOccurred())
-
-			// Get tunnel stats.
-			xferRegExp := regexp.MustCompile(`transfer:\s+([0-9a-zA-Z. ]+)\s+received,\s+([0-9a-zA-Z. ]+)\s+sent`)
-			var sent, rcvd [nodeCount]string
-			for i, felix := range felixes {
-				out, err := felix.ExecOutput("wg")
-				Expect(err).NotTo(HaveOccurred())
-				matches := xferRegExp.FindStringSubmatch(out)
-				Expect(len(matches)).To(BeNumerically("==", 3))
-				rcvd[i] = matches[1]
-				sent[i] = matches[2]
-			}
-			Expect(rcvd[0]).NotTo(BeEmpty())
-			Expect(rcvd[0]).To(Equal(sent[1]))
-			Expect(rcvd[1]).NotTo(BeEmpty())
-			Expect(rcvd[1]).To(Equal(sent[0]))
+		It("between pod to pod should be allowed and encrypted using wg tunnel", func() {
+			Eventually(checkConn, "5s", "100ms").ShouldNot(HaveOccurred())
 		})
 
 		for _, ai := range []bool{true, false} {
@@ -357,12 +397,17 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				desc += " (using eth0 HostEnpoint"
 			}
 			It(desc, func() {
+				By("Checking for allowed wep to host traffic")
+				err, _ := wls[0].SendPacketsTo(felixes[1].IP, 1, 56)
+				Expect(err).NotTo(HaveOccurred())
+
 				By("Creating policy to deny wireguard port on main felix host endpoint")
 				policy := api.NewGlobalNetworkPolicy()
 				policy.Name = "deny-wg-port"
 				prot := numorstring.ProtocolFromString(numorstring.ProtocolUDP)
 				policy.Spec.Egress = []api.Rule{
 					{
+						// Deny egress UDP to the wireguard port.
 						Action:   api.Deny,
 						Protocol: &prot,
 						Destination: api.EntityRule{
@@ -374,18 +419,18 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				}
 				policy.Spec.Ingress = []api.Rule{
 					{
+						// Deny all UDP traffic to the hosts.
 						Action:   api.Deny,
 						Protocol: &prot,
 						Destination: api.EntityRule{
 							Selector: "has(host-endpoint)",
-							Ports:    []numorstring.Port{numorstring.SinglePort(wireguardListeningPortDefault)},
 						},
 					},
 					{Action: api.Allow},
 				}
 				policy.Spec.Selector = "all()"
 				policy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress, api.PolicyTypeEgress}
-				_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
+				_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 				Expect(err).NotTo(HaveOccurred())
 
 				By("Creating a HostEndpoint for each Felix")
@@ -408,10 +453,18 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 					Expect(err).NotTo(HaveOccurred())
 				}
 
-				By("Checking there is connectivity between the workloads")
-				cc.ExpectSome(wls[0], wls[1])
-				cc.ExpectSome(wls[1], wls[0])
-				cc.CheckConnectivity()
+				By("Checking the policy has been applied by looking for denied traffic")
+				Eventually(func() error {
+					err, _ := wls[0].SendPacketsTo(felixes[1].IP, 1, 56)
+					return err
+				}).Should(HaveOccurred())
+				Consistently(func() error {
+					err, _ := wls[0].SendPacketsTo(felixes[1].IP, 1, 56)
+					return err
+				}).Should(HaveOccurred())
+
+				By("Checking there is connectivity between the workloads using wg")
+				Eventually(checkConn, "5s", "100ms").ShouldNot(HaveOccurred())
 			})
 		}
 	})
