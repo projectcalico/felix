@@ -27,7 +27,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strconv"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -364,8 +363,7 @@ configRetry:
 	}
 
 	// Set source-destination-check on AWS EC2 instance.
-	awsSrcDstCheck := strings.ToLower(configParams.AWSSrcDstCheck)
-	if awsSrcDstCheck != "donothing" {
+	if configParams.AWSSrcDstCheck != string(apiv3.AWSSrcDstCheckOptionDoNothing) {
 		go func(check, healthName string, healthAgg *health.HealthAggregator) {
 			log.Infof("Setting AWS EC2 source-destination-check to %s", check)
 			err := aws.UpdateSrcDstCheck(check)
@@ -374,7 +372,7 @@ configRetry:
 				// set not-ready.
 				healthAggregator.Report(healthName, &health.HealthReport{Live: true, Ready: false})
 			}
-		}(awsSrcDstCheck, healthName, healthAggregator)
+		}(configParams.AWSSrcDstCheck, healthName, healthAggregator)
 	}
 
 	// Start up the dataplane driver.  This may be the internal go-based driver or an external
