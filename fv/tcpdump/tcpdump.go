@@ -177,9 +177,12 @@ func (t *TCPDump) readStdout() {
 			logrus.Infof("[%s] %s", t.contName, line)
 		}
 		t.lock.Lock()
-		for _, m := range t.matchers {
+		for n, m := range t.matchers {
 			if m.regex.MatchString(line) {
+				logrus.Infof("[%s] [%s]: Matches", n, line)
 				m.count++
+			} else {
+				logrus.Infof("[%s] [%s]: Does not match", n, line)
 			}
 		}
 		t.lock.Unlock()

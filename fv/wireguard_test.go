@@ -291,9 +291,9 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				outTunnelPacketsPattern := fmt.Sprintf("IP \\d+\\.\\d+\\.\\d+\\.\\d+\\.51820 > %s\\.51820: UDP", felix.IP)
 				tcpdump.AddMatcher("numOutTunnelPackets", regexp.MustCompile(outTunnelPacketsPattern))
 				workload01PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[0].IP, wls[1].IP)
-				tcpdump.AddMatcher("numWorkload01Packets", regexp.MustCompile(workload01PacketsPattern))
+				tcpdump.AddMatcher("numWorkload0to1Packets", regexp.MustCompile(workload01PacketsPattern))
 				workload10PacketsPattern := fmt.Sprintf("IP %s\\.\\d+ > %s\\.\\d+: ", wls[1].IP, wls[0].IP)
-				tcpdump.AddMatcher("numWorkload10Packets", regexp.MustCompile(workload10PacketsPattern))
+				tcpdump.AddMatcher("numWorkload1to0Packets", regexp.MustCompile(workload10PacketsPattern))
 
 				tcpdump.Start()
 				tcpdumps = append(tcpdumps, tcpdump)
@@ -315,10 +315,10 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 					return tcpdumps[i].MatchCount("numOutTunnelPackets")
 				}, "10s", "100ms").Should(BeNumerically(">", 0))
 				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numWorkload01Packets")
+					return tcpdumps[i].MatchCount("numWorkload0to1Packets")
 				}, "10s", "100ms").Should(BeNumerically("==", 0))
 				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numWorkload10Packets")
+					return tcpdumps[i].MatchCount("numWorkload1to0Packets")
 				}, "10s", "100ms").Should(BeNumerically("==", 0))
 			}
 		})
@@ -367,8 +367,8 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 				for i := range felixes {
 					tcpdumps[i].ResetCount("numInTunnelPackets")
 					tcpdumps[i].ResetCount("numOutTunnelPackets")
-					tcpdumps[i].ResetCount("numWorkload01Packets")
-					tcpdumps[i].ResetCount("numWorkload10Packets")
+					tcpdumps[i].ResetCount("numWorkload0to1Packets")
+					tcpdumps[i].ResetCount("numWorkload1to0Packets")
 				}
 
 				// Send packets to and from workloads on each felix.
@@ -388,9 +388,9 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 						return err
 					} else if err := waitForPackets(tcpdumps[i], "numOutTunnelPackets", 2); err != nil {
 						return err
-					} else if err := waitForPackets(tcpdumps[i], "numWorkload01Packets", 0); err != nil {
+					} else if err := waitForPackets(tcpdumps[i], "numWorkload0to1Packets", 0); err != nil {
 						return err
-					} else if err := waitForPackets(tcpdumps[i], "numWorkload10Packets", 0); err != nil {
+					} else if err := waitForPackets(tcpdumps[i], "numWorkload1to0Packets", 0); err != nil {
 						return err
 					}
 				}
