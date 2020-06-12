@@ -438,7 +438,20 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			})
 		}
 
-		It("between pod to pod should be encrypted using wg tunnel with egress policy applied", func() {
+		readPolicy := func(name string, action api.Action) error {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			policy, err := client.GlobalNetworkPolicies().Get(ctx, name, options.GetOptions{})
+			if err == nil {
+				if len(policy.Spec.Egress) > 0 &&
+					policy.Spec.Egress[0].Action == action {
+					return nil
+				}
+			}
+			return fmt.Errorf("policy not applied")
+		}
+
+		It("between pod to pod should be encrypted using wg tunnel with egress policies applied", func() {
 			policy := api.NewGlobalNetworkPolicy()
 
 			policy.Name = "f01-egress-deny"
@@ -448,6 +461,11 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			policy.Spec.Selector = fmt.Sprintf("name in { '%s', '%s'}", wls[0].Name, wls[1].Name)
 			_, err := client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 			Expect(err).NotTo(HaveOccurred())
+
+			time.Sleep(5 * time.Second)
+			Eventually(func() error {
+				return readPolicy(policy.Name, api.Deny)
+			}, "5s", "100ms").ShouldNot(HaveOccurred())
 
 			cc.ExpectNone(wls[0], wls[1])
 			cc.ExpectNone(wls[1], wls[0])
@@ -472,6 +490,10 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Supported", []apiconfig.Data
 			policy.Spec.Selector = fmt.Sprintf("name in { '%s', '%s'}", wls[0].Name, wls[1].Name)
 			_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 			Expect(err).NotTo(HaveOccurred())
+
+			Eventually(func() error {
+				return readPolicy(policy.Name, api.Allow)
+			}, "5s", "100ms").ShouldNot(HaveOccurred())
 
 			cc.ExpectSome(wls[0], wls[1])
 			cc.ExpectSome(wls[1], wls[0])
