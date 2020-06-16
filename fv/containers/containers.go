@@ -310,10 +310,14 @@ func (c *Container) Remove() {
 	log.WithField("container", c).Info("Removed container.")
 }
 
-func (c *Container) copyOutputToLog(streamName string, stream io.Reader, done *sync.WaitGroup, watches *[]*watch) {
+func (c *Container) copyOutputToLog(streamName string, stream io.ReadCloser, done *sync.WaitGroup, watches *[]*watch) {
 	defer done.Done()
+	// We want GinkgoRecover() to fire first in order to mark the test as failed before we call Done().
+	defer ginkgo.GinkgoRecover()
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(nil, 10*1024*1024) // Increase maximum buffer size (but don't pre-alloc).
+
+	totalBytesRead := 0
 
 	// Felix is configured with the race detector enabled. When the race detector fires, we get output like this:
 	//
@@ -338,8 +342,19 @@ func (c *Container) copyOutputToLog(streamName string, stream io.Reader, done *s
 		Expect(err).NotTo(HaveOccurred(), "Failed to write to data race log (close).")
 	}()
 
+	const maxLogSize = 100 * 1024 * 1024 // Measured existing tests in the 2-4MB range so 100MB should be enough.
 	for scanner.Scan() {
 		line := scanner.Text()
+
+		totalBytesRead += len(line) + 1 // for the newline
+		if totalBytesRead > maxLogSize {
+			// Log size is huge; felix is probably tight looping or spewing data race warnings.
+			// Close the stream so that felix should die.
+			_ = stream.Close()
+			// Mark the test as failed.
+			ginkgo.Fail("Felix log size exceeded maximum")
+		}
+
 		log.Info(c.Name, "[", streamName, "] ", line)
 
 		// Capture data race warnings and log to file.
