@@ -342,7 +342,7 @@ func (c *Container) copyOutputToLog(streamName string, stream io.ReadCloser, don
 		Expect(err).NotTo(HaveOccurred(), "Failed to write to data race log (close).")
 	}()
 
-	const maxLogSize = 640 * 1024 * 1024 // should be enough for anyone.
+	const maxLogSize = 100 * 1024 * 1024 // Measured existing tests in the 2-4MB range so 100MB should be enough.
 	for scanner.Scan() {
 		line := scanner.Text()
 
@@ -405,7 +405,6 @@ func (c *Container) copyOutputToLog(streamName string, stream io.ReadCloser, don
 	if scanner.Err() != nil {
 		logCxt.WithError(scanner.Err()).Error("Non-EOF error reading container stream")
 	}
-	_, _ = dataRaceFile.WriteString(fmt.Sprintf("Total size of log: %d\n", totalBytesRead))
 	logCxt.Info("Stream finished")
 }
 
