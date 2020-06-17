@@ -37,6 +37,11 @@ import (
 //    return attr;
 // }
 //
+// // bpf_attr_clear zeroes the the provided attr memory
+// void bpf_attr_clear(union bpf_attr *attr) {
+//    memset(attr, 0, sizeof(union bpf_attr));
+// }
+//
 // // bpf_attr_setup_obj_get sets up the bpf_attr union for use with BPF_OBJ_GET.
 // // A C function makes this easier because unions aren't easy to access from Go.
 // void bpf_attr_setup_obj_get(union bpf_attr *attr, char *path, __u32 flags) {
@@ -292,26 +297,10 @@ func GetMapEntry(mapFD MapFD, k []byte, valueSize int) ([]byte, error) {
 		return nil, err
 	}
 
-	bpfAttr := C.bpf_attr_alloc()
-	defer C.free(unsafe.Pointer(bpfAttr))
+	x := allocBpfSyscallMapMemCtx(len(k), valueSize)
+	defer x.Free()
 
-	// Have to make C-heap copies here because passing these to the syscalls is done via pointers in an
-	// intermediate struct.
-	cK := C.CBytes(k)
-	defer C.free(cK)
-	cV := C.malloc(C.size_t(valueSize))
-	defer C.free(cV)
-
-	C.bpf_attr_setup_map_elem(bpfAttr, C.uint(mapFD), cK, cV, unix.BPF_ANY)
-
-	_, _, errno := unix.Syscall(unix.SYS_BPF, unix.BPF_MAP_LOOKUP_ELEM, uintptr(unsafe.Pointer(bpfAttr)), C.sizeof_union_bpf_attr)
-
-	v := C.GoBytes(cV, C.int(valueSize))
-
-	if errno != 0 {
-		return nil, errno
-	}
-	return v, nil
+	return x.GetMapEntry(mapFD, k, valueSize)
 }
 
 func checkMapIfDebug(mapFD MapFD, keySize, valueSize int) error {
@@ -390,32 +379,76 @@ func GetMapNextKey(mapFD MapFD, k []byte, keySize int) ([]byte, error) {
 		return nil, err
 	}
 
-	bpfAttr := C.bpf_attr_alloc()
-	defer C.free(unsafe.Pointer(bpfAttr))
+	x := allocBpfSyscallMapMemCtx(keySize, 0)
+	defer x.Free()
 
+	return x.GetMapNextKey(mapFD, k, keySize)
+}
+
+type bpfSyscallMapMemCtx struct {
+	cK   unsafe.Pointer
+	cV   unsafe.Pointer
+	attr *[72]byte
+}
+
+func allocBpfSyscallMapMemCtx(kSize, vSize int) bpfSyscallMapMemCtx {
+	x := bpfSyscallMapMemCtx{
+		cK:   C.malloc(C.size_t(kSize)),
+		attr: C.bpf_attr_alloc(),
+	}
+
+	if vSize > 0 {
+		x.cV = C.malloc(C.size_t(vSize))
+	}
+
+	return x
+}
+
+func (x bpfSyscallMapMemCtx) Free() {
+	C.free(x.cK)
+	C.free(x.cV)
+	C.free(unsafe.Pointer(x.attr))
+}
+
+func (x bpfSyscallMapMemCtx) GetMapNextKey(mapFD MapFD, k []byte, keySize int) ([]byte, error) {
 	var cK unsafe.Pointer
 
 	// Have to make C-heap copies here because passing these to the syscalls is done via pointers in an
 	// intermediate struct.
 	//
 	// it is valid to pass a nil key to start the iteration
-	if k != nil {
-		cK = C.CBytes(k)
-		defer C.free(cK)
+	if len(k) >= 1 {
+		cK = unsafe.Pointer(&k[0])
 	}
-	cV := C.malloc(C.size_t(keySize)) // value has the size of a key - it is the key!
-	defer C.free(cV)
 
-	C.bpf_attr_setup_map_get_next_key(bpfAttr, C.uint(mapFD), cK, cV, 0)
+	C.bpf_attr_clear(x.attr)
+	C.bpf_attr_setup_map_get_next_key(x.attr, C.uint(mapFD), cK, x.cK, 0)
 
 	_, _, errno := unix.Syscall(unix.SYS_BPF, unix.BPF_MAP_GET_NEXT_KEY,
-		uintptr(unsafe.Pointer(bpfAttr)), C.sizeof_union_bpf_attr)
+		uintptr(unsafe.Pointer(x.attr)), C.sizeof_union_bpf_attr)
 
-	v := C.GoBytes(cV, C.int(keySize))
+	next := C.GoBytes(x.cK, C.int(keySize))
 
 	if errno != 0 {
 		return nil, errno
 	}
 
+	return next, nil
+}
+
+func (x bpfSyscallMapMemCtx) GetMapEntry(mapFD MapFD, k []byte, valueSize int) ([]byte, error) {
+	cK := unsafe.Pointer(&k[0])
+
+	C.bpf_attr_clear(x.attr)
+	C.bpf_attr_setup_map_elem(x.attr, C.uint(mapFD), cK, x.cV, unix.BPF_ANY)
+
+	_, _, errno := unix.Syscall(unix.SYS_BPF, unix.BPF_MAP_LOOKUP_ELEM,
+		uintptr(unsafe.Pointer(x.attr)), C.sizeof_union_bpf_attr)
+
+	v := C.GoBytes(x.cV, C.int(valueSize))
+
+	if errno != 0 {
+		return nil, errno
+	}
 	return v, nil
 }
