@@ -170,8 +170,11 @@ func IterMapCmdOutput(output []byte, f MapIter) error {
 func (b *PinnedMap) Iter(f MapIter) error {
 	var nilKey []byte
 
+	x := allocBpfSyscallMapMemCtx(b.KeySize, b.ValueSize)
+	defer x.Free()
+
 	// Get the first key
-	k, err := GetMapNextKey(b.fd, nilKey, b.KeySize)
+	k, err := x.GetMapNextKey(b.fd, nilKey, b.KeySize)
 	if err != nil {
 		if IsNotExists(err) {
 			return nil
@@ -180,9 +183,9 @@ func (b *PinnedMap) Iter(f MapIter) error {
 	}
 
 	for {
-		next, nextErr := GetMapNextKey(b.fd, k, b.KeySize)
+		next, nextErr := x.GetMapNextKey(b.fd, k, b.KeySize)
 
-		v, err := GetMapEntry(b.fd, k, b.ValueSize)
+		v, err := x.GetMapEntry(b.fd, k, b.ValueSize)
 		if err != nil {
 			if IsNotExists(err) {
 				return nil
