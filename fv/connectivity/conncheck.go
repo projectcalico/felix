@@ -68,6 +68,10 @@ func (c *Checker) ExpectNone(from ConnectionSource, to ConnectionTarget, explici
 	c.expect(false, from, to, explicitPort)
 }
 
+func (c *Checker) ExpectNoneWithError(from ConnectionSource, to ConnectionTarget, ErrorStr string, explicitPort ...uint16) {
+	c.expect(false, from, to, explicitPort, ExpectWithError(ErrorStr))
+}
+
 // ExpectConnectivity asserts existing connectivity between a ConnectionSource
 // and ConnectionTarget with details configurable with ExpectationOption(s).
 // This is a super set of ExpectSome()
@@ -195,6 +199,9 @@ func (c *Checker) ExpectedConnectivityPretty() []string {
 				result[i] += fmt.Sprintf(" (maxLoss: %.1f%%)", exp.ExpectedPacketLoss.MaxPercent)
 			}
 		}
+		if exp.ErrorStr != "" {
+			result[i] += " " + exp.ErrorStr
+		}
 	}
 	return result
 }
@@ -293,6 +300,7 @@ type Response struct {
 	ServerAddr string
 
 	Request Request
+	ErrorStr   string
 }
 
 func (r *Response) SourceIP() string {
@@ -356,6 +364,11 @@ func ExpectWithSrcIPs(ips ...string) ExpectationOption {
 		e.ExpSrcIPs = ips
 	}
 }
+func ExpectWithError(ErrorStr string) ExpectationOption {
+	return func(e *Expectation) {
+		e.ErrorStr = ErrorStr
+	}
+}
 
 // ExpectWithSendLen asserts how much additional data on top of the original
 // requests should be sent with success
@@ -412,6 +425,8 @@ type Expectation struct {
 
 	clientMTUStart int
 	clientMTUEnd   int
+
+	ErrorStr string
 }
 
 type ExpPacketLoss struct {
@@ -460,8 +475,25 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 
 	} else {
 		if response != nil {
+			if e.ErrorStr != "" {
+				// Return a match if the error string expected is in the response
+				if strings.Contains(response.LastResponse.ErrorStr, e.ErrorStr) {
+					return true
+				}
+			} else if response.Stats.ResponsesReceived == 0 {
+				// In cases, were we don't expect an error and a response, but still get one, 
+				// return true, if the ResponsesReceived in the stats is 0. This is for 
+				// ExpectNone to pass
+				return true
+			}
 			return false
+		} else {
+			// Return false if we expect an error string and we don't get a response 
+			if e.ErrorStr != "" {
+				return false
+			}
 		}
+
 	}
 
 	return true
@@ -579,19 +611,14 @@ func (cmd *CheckCmd) run(cName string, logMsg string) *Result {
 	Expect(errErr).NotTo(HaveOccurred())
 
 	err = connectionCmd.Wait()
-
 	logCxt.WithFields(log.Fields{
 		"stdout": string(wOut),
 		"stderr": string(wErr)}).WithError(err).Info(logMsg)
 
-	if err != nil {
-		return nil
-	}
-
+	var resp Result
 	r := regexp.MustCompile(`RESULT=(.*)\n`)
 	m := r.FindSubmatch(wOut)
 	if len(m) > 0 {
-		var resp Result
 		err := json.Unmarshal(m[1], &resp)
 		if err != nil {
 			logCxt.WithError(err).WithField("output", string(wOut)).Panic("Failed to parse connection check response")
