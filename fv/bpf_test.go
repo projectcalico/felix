@@ -1386,7 +1386,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 										hostW1SrcIP = ExpectWithSrcIPs(felixes[1].ExpectedIPIPTunnelAddr)
 									}
 
-									ports := []uint16{npPort}
+									ports := ExpectWithPorts(npPort)
 
 									// Also try host networked pods, both on a local and remote node.
 									// N.B. it cannot work without the connect time balancer
@@ -1602,8 +1602,8 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 										Expect(err).NotTo(HaveOccurred())
 										Expect(pmtu).To(Equal(0)) // nothing specific for this path yet
 
-										port := []uint16{npPort}
-										cc.ExpectConnectivity(externalClient, TargetIP(felixes[1].IP), port,
+										cc.ExpectConnectivity(externalClient, TargetIP(felixes[1].IP),
+											ExpectWithPorts(npPort),
 											ExpectWithSendLen(sendLen),
 											ExpectWithRecvLen(recvLen),
 											ExpectWithClientAdjustedMTU(hostIfaceMTU, hostIfaceMTU),
@@ -1620,8 +1620,8 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 										err := felixes[1].ExecMayFail("ethtool", "-K", "eth0", "gro", "off")
 										Expect(err).NotTo(HaveOccurred())
 
-										port := []uint16{npPort}
-										cc.ExpectConnectivity(externalClient, TargetIP(felixes[1].IP), port,
+										cc.ExpectConnectivity(externalClient, TargetIP(felixes[1].IP),
+											ExpectWithPorts(npPort),
 											ExpectWithSendLen(sendLen),
 											ExpectWithRecvLen(recvLen),
 											ExpectWithClientAdjustedMTU(hostIfaceMTU, hostIfaceMTU),
