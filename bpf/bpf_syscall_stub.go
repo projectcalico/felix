@@ -63,3 +63,9 @@ func DeleteMapEntry(mapFD MapFD, k []byte, valueSize int) error {
 func GetMapNextKey(mapFD MapFD, k []byte, keySize int) ([]byte, error) {
 	panic("BPF syscall stub")
 }
+
+type bpfSyscallMapMemCtx struct{}
+
+func allocBpfSyscallMapMemCtx(kSize, vSize int) bpfSyscallMapMemCtx {
+	panic("cgo stub")
+}
