@@ -424,7 +424,7 @@ fv fv/latency.log fv/data-races.log: $(REMOTE_DEPS) image-test bin/iptables-lock
 	fi
 
 fv-bpf:
-	$(MAKE) fv FELIX_FV_ENABLE_BPF=true
+	$(MAKE) fv FELIX_FV_ENABLE_BPF=true GINKGO_FOCUS=BPF-SAFE
 
 KO_DIR := "/lib/modules/$(shell uname -r)/"
 WIREGUARD_KO_PATH := $(shell find $(KO_DIR) -name "wireguard.ko")
