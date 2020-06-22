@@ -17,6 +17,7 @@ package infrastructure
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"time"
 
@@ -122,6 +123,31 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 			infra.Stop()
 		}
 	}()
+
+	callerOpts := opts
+	if os.Getenv("FELIX_FV_ENABLE_WIREGUARD") == "true" {
+		// Enable Wireguard in tests with 2 or more nodes; skip tests with just one node.
+		if n >= 2 {
+			// Delay running Felix until Node resource has been created.
+			opts.DelayFelixStart = true
+			// Wireguard doesn't support IPv6, disable it.
+			opts.EnableIPv6 = false
+			// Assigning workload IPs using IPAM API.
+			opts.IPIPRoutesEnabled = false
+			// Indicate wireguard is enabled
+			opts.WireguardEnabled = true
+
+			// Enable Wireguard.
+			felixConfig := api.NewFelixConfiguration()
+			felixConfig.SetName("default")
+			enabled := true
+			felixConfig.Spec.WireguardEnabled = &enabled
+
+			opts.InitialFelixConfiguration = felixConfig
+		} else {
+			Skip("Skip single-node test in Wireguard run")
+		}
+	}
 
 	if opts.VXLANMode == "" {
 		opts.VXLANMode = api.VXLANModeNever
@@ -231,6 +257,10 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 			}
 			_, err := client.HostEndpoints().Create(context.Background(), hep, options.SetOptions{})
 			Expect(err).ToNot(HaveOccurred())
+		}
+
+		if opts.DelayFelixStart && !callerOpts.DelayFelixStart {
+			felix.TriggerDelayedStart()
 		}
 
 		felixes = append(felixes, felix)
