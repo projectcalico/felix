@@ -645,6 +645,8 @@ func resetBPFMaps() {
 }
 
 func TestMapIterWithDelete(t *testing.T) {
+	RegisterTestingT(t)
+
 	m := (&bpf.MapContext{}).NewPinnedMap(bpf.MapParameters{
 		Filename:   "/sys/fs/bpf/tc/globals/cali_tmap",
 		Type:       "hash",
