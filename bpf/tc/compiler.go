@@ -32,13 +32,6 @@ const (
 	HookEgress  Hook = "egress"
 )
 
-const (
-	CompileFlagHostEp  = 1
-	CompileFlagIngress = 2
-	CompileFlagTunnel  = 4
-	CompileFlagCgroup  = 8
-)
-
 type ToOrFromEp string
 
 const (
@@ -49,24 +42,14 @@ const (
 type EndpointType string
 
 const (
-	EpTypeWorkload EndpointType = "workload"
-	EpTypeHost     EndpointType = "host"
-	EpTypeTunnel   EndpointType = "tunnel"
+	EpTypeWorkload  EndpointType = "workload"
+	EpTypeHost      EndpointType = "host"
+	EpTypeTunnel    EndpointType = "tunnel"
+	EpTypeWireguard EndpointType = "wireguard"
 )
 
 func SectionName(endpointType EndpointType, fromOrTo ToOrFromEp) string {
 	return fmt.Sprintf("calico_%s_%s_ep", fromOrTo, endpointType)
-}
-
-var sectionToFlags = map[string]int{}
-
-func init() {
-	sectionToFlags[SectionName(EpTypeWorkload, FromEp)] = 0
-	sectionToFlags[SectionName(EpTypeWorkload, ToEp)] = CompileFlagIngress
-	sectionToFlags[SectionName(EpTypeHost, FromEp)] = CompileFlagHostEp | CompileFlagIngress
-	sectionToFlags[SectionName(EpTypeHost, ToEp)] = CompileFlagHostEp
-	sectionToFlags[SectionName(EpTypeTunnel, FromEp)] = CompileFlagHostEp | CompileFlagIngress | CompileFlagTunnel
-	sectionToFlags[SectionName(EpTypeTunnel, ToEp)] = CompileFlagHostEp | CompileFlagTunnel
 }
 
 func ProgFilename(epType EndpointType, toOrFrom ToOrFromEp, epToHostDrop, fib, dsr bool, logLevel string) string {
@@ -105,6 +88,8 @@ func ProgFilename(epType EndpointType, toOrFrom ToOrFromEp, epToHostDrop, fib, d
 		epTypeShort = "hep"
 	case EpTypeTunnel:
 		epTypeShort = "tnl"
+	case EpTypeWireguard:
+		epTypeShort = "wg"
 	}
 	oFileName := fmt.Sprintf("%v_%v_%s%s%s%v.o",
 		toOrFrom, epTypeShort, hostDropPart, fibPart, dsrPart, logLevel)
