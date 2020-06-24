@@ -1,3 +1,17 @@
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package aws
 
 import (
@@ -17,7 +31,7 @@ import (
 )
 
 const (
-	timeout         = 20
+	timeout         = 20 * time.Second
 	retries         = 3
 	deviceIndexZero = 0
 )
@@ -49,12 +63,8 @@ func retriable(err error) bool {
 	return false
 }
 
-func checkSourceDestinationValueIsDisable(check string) bool {
-	return check == apiv3.AWSSrcDstCheckOptionDisable
-}
-
-func UpdateSrcDstCheck(check string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
+func UpdateSrcDstCheck(caliCheckOption string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	ec2Cli, err := newEC2Client(ctx)
@@ -67,13 +77,13 @@ func UpdateSrcDstCheck(check string) error {
 		return fmt.Errorf("error getting ec2 network-interface-id: %s", convertError(err))
 	}
 
-	checkVal := !checkSourceDestinationValueIsDisable(check)
-	err = ec2Cli.setEC2SourceDestinationCheck(ctx, ec2NetId, checkVal)
+	checkEnabled := caliCheckOption == apiv3.AWSSrcDstCheckOptionEnable
+	err = ec2Cli.setEC2SourceDestinationCheck(ctx, ec2NetId, checkEnabled)
 	if err != nil {
 		return fmt.Errorf("error setting src-dst-check for network-interface-id: %s", convertError(err))
 	}
 
-	log.Infof("Successfully set source-destination-check to %t on network-interface-id: %s", checkVal, ec2NetId)
+	log.Infof("Successfully set source-destination-check to %t on network-interface-id: %s", checkEnabled, ec2NetId)
 	return nil
 }
 
@@ -110,7 +120,7 @@ type ec2Client struct {
 func newEC2Client(ctx context.Context) (*ec2Client, error) {
 	awsSession, err := awssession.NewSession()
 	if err != nil {
-		return nil, fmt.Errorf("error creating AWS session: %v", err)
+		return nil, fmt.Errorf("error creating AWS session: %w", err)
 	}
 
 	metadataSvc := ec2metadata.New(awsSession)
@@ -181,7 +191,9 @@ func (c *ec2Client) getEC2NetworkInterfaceId(ctx context.Context) (networkInstan
 		// out-of-order interface list. We compare the device-id in the
 		// response to make sure the right device is updated.
 		for _, networkInterface := range instance.NetworkInterfaces {
-			if *(networkInterface.Attachment.DeviceIndex) == deviceIndexZero {
+			if networkInterface.Attachment != nil &&
+				networkInterface.Attachment.DeviceIndex != nil &&
+				*(networkInterface.Attachment.DeviceIndex) == deviceIndexZero {
 				interfaceId = *(networkInterface.NetworkInterfaceId)
 				if interfaceId != "" {
 					log.Debugf("instance-id: %s, network-interface-id: %s", c.ec2InstanceId, interfaceId)

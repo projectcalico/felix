@@ -26,8 +26,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
 
-	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
-
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -125,15 +123,6 @@ var _ = Describe("AWS Tests", func() {
 		fakeMsg = "non-aws error"
 		err := fmt.Errorf(fakeMsg)
 		Expect(retriable(err)).To(BeFalse())
-	})
-
-	It("should return correct src-dst-check API value to set", func() {
-		val := checkSourceDestinationValueIsDisable(apiv3.AWSSrcDstCheckOptionDisable)
-		Expect(val).To(BeTrue())
-		val = checkSourceDestinationValueIsDisable(apiv3.AWSSrcDstCheckOptionEnable)
-		Expect(val).To(BeFalse())
-		val = checkSourceDestinationValueIsDisable("foobar")
-		Expect(val).To(BeFalse())
 	})
 
 	It("should handle EC2Metadata interactions correctly", func() {

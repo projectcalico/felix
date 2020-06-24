@@ -38,7 +38,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/projectcalico/felix/aws"
 	"github.com/projectcalico/felix/bpf"
 	"github.com/projectcalico/felix/buildinfo"
 	"github.com/projectcalico/felix/calc"
@@ -360,19 +359,6 @@ configRetry:
 	if configParams.DebugSimulateDataRace {
 		log.Warn("DebugSimulateDataRace is set, will start some racing goroutines!")
 		simulateDataRace()
-	}
-
-	// Set source-destination-check on AWS EC2 instance.
-	if configParams.AWSSrcDstCheck != string(apiv3.AWSSrcDstCheckOptionDoNothing) {
-		go func(check, healthName string, healthAgg *health.HealthAggregator) {
-			log.Infof("Setting AWS EC2 source-destination-check to %s", check)
-			err := aws.UpdateSrcDstCheck(check)
-			if err != nil {
-				log.WithField("src-dst-check", check).Errorf("Failed to set source-destination-check: %v", err)
-				// set not-ready.
-				healthAggregator.Report(healthName, &health.HealthReport{Live: true, Ready: false})
-			}
-		}(configParams.AWSSrcDstCheck, healthName, healthAggregator)
 	}
 
 	// Start up the dataplane driver.  This may be the internal go-based driver or an external
