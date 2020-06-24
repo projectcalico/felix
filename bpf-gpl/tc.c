@@ -211,6 +211,9 @@ static CALI_BPF_INLINE int forward_or_drop(struct __sk_buff *skb,
 #if FIB_ENABLED
 	// Try a short-circuit FIB lookup.
 	if (fwd_fib(fwd)) {
+	  if (CALI_F_WG_INGRESS) {
+	    goto cancel_fib;
+	  }
 		/* XXX we might include the tot_len in the fwd, set it once when
 		 * we get the ip_header the first time and only adjust the value
 		 * when we modify the packet - to avoid geting the header here
@@ -474,6 +477,16 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 
 	// Drop malformed IP packets
 	if (ip_header->ihl < 5) {
+	  unsigned char *d = skb_ptr(skb, 0);
+	  if (d + 15 > (unsigned char *)(long)skb->data_end) {
+	    CALI_DEBUG("SKB too short < 15\n");
+	    goto deny;
+	  }
+	  CALI_DEBUG("%x %x %x\n", d[0], d[1], d[2]);
+	  CALI_DEBUG("%x %x %x\n", d[3], d[4], d[5]);
+	  CALI_DEBUG("%x %x %x\n", d[6], d[7], d[8]);
+	  CALI_DEBUG("%x %x %x\n", d[9], d[10], d[11]);
+	  CALI_DEBUG("%x %x %x\n", d[12], d[13], d[14]);
 		fwd.reason = CALI_REASON_IP_MALFORMED;
 		CALI_DEBUG("Drop malformed IP packets\n");
 		goto deny;

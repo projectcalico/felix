@@ -33,10 +33,11 @@ const (
 )
 
 const (
-	CompileFlagHostEp  = 1
-	CompileFlagIngress = 2
-	CompileFlagTunnel  = 4
-	CompileFlagCgroup  = 8
+	CompileFlagHostEp    = 1
+	CompileFlagIngress   = 2
+	CompileFlagTunnel    = 4
+	CompileFlagCgroup    = 8
+	CompileFlagWireguard = 16
 )
 
 type ToOrFromEp string
@@ -49,9 +50,10 @@ const (
 type EndpointType string
 
 const (
-	EpTypeWorkload EndpointType = "workload"
-	EpTypeHost     EndpointType = "host"
-	EpTypeTunnel   EndpointType = "tunnel"
+	EpTypeWorkload  EndpointType = "workload"
+	EpTypeHost      EndpointType = "host"
+	EpTypeTunnel    EndpointType = "tunnel"
+	EpTypeWireguard EndpointType = "wireguard"
 )
 
 func SectionName(endpointType EndpointType, fromOrTo ToOrFromEp) string {
@@ -67,6 +69,8 @@ func init() {
 	sectionToFlags[SectionName(EpTypeHost, ToEp)] = CompileFlagHostEp
 	sectionToFlags[SectionName(EpTypeTunnel, FromEp)] = CompileFlagHostEp | CompileFlagIngress | CompileFlagTunnel
 	sectionToFlags[SectionName(EpTypeTunnel, ToEp)] = CompileFlagHostEp | CompileFlagTunnel
+	sectionToFlags[SectionName(EpTypeWireguard, FromEp)] = CompileFlagHostEp | CompileFlagIngress | CompileFlagWireguard
+	sectionToFlags[SectionName(EpTypeWireguard, ToEp)] = CompileFlagHostEp | CompileFlagWireguard
 }
 
 func ProgFilename(epType EndpointType, toOrFrom ToOrFromEp, epToHostDrop, fib, dsr bool, logLevel string) string {
@@ -105,6 +109,8 @@ func ProgFilename(epType EndpointType, toOrFrom ToOrFromEp, epToHostDrop, fib, d
 		epTypeShort = "hep"
 	case EpTypeTunnel:
 		epTypeShort = "tnl"
+	case EpTypeWireguard:
+		epTypeShort = "wg"
 	}
 	oFileName := fmt.Sprintf("%v_%v_%s%s%s%v.o",
 		toOrFrom, epTypeShort, hostDropPart, fibPart, dsrPart, logLevel)
