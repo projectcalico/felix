@@ -17,9 +17,11 @@ package infrastructure
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"time"
 
+	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -122,6 +124,31 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 			infra.Stop()
 		}
 	}()
+
+	callerOpts := opts
+	if os.Getenv("FELIX_FV_ENABLE_WIREGUARD") == "true" {
+		// Enable Wireguard in tests with 2 or more nodes; skip tests with just one node.
+		if n >= 2 {
+			// Delay running Felix until Node resource has been created.
+			opts.DelayFelixStart = true
+			// Wireguard doesn't support IPv6, disable it.
+			opts.EnableIPv6 = false
+			// Assigning workload IPs using IPAM API.
+			opts.IPIPRoutesEnabled = false
+			// Indicate wireguard is enabled
+			opts.WireguardEnabled = true
+
+			// Enable Wireguard.
+			felixConfig := api.NewFelixConfiguration()
+			felixConfig.SetName("default")
+			enabled := true
+			felixConfig.Spec.WireguardEnabled = &enabled
+
+			opts.InitialFelixConfiguration = felixConfig
+		} else {
+			Skip("Skip single-node test in Wireguard run")
+		}
+	}
 
 	if opts.VXLANMode == "" {
 		opts.VXLANMode = api.VXLANModeNever
@@ -233,10 +260,14 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 			Expect(err).ToNot(HaveOccurred())
 		}
 
+		if opts.DelayFelixStart && !callerOpts.DelayFelixStart {
+			felix.TriggerDelayedStart()
+		}
+
 		felixes = append(felixes, felix)
 	}
 
-	// Set up routes between the hosts, note: we're not using IPAM here but we set up similar
+	// Set up routes between the hosts, note: we're not using BGP here but we set up similar
 	// CIDR-based routes.
 	for i, iFelix := range felixes {
 		for j, jFelix := range felixes {
@@ -246,8 +277,12 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 
 			jBlock := fmt.Sprintf("10.65.%d.0/24", j)
 			if opts.IPIPEnabled && opts.IPIPRoutesEnabled {
-				err := iFelix.ExecMayFail("ip", "route", "add", jBlock, "via", jFelix.IP, "dev", "tunl0", "onlink")
-				Expect(err).ToNot(HaveOccurred())
+				// Can get "Nexthop device is not up" error here if tunl0 device is
+				// not ready yet, which can happen especially if Felix start was
+				// delayed.
+				Eventually(func() error {
+					return iFelix.ExecMayFail("ip", "route", "add", jBlock, "via", jFelix.IP, "dev", "tunl0", "onlink")
+				}, "10s", "1s").ShouldNot(HaveOccurred())
 			} else if opts.VXLANMode == api.VXLANModeNever {
 				// If VXLAN is enabled, Felix will program these routes itself.
 				err := iFelix.ExecMayFail("ip", "route", "add", jBlock, "via", jFelix.IP, "dev", "eth0")
