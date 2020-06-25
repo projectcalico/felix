@@ -267,7 +267,7 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 		felixes = append(felixes, felix)
 	}
 
-	// Set up routes between the hosts, note: we're not using IPAM here but we set up similar
+	// Set up routes between the hosts, note: we're not using BGP here but we set up similar
 	// CIDR-based routes.
 	for i, iFelix := range felixes {
 		for j, jFelix := range felixes {
