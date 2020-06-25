@@ -154,7 +154,7 @@ FELIX_0/32: local host idx -
 FELIX_1/32: remote host
 FELIX_2/32: remote host`
 
-const expectedRouteDumpIPIP = `10.65.0.0/16: remote in-pool nat-out
+const expectedRouteDumpWithTunnelAddr = `10.65.0.0/16: remote in-pool nat-out
 10.65.0.1/32: local host
 10.65.0.2/32: local workload in-pool nat-out idx -
 10.65.0.3/32: local workload in-pool nat-out idx -
@@ -201,7 +201,6 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 			bpfLog         *containers.Container
 			options        infrastructure.TopologyOptions
 			numericProto   uint8
-			expectedRoutes string
 		)
 
 		switch testOpts.protocol {
@@ -240,11 +239,9 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 			case "none":
 				options.IPIPEnabled = false
 				options.IPIPRoutesEnabled = false
-				expectedRoutes = expectedRouteDump
 			case "ipip":
 				options.IPIPEnabled = true
 				options.IPIPRoutesEnabled = true
-				expectedRoutes = expectedRouteDumpIPIP
 			default:
 				Fail("bad tunnel option")
 			}
@@ -542,6 +539,10 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 			})
 
 			It("should have correct routes", func() {
+				expectedRoutes := expectedRouteDump
+				if felixes[0].ExpectedIPIPTunnelAddr != "" || felixes[0].ExpectedVXLANTunnelAddr != "" || felixes[0].ExpectedWireguardTunnelAddr != "" {
+					expectedRoutes = expectedRouteDumpWithTunnelAddr
+				}
 				dumpRoutes := func() string {
 					out, err := felixes[0].ExecOutput("calico-bpf", "routes", "dump")
 					if err != nil {
@@ -615,7 +616,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 					_ = k8sClient
 				})
 
-				It("should handle NAT outgoing", func() {
+				It("_WIREGUARD-INCOMPAT_ should handle NAT outgoing", func() {
 					By("SNATting outgoing traffic with the flag set")
 					cc.ExpectSNAT(w[0][0], felixes[0].IP, hostW[1])
 					cc.CheckConnectivity()
@@ -1042,7 +1043,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 							cc.CheckConnectivity()
 						})
 
-						It("should only have connectivity from the local host via a service to workload 0", func() {
+						It("_WIREGUARD-INCOMPAT_ should only have connectivity from the local host via a service to workload 0", func() {
 							// Local host is always white-listed (for kubelet health checks).
 							ip := testSvc.Spec.ClusterIP
 							port := uint16(testSvc.Spec.Ports[0].Port)
@@ -1077,7 +1078,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 								pol = updatePolicy(pol)
 							})
 
-							It("should have connectivity from the hosts via a service to workload 0", func() {
+							It("_WIREGUARD-INCOMPAT_ should have connectivity from the hosts via a service to workload 0", func() {
 								ip := testSvc.Spec.ClusterIP
 								port := uint16(testSvc.Spec.Ports[0].Port)
 
@@ -1415,7 +1416,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 									pol = createPolicy(pol)
 								})
 
-								It("should have connectivity from all host-networked workloads to workload 0", func() {
+								It("_WIREGUARD-INCOMPAT_ should have connectivity from all host-networked workloads to workload 0", func() {
 									node0IP := felixes[0].IP
 									node1IP := felixes[1].IP
 
