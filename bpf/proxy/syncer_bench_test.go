@@ -22,6 +22,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	k8sp "k8s.io/kubernetes/pkg/proxy"
@@ -83,10 +84,11 @@ func stateToBPFMaps(state DPSyncerState) (nat.MapMem, nat.BackendMapMem) {
 
 func benchmarkStartupSync(b *testing.B, svcCnt, epCnt int) {
 	state := makeState(svcCnt, epCnt)
-	origSvcs, origEps := stateToBPFMaps(state)
 
 	b.Run(fmt.Sprintf("Services %d Endpoints %d", svcCnt, epCnt), func(b *testing.B) {
 		for n := 0; n < b.N; n++ {
+			b.StopTimer()
+			origSvcs, origEps := stateToBPFMaps(state)
 			s := &Syncer{
 				prevSvcMap: make(map[svcKey]svcInfo),
 				prevEpsMap: make(k8sp.EndpointsMap),
@@ -94,12 +96,15 @@ func benchmarkStartupSync(b *testing.B, svcCnt, epCnt int) {
 				origEps:    origEps,
 			}
 
+			b.StartTimer()
 			s.startupBuildPrev(state)
 		}
 	})
 }
 
 func BenchmarkStartupSync(b *testing.B) {
+	logrus.SetLevel(logrus.InfoLevel)
+
 	benchmarkStartupSync(b, 10, 1)
 	benchmarkStartupSync(b, 10, 10)
 	benchmarkStartupSync(b, 100, 1)
