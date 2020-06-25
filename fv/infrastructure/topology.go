@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -128,7 +129,9 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 	callerOpts := opts
 	if os.Getenv("FELIX_FV_ENABLE_WIREGUARD") == "true" {
 		// Enable Wireguard in tests with 2 or more nodes; skip tests with just one node.
-		if n >= 2 {
+		if strings.Contains(CurrentGinkgoTestDescription().FullTestText, "_WIREGUARD-INCOMPAT_") {
+			Skip("Skip Wireguard-incompatible test")
+		} else if n >= 2 {
 			// Delay running Felix until Node resource has been created.
 			opts.DelayFelixStart = true
 			// Wireguard doesn't support IPv6, disable it.

@@ -616,7 +616,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 					_ = k8sClient
 				})
 
-				It("should handle NAT outgoing", func() {
+				It("_WIREGUARD-INCOMPAT_ should handle NAT outgoing", func() {
 					By("SNATting outgoing traffic with the flag set")
 					cc.ExpectSNAT(w[0][0], felixes[0].IP, hostW[1])
 					cc.CheckConnectivity()
