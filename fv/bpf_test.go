@@ -1043,7 +1043,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 							cc.CheckConnectivity()
 						})
 
-						It("should only have connectivity from the local host via a service to workload 0", func() {
+						It("_WIREGUARD-INCOMPAT_ should only have connectivity from the local host via a service to workload 0", func() {
 							// Local host is always white-listed (for kubelet health checks).
 							ip := testSvc.Spec.ClusterIP
 							port := uint16(testSvc.Spec.Ports[0].Port)
@@ -1078,7 +1078,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 								pol = updatePolicy(pol)
 							})
 
-							It("should have connectivity from the hosts via a service to workload 0", func() {
+							It("_WIREGUARD-INCOMPAT_ should have connectivity from the hosts via a service to workload 0", func() {
 								ip := testSvc.Spec.ClusterIP
 								port := uint16(testSvc.Spec.Ports[0].Port)
 
@@ -1416,7 +1416,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 									pol = createPolicy(pol)
 								})
 
-								It("should have connectivity from all host-networked workloads to workload 0", func() {
+								It("_WIREGUARD-INCOMPAT_ should have connectivity from all host-networked workloads to workload 0", func() {
 									node0IP := felixes[0].IP
 									node1IP := felixes[1].IP
 
