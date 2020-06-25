@@ -139,12 +139,7 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 			opts.WireguardEnabled = true
 
 			// Enable Wireguard.
-			felixConfig := api.NewFelixConfiguration()
-			felixConfig.SetName("default")
-			enabled := true
-			felixConfig.Spec.WireguardEnabled = &enabled
-
-			opts.InitialFelixConfiguration = felixConfig
+			opts.ExtraEnvVars["FELIX_WIREGUARDENABLED"] = "true"
 		} else {
 			Skip("Skip single-node test in Wireguard run")
 		}
