@@ -30,6 +30,8 @@
 PACKAGE_NAME?=github.com/projectcalico/felix
 GO_BUILD_VER?=v0.45
 
+GIT_USE_SSH = true
+
 ###############################################################################
 # Download and include Makefile.common
 #   Additions to EXTRA_DOCKER_ARGS need to happen before the include since
@@ -44,6 +46,8 @@ Makefile.common.$(MAKE_BRANCH):
 	# Clean up any files downloaded from other branches so they don't accumulate.
 	rm -f Makefile.common.*
 	curl --fail $(MAKE_REPO)/Makefile.common -o "$@"
+
+EXTRA_DOCKER_ARGS += --init -e GOPRIVATE=github.com/tigera/*
 
 # Build mounts for running in "local build" mode. This allows an easy build using local development code,
 # assuming that there is a local checkout of libcalico in the same directory as this repo.
@@ -152,7 +156,7 @@ update-pod2daemon-pin:
 ###############################################################################
 # Building the binary
 ###############################################################################
-build: bin/calico-felix build-bpf
+build: bin/calico-felix build-bpf bin/calico-felix.exe
 build-all: $(addprefix sub-build-,$(VALIDARCHES))
 sub-build-%:
 	$(MAKE) build ARCH=$*
@@ -757,6 +761,15 @@ cover-report: combined.coverprofile
 
 bin/calico-felix.transfer-url: bin/calico-felix
 	$(DOCKER_GO_BUILD) sh -c 'curl --upload-file bin/calico-felix https://transfer.sh/calico-felix > $@'
+
+# Cross-compile Felix for Windows
+bin/calico-felix.exe: $(SRC_FILES)
+	@echo Building felix for Windows...
+	mkdir -p bin
+	$(DOCKER_RUN) $(LOCAL_BUILD_MOUNTS) $(CALICO_BUILD) sh -c '$(GIT_CONFIG_SSH) \
+	   	GOOS=windows go build -v -o $@ -v $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix" && \
+		( ldd $@ 2>&1 | grep -q "Not a valid dynamic program\|not a dynamic executable" || \
+		( echo "Error: $@ was not statically linked"; false ) )'
 
 .PHONY: patch-script
 patch-script: bin/calico-felix.transfer-url

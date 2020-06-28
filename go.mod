@@ -3,6 +3,7 @@ module github.com/projectcalico/felix
 go 1.14
 
 require (
+	github.com/Microsoft/hcsshim v0.8.6
 	github.com/aws/aws-sdk-go v1.31.15
 	github.com/containernetworking/plugins v0.8.2
 	github.com/davecgh/go-spew v1.1.1
@@ -74,3 +75,5 @@ replace (
 	k8s.io/metrics => k8s.io/metrics v0.17.2
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.17.2
 )
+
+replace github.com/projectcalico/libcalico-go => github.com/tigera/libcalico-go-private v1.7.2-0.20200803104031-31f98f5df84c
