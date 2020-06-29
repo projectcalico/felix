@@ -67,7 +67,7 @@ const backendKeySize = 8
 // };
 const backendValueSize = 8
 
-const BlackHoleCount = 0xffffffff
+const BlackHoleCount uint32 = 0xffffffff
 
 //(sizeof(addr) + sizeof(port) + sizeof(proto)) in bits
 const ZeroCIDRPrefixLen = 56
@@ -281,6 +281,10 @@ func (m MapMem) Equal(cmp MapMem) bool {
 func LoadFrontendMap(m bpf.Map) (MapMem, error) {
 	ret := make(MapMem)
 
+	if err := m.Open(); err != nil {
+		return nil, err
+	}
+
 	err := m.Iter(MapMemIter(ret))
 	if err != nil {
 		ret = nil
@@ -305,7 +309,7 @@ func MapMemIter(m MapMem) bpf.MapIter {
 	}
 }
 
-// NATBackendMapMem represents a NATBackend loaded into memory
+// BackendMapMem represents a NATBackend loaded into memory
 type BackendMapMem map[BackendKey]BackendValue
 
 // Equal compares keys and values of the NATBackendMapMem
@@ -327,6 +331,10 @@ func (m BackendMapMem) Equal(cmp BackendMapMem) bool {
 // LoadBackendMap loads the NATBackend map into a go map or returns an error
 func LoadBackendMap(m bpf.Map) (BackendMapMem, error) {
 	ret := make(BackendMapMem)
+
+	if err := m.Open(); err != nil {
+		return nil, err
+	}
 
 	err := m.Iter(BackendMapMemIter(ret))
 	if err != nil {

@@ -22,11 +22,13 @@ import (
 
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/options"
+	"github.com/projectcalico/libcalico-go/lib/resources"
 
 	"github.com/projectcalico/felix/fv/containers"
 )
@@ -42,9 +44,11 @@ type TopologyOptions struct {
 	IPIPEnabled               bool
 	IPIPRoutesEnabled         bool
 	VXLANMode                 api.VXLANMode
+	WireguardEnabled          bool
 	InitialFelixConfiguration *api.FelixConfiguration
 	NATOutgoingEnabled        bool
 	DelayFelixStart           bool
+	AutoHEPsEnabled           bool
 }
 
 func DefaultTopologyOptions() TopologyOptions {
@@ -178,11 +182,18 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 		felix := RunFelix(infra, i, opts)
 		opts.ExtraEnvVars["BPF_LOG_PFX"] = ""
 		felix.TyphaIP = typhaIP
+
+		expectedIPs := []string{felix.IP}
+
 		if opts.IPIPEnabled {
 			infra.SetExpectedIPIPTunnelAddr(felix, i, bool(n > 1))
+			expectedIPs = append(expectedIPs, felix.ExpectedIPIPTunnelAddr)
 		}
 		if opts.VXLANMode != api.VXLANModeNever {
 			infra.SetExpectedVXLANTunnelAddr(felix, i, bool(n > 1))
+		}
+		if opts.WireguardEnabled {
+			infra.SetExpectedWireguardTunnelAddr(felix, i, bool(n > 1))
 		}
 
 		var w chan struct{}
@@ -200,6 +211,28 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 			Eventually(w, "10s").Should(BeClosed(),
 				"Timed out waiting for Felix to restart with IpInIpTunnelAddress")
 		}
+
+		if opts.AutoHEPsEnabled {
+			hep := &api.HostEndpoint{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf("%s-auto-hep", felix.Name),
+					Labels: map[string]string{
+						"projectcalico.org/created-by": "calico-kube-controllers",
+						"node":                         felix.Name,
+						"ep-type":                      "host",
+					},
+				},
+				Spec: api.HostEndpointSpec{
+					Node:          felix.Name,
+					InterfaceName: "*",
+					ExpectedIPs:   expectedIPs,
+					Profiles:      []string{resources.DefaultAllowProfileName},
+				},
+			}
+			_, err := client.HostEndpoints().Create(context.Background(), hep, options.SetOptions{})
+			Expect(err).ToNot(HaveOccurred())
+		}
+
 		felixes = append(felixes, felix)
 	}
 

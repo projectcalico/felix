@@ -117,7 +117,7 @@ type Config struct {
 	BPFEnabled                         bool           `config:"bool;false"`
 	BPFDisableUnprivileged             bool           `config:"bool;true"`
 	BPFLogLevel                        string         `config:"oneof(off,info,debug);off;non-zero"`
-	BPFDataIfacePattern                *regexp.Regexp `config:"regexp;^(en.*|eth.*|tunl0$)"`
+	BPFDataIfacePattern                *regexp.Regexp `config:"regexp;^(en.*|eth.*|tunl0$|wireguard.cali$)"`
 	BPFConnectTimeLoadBalancingEnabled bool           `config:"bool;true"`
 	BPFExternalServiceMode             string         `config:"oneof(tunnel,dsr);tunnel;non-zero"`
 	BPFKubeProxyIptablesCleanupEnabled bool           `config:"bool;true"`
@@ -211,6 +211,8 @@ type Config struct {
 	IpInIpMtu        int    `config:"int;1440;non-zero"`
 	IpInIpTunnelAddr net.IP `config:"ipv4;"`
 
+	AWSSrcDstCheck string `config:"oneof(DoNothing,Enable,Disable);DoNothing;non-zero"`
+
 	ReportingIntervalSecs time.Duration `config:"seconds;30"`
 	ReportingTTLSecs      time.Duration `config:"seconds;90"`
 
@@ -230,8 +232,8 @@ type Config struct {
 	PrometheusGoMetricsEnabled      bool   `config:"bool;true"`
 	PrometheusProcessMetricsEnabled bool   `config:"bool;true"`
 
-	FailsafeInboundHostPorts  []ProtoPort `config:"port-list;tcp:22,udp:68,tcp:179,tcp:2379,tcp:2380,tcp:6443,tcp:6666,tcp:6667;die-on-fail"`
-	FailsafeOutboundHostPorts []ProtoPort `config:"port-list;udp:53,udp:67,tcp:179,tcp:2379,tcp:2380,tcp:6443,tcp:6666,tcp:6667;die-on-fail"`
+	FailsafeInboundHostPorts  []ProtoPort `config:"port-list;tcp:22,udp:68,tcp:179,tcp:2379,tcp:2380,tcp:5473,tcp:6443,tcp:6666,tcp:6667;die-on-fail"`
+	FailsafeOutboundHostPorts []ProtoPort `config:"port-list;udp:53,udp:67,tcp:179,tcp:2379,tcp:2380,tcp:5473,tcp:6443,tcp:6666,tcp:6667;die-on-fail"`
 
 	KubeNodePortRanges []numorstring.Port `config:"portrange-list;30000:32767"`
 	NATPortRange       numorstring.Port   `config:"portrange;"`

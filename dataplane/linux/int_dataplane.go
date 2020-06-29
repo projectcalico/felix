@@ -36,6 +36,7 @@ import (
 	"github.com/vishvananda/netlink"
 
 	"github.com/projectcalico/libcalico-go/lib/health"
+	cprometheus "github.com/projectcalico/libcalico-go/lib/prometheus"
 	"github.com/projectcalico/libcalico-go/lib/set"
 
 	"github.com/projectcalico/felix/bpf"
@@ -75,21 +76,21 @@ var (
 		Name: "felix_int_dataplane_messages",
 		Help: "Number dataplane messages by type.",
 	}, []string{"type"})
-	summaryApplyTime = prometheus.NewSummary(prometheus.SummaryOpts{
+	summaryApplyTime = cprometheus.NewSummary(prometheus.SummaryOpts{
 		Name: "felix_int_dataplane_apply_time_seconds",
 		Help: "Time in seconds that it took to apply a dataplane update.",
 	})
-	summaryBatchSize = prometheus.NewSummary(prometheus.SummaryOpts{
+	summaryBatchSize = cprometheus.NewSummary(prometheus.SummaryOpts{
 		Name: "felix_int_dataplane_msg_batch_size",
 		Help: "Number of messages processed in each batch. Higher values indicate we're " +
 			"doing more batching to try to keep up.",
 	})
-	summaryIfaceBatchSize = prometheus.NewSummary(prometheus.SummaryOpts{
+	summaryIfaceBatchSize = cprometheus.NewSummary(prometheus.SummaryOpts{
 		Name: "felix_int_dataplane_iface_msg_batch_size",
 		Help: "Number of interface state messages processed in each batch. Higher " +
 			"values indicate we're doing more batching to try to keep up.",
 	})
-	summaryAddrBatchSize = prometheus.NewSummary(prometheus.SummaryOpts{
+	summaryAddrBatchSize = cprometheus.NewSummary(prometheus.SummaryOpts{
 		Name: "felix_int_dataplane_addr_msg_batch_size",
 		Help: "Number of interface address messages processed in each batch. Higher " +
 			"values indicate we're doing more batching to try to keep up.",
@@ -496,8 +497,6 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		dp.RegisterManager(newBPFIPSetManager(ipSetIDAllocator, ipSetsMap))
 		bpfRTMgr := newBPFRouteManager(config.Hostname, bpfMapContext)
 		dp.RegisterManager(bpfRTMgr)
-		dp.RegisterManager(newBPFConntrackManager(
-			config.BPFConntrackTimeouts, config.BPFNodePortDSREnabled, bpfMapContext))
 
 		// Forwarding into a tunnel seems to fail silently, disable FIB lookup if tunnel is enabled for now.
 		fibLookupEnabled := !config.RulesConfig.IPIPEnabled && !config.RulesConfig.VXLANEnabled
@@ -542,12 +541,23 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			log.WithError(err).Panic("Failed to create routes BPF map.")
 		}
 
+		ctMap := conntrack.Map(bpfMapContext)
+		err = ctMap.EnsureExists()
+		if err != nil {
+			log.WithError(err).Panic("Failed to create conntrack BPF map.")
+		}
+
 		bpfproxyOpts := []bpfproxy.Option{
 			bpfproxy.WithMinSyncPeriod(config.KubeProxyMinSyncPeriod),
+			bpfproxy.WithConntrackTimeouts(config.BPFConntrackTimeouts),
 		}
 
 		if config.KubeProxyEndpointSlicesEnabled {
 			bpfproxyOpts = append(bpfproxyOpts, bpfproxy.WithEndpointsSlices())
+		}
+
+		if config.BPFNodePortDSREnabled {
+			bpfproxyOpts = append(bpfproxyOpts, bpfproxy.WithDSREnabled())
 		}
 
 		if config.KubeClientSet != nil {
@@ -558,6 +568,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 				frontendMap,
 				backendMap,
 				backendAffinityMap,
+				ctMap,
 				bpfproxyOpts...,
 			)
 			if err != nil {

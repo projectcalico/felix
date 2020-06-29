@@ -40,8 +40,9 @@ import (
 // actual state of the connectivity between the given workloads.  It is expected to be used like so:
 //
 //     var cc = &connectivity.Checker{}
-//     cc.ExpectNone(w[2], w[0], 1234)
-//     cc.ExpectSome(w[1], w[0], 5678)
+//     cc.Expect(None, w[2], w[0], 1234)
+//     cc.Expect(Some, w[1], w[0], 5678)
+//     cc.Expect(Some, w[1], w[0], 4321, ExpectWithABC, ExpectWithXYZ)
 //     cc.CheckConnectivity()
 //
 type Checker struct {
@@ -55,25 +56,36 @@ type Checker struct {
 	OnFail func(msg string)
 }
 
+// Expected defines what connectivity expectations we can have
+type Expected bool
+
+const (
+	// None no connectivity is expected
+	None Expected = false
+	// Some some connectivity, possibly after retries is expected
+	Some Expected = true
+)
+
 func (c *Checker) ExpectSome(from ConnectionSource, to ConnectionTarget, explicitPort ...uint16) {
-	c.expect(true, from, to, explicitPort)
+	c.expect(Some, from, to, ExpectWithPorts(explicitPort...))
 }
 
 func (c *Checker) ExpectSNAT(from ConnectionSource, srcIP string, to ConnectionTarget, explicitPort ...uint16) {
 	c.CheckSNAT = true
-	c.expect(true, from, to, explicitPort, ExpectWithSrcIPs(srcIP))
+	c.expect(Some, from, to, ExpectWithPorts(explicitPort...), ExpectWithSrcIPs(srcIP))
 }
 
 func (c *Checker) ExpectNone(from ConnectionSource, to ConnectionTarget, explicitPort ...uint16) {
-	c.expect(false, from, to, explicitPort)
+	c.expect(None, from, to, ExpectWithPorts(explicitPort...))
 }
 
-// ExpectConnectivity asserts existing connectivity between a ConnectionSource
+// Expect asserts existing connectivity between a ConnectionSource
 // and ConnectionTarget with details configurable with ExpectationOption(s).
 // This is a super set of ExpectSome()
-func (c *Checker) ExpectConnectivity(from ConnectionSource, to ConnectionTarget,
-	ports []uint16, opts ...ExpectationOption) {
-	c.expect(true, from, to, ports, opts...)
+func (c *Checker) Expect(expected Expected,
+	from ConnectionSource, to ConnectionTarget, opts ...ExpectationOption) {
+
+	c.expect(expected, from, to, opts...)
 }
 
 func (c *Checker) ExpectLoss(from ConnectionSource, to ConnectionTarget,
@@ -82,11 +94,14 @@ func (c *Checker) ExpectLoss(from ConnectionSource, to ConnectionTarget,
 	// Packet loss measurements shouldn't be retried.
 	c.RetriesDisabled = true
 
-	c.expect(true, from, to, explicitPort, ExpectWithLoss(duration, maxPacketLossPercent, maxPacketLossNumber))
+	c.expect(Some, from, to,
+		ExpectWithPorts(explicitPort...),
+		ExpectWithLoss(duration, maxPacketLossPercent, maxPacketLossNumber),
+	)
 }
 
-func (c *Checker) expect(connectivity bool, from ConnectionSource, to ConnectionTarget,
-	explicitPort []uint16, opts ...ExpectationOption) {
+func (c *Checker) expect(expected Expected, from ConnectionSource, to ConnectionTarget,
+	opts ...ExpectationOption) {
 
 	UnactivatedCheckers.Add(c)
 	if c.ReverseDirection {
@@ -95,11 +110,10 @@ func (c *Checker) expect(connectivity bool, from ConnectionSource, to Connection
 
 	e := Expectation{
 		From:     from,
-		To:       to.ToMatcher(explicitPort...),
-		Expected: connectivity,
+		Expected: expected,
 	}
 
-	if connectivity {
+	if expected {
 		// we expect the from.SourceIPs() by default
 		e.ExpSrcIPs = from.SourceIPs()
 	}
@@ -107,6 +121,8 @@ func (c *Checker) expect(connectivity bool, from ConnectionSource, to Connection
 	for _, option := range opts {
 		option(&e)
 	}
+
+	e.To = to.ToMatcher(e.explicitPorts...)
 
 	c.expectations = append(c.expectations, e)
 }
@@ -194,6 +210,9 @@ func (c *Checker) ExpectedConnectivityPretty() []string {
 			if exp.ExpectedPacketLoss.MaxPercent >= 0 {
 				result[i] += fmt.Sprintf(" (maxLoss: %.1f%%)", exp.ExpectedPacketLoss.MaxPercent)
 			}
+		}
+		if exp.ErrorStr != "" {
+			result[i] += " " + exp.ErrorStr
 		}
 	}
 	return result
@@ -292,7 +311,8 @@ type Response struct {
 	SourceAddr string
 	ServerAddr string
 
-	Request Request
+	Request  Request
+	ErrorStr string
 }
 
 func (r *Response) SourceIP() string {
@@ -356,6 +376,11 @@ func ExpectWithSrcIPs(ips ...string) ExpectationOption {
 		e.ExpSrcIPs = ips
 	}
 }
+func ExpectNoneWithError(ErrorStr string) ExpectationOption {
+	return func(e *Expectation) {
+		e.ErrorStr = ErrorStr
+	}
+}
 
 // ExpectWithSendLen asserts how much additional data on top of the original
 // requests should be sent with success
@@ -400,18 +425,28 @@ func ExpectWithLoss(duration time.Duration, maxPacketLossPercent float64, maxPac
 	}
 }
 
+func ExpectWithPorts(ports ...uint16) ExpectationOption {
+	return func(e *Expectation) {
+		e.explicitPorts = ports
+	}
+}
+
 type Expectation struct {
 	From               ConnectionSource // Workload or Container
 	To                 *Matcher         // Workload or IP, + port
-	Expected           bool
+	Expected           Expected
 	ExpSrcIPs          []string
 	ExpectedPacketLoss ExpPacketLoss
+
+	explicitPorts []uint16
 
 	sendLen int
 	recvLen int
 
 	clientMTUStart int
 	clientMTUEnd   int
+
+	ErrorStr string
 }
 
 type ExpPacketLoss struct {
@@ -460,8 +495,25 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 
 	} else {
 		if response != nil {
+			if e.ErrorStr != "" {
+				// Return a match if the error string expected is in the response
+				if strings.Contains(response.LastResponse.ErrorStr, e.ErrorStr) {
+					return true
+				}
+			} else if response.Stats.ResponsesReceived == 0 {
+				// In cases, were we don't expect an error and a response, but still get one,
+				// return true, if the ResponsesReceived in the stats is 0. This is for
+				// ExpectNone to pass
+				return true
+			}
 			return false
+		} else {
+			// Return false if we expect an error string and we don't get a response
+			if e.ErrorStr != "" {
+				return false
+			}
 		}
+
 	}
 
 	return true
@@ -579,19 +631,14 @@ func (cmd *CheckCmd) run(cName string, logMsg string) *Result {
 	Expect(errErr).NotTo(HaveOccurred())
 
 	err = connectionCmd.Wait()
-
 	logCxt.WithFields(log.Fields{
 		"stdout": string(wOut),
 		"stderr": string(wErr)}).WithError(err).Info(logMsg)
 
-	if err != nil {
-		return nil
-	}
-
+	var resp Result
 	r := regexp.MustCompile(`RESULT=(.*)\n`)
 	m := r.FindSubmatch(wOut)
 	if len(m) > 0 {
-		var resp Result
 		err := json.Unmarshal(m[1], &resp)
 		if err != nil {
 			logCxt.WithError(err).WithField("output", string(wOut)).Panic("Failed to parse connection check response")

@@ -16,6 +16,8 @@ package proxy_test
 
 import (
 	"fmt"
+	"net"
+	"runtime"
 	"time"
 
 	. "github.com/onsi/ginkgo"
@@ -39,10 +41,10 @@ var _ = Describe("BPF Proxy", func() {
 	var syncStop chan struct{}
 
 	It("should fail without k8s client", func() {
-		_, err := proxy.New(nil, nil, "testnode")
+		_, err := proxy.New(nil, nil, nil, "testnode")
 		Expect(err).To(HaveOccurred())
 
-		_, err = proxy.New(fake.NewSimpleClientset(), nil, "testnode")
+		_, err = proxy.New(fake.NewSimpleClientset(), nil, nil, "testnode")
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -52,7 +54,7 @@ var _ = Describe("BPF Proxy", func() {
 		syncStop = make(chan struct{})
 		dp := newMockSyncer(syncStop)
 
-		p, err := proxy.New(k8s, dp, "testnode", proxy.WithImmediateSync())
+		p, err := proxy.New(k8s, dp, nil, "testnode", proxy.WithImmediateSync())
 		Expect(err).NotTo(HaveOccurred())
 
 		defer func() {
@@ -63,8 +65,6 @@ var _ = Describe("BPF Proxy", func() {
 		dp.checkState(func(s proxy.DPSyncerState) {
 			Expect(len(s.SvcMap)).To(Equal(0))
 			Expect(len(s.EpsMap)).To(Equal(0))
-			Expect(len(s.StaleUDPEps)).To(Equal(0))
-			Expect(len(s.StaleUDPSvcs)).To(Equal(0))
 		})
 	})
 
@@ -170,12 +170,12 @@ var _ = Describe("BPF Proxy", func() {
 				syncStop = make(chan struct{})
 				dp = newMockSyncer(syncStop)
 
-				opts := []proxy.Option{proxy.WithMinSyncPeriod(200 * time.Millisecond)}
+				opts := []proxy.Option{proxy.WithImmediateSync()}
 				if endpointSlicesEnabled {
 					opts = append(opts, proxy.WithEndpointsSlices())
 				}
 
-				p, err = proxy.New(k8s, dp, "testnode", opts...)
+				p, err = proxy.New(k8s, dp, nil, "testnode", opts...)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -193,8 +193,6 @@ var _ = Describe("BPF Proxy", func() {
 				dp.checkState(func(s proxy.DPSyncerState) {
 					Expect(len(s.SvcMap)).To(Equal(2))
 					Expect(len(s.EpsMap)).To(Equal(2))
-					Expect(len(s.StaleUDPEps)).To(Equal(0))
-					Expect(len(s.StaleUDPSvcs)).To(Equal(0))
 				})
 			})
 
@@ -223,8 +221,6 @@ var _ = Describe("BPF Proxy", func() {
 				dp.checkState(func(s proxy.DPSyncerState) {
 					Expect(len(s.SvcMap)).To(Equal(3))
 					Expect(len(s.EpsMap)).To(Equal(2))
-					Expect(len(s.StaleUDPEps)).To(Equal(0))
-					Expect(len(s.StaleUDPSvcs)).To(Equal(0))
 				})
 			})
 
@@ -235,8 +231,6 @@ var _ = Describe("BPF Proxy", func() {
 				dp.checkState(func(s proxy.DPSyncerState) {
 					Expect(len(s.SvcMap)).To(Equal(2))
 					Expect(len(s.EpsMap)).To(Equal(2))
-					Expect(len(s.StaleUDPEps)).To(Equal(0))
-					Expect(len(s.StaleUDPSvcs)).To(Equal(0))
 				})
 			})
 
@@ -286,8 +280,6 @@ var _ = Describe("BPF Proxy", func() {
 					Expect(len(s.SvcMap)).To(Equal(2))
 					Expect(len(s.EpsMap)).To(Equal(2))
 					Expect(len(s.EpsMap[secondSvcEpsKey])).To(Equal(1))
-					Expect(len(s.StaleUDPEps)).To(Equal(0))
-					Expect(len(s.StaleUDPSvcs)).To(Equal(0))
 				})
 			})
 
@@ -299,8 +291,6 @@ var _ = Describe("BPF Proxy", func() {
 				dp.checkState(func(s proxy.DPSyncerState) {
 					Expect(len(s.SvcMap)).To(Equal(1))
 					Expect(len(s.EpsMap)).To(Equal(2))
-					Expect(len(s.StaleUDPEps)).To(Equal(0))
-					Expect(len(s.StaleUDPSvcs)).To(Equal(1))
 				})
 			})
 
@@ -353,8 +343,6 @@ var _ = Describe("BPF Proxy", func() {
 					for _, port := range httpSvcEps.Subsets[0].Ports {
 						Expect(len(s.SvcMap)).To(Equal(1))
 						Expect(len(s.EpsMap)).To(Equal(5))
-						Expect(len(s.StaleUDPEps)).To(Equal(0))
-						Expect(len(s.StaleUDPSvcs)).To(Equal(0))
 
 						ep := s.EpsMap[k8sp.ServicePortName{
 							NamespacedName: types.NamespacedName{
@@ -402,8 +390,6 @@ var _ = Describe("BPF Proxy", func() {
 				dp.checkState(func(s proxy.DPSyncerState) {
 					Expect(len(s.SvcMap)).To(Equal(1))
 					Expect(len(s.EpsMap)).To(Equal(6))
-					Expect(len(s.StaleUDPEps)).To(Equal(0))
-					Expect(len(s.StaleUDPSvcs)).To(Equal(0))
 				})
 			})
 
@@ -461,8 +447,6 @@ var _ = Describe("BPF Proxy", func() {
 				dp.checkState(func(s proxy.DPSyncerState) {
 					Expect(len(s.SvcMap)).To(Equal(2))
 					Expect(len(s.EpsMap)).To(Equal(7))
-					Expect(len(s.StaleUDPEps)).To(Equal(0))
-					Expect(len(s.StaleUDPSvcs)).To(Equal(0))
 
 					npKey := k8sp.ServicePortName{
 						NamespacedName: types.NamespacedName{
@@ -560,12 +544,12 @@ var _ = Describe("BPF Proxy", func() {
 				syncStop = make(chan struct{})
 				dp = newMockSyncer(syncStop)
 
-				opts := []proxy.Option{proxy.WithMinSyncPeriod(200 * time.Millisecond)}
+				opts := []proxy.Option{proxy.WithImmediateSync()}
 				if endpointSlicesEnabled {
 					opts = append(opts, proxy.WithEndpointsSlices())
 				}
 
-				p, err = proxy.New(k8s, dp, testNodeName, opts...)
+				p, err = proxy.New(k8s, dp, nil, testNodeName, opts...)
 				Expect(err).NotTo(HaveOccurred())
 			})
 		})
@@ -601,6 +585,7 @@ var _ = Describe("BPF Proxy", func() {
 })
 
 type mockSyncer struct {
+	syncerConntrackAPIDummy
 	out  chan proxy.DPSyncerState
 	in   chan error
 	stop chan struct{}
@@ -627,10 +612,52 @@ func (s *mockSyncer) Apply(state proxy.DPSyncerState) error {
 	}
 }
 
+type syncerConntrackAPIDummy struct{}
+
+func (*syncerConntrackAPIDummy) ConntrackScanStart() {}
+func (*syncerConntrackAPIDummy) ConntrackScanEnd()   {}
+func (*syncerConntrackAPIDummy) ConntrackFrontendHasBackend(ip net.IP, port uint16, backendIP net.IP,
+	backendPort uint16, proto uint8) bool {
+	return false
+}
+
 func (s *mockSyncer) checkState(f func(proxy.DPSyncerState)) {
-	// defer to recover/unblock in case of expectations failing in f()
-	defer func() { s.in <- nil }()
-	f(<-s.out)
+	tickC := time.After(10 * time.Second)
+
+	var fails []string
+
+	// Since the k8s changes may not come atomically, we wait for the state to
+	// be eventually what we expected
+	for {
+		select {
+		case state, ok := <-s.out:
+			if !ok {
+				Fail("checkState : s.out closed")
+			}
+			fails = InterceptGomegaFailures(func() {
+				// defer to recover/unblock in case of expectations failing in f()
+				defer func() { s.in <- nil }()
+				f(state)
+			})
+
+			if len(fails) == 0 {
+				return
+			}
+
+		case <-tickC:
+			_, file, line, _ := runtime.Caller(1)
+
+			var msg string
+			for _, f := range fails {
+				msg += "\n" + f
+			}
+
+			Fail(fmt.Sprintf(
+				"checkState timed out at File: %s Line: %d, last failed expectations: %s",
+				file, line, msg,
+			))
+		}
+	}
 }
 
 func typeMetaV1(kind string) metav1.TypeMeta {

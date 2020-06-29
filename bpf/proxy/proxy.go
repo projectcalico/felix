@@ -18,7 +18,7 @@
 package proxy
 
 import (
-	"strings"
+	"net"
 	"sync"
 	"time"
 
@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/selection"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -39,6 +38,9 @@ import (
 	"k8s.io/kubernetes/pkg/proxy/config"
 	"k8s.io/kubernetes/pkg/proxy/healthcheck"
 	"k8s.io/kubernetes/pkg/util/async"
+
+	"github.com/projectcalico/felix/bpf/conntrack"
+	"github.com/projectcalico/felix/jitter"
 )
 
 // Proxy watches for updates of Services and Endpoints, maintains their mapping
@@ -50,16 +52,17 @@ type Proxy interface {
 
 // DPSyncerState groups the information passed to the DPSyncer's Apply
 type DPSyncerState struct {
-	SvcMap       k8sp.ServiceMap
-	EpsMap       k8sp.EndpointsMap
-	StaleUDPEps  []k8sp.ServiceEndpoint
-	StaleUDPSvcs sets.String
+	SvcMap k8sp.ServiceMap
+	EpsMap k8sp.EndpointsMap
 }
 
 // DPSyncer is an interface representing the dataplane syncer that applies the
 // observed changes to the dataplane
 type DPSyncer interface {
 	Apply(state DPSyncerState) error
+	ConntrackScanStart()
+	ConntrackScanEnd()
+	ConntrackFrontendHasBackend(ip net.IP, port uint16, backendIP net.IP, backendPort uint16, proto uint8) bool
 	Stop()
 }
 
@@ -95,6 +98,8 @@ type proxy struct {
 	svcHealthServer healthcheck.ServiceHealthServer
 	healthzServer   healthcheck.ProxierHealthUpdater
 
+	connScan *conntrack.Scanner
+
 	stopCh   chan struct{}
 	stopWg   sync.WaitGroup
 	stopOnce sync.Once
@@ -105,7 +110,9 @@ type stoppableRunner interface {
 }
 
 // New returns a new Proxy for the given k8s interface
-func New(k8s kubernetes.Interface, dp DPSyncer, hostname string, opts ...Option) (Proxy, error) {
+func New(k8s kubernetes.Interface, dp DPSyncer, connScan *conntrack.Scanner,
+	hostname string, opts ...Option) (Proxy, error) {
+
 	if k8s == nil {
 		return nil, errors.Errorf("no k8s client")
 	}
@@ -117,6 +124,7 @@ func New(k8s kubernetes.Interface, dp DPSyncer, hostname string, opts ...Option)
 	p := &proxy{
 		k8s:      k8s,
 		dpSyncer: dp,
+		connScan: connScan,
 		hostname: hostname,
 		svcMap:   make(k8sp.ServiceMap),
 		epsMap:   make(k8sp.EndpointsMap),
@@ -190,14 +198,20 @@ func New(k8s kubernetes.Interface, dp DPSyncer, hostname string, opts ...Option)
 	p.startRoutine(func() { informerFactory.Start(p.stopCh) })
 	p.startRoutine(func() { svcConfig.Run(p.stopCh) })
 
+	if p.connScan != nil {
+		p.startRoutine(func() { p.conntrackCleaner(p.stopCh) })
+	}
+
 	return p, nil
 }
 
 func (p *proxy) Stop() {
 	p.stopOnce.Do(func() {
+		log.Info("Proxy stopping")
 		p.dpSyncer.Stop()
 		close(p.stopCh)
 		p.stopWg.Wait()
+		log.Info("Proxy stopped")
 	})
 }
 
@@ -228,20 +242,6 @@ func (p *proxy) invokeDPSyncer() {
 	svcUpdateResult := k8sp.UpdateServiceMap(p.svcMap, p.svcChanges)
 	epsUpdateResult := p.epsMap.Update(p.epsChanges)
 
-	staleUDPSvcs := svcUpdateResult.UDPStaleClusterIP
-
-	// merge stale UDP services
-	for _, svcPortName := range epsUpdateResult.StaleServiceNames {
-		if svcInfo, ok := p.svcMap[svcPortName]; ok && svcInfo != nil && svcInfo.Protocol() == v1.ProtocolUDP {
-			log.Infof("Stale %s service %v -> %s",
-				strings.ToLower(string(svcInfo.Protocol())), svcPortName, svcInfo.ClusterIP().String())
-			staleUDPSvcs.Insert(svcInfo.ClusterIP().String())
-			for _, extIP := range svcInfo.ExternalIPStrings() {
-				staleUDPSvcs.Insert(extIP)
-			}
-		}
-	}
-
 	if err := p.svcHealthServer.SyncServices(svcUpdateResult.HCServiceNodePorts); err != nil {
 		log.WithError(err).Error("Error syncing healthcheck services")
 	}
@@ -249,9 +249,8 @@ func (p *proxy) invokeDPSyncer() {
 		log.WithError(err).Error("Error syncing healthcheck endpoints")
 	}
 	err := p.dpSyncer.Apply(DPSyncerState{
-		SvcMap:       p.svcMap,
-		EpsMap:       p.epsMap,
-		StaleUDPSvcs: staleUDPSvcs,
+		SvcMap: p.svcMap,
+		EpsMap: p.epsMap,
 	})
 
 	if err != nil {
@@ -324,6 +323,28 @@ func (p *proxy) OnEndpointSliceDelete(eps *discovery.EndpointSlice) {
 func (p *proxy) OnEndpointSlicesSynced() {
 	p.setEpsSynced()
 	p.forceSyncDP()
+}
+
+func (p *proxy) conntrackCleaner(stopCh <-chan struct{}) {
+	log.Debug("Conntrack cleanup thread started")
+	defer log.Debug("Conntrack cleanup thread stopped")
+
+	ticker := jitter.NewTicker(10*time.Second, 100*time.Millisecond)
+
+	for {
+		select {
+		case <-ticker.C:
+			log.Debug("Conntrack cleanup timer popped")
+			// N.B. syncer needs to be told about when scanning starts and ends so that it
+			// can get its internal structs ready, take/release any locks and do cleanup.
+			p.dpSyncer.ConntrackScanStart()
+			p.connScan.Scan()
+			p.dpSyncer.ConntrackScanEnd()
+		case <-stopCh:
+			log.Debug("Conntrack cleanup got stop signal")
+			return
+		}
+	}
 }
 
 type initState struct {

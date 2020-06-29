@@ -122,6 +122,8 @@ func (m *bpfRouteManager) OnUpdate(msg interface{}) {
 }
 
 func (m *bpfRouteManager) CompleteDeferredWork() error {
+	m.ensureDataplaneInitialised()
+
 	startTime := time.Now()
 
 	// Step 1: calculate any updates to the _desired_ state of the BPF map.
@@ -275,7 +277,6 @@ func (m *bpfRouteManager) calculateRoute(cidr ip.V4CIDR) *routes.Value {
 }
 
 func (m *bpfRouteManager) applyUpdates() (numDels uint, numAdds uint) {
-	m.ensureDataplaneInitialised()
 
 	debug := log.GetLevel() >= log.DebugLevel
 
@@ -472,6 +473,12 @@ func (m *bpfRouteManager) onRouteUpdate(update *proto.RouteUpdate) {
 		return
 	}
 
+	// For now don't handle the tunnel addresses, which were previously not being included in the route updates.
+	if update.Type == proto.RouteType_REMOTE_TUNNEL || update.Type == proto.RouteType_LOCAL_TUNNEL {
+		m.onRouteRemove(&proto.RouteRemove{Dst: update.Dst})
+		return
+	}
+
 	if m.cidrToRoute[v4CIDR] == *update {
 		return
 	}
@@ -487,8 +494,12 @@ func (m *bpfRouteManager) onRouteRemove(update *proto.RouteRemove) {
 		// FIXME IPv6
 		return
 	}
-	delete(m.cidrToRoute, v4CIDR)
-	m.dirtyCIDRs.Add(v4CIDR)
+
+	if _, ok := m.cidrToRoute[v4CIDR]; ok {
+		// Check the entry is in the cache before removing and flagging as dirty.
+		delete(m.cidrToRoute, v4CIDR)
+		m.dirtyCIDRs.Add(v4CIDR)
+	}
 }
 
 func (m *bpfRouteManager) onWorkloadEndpointUpdate(update *proto.WorkloadEndpointUpdate) {
