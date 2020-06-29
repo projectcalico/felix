@@ -40,7 +40,9 @@ function create-vm() {
   gcloud --quiet compute ssh --zone=${zone} "ubuntu@${vm_name}" -- sudo apt-get update -y && \
   gcloud --quiet compute ssh --zone=${zone} "ubuntu@${vm_name}" -- sudo apt-get install -y --no-install-recommends git make iproute2 docker.io wireguard && \
   gcloud --quiet compute ssh --zone=${zone} "ubuntu@${vm_name}" -- sudo usermod -a -G docker ubuntu && \
-  gcloud --quiet compute scp --zone=${zone} --recurse --compress "$(pwd)" "ubuntu@${vm_name}:"
+  gcloud --quiet compute scp --zone=${zone} --recurse --compress "$(pwd)" "ubuntu@${vm_name}:" && \
+  gcloud --quiet compute ssh --zone=${zone} "ubuntu@${vm_name}" -- docker load -i felix/calico-felix.tar && \
+  gcloud --quiet compute ssh --zone=${zone} "ubuntu@${vm_name}" -- rm felix/calico-felix.tar
 }
 
 function delete-vm() {
