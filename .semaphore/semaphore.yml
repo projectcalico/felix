@@ -25,16 +25,16 @@ blocks:
 - name: Build
   task:
     jobs:
-      name: Build
-      commands:
-      - checkout
-      - cache restore go-pkg-cache
-      - cache restore go-mod-cache
-      - >-
-          make image-test fv/fv.test bin/test-workload bin/test-connection
-          bin/calico-felix
-      - docker save -o ./calico-felix.tar calico/felix-test:latest-amd64
-      - 'cache store checkout-${SEMAPHORE_GIT_SHA} `pwd`'
+      - name: Build
+        commands:
+        - checkout
+        - cache restore go-pkg-cache
+        - cache restore go-mod-cache
+        - >-
+            make image-test fv/fv.test bin/test-workload bin/test-connection
+            bin/calico-felix
+        - docker save -o ./calico-felix.tar calico/felix-test:latest-amd64
+        - 'cache store checkout-${SEMAPHORE_GIT_SHA} `pwd`'
 - name: BPF UT/FV tests on new kernel
   dependencies: [Build]
   task:
