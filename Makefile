@@ -170,6 +170,12 @@ bin/calico-felix-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	     sh -c 'go build -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix"'; \
 	fi
 
+bin/crash-repro: $(SRC_FILES) $(LOCAL_BUILD_DEP)
+	@echo Building crash-repro
+	mkdir -p bin
+	$(DOCKER_GO_BUILD_CGO) \
+	  sh -c 'go build -race -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/crash-repro"';
+
 bin/calico-felix-race-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	@echo Building felix with race detector enabled for $(ARCH) on $(BUILDARCH)
 	mkdir -p bin
