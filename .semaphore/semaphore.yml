@@ -39,7 +39,7 @@ blocks:
     jobs:
     - name: FV on newer kernel
       commands:
-      - ./.semaphore/on-test-vm make --directory=${REPO_NAME} fv-bpf GINKGO_FOCUS=BPF-SAFE FV_NUM_BATCHES=6 FV_BATCHES_TO_RUN=$((SEMAPHORE_JOB_INDEX % 6))
+      - ./.semaphore/on-test-vm make --directory=${REPO_NAME} fv-bpf GINKGO_FOCUS=BPF-SAFE FV_NUM_BATCHES=6 FV_BATCHES_TO_RUN=$((SEMAPHORE_JOB_INDEX % 6)) GINKGO_ARGS="-ginkgo.noisySkippings=false"
       parallelism: 24
     epilogue:
       always:
