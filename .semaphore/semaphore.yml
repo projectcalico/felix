@@ -22,12 +22,24 @@ promotions:
     when: "result = 'stopped'"
 
 blocks:
+- name: Build
+  task:
+    commands:
+    - checkout
+    - cache restore go-pkg-cache
+    - cache restore go-mod-cache
+    - >-
+        make image fv/fv.test bin/test-workload bin/test-connection
+        bin/calico-felix
+    - docker save -o ./calico-felix.tar calico/felix:latest-amd64
+    - 'cache store checkout-${SEMAPHORE_GIT_SHA} `pwd`'
 - name: BPF UT/FV tests on new kernel
-  dependencies: []
+  dependencies: [Build]
   task:
     prologue:
       commands:
-      - checkout
+      - cache restore checkout-${SEMAPHORE_GIT_SHA}
+      - cd felix
       - export GOOGLE_APPLICATION_CREDENTIALS=$HOME/secrets/secret.google-service-account-key.json
       - export SHORT_WORKFLOW_ID=$(echo ${SEMAPHORE_WORKFLOW_ID} | sha256sum | cut -c -8)
       - export ZONE=europe-west3-c
