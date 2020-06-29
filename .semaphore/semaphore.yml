@@ -24,15 +24,17 @@ promotions:
 blocks:
 - name: Build
   task:
-    commands:
-    - checkout
-    - cache restore go-pkg-cache
-    - cache restore go-mod-cache
-    - >-
-        make image fv/fv.test bin/test-workload bin/test-connection
-        bin/calico-felix
-    - docker save -o ./calico-felix.tar calico/felix:latest-amd64
-    - 'cache store checkout-${SEMAPHORE_GIT_SHA} `pwd`'
+    jobs:
+      name: Build
+      commands:
+      - checkout
+      - cache restore go-pkg-cache
+      - cache restore go-mod-cache
+      - >-
+          make image-test fv/fv.test bin/test-workload bin/test-connection
+          bin/calico-felix
+      - docker save -o ./calico-felix.tar calico/felix-test:latest-amd64
+      - 'cache store checkout-${SEMAPHORE_GIT_SHA} `pwd`'
 - name: BPF UT/FV tests on new kernel
   dependencies: [Build]
   task:
@@ -51,6 +53,7 @@ blocks:
     jobs:
     - name: FV on newer kernel
       commands:
+      - ./.semaphore/on-test-vm touch ${REPO_NAME}/image-test
       - ./.semaphore/on-test-vm make --directory=${REPO_NAME} fv-bpf GINKGO_FOCUS=BPF-SAFE FV_NUM_BATCHES=6 FV_BATCHES_TO_RUN=$(( (SEMAPHORE_JOB_INDEX % 6) + 1)) GINKGO_ARGS="-ginkgo.noisySkippings=false"
       parallelism: 24
     epilogue:
