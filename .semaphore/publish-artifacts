@@ -22,6 +22,11 @@ repo_dir=$my_dir/..
 
 cd "$repo_dir/artifacts" || exit 1
 
+if [[ -z "$(ls | grep -v binaries)" ]]; then
+  echo "No diagnositc artifacts detected."
+  exit 0
+fi
+
 for file in *; do
-  artifact push --expire-in 4w job "$file"
+  artifact push --expire-in 4w workflow "$file"
 done
