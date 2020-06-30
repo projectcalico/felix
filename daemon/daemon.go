@@ -480,7 +480,7 @@ configRetry:
 				time.Sleep(1 * time.Second)
 			}
 			if err != nil {
-				log.WithError(err).Fatal("Failed to connect to Typha")
+				log.WithError(err).Fatalf("Failed to connect to Typha at %s. Consider checking firewall rules.", typhaAddr)
 			} else {
 				log.Info("Connected to Typha after retries.")
 				healthAggregator.Report(healthName, &health.HealthReport{Live: true, Ready: true})
