@@ -22,6 +22,11 @@ repo_dir=$my_dir/..
 
 cd "$repo_dir/artifacts" || exit 1
 
+if [[ $(ls) = "binaries.tgz" ]]; then
+  echo "Only the binaries tarball detected, skipping artifact collection."
+  exit 0
+fi
+
 for file in *; do
-  artifact push --expire-in 4w job "$file"
+  artifact push --expire-in 4w workflow "$file"
 done
