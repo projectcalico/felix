@@ -26,6 +26,7 @@ trap 'echo "calico-felix-wrapper: SIGHUP received, passing on to calico-felix"; 
 rc=unknown
 
 if [ "$SET_CORE_PATTERN" == "true" ]; then
+  ulimit -c unlimited
   echo '/tmp/core_%h_%e.%p' > /proc/sys/kernel/core_pattern
 fi
 

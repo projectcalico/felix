@@ -168,6 +168,10 @@ FELIX_2/32: remote host`
 
 const extIP = "10.1.2.3"
 
+var _= JustBeforeEach(func() {
+	Skip("Skipping test body")
+})
+
 func describeBPFTests(opts ...bpfTestOpt) bool {
 	testOpts := bpfTestOptions{
 		bpfLogLevel: "debug",
