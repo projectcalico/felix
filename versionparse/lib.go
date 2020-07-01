@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,13 +20,16 @@ import (
 	"io/ioutil"
 	"os"
 	"regexp"
+	"strconv"
+	"strings"
 
 	version "github.com/hashicorp/go-version"
 	log "github.com/sirupsen/logrus"
 )
 
 var (
-	kernelVersionRegexp = regexp.MustCompile(`Linux version (\d+\.\d+\.\d+)`)
+	kernelVersionRegexp     = regexp.MustCompile(`Linux version (\d+\.\d+\.\d+)`)
+	kernelVersionRHELRegexp = regexp.MustCompile(`Linux version (\d+\.\d+\.\d-\d+)`)
 )
 
 func MustParseVersion(v string) *version.Version {
@@ -37,19 +40,52 @@ func MustParseVersion(v string) *version.Version {
 	return ver
 }
 
+func convertVersionToIntSlice(ver *version.Version) []int {
+	intSlice := []int{0, 0, 0, 0}
+	sliceIndex := 0
+	for index, outer := range strings.Split(ver.String(), "-") {
+		if index == 0 {
+			for _, inner := range strings.Split(outer, ".") {
+				intSlice[sliceIndex], _ = strconv.Atoi(inner)
+				sliceIndex++
+			}
+		} else if index == 1 {
+			intSlice[sliceIndex], _ = strconv.Atoi(outer)
+		}
+	}
+	return intSlice
+}
+
+func Compare(version1, version2 *version.Version) int {
+	ver1Slice := convertVersionToIntSlice(version1)
+	ver2Slice := convertVersionToIntSlice(version2)
+	for index := range ver1Slice {
+		if ver1Slice[index] == ver2Slice[index] {
+			continue
+		}
+		if ver1Slice[index] < ver2Slice[index] {
+			return -1
+		}
+		if ver1Slice[index] > ver2Slice[index] {
+			return 1
+		}
+	}
+	return 0
+}
 func GetKernelVersionReader() (io.Reader, error) {
 	return os.Open("/proc/version")
 }
 
-func GetKernelVersion(reader io.Reader) (*version.Version, error) {
-	kernVersion, err := ioutil.ReadAll(reader)
-	if err != nil {
-		log.WithError(err).Warn("Failed to read kernel version from reader")
-		return nil, err
-	}
-	s := string(kernVersion)
+func GetVersionFromString(s string) (*version.Version, error) {
+	var matches []string
 	log.WithField("rawVersion", s).Debug("Raw kernel version")
-	matches := kernelVersionRegexp.FindStringSubmatch(s)
+	// Match the build version for Red Hat
+	if strings.Contains(s, "Red Hat") {
+		matches = kernelVersionRHELRegexp.FindStringSubmatch(s)
+	} else {
+		matches = kernelVersionRegexp.FindStringSubmatch(s)
+	}
+
 	if len(matches) == 0 {
 		msg := "Failed to parse kernel version string"
 		log.WithField("rawVersion", s).Warn(msg)
@@ -63,4 +99,40 @@ func GetKernelVersion(reader io.Reader) (*version.Version, error) {
 	}
 	log.WithField("version", parsedVersion).Debug("Parsed kernel version")
 	return parsedVersion, nil
+}
+
+func GetDistFromString(s string) string {
+	distName := "default"
+	if strings.Contains(s, "Ubuntu") {
+		distName = "ubuntu"
+	} else if strings.Contains(s, "Red Hat") {
+		distName = "rhel"
+	}
+	return distName
+}
+
+func GetKernelVersion(reader io.Reader) (*version.Version, error) {
+	kernVersion, err := ioutil.ReadAll(reader)
+	if err != nil {
+		log.WithError(err).Warn("Failed to read kernel version from reader")
+		return nil, err
+	}
+	s := string(kernVersion)
+	return GetVersionFromString(s)
+}
+
+func GetDistributionName() string {
+	reader, err := GetKernelVersionReader()
+	if err != nil {
+		log.WithError(err).Warn("Failed to get kernel version reader")
+		return "default"
+	}
+	kernVersion, err := ioutil.ReadAll(reader)
+	if err != nil {
+		log.WithError(err).Warn("Failed to read kernel version from reader")
+		return "default"
+	}
+	s := string(kernVersion)
+
+	return GetDistFromString(s)
 }

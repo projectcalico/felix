@@ -91,6 +91,9 @@ var (
 	// v4Dot16Dot0 is the first kernel version that has all the
 	// required features we use for XDP filtering
 	v4Dot16Dot0 = versionparse.MustParseVersion("4.16.0")
+	// v4Dot18Dot0 is the kernel version in RHEL that has all the
+	// required features for BPF dataplane, sidecar acceleration
+	v4Dot18Dot0 = versionparse.MustParseVersion("4.18.0-193")
 	// v4Dot20Dot0 is the first kernel version that has all the
 	// required features we use for sidecar acceleration
 	v4Dot20Dot0 = versionparse.MustParseVersion("4.20.0")
@@ -98,6 +101,12 @@ var (
 	// required features we use for BPF dataplane mode
 	v5Dot3Dot0 = versionparse.MustParseVersion("5.3.0")
 )
+
+var distToVersionMap = map[string]*version.Version{
+	"ubuntu":  v5Dot3Dot0,
+	"rhel":    v4Dot18Dot0,
+	"default": v5Dot3Dot0,
+}
 
 func (m XDPMode) String() string {
 	switch m {
@@ -2171,7 +2180,7 @@ func isAtLeastKernel(v *version.Version) error {
 		return fmt.Errorf("failed to get kernel version: %v", err)
 	}
 
-	if kernelVersion.Compare(v) < 0 {
+	if versionparse.Compare(kernelVersion, v) < 0 {
 		return fmt.Errorf("kernel is too old (have: %v but want at least: %v)", kernelVersion, v)
 	}
 
@@ -2191,8 +2200,13 @@ func SupportsSockmap() error {
 	return nil
 }
 
+func GetMinKernelVersionForDistro(distName string) *version.Version {
+	return distToVersionMap[distName]
+}
+
 func SupportsBPFDataplane() error {
-	if err := isAtLeastKernel(v5Dot3Dot0); err != nil {
+	distName := versionparse.GetDistributionName()
+	if err := isAtLeastKernel(GetMinKernelVersionForDistro(distName)); err != nil {
 		return err
 	}
 
