@@ -135,6 +135,8 @@ func runK8sApiserver(etcdIp string) *containers.Container {
 		"--insecure-bind-address=0.0.0.0",
 		fmt.Sprintf("--etcd-servers=http://%s:2379", etcdIp),
 		"--service-account-key-file=/private.key",
+		"--max-mutating-requests-inflight=0",
+		"--max-requests-inflight=0",
 	)
 }
 
@@ -153,8 +155,10 @@ func runK8sControllerManager(apiserverIp string) *containers.Container {
 		// Disable node CIDRs since the controller manager stalls for 10s if
 		// they are enabled.
 		"--allocate-node-cidrs=false",
+		"--leader-elect=false",
 		"--v=3",
 		"--service-account-private-key-file=/private.key",
+		"--concurrent-gc-syncs=50",
 	)
 	return c
 }
@@ -198,6 +202,8 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 		kds.K8sClient, err = kubernetes.NewForConfig(&rest.Config{
 			Transport: insecureTransport,
 			Host:      "https://" + kds.k8sApiContainer.IP + ":6443",
+			QPS:       100,
+			Burst:     100,
 		})
 		if err == nil {
 			break
@@ -222,6 +228,11 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 			"--user=system:anonymous",
 		)
 		if err == nil {
+			break
+		}
+		if strings.Contains(err.Error(), "already exists") {
+			// Sometimes hit an "already exists" error here; I suspect the account we create is
+			// also added by the controller manager.  It doesn't matter who wins.
 			break
 		}
 		if time.Since(start) > 90*time.Second {
@@ -324,6 +335,7 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 				KubeConfig: apiconfig.KubeConfig{
 					K8sAPIEndpoint:           kds.Endpoint,
 					K8sInsecureSkipTLSVerify: true,
+					K8sClientQPS:             100,
 				},
 			},
 		})
@@ -405,6 +417,7 @@ type cleanupFunc func(clientset *kubernetes.Clientset, calicoClient client.Inter
 
 func (kds *K8sDatastoreInfra) CleanUp() {
 	log.Info("Cleaning up kubernetes datastore")
+	startTime := time.Now()
 
 	var wg sync.WaitGroup
 	for _, f := range []cleanupFunc{
@@ -427,6 +440,7 @@ func (kds *K8sDatastoreInfra) CleanUp() {
 	}
 	wg.Wait()
 	kds.needsCleanup = false
+	log.WithField("time", time.Since(startTime)).Info("Cleaned up kubernetes datastore")
 }
 
 func cleanupIPAM(clientset *kubernetes.Clientset, calicoClient client.Interface) {
@@ -735,6 +749,7 @@ func cleanupAllNodes(clientset *kubernetes.Clientset, calicoClient client.Interf
 	}
 	log.Info("Cleaned up all nodes")
 }
+
 func cleanupAllPods(clientset *kubernetes.Clientset, calicoClient client.Interface) {
 	log.Info("Cleaning up Pods")
 	nsList, err := clientset.CoreV1().Namespaces().List(metav1.ListOptions{})
@@ -790,6 +805,7 @@ func cleanupAllPools(clientset *kubernetes.Clientset, client client.Interface) {
 }
 
 func cleanupAllGlobalNetworkPolicies(clientset *kubernetes.Clientset, client client.Interface) {
+	log.Info("Cleaning up GNPs")
 	ctx := context.Background()
 	gnps, err := client.GlobalNetworkPolicies().List(ctx, options.ListOptions{})
 	if err != nil {
@@ -802,6 +818,7 @@ func cleanupAllGlobalNetworkPolicies(clientset *kubernetes.Clientset, client cli
 			panic(err)
 		}
 	}
+	log.Info("Cleaned up GNPs")
 }
 
 func cleanupAllNetworkPolicies(clientset *kubernetes.Clientset, client client.Interface) {
