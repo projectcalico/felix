@@ -878,15 +878,7 @@ func wireguardTopologyOptions() infrastructure.TopologyOptions {
 	topologyOptions.WireguardEnabled = true
 
 	// Enable Wireguard.
-	felixConfig := api.NewFelixConfiguration()
-	felixConfig.SetName("default")
-	enabled := true
-	felixConfig.Spec.WireguardEnabled = &enabled
-	topologyOptions.InitialFelixConfiguration = felixConfig
-
-	// Debugging.
-	//topologyOptions.ExtraEnvVars["FELIX_DebugUseShortPollIntervals"] = "true"
-	//topologyOptions.FelixLogSeverity = "debug"
+	topologyOptions.ExtraEnvVars["FELIX_WIREGUARDENABLED"] = "true"
 
 	return topologyOptions
 }
