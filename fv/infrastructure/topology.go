@@ -28,7 +28,6 @@ import (
 
 	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
-	"github.com/projectcalico/libcalico-go/lib/errors"
 	"github.com/projectcalico/libcalico-go/lib/options"
 	"github.com/projectcalico/libcalico-go/lib/resources"
 
@@ -36,21 +35,20 @@ import (
 )
 
 type TopologyOptions struct {
-	FelixLogSeverity          string
-	EnableIPv6                bool
-	ExtraEnvVars              map[string]string
-	ExtraVolumes              map[string]string
-	WithTypha                 bool
-	WithFelixTyphaTLS         bool
-	TyphaLogSeverity          string
-	IPIPEnabled               bool
-	IPIPRoutesEnabled         bool
-	VXLANMode                 api.VXLANMode
-	WireguardEnabled          bool
-	InitialFelixConfiguration *api.FelixConfiguration
-	NATOutgoingEnabled        bool
-	DelayFelixStart           bool
-	AutoHEPsEnabled           bool
+	FelixLogSeverity   string
+	EnableIPv6         bool
+	ExtraEnvVars       map[string]string
+	ExtraVolumes       map[string]string
+	WithTypha          bool
+	WithFelixTyphaTLS  bool
+	TyphaLogSeverity   string
+	IPIPEnabled        bool
+	IPIPRoutesEnabled  bool
+	VXLANMode          api.VXLANMode
+	WireguardEnabled   bool
+	NATOutgoingEnabled bool
+	DelayFelixStart    bool
+	AutoHEPsEnabled    bool
 }
 
 func DefaultTopologyOptions() TopologyOptions {
@@ -134,24 +132,6 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 	// Get client.
 	client = infra.GetCalicoClient()
 	mustInitDatastore(client)
-
-	// If asked to, pre-create a felix configuration.  We do this before enabling IPIP because IPIP set-up can
-	// create/update a FelixConfiguration as a side-effect.
-	if opts.InitialFelixConfiguration != nil {
-		log.WithField("config", opts.InitialFelixConfiguration).Info(
-			"Installing initial FelixConfiguration")
-		Eventually(func() error {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			_, err = client.FelixConfigurations().Create(ctx, opts.InitialFelixConfiguration, options.SetOptions{})
-			if _, ok := err.(errors.ErrorResourceAlreadyExists); ok {
-				// Try to delete the unexpected config, then, if there's still time in the Eventually loop,
-				// we'll try to recreate
-				_, _ = client.FelixConfigurations().Delete(ctx, "default", options.DeleteOptions{})
-			}
-			return err
-		}, "10s").ShouldNot(HaveOccurred())
-	}
 
 	if n > 1 {
 		Eventually(func() error {
