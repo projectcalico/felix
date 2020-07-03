@@ -94,7 +94,7 @@ FV_NUM_BATCHES?=1
 # (with FV_NUM_BATCHES=1) to check that it's not a flake.
 FV_BATCHES_TO_RUN?=$(shell seq $(FV_NUM_BATCHES))
 FV_SLOW_SPEC_THRESH=90
-FV_RACE_DETECTOR_ENABLED?=true
+FV_RACE_DETECTOR_ENABLED?=false
 
 # Linker flags for building Felix.
 #
