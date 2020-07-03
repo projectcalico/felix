@@ -94,7 +94,7 @@ FV_NUM_BATCHES?=1
 # (with FV_NUM_BATCHES=1) to check that it's not a flake.
 FV_BATCHES_TO_RUN?=$(shell seq $(FV_NUM_BATCHES))
 FV_SLOW_SPEC_THRESH=90
-FV_RACE_DETECTOR_ENABLED?=true
+FV_RACE_DETECTOR_ENABLED?=false
 
 # Linker flags for building Felix.
 #
@@ -169,6 +169,12 @@ bin/calico-felix-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	  $(DOCKER_GO_BUILD_CGO) \
 	     sh -c 'go build -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix"'; \
 	fi
+
+bin/crash-repro: $(SRC_FILES) $(LOCAL_BUILD_DEP)
+	@echo Building crash-repro
+	mkdir -p bin
+	$(DOCKER_GO_BUILD_CGO) \
+	  sh -c 'go build -race -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/crash-repro"';
 
 bin/calico-felix-race-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	@echo Building felix with race detector enabled for $(ARCH) on $(BUILDARCH)
