@@ -46,7 +46,7 @@ blocks:
         commands:
         - ./.semaphore/on-test-vm ${REPO_NAME}/.semaphore/collect-artifacts
         - gcloud --quiet compute scp "--zone=${ZONE}" "ubuntu@${VM_NAME}:${REPO_NAME}/artifacts" ./ --recurse
-        - artifact push --expire-in 4w job artifacts
+        - cd artifacts && for f in *; do mv $f ${SEMAPHORE_JOB_INDEX}_$f; artifact push --expire-in 4w workflow ${SEMAPHORE_JOB_INDEX}_$f; done; cd ..
         - gcloud --quiet compute instances delete ${VM_NAME} --zone=${ZONE}
     secrets:
     - name: google-service-account-for-gce
