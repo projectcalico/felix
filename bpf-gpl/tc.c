@@ -806,7 +806,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct __sk_buff *skb,
 		/* XXX we do it here again because doing it in one place only
 		 * XXX in calico_tc() irritates the verifier :'(
 		 */
-		if (!CALI_F_TO_HOST || !ct_result_rpf_failed(state->ct_result.rc)) {
+		if (CALI_F_TO_HOST && !ct_result_rpf_failed(state->ct_result.rc)) {
 			fib = true;
 		}
 		seen_mark = CALI_SKB_MARK_SEEN;
