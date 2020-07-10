@@ -514,18 +514,19 @@ func (r *DefaultRuleRenderer) StaticFilterForwardChains() []*Chain {
 		},
 	)
 
-	// Accept packet if policies above set ACCEPT mark.
-	rules = append(rules,
-		Rule{
-			Match:   Match().MarkSingleBitSet(r.IptablesMarkAccept),
-			Action:  r.filterAllowAction,
-			Comment: []string{"Policy explicitly accepted packet."},
-		},
-	)
-
 	return []*Chain{{
 		Name:  ChainFilterForward,
 		Rules: rules,
+	}}
+}
+
+// StaticFilterForwardAppendRules returns rules which should be statically appended to the end of the filter
+// table's forward chain.
+func (r *DefaultRuleRenderer) StaticFilterForwardAppendRules() []Rule {
+	return []Rule{{
+		Match:   Match().MarkSingleBitSet(r.IptablesMarkAccept),
+		Action:  r.filterAllowAction,
+		Comment: []string{"Policy explicitly accepted packet."},
 	}}
 }
 
@@ -670,10 +671,12 @@ func (r *DefaultRuleRenderer) StaticNATPreroutingChains(ipVersion uint8) []*Chai
 		})
 	}
 
-	return []*Chain{{
+	chains := []*Chain{{
 		Name:  ChainNATPrerouting,
 		Rules: rules,
 	}}
+
+	return chains
 }
 
 func (r *DefaultRuleRenderer) StaticNATPostroutingChains(ipVersion uint8) []*Chain {
@@ -752,11 +755,15 @@ func (r *DefaultRuleRenderer) StaticNATOutputChains(ipVersion uint8) []*Chain {
 	}}
 }
 
-func (r *DefaultRuleRenderer) StaticMangleTableChains(ipVersion uint8) (chains []*Chain) {
-	return []*Chain{
+func (r *DefaultRuleRenderer) StaticMangleTableChains(ipVersion uint8) []*Chain {
+	var chains []*Chain
+
+	chains = append(chains,
 		r.failsafeInChain("mangle"),
 		r.StaticManglePreroutingChain(ipVersion),
-	}
+	)
+
+	return chains
 }
 
 func (r *DefaultRuleRenderer) StaticManglePreroutingChain(ipVersion uint8) *Chain {
