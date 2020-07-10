@@ -281,7 +281,7 @@ func StartDataplaneDriver(configParams *config.Config,
 		intDP := intdataplane.NewIntDataplaneDriver(dpConfig)
 		intDP.Start()
 
-		const healthName = "felix-startup"
+		const healthName = "aws-source-destination-check"
 		// Set source-destination-check on AWS EC2 instance.
 		if configParams.AWSSrcDstCheck != string(apiv3.AWSSrcDstCheckOptionDoNothing) {
 			go func(check, healthName string, healthAgg *health.HealthAggregator) {
