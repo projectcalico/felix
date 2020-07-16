@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	cleanupGracePeriod = 10 * time.Second
+	cleanupGracePeriod = 1000 * time.Second
 	maxConnFailures    = 3
 )
 
