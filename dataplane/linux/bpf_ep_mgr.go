@@ -31,6 +31,7 @@ import (
 
 	"github.com/projectcalico/felix/bpf"
 	"github.com/projectcalico/felix/bpf/polprog"
+	"github.com/projectcalico/felix/iptables"
 
 	"github.com/projectcalico/felix/bpf/tc"
 
@@ -76,8 +77,14 @@ type bpfEndpointManager struct {
 	vxlanMTU         int
 	dsrEnabled       bool
 
-	ipSetMap bpf.Map
-	stateMap bpf.Map
+	ipSetMap            bpf.Map
+	stateMap            bpf.Map
+	ruleRenderer        bpfAllowChainRenderer
+	iptablesFilterTable *iptables.Table
+}
+
+type bpfAllowChainRenderer interface {
+	WorkloadInterfaceAllowChains(endpoints map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint) []*iptables.Chain
 }
 
 func newBPFEndpointManager(
@@ -91,6 +98,8 @@ func newBPFEndpointManager(
 	dsrEnabled bool,
 	ipSetMap bpf.Map,
 	stateMap bpf.Map,
+	iptablesRuleRenderer bpfAllowChainRenderer,
+	iptablesFilterTable *iptables.Table,
 ) *bpfEndpointManager {
 	return &bpfEndpointManager{
 		wlEps:               map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint{},
@@ -111,6 +120,8 @@ func newBPFEndpointManager(
 		dsrEnabled:          dsrEnabled,
 		ipSetMap:            ipSetMap,
 		stateMap:            stateMap,
+		ruleRenderer:        iptablesRuleRenderer,
+		iptablesFilterTable: iptablesFilterTable,
 	}
 }
 
@@ -359,7 +370,11 @@ func (m *bpfEndpointManager) CompleteDeferredWork() error {
 	m.applyProgramsToDirtyDataInterfaces()
 	m.applyProgramsToDirtyWorkloadEndpoints()
 
-	// TODO: handle cali interfaces with no WEP
+	// FIXME: only include WEPs that we know we successfully programmed in the dispatch chain.
+	// FIXME: only update when the set of workloads changes.
+	chains := m.ruleRenderer.WorkloadInterfaceAllowChains(m.wlEps)
+	m.iptablesFilterTable.UpdateChains(chains)
+
 	return nil
 }
 
