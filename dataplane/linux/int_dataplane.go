@@ -906,9 +906,9 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 		for _, prefix := range d.config.RulesConfig.WorkloadIfacePrefixes {
 			fwdRules = append(fwdRules,
 				iptables.Rule{
-					Match:   iptables.Match().InInterface(prefix + "+"),
+					Match:   iptables.Match().InInterface(prefix + "+").NotMarkMatchesWithMask(tc.MarkSeen, tc.MarkSeenAndFlagsMask),
 					Action:  iptables.DropAction{},
-					Comment: []string{"From workload without BPF ACCEPT mark"},
+					Comment: []string{"From workload without BPF seen mark"},
 				})
 
 			if d.config.RulesConfig.EndpointToHostAction == "ACCEPT" {
@@ -928,7 +928,7 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 
 		if t.IPVersion == 6 {
 			for _, prefix := range d.config.RulesConfig.WorkloadIfacePrefixes {
-				// Make sure iptables rules don't drop packets that we're about to process through BPF.
+				// In BPF mode, we don't support IPv6 yet.  Drop it.
 				fwdRules = append(fwdRules, iptables.Rule{
 					Match:   iptables.Match().OutInterface(prefix + "+"),
 					Action:  iptables.DropAction{},
