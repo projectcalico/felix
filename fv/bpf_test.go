@@ -603,13 +603,13 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 					}()
 					defer wg.Wait()
 
-					Consistently(tcpdump.MatchCountFn("UDP-8057"), "5s").Should(
+					Consistently(tcpdump.MatchCountFn("UDP-8057"), "5s", "200ms").Should(
 						BeNumerically("==", 0),
 						"Traffic to the workload should be blocked before datastore is configured")
 
 					dpOnlyWorkload.ConfigureInDatastore(infra)
 
-					Eventually(tcpdump.MatchCountFn("UDP-8057"), "5s").Should(
+					Eventually(tcpdump.MatchCountFn("UDP-8057"), "5s", "200ms").Should(
 						BeNumerically(">", 0),
 						"Traffic to the workload should be allowed after datastore is configured")
 				})
