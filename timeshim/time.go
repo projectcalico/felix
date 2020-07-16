@@ -12,26 +12,57 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package time
+package timeshim
 
 import (
 	"time"
 )
 
 // Time is our shim interface to the time package.
-type Time interface {
+type Interface interface {
 	Now() time.Time
 	Since(t time.Time) time.Duration
 	Until(t time.Time) time.Duration
 	After(t time.Duration) <-chan time.Time
+	NewTimer(d Duration) Timer
 }
 
-func NewRealTime() Time {
-	return &realTime{}
+type Time = time.Time
+type Duration = time.Duration
+
+type Timer interface {
+	Stop() bool
+	Reset(clean Duration)
+	Chan() <-chan Time
+}
+
+var singleton realTime
+
+func RealTime() Interface {
+	return singleton
 }
 
 // realTime is the real implementation of timeIface, which calls through to the real time package.
 type realTime struct{}
+
+func (t realTime) NewTimer(d Duration) Timer {
+	timer := time.NewTimer(d)
+	return (*timerWrapper)(timer)
+}
+
+type timerWrapper time.Timer
+
+func (t *timerWrapper) Stop() bool {
+	return (*time.Timer)(t).Stop()
+}
+
+func (t *timerWrapper) Reset(duration Duration) {
+	(*time.Timer)(t).Reset(duration)
+}
+
+func (t *timerWrapper) Chan() <-chan Time {
+	return (*time.Timer)(t).C
+}
 
 func (realTime) Until(t time.Time) time.Duration {
 	return time.Until(t)
