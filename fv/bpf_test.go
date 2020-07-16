@@ -598,7 +598,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 							_, err = w[1][0].RunCmd("/pktgen", w[1][0].IP, dpOnlyWorkload.IP, "udp",
 								"--port-src", "30444", "--port-dst", "8057")
 							Expect(err).NotTo(HaveOccurred())
-							time.Sleep(100*(time.Millisecond))
+							time.Sleep(100 * (time.Millisecond))
 						}
 					}()
 					defer wg.Wait()

@@ -906,7 +906,7 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 		for _, prefix := range d.config.RulesConfig.WorkloadIfacePrefixes {
 			fwdRules = append(fwdRules,
 				iptables.Rule{
-					Match:   iptables.Match().InInterface(prefix + "+").NotMarkMatchesWithMask(tc.MarkSeen, tc.MarkSeenAndFlagsMask),
+					Match:   iptables.Match().InInterface(prefix+"+").NotMarkMatchesWithMask(tc.MarkSeen, tc.MarkSeenAndFlagsMask),
 					Action:  iptables.DropAction{},
 					Comment: []string{"From workload without BPF seen mark"},
 				})
