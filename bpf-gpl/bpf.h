@@ -167,7 +167,7 @@ enum calico_skb_mark {
 	CALI_SKB_MARK_BYPASS_FWD             = CALI_SKB_MARK_BYPASS | 0x300000,
 	CALI_SKB_MARK_BYPASS_FWD_SRC_FIXUP   = CALI_SKB_MARK_BYPASS | 0x500000,
 	CALI_SKB_MARK_SKIP_RPF               = CALI_SKB_MARK_BYPASS | 0x400000,
-	CALI_SKB_MARK_NAT_OUT                = CALI_SKB_MARK_SEEN | 0x800000,
+	CALI_SKB_MARK_NAT_OUT                = CALI_SKB_MARK_BYPASS | 0x800000,
 };
 
 #define ip_is_dnf(ip) ((ip)->frag_off & host_to_be16(0x4000))
