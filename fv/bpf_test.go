@@ -1593,12 +1593,17 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 
 							It("should have connectivity from the hosts via a service to workload 0", func() {
 								ip := testSvc.Spec.ClusterIP
-								port := uint16(testSvc.Spec.Ports[0].Port)
+								port := ExpectWithPorts(uint16(testSvc.Spec.Ports[0].Port))
 
-								cc.ExpectSome(felixes[0], TargetIP(ip), port)
-								cc.ExpectSome(felixes[1], TargetIP(ip), port)
-								cc.ExpectNone(w[0][1], TargetIP(ip), port)
-								cc.ExpectNone(w[1][0], TargetIP(ip), port)
+								host1SrcIP := ExpectWithSrcIPs(felixes[1].IP)
+								if testOpts.tunnel == "wireguard" {
+									host1SrcIP = ExpectWithSrcIPs(felixes[1].ExpectedWireguardTunnelAddr)
+								}
+
+								cc.Expect(Some, felixes[0], TargetIP(ip), port)
+								cc.Expect(Some, felixes[1], TargetIP(ip), port, host1SrcIP)
+								cc.Expect(None, w[0][1], TargetIP(ip), port)
+								cc.Expect(None, w[1][0], TargetIP(ip), port)
 								cc.CheckConnectivity()
 							})
 						})
