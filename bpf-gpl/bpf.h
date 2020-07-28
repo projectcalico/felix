@@ -131,9 +131,9 @@ struct bpf_map_def_extended {
 #define CALI_F_FROM_WEP (CALI_F_WEP && CALI_F_EGRESS)
 #define CALI_F_TO_WEP   (CALI_F_WEP && CALI_F_INGRESS)
 
-#define CALI_F_TO_HOST       (CALI_F_FROM_HEP || CALI_F_FROM_WEP)
+#define CALI_F_TO_HOST       (CALI_F_FROM_HEP || CALI_F_FROM_WEP || CALI_F_WG_INGRESS)
 #define CALI_F_FROM_HOST     (!CALI_F_TO_HOST)
-#define CALI_F_L3            (CALI_F_TO_HEP && CALI_F_TUNNEL)
+#define CALI_F_L3            ((CALI_F_TO_HEP && CALI_F_TUNNEL) || CALI_F_WIREGUARD)
 #define CALI_F_IPIP_ENCAPPED (CALI_F_INGRESS && CALI_F_TUNNEL)
 #define CALI_F_WG_INGRESS    (CALI_F_INGRESS && CALI_F_WIREGUARD)
 
@@ -142,7 +142,7 @@ struct bpf_map_def_extended {
 
 #define CALI_RES_REDIR_IFINDEX	(TC_ACT_VALUE_MAX + 100) /* packet should be sent back the same iface */
 
-#define FIB_ENABLED (!CALI_F_L3 && CALI_FIB_LOOKUP_ENABLED && CALI_F_TO_HOST)
+#define FIB_ENABLED (CALI_FIB_LOOKUP_ENABLED && CALI_F_TO_HOST)
 
 #define COMPILE_TIME_ASSERT(expr) {typedef char array[(expr) ? 1 : -1];}
 static CALI_BPF_INLINE void __compile_asserts(void) {

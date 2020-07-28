@@ -505,6 +505,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 
 		// Forwarding into a tunnel seems to fail silently, disable FIB lookup if tunnel is enabled for now.
 		fibLookupEnabled := !config.RulesConfig.IPIPEnabled && !config.RulesConfig.VXLANEnabled
+		log.Infof("FIB lookup enabled: %t", fibLookupEnabled)
 		stateMap := state.Map(bpfMapContext)
 		err := stateMap.EnsureExists()
 		if err != nil {
