@@ -857,9 +857,25 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 				})
 
 				It("connectivity from all workloads via workload 0's main IP", func() {
-					cc.ExpectSome(w[0][1], w[0][0])
+					/*
+						tcpF0 := felixes[0].AttachTCPDump("wireguard.cali")
+						tcpF0.SetLogEnabled(true)
+						tcpF0.Start("-nnv")
+						defer tcpF0.Stop()
+					*/
+					tcpF1 := felixes[1].AttachTCPDump("wireguard.cali")
+					tcpF1.SetLogEnabled(true)
+					tcpF1.Start("-nnv")
+					defer tcpF1.Stop()
+					/*
+							tcpW10 := w[1][0].AttachTCPDump()
+							tcpW10.SetLogEnabled(true)
+							tcpW10.Start("-nnv")
+						defer tcpW10.Stop()
+					*/
+					// cc.ExpectSome(w[0][1], w[0][0])
 					cc.ExpectSome(w[1][0], w[0][0])
-					cc.ExpectSome(w[1][1], w[0][0])
+					// cc.ExpectSome(w[1][1], w[0][0])
 					cc.CheckConnectivity()
 				})
 

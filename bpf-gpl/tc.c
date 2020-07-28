@@ -262,8 +262,29 @@ static CALI_BPF_INLINE int forward_or_drop(struct __sk_buff *skb,
 				goto cancel_fib;
 			}
 
-			// Update the MACs.  NAT may have invalidated pointer into the packet so need to
-			// revalidate.
+			/* Make room for an eth header - turn L3 packet into an L2 one. */
+			if (CALI_F_L3) {
+				/* XXX skb_iphdr(_offset)() does not work from this point
+				 * XXX on as the program is still compiled with CALI_F_L3!!!
+				 */
+				CALI_DEBUG("FIB L3 OK\n");
+
+				if (skb_make_l3_l2(skb)) {
+					CALI_DEBUG("Failed to add L2 header, skip fib\n");
+					goto cancel_fib;
+				}
+				if (skb_shorter(skb, sizeof(struct ethhdr) + sizeof(struct iphdr))) {
+					CALI_DEBUG("Too short after adding L2 header, drop\n");
+					reason = CALI_REASON_SHORT;
+					goto  deny;
+				}
+
+				ip_header = skb_ptr(skb, sizeof(struct ethhdr));
+			}
+
+			/* Update the MACs.  NAT may have invalidated pointer into the
+			 * packet so need to revalidate.
+			 */
 			if ((void *)(long)skb->data + sizeof(struct ethhdr) > (void *)(long)skb->data_end) {
 				reason = CALI_REASON_SHORT;
 				goto deny;
@@ -271,6 +292,11 @@ static CALI_BPF_INLINE int forward_or_drop(struct __sk_buff *skb,
 			struct ethhdr *eth_hdr = (void *)(long)skb->data;
 			__builtin_memcpy(&eth_hdr->h_source, fib_params.smac, sizeof(eth_hdr->h_source));
 			__builtin_memcpy(&eth_hdr->h_dest, fib_params.dmac, sizeof(eth_hdr->h_dest));
+
+			if (CALI_F_L3) {
+				/* it was zeroed when we prepended the header */
+				eth_hdr->h_proto = host_to_be16(ETH_P_IP);
+			}
 
 			// Redirect the packet.
 			CALI_DEBUG("Got Linux FIB hit, redirecting to iface %d.\n", fib_params.ifindex);

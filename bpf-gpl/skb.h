@@ -85,4 +85,10 @@ static CALI_BPF_INLINE long skb_l4hdr_offset(struct __sk_buff *skb, __u8 ihl)
 
 #define skb_is_gso(skb) ((skb)->gso_segs > 1)
 
+static CALI_BPF_INLINE int skb_make_l3_l2(struct __sk_buff *skb)
+{
+	/* XXX requires kernel v5.8 */
+	return bpf_skb_change_head(skb, sizeof(struct ethhdr), 0);
+}
+
 #endif /* __SKB_H__ */
