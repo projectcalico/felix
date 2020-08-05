@@ -30,6 +30,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/projectcalico/felix/fv/connectivity"
+	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/infrastructure"
 	"github.com/projectcalico/felix/fv/tcpdump"
 	"github.com/projectcalico/felix/fv/utils"
@@ -318,6 +319,8 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 			return nil
 		}
 
+		var bpfLog *containers.Container
+
 		BeforeEach(func() {
 			// Tunnel readiness checks.
 			for i, felix := range felixes {
@@ -365,6 +368,13 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 				tcpdump.Start()
 				tcpdumps[i] = tcpdump
 			}
+
+			bpfLog = containers.Run("bpf-log", containers.RunOpts{AutoRemove: true}, "--privileged",
+				"calico/bpftool:v5.3-amd64", "/bpftool", "prog", "tracelog")
+		})
+
+		AfterEach(func() {
+			bpfLog.Stop()
 		})
 
 		It("between pod to pod should be allowed and encrypted using wg tunnel", func() {
@@ -886,7 +896,7 @@ func wireguardTopologyOptions() infrastructure.TopologyOptions {
 
 	// Debugging.
 	//topologyOptions.ExtraEnvVars["FELIX_DebugUseShortPollIntervals"] = "true"
-	//topologyOptions.FelixLogSeverity = "debug"
+	topologyOptions.FelixLogSeverity = "debug"
 
 	return topologyOptions
 }
