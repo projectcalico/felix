@@ -133,7 +133,7 @@ func (s *IPSets) filterMembers(members []string) set.Set {
 	filtered := set.New()
 	wantIPV6 := s.IPVersionConfig.Family == IPFamilyV6
 	for _, member := range members {
-		isIPV6 := strings.Index(member, ":") >= 0
+		isIPV6 := strings.Contains(member, ":")
 		if wantIPV6 != isIPV6 {
 			continue
 		}

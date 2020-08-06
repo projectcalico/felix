@@ -63,9 +63,7 @@ func (network *HostComputeNetwork) AddPolicy(request PolicyNetworkRequest) error
 	if network.Err != nil {
 		return network.Err
 	}
-	for _, p := range request.Policies {
-		network.Ptr.Policies = append(network.Ptr.Policies, p)
-	}
+        network.Ptr.Policies = append(network.Ptr.Policies, request.Policies...)
 	return nil
 }
 

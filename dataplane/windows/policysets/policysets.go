@@ -43,8 +43,6 @@ type PolicySets struct {
 
 	supportedFeatures      hns.HNSSupportedFeatures
 	policySetIdToPolicySet map[string]*policySet
-
-	resyncRequired bool
 }
 
 func NewPolicySets(hns HNSAPI, ipsets []IPSetCache) *PolicySets {

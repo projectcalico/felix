@@ -271,7 +271,7 @@ func (m *endpointManager) CompleteDeferredWork() error {
 	}
 
 	if len(m.pendingWlEpUpdates) > 0 {
-		m.RefreshHnsEndpointCache(false)
+		_ = m.RefreshHnsEndpointCache(false)
 	}
 
 	// Loop through each pending update
@@ -455,7 +455,7 @@ func (m *endpointManager) getHnsEndpointId(ip string) (string, error) {
 			// No cached entry was found, force refresh the cache and check again
 			log.WithField("ip", ip).Debug("Cache miss, requesting a cache refresh")
 			allowRefresh = false
-			m.RefreshHnsEndpointCache(true)
+			_ = m.RefreshHnsEndpointCache(true)
 			continue
 		}
 		break
