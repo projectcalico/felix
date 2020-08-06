@@ -30,8 +30,6 @@
 PACKAGE_NAME?=github.com/projectcalico/felix
 GO_BUILD_VER?=v0.45
 
-GIT_USE_SSH = true
-
 ###############################################################################
 # Download and include Makefile.common
 #   Additions to EXTRA_DOCKER_ARGS need to happen before the include since
@@ -46,8 +44,6 @@ Makefile.common.$(MAKE_BRANCH):
 	# Clean up any files downloaded from other branches so they don't accumulate.
 	rm -f Makefile.common.*
 	curl --fail $(MAKE_REPO)/Makefile.common -o "$@"
-
-EXTRA_DOCKER_ARGS += --init -e GOPRIVATE=github.com/tigera/*
 
 # Build mounts for running in "local build" mode. This allows an easy build using local development code,
 # assuming that there is a local checkout of libcalico in the same directory as this repo.
