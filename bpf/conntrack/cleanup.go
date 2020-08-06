@@ -88,11 +88,16 @@ func NewScanner(ctMap bpf.Map, scanners ...EntryScanner) *Scanner {
 
 // Scan executes a scanning iteration
 func (s *Scanner) Scan() {
-	err := s.ctMap.Iter(func(k, v []byte) {
-		ctKey := KeyFromBytes(k)
-		ctVal := ValueFromBytes(v)
+	debug := log.GetLevel() >= log.DebugLevel
 
-		if log.GetLevel() >= log.DebugLevel {
+	var ctKey Key
+	var ctVal Value
+
+	err := s.ctMap.Iter(func(k, v []byte) bpf.IteratorAction {
+		copy(ctKey[:], k[:])
+		copy(ctVal[:], v[:])
+
+		if debug {
 			log.WithFields(log.Fields{
 				"key":   ctKey,
 				"entry": ctVal,
@@ -101,16 +106,13 @@ func (s *Scanner) Scan() {
 
 		for _, scanner := range s.scanners {
 			if verdict := scanner(ctKey, ctVal, s.get); verdict == ScanVerdictDelete {
-				err := s.ctMap.Delete(k)
-				if err != nil {
-					log.WithError(err).Debug("Deletion result")
-					if !bpf.IsNotExists(err) {
-						log.WithError(err).WithField("key", ctKey).Warn("Failed to delete conntrack entry")
-					}
+				if debug {
+					log.Debug("Deleting conntrack entry.")
 				}
-				return // the entry is no more
+				return bpf.IterDelete
 			}
 		}
+		return bpf.IterNone
 	})
 
 	if err != nil {
