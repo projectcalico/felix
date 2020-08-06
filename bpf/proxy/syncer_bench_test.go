@@ -109,7 +109,8 @@ func benchmarkStartupSync(b *testing.B, svcCnt, epCnt int) {
 			}
 
 			b.StartTimer()
-			s.startupBuildPrev(state)
+			err := s.startupBuildPrev(state)
+			Expect(err).ShouldNot(HaveOccurred())
 			b.StopTimer()
 		}
 	})
