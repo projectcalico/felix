@@ -1184,7 +1184,7 @@ func (s *Syncer) cleanupSticky() error {
 
 	now := time.Duration(bpf.KTimeNanos())
 
-	err := s.bpfAff.Iter(func(k, v []byte) {
+	err := s.bpfAff.Iter(func(k, v []byte) bpf.IteratorAction {
 
 		copy(key[:], k[:ks])
 		copy(val[:], v[:vs])
@@ -1195,7 +1195,7 @@ func (s *Syncer) cleanupSticky() error {
 				log.Debugf("cleaning affinity %v:%v - no such a service", key, val)
 			}
 			dels = append(dels, key)
-			return
+			return bpf.IterNone
 		}
 
 		if _, ok := s.stickyEps[fend.id][val.Backend()]; !ok {
@@ -1203,7 +1203,7 @@ func (s *Syncer) cleanupSticky() error {
 				log.Debugf("cleaning affinity %v:%v - no such a backend", key, val)
 			}
 			dels = append(dels, key)
-			return
+			return bpf.IterNone
 		}
 
 		if now-val.Timestamp() > fend.timeo {
@@ -1211,11 +1211,12 @@ func (s *Syncer) cleanupSticky() error {
 				log.Debugf("cleaning affinity %v:%v - expired", key, val)
 			}
 			dels = append(dels, key)
-			return
+			return bpf.IterNone
 		}
 		if log.GetLevel() >= log.DebugLevel {
 			log.Debugf("cleaning affinity %v:%v - keeping", key, val)
 		}
+		return bpf.IterNone
 	})
 
 	if err != nil {
