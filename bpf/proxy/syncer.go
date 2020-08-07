@@ -411,7 +411,11 @@ func (s *Syncer) applySvc(skey svcKey, sinfo k8sp.ServicePort, eps []k8sp.Endpoi
 	if exists {
 		if ServicePortEqual(old.svc, sinfo) {
 			id = old.id
-			count, local, err = s.updateExistingSvc(skey.sname, sinfo, id, old.count, eps)
+			if !ServiceEpsEqual(s.prevEpsMap[skey.sname], eps) {
+				count, local, err = s.updateExistingSvc(skey.sname, sinfo, id, old.count, eps)
+			} else {
+				count = old.count
+			}
 		} else {
 			if err := s.deleteSvc(old.svc, old.id, old.count); err != nil {
 				return err
@@ -839,7 +843,6 @@ func getSvcNATKey(svc k8sp.ServicePort) (nat.FrontendKey, error) {
 }
 
 func getSvcNATKeyLBSrcRange(svc k8sp.ServicePort) ([]nat.FrontendKey, error) {
-	var keys []nat.FrontendKey
 	ipaddr := svc.ClusterIP()
 	port := svc.Port()
 	loadBalancerSourceRanges := svc.LoadBalancerSourceRanges()
@@ -848,8 +851,11 @@ func getSvcNATKeyLBSrcRange(svc k8sp.ServicePort) ([]nat.FrontendKey, error) {
 	}
 	proto, err := ProtoV1ToInt(svc.Protocol())
 	if err != nil {
-		return keys, err
+		return nil, err
 	}
+
+	keys := make([]nat.FrontendKey, 0, len(loadBalancerSourceRanges))
+
 	for _, src := range loadBalancerSourceRanges {
 		// Ignore IPv6 addresses
 		if strings.Contains(src, ":") {
@@ -1421,6 +1427,27 @@ func ServicePortEqual(a, b k8sp.ServicePort) bool {
 		stringsEqual(a.LoadBalancerIPStrings(), b.LoadBalancerIPStrings()) &&
 		stringsEqual(a.LoadBalancerSourceRanges(), b.LoadBalancerSourceRanges()) &&
 		stringsEqual(a.TopologyKeys(), b.TopologyKeys())
+}
+
+func ServiceEpsEqual(a, b []k8sp.Endpoint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for _, aa := range a {
+		found := false
+		for _, bb := range b {
+			if aa.Equal(bb) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	return true
 }
 
 func stringsEqual(a, b []string) bool {
