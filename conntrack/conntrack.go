@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2017,2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package conntrack
 
 import (
+	"bytes"
 	"net"
 	"os/exec"
 	"strings"
@@ -88,7 +89,13 @@ func (c Conntrack) RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP) {
 			if err == nil {
 				logCxt.Debug("Successfully removed conntrack flows.")
 				break
+			} else if bytes.Contains(output, []byte("0 flow entries have been deleted")) {
+				// If there are no flows to delete then the tool returns rc=1; detect that case and handle as
+				// success.
+				logCxt.Debug("conntrack tool didn't find any flows.")
+				break
 			}
+
 			if strings.Contains(string(output), "0 flow entries") {
 				// Success, there were no flows.
 				logCxt.Debug("IP wasn't in conntrack")
