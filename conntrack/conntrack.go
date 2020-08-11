@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2017,2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -89,15 +89,17 @@ func (c Conntrack) RemoveConntrackFlows(ipVersion uint8, ipAddr net.IP) {
 				logCxt.Debug("Successfully removed conntrack flows.")
 				break
 			}
-			if strings.Contains(string(output), "0 flow entries") {
+
+			outStr := string(output)
+			if strings.Contains(outStr, "0 flow entries") {
 				// Success, there were no flows.
 				logCxt.Debug("IP wasn't in conntrack")
 				break
 			}
 			if retry == numRetries {
-				logCxt.WithError(err).Error("Failed to remove conntrack flows after retries.")
+				logCxt.WithError(err).WithField("output", outStr).Error("Failed to remove conntrack flows after retries.")
 			} else {
-				logCxt.WithError(err).Warn("Failed to remove conntrack flows, will retry...")
+				logCxt.WithError(err).WithField("output", outStr).Debug("Failed to remove conntrack flows, will retry...")
 			}
 		}
 	}
