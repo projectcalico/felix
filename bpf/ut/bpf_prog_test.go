@@ -286,18 +286,11 @@ func cleanUpMaps() {
 			continue // Can't clean up array maps
 		}
 		log.WithField("map", m.GetName()).Info("Cleaning")
-		var allKeys [][]byte
-		err := m.Iter(func(k, v []byte) bpf.IteratorAction {
-			kCopy := make([]byte, len(k))
-			copy(kCopy, k)
-			allKeys = append(allKeys, kCopy)
-			return bpf.IterNone
+		err := m.Iter(func(_, _ []byte) bpf.IteratorAction {
+			return bpf.IterDelete
 		})
 		if err != nil {
 			log.WithError(err).Panic("Failed to walk map")
-		}
-		for _, k := range allKeys {
-			_ = m.Delete(k)
 		}
 	}
 	log.Info("Cleaned up all maps")
@@ -483,6 +476,12 @@ func dumpNATMap(natMap bpf.Map) {
 	}
 }
 
+func resetMap(m bpf.Map) {
+	m.Iter(func(_, _ []byte) bpf.IteratorAction {
+		return bpf.IterDelete
+	})
+}
+
 func dumpCTMap(ctMap bpf.Map) {
 	ct, err := conntrack.LoadMapMem(ctMap)
 	Expect(err).NotTo(HaveOccurred())
@@ -494,12 +493,7 @@ func dumpCTMap(ctMap bpf.Map) {
 }
 
 func resetCTMap(ctMap bpf.Map) {
-	ct, err := conntrack.LoadMapMem(ctMap)
-	Expect(err).NotTo(HaveOccurred())
-	for k := range ct {
-		err := ctMap.Delete(k[:])
-		Expect(err).NotTo(HaveOccurred())
-	}
+	resetMap(ctMap)
 }
 
 func saveCTMap(ctMap bpf.Map) conntrack.MapMem {
@@ -523,13 +517,8 @@ func dumpRTMap(rtMap bpf.Map) {
 	}
 }
 
-func resetRTMap(ctMap bpf.Map) {
-	rt, err := routes.LoadMap(ctMap)
-	Expect(err).NotTo(HaveOccurred())
-	for k := range rt {
-		err := rtMap.Delete(k[:])
-		Expect(err).NotTo(HaveOccurred())
-	}
+func resetRTMap(rtMap bpf.Map) {
+	resetMap(rtMap)
 }
 
 func saveRTMap(rtMap bpf.Map) routes.MapMem {
@@ -600,10 +589,13 @@ func testPacket(ethAlt *layers.Ethernet, ipv4Alt *layers.IPv4, l4Alt gopacket.La
 		switch v := l4Alt.(type) {
 		case *layers.UDP:
 			udp = v
+			ipv4.Protocol = layers.IPProtocolUDP
 		case *layers.TCP:
 			tcp = v
+			ipv4.Protocol = layers.IPProtocolTCP
 		case *layers.ICMPv4:
 			icmp = v
+			ipv4.Protocol = layers.IPProtocolICMPv4
 		default:
 			return nil, nil, nil, nil, nil, errors.Errorf("unrecognized l4 layer type %t", l4Alt)
 		}
@@ -629,7 +621,17 @@ func testPacket(ethAlt *layers.Ethernet, ipv4Alt *layers.IPv4, l4Alt gopacket.La
 
 		return eth, ipv4, udp, payload, pkt.Bytes(), err
 	case tcp != nil:
-		return nil, nil, nil, nil, nil, errors.Errorf("tcp not implemented yet")
+		if tcp == nil {
+			return nil, nil, nil, nil, nil, errors.Errorf("tcp default not implemented yet")
+		}
+		ipv4.Length = uint16(5*4 + 8 + len(payload))
+		_ = tcp.SetNetworkLayerForChecksum(ipv4)
+
+		pkt := gopacket.NewSerializeBuffer()
+		err := gopacket.SerializeLayers(pkt, gopacket.SerializeOptions{ComputeChecksums: true},
+			eth, ipv4, tcp, gopacket.Payload(payload))
+
+		return eth, ipv4, tcp, payload, pkt.Bytes(), err
 	case icmp != nil:
 		ipv4.Length = uint16(5*4 + 8 + len(payload))
 
