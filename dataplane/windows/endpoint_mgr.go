@@ -178,6 +178,21 @@ func (m *endpointManager) RefreshHnsEndpointCache(forceRefresh bool) error {
 			}
 			continue
 		}
+		containers, err := endpoint.GetAttachedContainerIDs()
+		if err != nil {
+			log.WithFields(log.Fields{
+				"id":   endpoint.Id,
+				"name": endpoint.Name,
+			}).Warn("Failed to get attached containers")
+			continue
+		}
+		if len(containers) == 0 {
+			log.WithFields(log.Fields{
+				"id":   endpoint.Id,
+				"name": endpoint.Name,
+			}).Warn("This is a stale endpoint with no container attached")
+			continue
+		}
 		ip := endpoint.IPAddress.String() + ipv4AddrSuffix
 		logCxt := log.WithFields(log.Fields{"IPAddress": ip, "EndpointId": endpoint.Id})
 		logCxt.Debug("Adding HNS Endpoint Id entry to cache")
@@ -271,7 +286,7 @@ func (m *endpointManager) CompleteDeferredWork() error {
 	}
 
 	if len(m.pendingWlEpUpdates) > 0 {
-		_ = m.RefreshHnsEndpointCache(false)
+		_ = m.RefreshHnsEndpointCache(true)
 	}
 
 	// Loop through each pending update
