@@ -178,6 +178,10 @@ func (m *endpointManager) RefreshHnsEndpointCache(forceRefresh bool) error {
 			}
 			continue
 		}
+
+		// Some CNI plugins does not clear endpoint properly when a pod has been teared down.
+		// In that case, it is possible Felix sees multiple endpoints with the same IP.
+		// We need to filter out inactive endpoints that do not attach to any container.
 		containers, err := endpoint.GetAttachedContainerIDs()
 		if err != nil {
 			log.WithFields(log.Fields{
@@ -286,6 +290,9 @@ func (m *endpointManager) CompleteDeferredWork() error {
 	}
 
 	if len(m.pendingWlEpUpdates) > 0 {
+		// HnsEndpointCache needs to be refreshed before endpoint manager processes any
+		// WEP updates. This is because an IP address can be recycled and assigned to a
+		// different endpoint since last time HnsEndpointCache been updated.
 		_ = m.RefreshHnsEndpointCache(true)
 	}
 
