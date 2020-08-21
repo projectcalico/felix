@@ -280,7 +280,9 @@ type Config struct {
 	AllowIPIPPacketsFromWorkloads  bool
 
 	WireguardEnabled       bool
+	WireguardListeningPort int
 	WireguardInterfaceName string
+	WireguardFirewallMark  uint32
 
 	IptablesLogPrefix         string
 	EndpointToHostAction      string

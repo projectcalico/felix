@@ -228,7 +228,9 @@ func StartDataplaneDriver(configParams *config.Config,
 				AllowIPIPPacketsFromWorkloads:  configParams.AllowIPIPPacketsFromWorkloads,
 
 				WireguardEnabled:       configParams.WireguardEnabled,
+				WireguardListeningPort: configParams.WireguardListeningPort,
 				WireguardInterfaceName: configParams.WireguardInterfaceName,
+				WireguardFirewallMark:  markWireguard,
 
 				IptablesLogPrefix:         configParams.LogPrefix,
 				EndpointToHostAction:      configParams.DefaultEndpointToHostAction,
