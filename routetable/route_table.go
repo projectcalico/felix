@@ -730,20 +730,22 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 	}
 	cidr := target.CIDR
 	ipNet := cidr.ToIPNet()
+	scope := target.RouteScope()
 	route := netlink.Route{
 		LinkIndex: linkIndex,
 		Dst:       &ipNet,
 		Type:      target.RouteType(),
 		Protocol:  r.deviceRouteProtocol,
-		Scope:     target.RouteScope(),
+		Scope:     scope,
 		Table:     r.tableIndex,
 	}
 
-	if r.deviceRouteSourceAddress != nil {
+	if r.deviceRouteSourceAddress != nil && scope == netlink.SCOPE_LINK {
+		// For link scope routes include a source address if configured.
 		route.Src = r.deviceRouteSourceAddress
 	}
 
-	if target.GW != nil {
+	if target.GW != nil{
 		route.Gw = target.GW.AsNetIP()
 	}
 

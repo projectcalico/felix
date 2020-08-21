@@ -224,6 +224,21 @@ func (r *DefaultRuleRenderer) filterInputChain(ipVersion uint8) *Chain {
 		)
 	}
 
+	if ipVersion == 4 && r.WireguardEnabled {
+		// Wireguard is enabled.  Match packets bound for the wireguard endpoint on this host and make sure we set the
+		// wireguard routing bit to avoid RPF issues. Setting this bit tells routing to not route over wireguard and
+		// use standard routing.
+		inputRules = append(inputRules,
+			Rule{
+				Match: Match().ProtocolNum(ProtoUDP).DestPorts(uint16(r.Config.WireguardListeningPort)).
+					DestIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDThisHostIPs)).
+					DestAddrType(AddrTypeLocal),
+				Action: SetMarkAction{Mark: r.WireguardFirewallMark},
+				Comment: []string{"Packets destined for local wireguard endpoint"},
+			},
+		)
+	}
+
 	if ipVersion == 4 && r.VXLANEnabled {
 		// VXLAN is enabled, filter incoming VXLAN packets that match our VXLAN port to ensure they
 		// come from a recognised host and are going to a local address on the host.

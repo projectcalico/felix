@@ -196,7 +196,9 @@ func StartDataplaneDriver(configParams *config.Config,
 				VXLANTunnelAddress: configParams.IPv4VXLANTunnelAddr,
 
 				WireguardEnabled:       configParams.WireguardEnabled,
+				WireguardListeningPort: configParams.WireguardListeningPort,
 				WireguardInterfaceName: configParams.WireguardInterfaceName,
+				WireguardFirewallMark:  markWireguard,
 
 				IptablesLogPrefix:         configParams.LogPrefix,
 				EndpointToHostAction:      configParams.DefaultEndpointToHostAction,

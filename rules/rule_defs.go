@@ -266,7 +266,9 @@ type Config struct {
 	VXLANTunnelAddress net.IP
 
 	WireguardEnabled       bool
+	WireguardListeningPort int
 	WireguardInterfaceName string
+	WireguardFirewallMark  uint32
 
 	IptablesLogPrefix         string
 	EndpointToHostAction      string
