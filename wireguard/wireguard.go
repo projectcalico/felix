@@ -273,7 +273,26 @@ func (w *Wireguard) EndpointUpdate(name string, ipv4Addr ip.Addr) {
 	}
 
 	update := w.getOrInitNodeUpdateData(name)
-	if existing, ok := w.nodes[name]; ok && existing.ipv4EndpointAddr == ipv4Addr {
+	existing, ok := w.nodes[name]
+
+	// We include the endpoint IP address in the list of routes to the same endpoint (i.e. we route traffic
+	// for the host via the wireguard endpoint on the same host). Delete existing route and any pending update, and
+	// add the new route in.
+	if update.ipv4EndpointAddr != nil && *update.ipv4EndpointAddr != nil && *update.ipv4EndpointAddr != ipv4Addr {
+		// Remove route associated with previous update.
+		w.RouteRemove((*update.ipv4EndpointAddr).AsCIDR())
+	}
+	if ok && existing.ipv4EndpointAddr != nil && existing.ipv4EndpointAddr != ipv4Addr {
+		// Remove route associated with current programming.
+		w.RouteRemove(existing.ipv4EndpointAddr.AsCIDR())
+	}
+	if ipv4Addr != nil {
+		// Make sure the endpoint is included as a route.
+		w.RouteUpdate(name, ipv4Addr.AsCIDR())
+	}
+
+	// Modify the endpoint address update, removing the update if another update undoes the change.
+	if ok && existing.ipv4EndpointAddr == ipv4Addr {
 		logCxt.Debug("Update contains unchanged IPv4 address")
 		update.ipv4EndpointAddr = nil
 	} else {
@@ -996,7 +1015,7 @@ func (w *Wireguard) updateCacheFromNodeUpdates(conflictingKeys set.Set) {
 
 // updateRouteTable updates the route table from the node updates.
 func (w *Wireguard) updateRouteTableFromNodeUpdates() {
-	// Do all deletes first. Then adds or updates separarately. This ensures a CIDR that has been deleted from one node
+	// Do all deletes first. Then adds or updates separately. This ensures a CIDR that has been deleted from one node
 	// and added to another will not add first then delete (which will remove the route, since the route table does not
 	// care about destination node).
 	for name, update := range w.nodeUpdates {
