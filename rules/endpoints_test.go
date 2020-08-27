@@ -49,6 +49,7 @@ var _ = Describe("Endpoints", func() {
 			IptablesMarkNonCaliEndpoint: 0x0100,
 			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
 			IptablesMangleAllowAction:   "RETURN",
+			VXLANEnabled:                true,
 			VXLANPort:                   4789,
 			VXLANVNI:                    4096,
 		}
@@ -67,6 +68,7 @@ var _ = Describe("Endpoints", func() {
 			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
 			DisableConntrackInvalid:     true,
 			IptablesFilterAllowAction:   "RETURN",
+			VXLANEnabled:                true,
 			VXLANPort:                   4789,
 			VXLANVNI:                    4096,
 		}
