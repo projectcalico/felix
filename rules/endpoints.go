@@ -309,16 +309,22 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 	})
 
 	if dropEncap && r.Config.VXLANEnabled {
+		// If VXLANEnabled, block the endpoint from sending VXLAN traffic with destination IP
+		// address matching any of the VXLAN hosts.
 		rules = append(rules, Rule{
 			Match: Match().ProtocolNum(ProtoUDP).
+				DestIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllVXLANSourceNets)).
 				DestPorts(uint16(r.Config.VXLANPort)),
 			Action:  DropAction{},
 			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
 		})
 	}
 	if dropEncap && r.Config.IPIPEnabled {
+		// If IPIP is enabled, block the endpoint from sending IPIP traffic with destination IP
+		// address matching any of our hosts.
 		rules = append(rules, Rule{
-			Match:   Match().ProtocolNum(ProtoIPIP),
+			Match: Match().ProtocolNum(ProtoIPIP).
+				DestIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllHostNets)),
 			Action:  DropAction{},
 			Comment: []string{"Drop IPinIP encapped packets originating in pods"},
 		})

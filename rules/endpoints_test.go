@@ -76,14 +76,18 @@ var _ = Describe("Endpoints", func() {
 		var renderer RuleRenderer
 		var epMarkMapper EndpointMarkMapper
 
+		ipSetVXLANSourceHosts := "cali40all-vxlan-net"
+		ipSetAllHosts := "cali40all-hosts-net"
 		dropVXLANRule := Rule{
 			Match: Match().ProtocolNum(ProtoUDP).
+				DestIPSet(ipSetVXLANSourceHosts).
 				DestPorts(uint16(VXLANPort)),
 			Action:  DropAction{},
 			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
 		}
 		dropIPIPRule := Rule{
-			Match:   Match().ProtocolNum(ProtoIPIP),
+			Match: Match().ProtocolNum(ProtoIPIP).
+				DestIPSet(ipSetAllHosts),
 			Action:  DropAction{},
 			Comment: []string{"Drop IPinIP encapped packets originating in pods"},
 		}

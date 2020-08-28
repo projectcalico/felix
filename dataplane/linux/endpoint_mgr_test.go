@@ -164,15 +164,19 @@ func chainsForIfaces(ifaceMetadata []string,
 	epMarkFromName := "cali-from-endpoint-mark"
 	epMarkSetOnePrefix := "cali-sm-"
 	epmarkFromPrefix := outPrefix[:6]
+	ipSetVXLANSourceHosts := "cali40all-vxlan-net"
+	ipSetAllHosts := "cali40all-hosts-net"
 	dropEncapRules := []iptables.Rule{
 		{
 			Match: iptables.Match().ProtocolNum(ProtoUDP).
+				DestIPSet(ipSetVXLANSourceHosts).
 				DestPorts(uint16(VXLANPort)),
 			Action:  iptables.DropAction{},
 			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
 		},
 		{
-			Match:   iptables.Match().ProtocolNum(ProtoIPIP),
+			Match: iptables.Match().ProtocolNum(ProtoIPIP).
+				DestIPSet(ipSetAllHosts),
 			Action:  iptables.DropAction{},
 			Comment: []string{"Drop IPinIP encapped packets originating in pods"},
 		},
