@@ -172,13 +172,13 @@ func chainsForIfaces(ifaceMetadata []string,
 				DestIPSet(ipSetVXLANSourceHosts).
 				DestPorts(uint16(VXLANPort)),
 			Action:  iptables.DropAction{},
-			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
+			Comment: []string{"Drop VXLAN encapped packets originating in pods destined to the cluster nodes"},
 		},
 		{
 			Match: iptables.Match().ProtocolNum(ProtoIPIP).
 				DestIPSet(ipSetAllHosts),
 			Action:  iptables.DropAction{},
-			Comment: []string{"Drop IPinIP encapped packets originating in pods"},
+			Comment: []string{"Drop IPinIP encapped packets originating in pods destined to the cluster nodes"},
 		},
 	}
 

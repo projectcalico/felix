@@ -83,13 +83,13 @@ var _ = Describe("Endpoints", func() {
 				DestPorts(uint16(VXLANPort)).
 				DestIPSet(ipSetVXLANSourceHosts),
 			Action:  DropAction{},
-			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
+			Comment: []string{"Drop VXLAN encapped packets originating in pods destined to the cluster nodes"},
 		}
 		dropIPIPRule := Rule{
 			Match: Match().ProtocolNum(ProtoIPIP).
 				DestIPSet(ipSetAllHosts),
 			Action:  DropAction{},
-			Comment: []string{"Drop IPinIP encapped packets originating in pods"},
+			Comment: []string{"Drop IPinIP encapped packets originating in pods destined to the cluster nodes"},
 		}
 
 		Context("with normal config", func() {
