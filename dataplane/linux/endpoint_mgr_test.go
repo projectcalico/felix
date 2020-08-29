@@ -164,17 +164,21 @@ func chainsForIfaces(ifaceMetadata []string,
 	epMarkFromName := "cali-from-endpoint-mark"
 	epMarkSetOnePrefix := "cali-sm-"
 	epmarkFromPrefix := outPrefix[:6]
+	ipSetVXLANSourceHosts := "cali40all-vxlan-net"
+	ipSetAllHosts := "cali40all-hosts-net"
 	dropEncapRules := []iptables.Rule{
 		{
 			Match: iptables.Match().ProtocolNum(ProtoUDP).
+				DestIPSet(ipSetVXLANSourceHosts).
 				DestPorts(uint16(VXLANPort)),
 			Action:  iptables.DropAction{},
-			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
+			Comment: []string{"Drop VXLAN encapped packets originating in pods destined to the cluster nodes"},
 		},
 		{
-			Match:   iptables.Match().ProtocolNum(ProtoIPIP),
+			Match: iptables.Match().ProtocolNum(ProtoIPIP).
+				DestIPSet(ipSetAllHosts),
 			Action:  iptables.DropAction{},
-			Comment: []string{"Drop IPinIP encapped packets originating in pods"},
+			Comment: []string{"Drop IPinIP encapped packets originating in pods destined to the cluster nodes"},
 		},
 	}
 
@@ -635,6 +639,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 				IptablesMarkNonCaliEndpoint: 0x0100,
 				KubeIPVSSupportEnabled:      true,
 				WorkloadIfacePrefixes:       []string{"cali", "tap"},
+				VXLANEnabled:                true,
 				VXLANPort:                   4789,
 				VXLANVNI:                    4096,
 			}

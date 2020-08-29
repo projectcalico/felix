@@ -172,6 +172,7 @@ type RuleRenderer interface {
 		ingressPolicies []string,
 		egressPolicies []string,
 		profileIDs []string,
+		ipVersion uint8,
 	) []*iptables.Chain
 
 	WorkloadInterfaceAllowChains(endpoints map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint) []*iptables.Chain
@@ -192,15 +193,18 @@ type RuleRenderer interface {
 		ingressForwardPolicyNames []string,
 		egressForwardPolicyNames []string,
 		profileIDs []string,
+		ipVersion uint8,
 	) []*iptables.Chain
 	HostEndpointToRawChains(
 		ifaceName string,
 		ingressPolicyNames []string,
 		egressPolicyNames []string,
+		ipVersion uint8,
 	) []*iptables.Chain
 	HostEndpointToMangleChains(
 		ifaceName string,
 		preDNATPolicyNames []string,
+		ipVersion uint8,
 	) []*iptables.Chain
 
 	PolicyToIptablesChains(policyID *proto.PolicyID, policy *proto.Policy, ipVersion uint8) []*iptables.Chain
