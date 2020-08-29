@@ -583,6 +583,7 @@ func (m *endpointManager) resolveWorkloadEndpoints() {
 						ingressPolicyNames,
 						egressPolicyNames,
 						workload.ProfileIds,
+						m.ipVersion,
 					)
 					m.filterTable.UpdateChains(chains)
 					m.activeWlIDToChains[id] = chains
@@ -906,6 +907,7 @@ func (m *endpointManager) resolveHostEndpoints() {
 				ingressForwardPolicyNames,
 				egressForwardPolicyNames,
 				hostEp.ProfileIds,
+				m.ipVersion,
 			)
 
 			if !reflect.DeepEqual(filtChains, m.activeHostIfaceToFiltChains[ifaceName]) {
@@ -951,6 +953,7 @@ func (m *endpointManager) resolveHostEndpoints() {
 				ifaceName,
 				ingressPolicyNames,
 				egressPolicyNames,
+				m.ipVersion,
 			)
 			if !reflect.DeepEqual(rawChains, m.activeHostIfaceToRawChains[ifaceName]) {
 				m.rawTable.UpdateChains(rawChains)

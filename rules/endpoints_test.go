@@ -80,8 +80,8 @@ var _ = Describe("Endpoints", func() {
 		ipSetAllHosts := "cali40all-hosts-net"
 		dropVXLANRule := Rule{
 			Match: Match().ProtocolNum(ProtoUDP).
-				DestIPSet(ipSetVXLANSourceHosts).
-				DestPorts(uint16(VXLANPort)),
+				DestPorts(uint16(VXLANPort)).
+				DestIPSet(ipSetVXLANSourceHosts),
 			Action:  DropAction{},
 			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
 		}
@@ -105,7 +105,8 @@ var _ = Describe("Endpoints", func() {
 					true,
 					nil,
 					nil,
-					nil)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+					nil,
+					4)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
 					{
 						Name: "cali-tw-cali1234",
 						Rules: []Rule{
@@ -152,6 +153,7 @@ var _ = Describe("Endpoints", func() {
 					nil,
 					nil,
 					nil,
+					4,
 				)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
 					{
 						Name: "cali-tw-cali1234",
@@ -184,6 +186,7 @@ var _ = Describe("Endpoints", func() {
 					[]string{"ai", "bi"},
 					[]string{"ae", "be"},
 					[]string{"prof1", "prof2"},
+					4,
 				)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
 					{
 						Name: "cali-tw-cali1234",
@@ -281,7 +284,7 @@ var _ = Describe("Endpoints", func() {
 					epMarkMapper,
 					[]string{"ai", "bi"}, []string{"ae", "be"},
 					[]string{"afi", "bfi"}, []string{"afe", "bfe"},
-					[]string{"prof1", "prof2"})).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+					[]string{"prof1", "prof2"}, 4)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
 					{
 						Name: "cali-th-eth0",
 						Rules: []Rule{
@@ -434,7 +437,7 @@ var _ = Describe("Endpoints", func() {
 			})
 
 			It("should render host endpoint raw chains with untracked policies", func() {
-				Expect(renderer.HostEndpointToRawChains("eth0", []string{"c"}, []string{"c"})).To(Equal([]*Chain{
+				Expect(renderer.HostEndpointToRawChains("eth0", []string{"c"}, []string{"c"}, 4)).To(Equal([]*Chain{
 					{
 						Name: "cali-th-eth0",
 						Rules: []Rule{
@@ -486,6 +489,7 @@ var _ = Describe("Endpoints", func() {
 				Expect(renderer.HostEndpointToMangleChains(
 					"eth0",
 					[]string{"c"},
+					4,
 				)).To(Equal([]*Chain{
 					{
 						Name: "cali-fh-eth0",
@@ -533,6 +537,7 @@ var _ = Describe("Endpoints", func() {
 					nil,
 					nil,
 					nil,
+					4,
 				)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
 					{
 						Name: "cali-tw-cali1234",
@@ -579,6 +584,7 @@ var _ = Describe("Endpoints", func() {
 				Expect(renderer.HostEndpointToMangleChains(
 					"eth0",
 					[]string{"c"},
+					4,
 				)).To(Equal([]*Chain{
 					{
 						Name: "cali-fh-eth0",
@@ -619,7 +625,9 @@ var _ = Describe("Endpoints", func() {
 						true,
 						nil,
 						nil,
-						nil)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+						nil,
+						4,
+					)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
 						{
 							Name: "cali-tw-cali1234",
 							Rules: []Rule{
@@ -669,7 +677,9 @@ var _ = Describe("Endpoints", func() {
 						true,
 						nil,
 						nil,
-						nil)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+						nil,
+						4,
+					)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
 						{
 							Name: "cali-tw-cali1234",
 							Rules: []Rule{
@@ -720,7 +730,9 @@ var _ = Describe("Endpoints", func() {
 						true,
 						nil,
 						nil,
-						nil)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+						nil,
+						4,
+					)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
 						{
 							Name: "cali-tw-cali1234",
 							Rules: []Rule{
