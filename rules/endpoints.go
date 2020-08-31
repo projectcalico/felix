@@ -328,8 +328,11 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		match := Match().ProtocolNum(ProtoUDP).DestPorts(uint16(r.Config.VXLANPort))
 		comment := "Drop VXLAN encapped packets originating in pods"
 		if ipVersion == 4 {
-			// The VXLAN blocking rules use a IPv4 specific ipset, so in the
+			// The VXLAN blocking rules uses a IPv4 specific ipset, so in the
 			// case of IPv6, we leave the rule broad.
+			// The IPSet variable name here is referred to as "sources" but it actually
+			// contains a maintained list of all VXLAN tunnel endpoints making it suitable
+			// to be used in a destination IPSet.
 			match = match.DestIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllVXLANSourceNets))
 			comment = "Drop VXLAN encapped packets originating in pods destined to the cluster nodes"
 		}
@@ -345,7 +348,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		match := Match().ProtocolNum(ProtoIPIP)
 		comment := "Drop IPinIP encapped packets originating in pods"
 		if ipVersion == 4 {
-			// The IPIP blocking rules use a IPv4 specific ipset, so in the
+			// The IPIP blocking rules uses a IPv4 specific ipset, so in the
 			// case of IPv6, we leave the rule broad.
 			match = match.DestIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllHostNets))
 			comment = "Drop IPinIP encapped packets originating in pods destined to the cluster nodes"
