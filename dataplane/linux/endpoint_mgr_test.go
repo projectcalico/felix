@@ -117,25 +117,25 @@ var fromHostDispatchEmpty = []*iptables.Chain{
 	},
 }
 
-func hostChainsForIfaces(ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
-	return append(chainsForIfaces(ifaceMetadata, epMarkMapper, true, "normal"),
-		chainsForIfaces(ifaceMetadata, epMarkMapper, true, "applyOnForward")...,
+func hostChainsForIfaces(ipVersion uint8, ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
+	return append(chainsForIfaces(ipVersion, ifaceMetadata, epMarkMapper, true, "normal"),
+		chainsForIfaces(ipVersion, ifaceMetadata, epMarkMapper, true, "applyOnForward")...,
 	)
 }
 
-func rawChainsForIfaces(ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
-	return chainsForIfaces(ifaceMetadata, epMarkMapper, true, "untracked")
+func rawChainsForIfaces(ipVersion uint8, ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
+	return chainsForIfaces(ipVersion, ifaceMetadata, epMarkMapper, true, "untracked")
 }
 
-func preDNATChainsForIfaces(ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
-	return chainsForIfaces(ifaceMetadata, epMarkMapper, true, "preDNAT")
+func preDNATChainsForIfaces(ipVersion uint8, ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
+	return chainsForIfaces(ipVersion, ifaceMetadata, epMarkMapper, true, "preDNAT")
 }
 
-func wlChainsForIfaces(ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
-	return chainsForIfaces(ifaceMetadata, epMarkMapper, false, "normal")
+func wlChainsForIfaces(ipVersion uint8, ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
+	return chainsForIfaces(ipVersion, ifaceMetadata, epMarkMapper, false, "normal")
 }
 
-func chainsForIfaces(ifaceMetadata []string,
+func chainsForIfaces(ipVersion uint8, ifaceMetadata []string,
 	epMarkMapper rules.EndpointMarkMapper,
 	host bool,
 	tableKind string) []*iptables.Chain {
@@ -164,6 +164,8 @@ func chainsForIfaces(ifaceMetadata []string,
 	epMarkFromName := "cali-from-endpoint-mark"
 	epMarkSetOnePrefix := "cali-sm-"
 	epmarkFromPrefix := outPrefix[:6]
+	ipSetVXLANSourceHosts := "cali40all-vxlan-net"
+	ipSetAllHosts := "cali40all-hosts-net"
 	dropEncapRules := []iptables.Rule{
 		{
 			Match: iptables.Match().ProtocolNum(ProtoUDP).
@@ -176,6 +178,23 @@ func chainsForIfaces(ifaceMetadata []string,
 			Action:  iptables.DropAction{},
 			Comment: []string{"Drop IPinIP encapped packets originating in pods"},
 		},
+	}
+	if ipVersion == 4 {
+		dropEncapRules = []iptables.Rule{
+			{
+				Match: iptables.Match().ProtocolNum(ProtoUDP).
+					DestPorts(uint16(VXLANPort)).
+					DestIPSet(ipSetVXLANSourceHosts),
+				Action:  iptables.DropAction{},
+				Comment: []string{"Drop VXLAN encapped packets originating in pods destined to the cluster nodes"},
+			},
+			{
+				Match: iptables.Match().ProtocolNum(ProtoIPIP).
+					DestIPSet(ipSetAllHosts),
+				Action:  iptables.DropAction{},
+				Comment: []string{"Drop IPinIP encapped packets originating in pods destined to the cluster nodes"},
+			},
+		}
 	}
 
 	if host {
@@ -749,13 +768,13 @@ func endpointManagerTests(ipVersion uint8) func() {
 			return func() {
 				filterTable.checkChains([][]*iptables.Chain{
 					wlDispatchEmpty,
-					hostChainsForIfaces(names, epMgr.epMarkMapper),
+					hostChainsForIfaces(ipVersion, names, epMgr.epMarkMapper),
 				})
 				rawTable.checkChains([][]*iptables.Chain{
-					rawChainsForIfaces(names, epMgr.epMarkMapper),
+					rawChainsForIfaces(ipVersion, names, epMgr.epMarkMapper),
 				})
 				mangleTable.checkChains([][]*iptables.Chain{
-					preDNATChainsForIfaces(names, epMgr.epMarkMapper),
+					preDNATChainsForIfaces(ipVersion, names, epMgr.epMarkMapper),
 				})
 			}
 		}
@@ -1328,7 +1347,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 				filterTable.checkChains([][]*iptables.Chain{
 					hostDispatchEmptyNormal,
 					hostDispatchEmptyForward,
-					wlChainsForIfaces(names, epMgr.epMarkMapper),
+					wlChainsForIfaces(ipVersion, names, epMgr.epMarkMapper),
 				})
 				mangleTable.checkChains([][]*iptables.Chain{
 					fromHostDispatchEmpty,

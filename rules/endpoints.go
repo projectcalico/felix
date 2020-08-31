@@ -34,6 +34,7 @@ func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 	ingressPolicies []string,
 	egressPolicies []string,
 	profileIDs []string,
+	ipVersion uint8,
 ) []*Chain {
 	result := []*Chain{}
 	result = append(result,
@@ -50,6 +51,7 @@ func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 			adminUp,
 			r.filterAllowAction, // Workload endpoint chains are only used in the filter table
 			dontDropEncap,
+			ipVersion,
 		),
 		// Chain for traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -64,6 +66,7 @@ func (r *DefaultRuleRenderer) WorkloadEndpointToIptablesChains(
 			adminUp,
 			r.filterAllowAction, // Workload endpoint chains are only used in the filter table
 			dropEncap,
+			ipVersion,
 		),
 	)
 
@@ -89,6 +92,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 	ingressForwardPolicyNames []string,
 	egressForwardPolicyNames []string,
 	profileIDs []string,
+	ipVersion uint8,
 ) []*Chain {
 	log.WithField("ifaceName", ifaceName).Debug("Rendering filter host endpoint chain.")
 	result := []*Chain{}
@@ -106,6 +110,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			ipVersion,
 		),
 		// Chain for input traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -120,6 +125,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			ipVersion,
 		),
 		// Chain for forward traffic _to_ the endpoint.
 		r.endpointIptablesChain(
@@ -134,6 +140,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			ipVersion,
 		),
 		// Chain for forward traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -148,6 +155,7 @@ func (r *DefaultRuleRenderer) HostEndpointToFilterChains(
 			true, // Host endpoints are always admin up.
 			r.filterAllowAction,
 			dontDropEncap,
+			ipVersion,
 		),
 	)
 
@@ -169,6 +177,7 @@ func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 	ifaceName string,
 	ingressPolicyNames []string,
 	egressPolicyNames []string,
+	ipVersion uint8,
 ) []*Chain {
 	log.WithField("ifaceName", ifaceName).Debug("Rendering raw (untracked) host endpoint chain.")
 	return []*Chain{
@@ -185,6 +194,7 @@ func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 			true, // Host endpoints are always admin up.
 			AcceptAction{},
 			dontDropEncap,
+			ipVersion,
 		),
 		// Chain for traffic _from_ the endpoint.
 		r.endpointIptablesChain(
@@ -199,6 +209,7 @@ func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 			true, // Host endpoints are always admin up.
 			AcceptAction{},
 			dontDropEncap,
+			ipVersion,
 		),
 	}
 }
@@ -206,6 +217,7 @@ func (r *DefaultRuleRenderer) HostEndpointToRawChains(
 func (r *DefaultRuleRenderer) HostEndpointToMangleChains(
 	ifaceName string,
 	preDNATPolicyNames []string,
+	ipVersion uint8,
 ) []*Chain {
 	log.WithField("ifaceName", ifaceName).Debug("Rendering pre-DNAT host endpoint chain.")
 	return []*Chain{
@@ -223,6 +235,7 @@ func (r *DefaultRuleRenderer) HostEndpointToMangleChains(
 			true, // Host endpoints are always admin up.
 			r.mangleAllowAction,
 			dontDropEncap,
+			ipVersion,
 		),
 	}
 }
@@ -270,6 +283,7 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 	adminUp bool,
 	allowAction Action,
 	dropEncap bool,
+	ipVersion uint8,
 ) *Chain {
 	rules := []Rule{}
 	chainName := EndpointChainName(endpointPrefix, name)
@@ -309,16 +323,38 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 	})
 
 	if dropEncap {
+		// Block the endpoint from sending VXLAN traffic with destination IP
+		// address matching any of the VXLAN hosts.
+		match := Match().ProtocolNum(ProtoUDP).DestPorts(uint16(r.Config.VXLANPort))
+		comment := "Drop VXLAN encapped packets originating in pods"
+		if ipVersion == 4 {
+			// The VXLAN blocking rules uses a IPv4 specific ipset, so in the
+			// case of IPv6, we leave the rule broad.
+			// The IPSet variable name here is referred to as "sources" but it actually
+			// contains a maintained list of all VXLAN tunnel endpoints making it suitable
+			// to be used in a destination IPSet.
+			match = match.DestIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllVXLANSourceNets))
+			comment = "Drop VXLAN encapped packets originating in pods destined to the cluster nodes"
+		}
 		rules = append(rules, Rule{
-			Match: Match().ProtocolNum(ProtoUDP).
-				DestPorts(uint16(r.Config.VXLANPort)),
+			Match:   match,
 			Action:  DropAction{},
-			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
+			Comment: []string{comment},
 		})
+		// Block the endpoint from sending IPIP traffic with destination IP
+		// address matching any of our hosts.
+		match = Match().ProtocolNum(ProtoIPIP)
+		comment = "Drop IPinIP encapped packets originating in pods"
+		if ipVersion == 4 {
+			// The IPIP blocking rules uses a IPv4 specific ipset, so in the
+			// case of IPv6, we leave the rule broad.
+			match = match.DestIPSet(r.IPSetConfigV4.NameForMainIPSet(IPSetIDAllHostNets))
+			comment = "Drop IPinIP encapped packets originating in pods destined to the cluster nodes"
+		}
 		rules = append(rules, Rule{
-			Match:   Match().ProtocolNum(ProtoIPIP),
+			Match:   match,
 			Action:  DropAction{},
-			Comment: []string{"Drop IPinIP encapped packets originating in pods"},
+			Comment: []string{comment},
 		})
 	}
 
