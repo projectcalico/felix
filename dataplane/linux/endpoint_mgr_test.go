@@ -654,7 +654,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 				IptablesMarkNonCaliEndpoint: 0x0100,
 				KubeIPVSSupportEnabled:      true,
 				WorkloadIfacePrefixes:       []string{"cali", "tap"},
-				VXLANEnabled:                true,
 				VXLANPort:                   4789,
 				VXLANVNI:                    4096,
 			}
