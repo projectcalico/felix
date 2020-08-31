@@ -183,8 +183,8 @@ func chainsForIfaces(ipVersion uint8, ifaceMetadata []string,
 		dropEncapRules = []iptables.Rule{
 			{
 				Match: iptables.Match().ProtocolNum(ProtoUDP).
-					DestIPSet(ipSetVXLANSourceHosts).
-					DestPorts(uint16(VXLANPort)),
+					DestPorts(uint16(VXLANPort)).
+					DestIPSet(ipSetVXLANSourceHosts),
 				Action:  iptables.DropAction{},
 				Comment: []string{"Drop VXLAN encapped packets originating in pods destined to the cluster nodes"},
 			},
