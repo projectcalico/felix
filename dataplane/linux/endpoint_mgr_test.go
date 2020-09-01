@@ -623,20 +623,22 @@ func endpointManagerTests(ipVersion uint8) func() {
 
 		BeforeEach(func() {
 			rrConfigNormal = rules.Config{
-				IPIPEnabled:                 true,
-				IPIPTunnelAddress:           nil,
-				IPSetConfigV4:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
-				IPSetConfigV6:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
-				IptablesMarkAccept:          0x8,
-				IptablesMarkPass:            0x10,
-				IptablesMarkScratch0:        0x20,
-				IptablesMarkScratch1:        0x40,
-				IptablesMarkEndpoint:        0xff00,
-				IptablesMarkNonCaliEndpoint: 0x0100,
-				KubeIPVSSupportEnabled:      true,
-				WorkloadIfacePrefixes:       []string{"cali", "tap"},
-				VXLANPort:                   4789,
-				VXLANVNI:                    4096,
+				IPIPEnabled:                   true,
+				IPIPTunnelAddress:             nil,
+				IPSetConfigV4:                 ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
+				IPSetConfigV6:                 ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
+				IptablesMarkAccept:            0x8,
+				IptablesMarkPass:              0x10,
+				IptablesMarkScratch0:          0x20,
+				IptablesMarkScratch1:          0x40,
+				IptablesMarkEndpoint:          0xff00,
+				IptablesMarkNonCaliEndpoint:   0x0100,
+				KubeIPVSSupportEnabled:        true,
+				WorkloadIfacePrefixes:         []string{"cali", "tap"},
+				VXLANPort:                     4789,
+				VXLANVNI:                      4096,
+				DropVXLANPacketsFromWorkloads: true,
+				DropIPIPPacketsFromWorkloads:  true,
 			}
 			eth0Addrs = set.New()
 			eth0Addrs.Add(ipv4)

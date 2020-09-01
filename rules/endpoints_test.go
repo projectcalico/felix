@@ -37,38 +37,42 @@ var _ = Describe("Endpoints", func() {
 	for _, trueOrFalse := range []bool{true, false} {
 		kubeIPVSEnabled := trueOrFalse
 		var rrConfigNormalMangleReturn = Config{
-			IPIPEnabled:                 true,
-			IPIPTunnelAddress:           nil,
-			IPSetConfigV4:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
-			IPSetConfigV6:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
-			IptablesMarkAccept:          0x8,
-			IptablesMarkPass:            0x10,
-			IptablesMarkScratch0:        0x20,
-			IptablesMarkScratch1:        0x40,
-			IptablesMarkEndpoint:        0xff00,
-			IptablesMarkNonCaliEndpoint: 0x0100,
-			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
-			IptablesMangleAllowAction:   "RETURN",
-			VXLANPort:                   4789,
-			VXLANVNI:                    4096,
+			IPIPEnabled:                   true,
+			IPIPTunnelAddress:             nil,
+			IPSetConfigV4:                 ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
+			IPSetConfigV6:                 ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
+			IptablesMarkAccept:            0x8,
+			IptablesMarkPass:              0x10,
+			IptablesMarkScratch0:          0x20,
+			IptablesMarkScratch1:          0x40,
+			IptablesMarkEndpoint:          0xff00,
+			IptablesMarkNonCaliEndpoint:   0x0100,
+			KubeIPVSSupportEnabled:        kubeIPVSEnabled,
+			IptablesMangleAllowAction:     "RETURN",
+			VXLANPort:                     4789,
+			VXLANVNI:                      4096,
+			DropIPIPPacketsFromWorkloads:  true,
+			DropVXLANPacketsFromWorkloads: true,
 		}
 
 		var rrConfigConntrackDisabledReturnAction = Config{
-			IPIPEnabled:                 true,
-			IPIPTunnelAddress:           nil,
-			IPSetConfigV4:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
-			IPSetConfigV6:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
-			IptablesMarkAccept:          0x8,
-			IptablesMarkPass:            0x10,
-			IptablesMarkScratch0:        0x20,
-			IptablesMarkScratch1:        0x40,
-			IptablesMarkEndpoint:        0xff00,
-			IptablesMarkNonCaliEndpoint: 0x0100,
-			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
-			DisableConntrackInvalid:     true,
-			IptablesFilterAllowAction:   "RETURN",
-			VXLANPort:                   4789,
-			VXLANVNI:                    4096,
+			IPIPEnabled:                   true,
+			IPIPTunnelAddress:             nil,
+			IPSetConfigV4:                 ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
+			IPSetConfigV6:                 ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
+			IptablesMarkAccept:            0x8,
+			IptablesMarkPass:              0x10,
+			IptablesMarkScratch0:          0x20,
+			IptablesMarkScratch1:          0x40,
+			IptablesMarkEndpoint:          0xff00,
+			IptablesMarkNonCaliEndpoint:   0x0100,
+			KubeIPVSSupportEnabled:        kubeIPVSEnabled,
+			DisableConntrackInvalid:       true,
+			IptablesFilterAllowAction:     "RETURN",
+			VXLANPort:                     4789,
+			VXLANVNI:                      4096,
+			DropIPIPPacketsFromWorkloads:  true,
+			DropVXLANPacketsFromWorkloads: true,
 		}
 
 		var renderer RuleRenderer
@@ -598,6 +602,166 @@ var _ = Describe("Endpoints", func() {
 						},
 					},
 				}))
+			})
+		})
+		Describe("Disabling adding drop encap rules", func() {
+
+			Context("VXLAN disabled, IPIP enabled", func() {
+				It("should render a minimal workload endpoint without VXLAN drop encap rule and with IPIP drop encap rule", func() {
+					rrConfigNormalMangleReturn.DropVXLANPacketsFromWorkloads = false
+					renderer = NewRenderer(rrConfigNormalMangleReturn)
+					epMarkMapper = NewEndpointMarkMapper(rrConfigNormalMangleReturn.IptablesMarkEndpoint,
+						rrConfigNormalMangleReturn.IptablesMarkNonCaliEndpoint)
+					Expect(renderer.WorkloadEndpointToIptablesChains(
+						"cali1234", epMarkMapper,
+						true,
+						nil,
+						nil,
+						nil,
+					)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+						{
+							Name: "cali-tw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: DropAction{}},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								{Action: DropAction{},
+									Comment: []string{"Drop if no profiles matched"}},
+							},
+						},
+						{
+							Name: "cali-fw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: DropAction{}},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								dropIPIPRule,
+								{Action: DropAction{},
+									Comment: []string{"Drop if no profiles matched"}},
+							},
+						},
+						{
+							Name: "cali-sm-cali1234",
+							Rules: []Rule{
+								{Action: SetMaskedMarkAction{Mark: 0xd400, Mask: 0xff00}},
+							},
+						},
+					})))
+				})
+			})
+			Context("VXLAN disabled, IPIP enabled", func() {
+				It("should render a minimal workload endpoint with VXLAN drop encap rule and without IPIP drop encap rule", func() {
+					rrConfigNormalMangleReturn.DropIPIPPacketsFromWorkloads = false
+					renderer = NewRenderer(rrConfigNormalMangleReturn)
+					epMarkMapper = NewEndpointMarkMapper(rrConfigNormalMangleReturn.IptablesMarkEndpoint,
+						rrConfigNormalMangleReturn.IptablesMarkNonCaliEndpoint)
+					Expect(renderer.WorkloadEndpointToIptablesChains(
+						"cali1234", epMarkMapper,
+						true,
+						nil,
+						nil,
+						nil,
+					)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+						{
+							Name: "cali-tw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: DropAction{}},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								{Action: DropAction{},
+									Comment: []string{"Drop if no profiles matched"}},
+							},
+						},
+						{
+							Name: "cali-fw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: DropAction{}},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								dropVXLANRule,
+								{Action: DropAction{},
+									Comment: []string{"Drop if no profiles matched"}},
+							},
+						},
+						{
+							Name: "cali-sm-cali1234",
+							Rules: []Rule{
+								{Action: SetMaskedMarkAction{Mark: 0xd400, Mask: 0xff00}},
+							},
+						},
+					})))
+				})
+			})
+			Context("VXLAN and IPIP disabled", func() {
+				It("should render a minimal workload endpoint without both VXLAN and IPIP drop encap rule", func() {
+					rrConfigNormalMangleReturn.DropVXLANPacketsFromWorkloads = false
+					rrConfigNormalMangleReturn.DropIPIPPacketsFromWorkloads = false
+					renderer = NewRenderer(rrConfigNormalMangleReturn)
+					epMarkMapper = NewEndpointMarkMapper(rrConfigNormalMangleReturn.IptablesMarkEndpoint,
+						rrConfigNormalMangleReturn.IptablesMarkNonCaliEndpoint)
+					Expect(renderer.WorkloadEndpointToIptablesChains(
+						"cali1234", epMarkMapper,
+						true,
+						nil,
+						nil,
+						nil,
+					)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+						{
+							Name: "cali-tw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: DropAction{}},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								{Action: DropAction{},
+									Comment: []string{"Drop if no profiles matched"}},
+							},
+						},
+						{
+							Name: "cali-fw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: DropAction{}},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								{Action: DropAction{},
+									Comment: []string{"Drop if no profiles matched"}},
+							},
+						},
+						{
+							Name: "cali-sm-cali1234",
+							Rules: []Rule{
+								{Action: SetMaskedMarkAction{Mark: 0xd400, Mask: 0xff00}},
+							},
+						},
+					})))
+				})
+			})
+			AfterEach(func() {
+				rrConfigNormalMangleReturn.DropIPIPPacketsFromWorkloads = true
+				rrConfigNormalMangleReturn.DropVXLANPacketsFromWorkloads = true
 			})
 		})
 	}

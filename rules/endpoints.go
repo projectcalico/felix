@@ -308,13 +308,15 @@ func (r *DefaultRuleRenderer) endpointIptablesChain(
 		},
 	})
 
-	if dropEncap {
+	if dropEncap && r.Config.DropVXLANPacketsFromWorkloads {
 		rules = append(rules, Rule{
 			Match: Match().ProtocolNum(ProtoUDP).
 				DestPorts(uint16(r.Config.VXLANPort)),
 			Action:  DropAction{},
 			Comment: []string{"Drop VXLAN encapped packets originating in pods"},
 		})
+	}
+	if dropEncap && r.Config.DropIPIPPacketsFromWorkloads {
 		rules = append(rules, Rule{
 			Match:   Match().ProtocolNum(ProtoIPIP),
 			Action:  DropAction{},
