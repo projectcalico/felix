@@ -214,9 +214,9 @@ type Config struct {
 	IpInIpTunnelAddr net.IP `config:"ipv4;"`
 
 	// Knobs provided to explicitly control whether we add rules to drop encap traffic
-	// from workloads. We always add them unless explicitly disabled.
-	DropVXLANPacketsFromWorkloads bool `config:"bool;true"`
-	DropIPIPPacketsFromWorkloads  bool `config:"bool;true"`
+	// from workloads. We always add them unless explicitly requested not to add them.
+	AllowVXLANPacketsFromWorkloads bool `config:"bool;false"`
+	AllowIPIPPacketsFromWorkloads  bool `config:"bool;false"`
 
 	AWSSrcDstCheck string `config:"oneof(DoNothing,Enable,Disable);DoNothing;non-zero"`
 
