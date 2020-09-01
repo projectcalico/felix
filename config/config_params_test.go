@@ -61,6 +61,10 @@ var _ = Describe("FelixConfig vs ConfigParams parity", func() {
 		"loadClientConfigFromEnvironment",
 		"useNodeResourceUpdates",
 		"internalOverrides",
+
+		// TODO(doublek): Add these two new params to libcalico-go
+		"AllowVXLANPacketsFromWorkloads",
+		"AllowIPIPPacketsFromWorkloads",
 	}
 	cpFieldNameToFC := map[string]string{
 		"IpInIpEnabled":                      "IPIPEnabled",
