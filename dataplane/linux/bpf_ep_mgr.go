@@ -403,23 +403,6 @@ func (m *bpfEndpointManager) CompleteDeferredWork() error {
 	return nil
 }
 
-func (m *bpfEndpointManager) setAcceptLocal(iface string, val bool) error {
-	numval := "0"
-	if val {
-		numval = "1"
-	}
-
-	path := fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/accept_local", iface)
-	err := writeProcSys(path, numval)
-	if err != nil {
-		log.WithField("err", err).Errorf("Failed to  set %s to %s", path, numval)
-		return err
-	}
-
-	log.Infof("%s set to %s", path, numval)
-	return nil
-}
-
 func (m *bpfEndpointManager) ensureStarted() {
 	m.startupOnce.Do(func() {
 		log.Info("Starting map cleanup runner.")
@@ -467,11 +450,6 @@ func (m *bpfEndpointManager) applyProgramsToDirtyDataInterfaces() {
 			ingressWG.Wait()
 			if err == nil {
 				err = ingressErr
-			}
-			if err == nil {
-				// This is required to allow NodePort forwarding with
-				// encapsulation with the host's IP as the source address
-				err = m.setAcceptLocal(iface, true)
 			}
 			mutex.Lock()
 			errs[iface] = err
