@@ -340,7 +340,7 @@ func TestNATNodePort(t *testing.T) {
 		ipv4L := pktR.Layer(layers.LayerTypeIPv4)
 		Expect(ipv4L).NotTo(BeNil())
 		ipv4R := ipv4L.(*layers.IPv4)
-		Expect(ipv4R.SrcIP.String()).To(Equal(hostIP.String()))
+		Expect(ipv4R.SrcIP.String()).To(Equal(ipv4.SrcIP.String()))
 		Expect(ipv4R.DstIP.String()).To(Equal(node2ip.String()))
 
 		checkVxlanEncap(pktR, false, ipv4, udp, payload)
@@ -370,7 +370,7 @@ func TestNATNodePort(t *testing.T) {
 
 	dumpCTMap(ctMap)
 
-	skbMark = tc.MarkSeenBypassForwardSourceFixup // CALI_SKB_MARK_BYPASS_FWD_SRC_FIXUP
+	skbMark = tc.MarkSeenBypassForwardSourceFixup
 	// Leaving node 1
 	runBpfTest(t, "calico_to_host_ep", rulesDefaultAllow, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(encapedPkt)
@@ -380,7 +380,19 @@ func TestNATNodePort(t *testing.T) {
 		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
 		fmt.Printf("pktR = %+v\n", pktR)
 
-		Expect(res.dataOut).To(Equal(encapedPkt))
+		// Do not match src IP and csum
+		Expect(res.dataOut[:24]).To(Equal(encapedPkt[:24]))
+		Expect(res.dataOut[30:]).To(Equal(encapedPkt[30:]))
+		ipv4L := pktR.Layer(layers.LayerTypeIPv4)
+		Expect(ipv4L).NotTo(BeNil())
+		ipv4R := ipv4L.(*layers.IPv4)
+		// Check that the IP is fixed up
+		Expect(ipv4R.SrcIP.String()).To(Equal(node1ip.String()))
+
+		// Check that it is valid vxlan and csum are ok
+		checkVxlan(pktR)
+
+		encapedPkt = res.dataOut
 	})
 
 	dumpCTMap(ctMap)
@@ -531,7 +543,14 @@ func TestNATNodePort(t *testing.T) {
 		Expect(ipv4R.SrcIP.String()).To(Equal(natIP.String()))
 		Expect(ipv4R.DstIP.String()).To(Equal(node1ip.String()))
 
-		checkVxlan(pktR)
+		// Check that it is properly NATed
+		inner := checkVxlan(pktR)
+		ipv4L = inner.Layer(layers.LayerTypeIPv4)
+		Expect(ipv4L).NotTo(BeNil())
+		ipv4R = ipv4L.(*layers.IPv4)
+		// To avoid accept_local, SNAT is done on node1
+		Expect(ipv4R.SrcIP.String()).To(Equal(natIP.String()))
+		Expect(ipv4R.DstIP.String()).To(Equal(ipv4.SrcIP.String()))
 
 		encapedPkt = res.dataOut
 	})
@@ -590,12 +609,12 @@ func TestNATNodePort(t *testing.T) {
 		Expect(ipv4L).NotTo(BeNil())
 		ipv4R := ipv4L.(*layers.IPv4)
 		Expect(ipv4R.DstIP.String()).To(Equal(ipv4.SrcIP.String()))
-		Expect(ipv4R.SrcIP.String()).To(Equal(ipv4.DstIP.String()))
+		Expect(ipv4R.SrcIP.String()).To(Equal(natIP.String()))
 
 		udpL := pktR.Layer(layers.LayerTypeUDP)
 		Expect(udpL).NotTo(BeNil())
 		udpR := udpL.(*layers.UDP)
-		Expect(udpR.SrcPort).To(Equal(udp.DstPort))
+		Expect(uint16(udpR.SrcPort)).To(Equal(natPort))
 		Expect(udpR.DstPort).To(Equal(udp.SrcPort))
 
 		payloadL := pktR.ApplicationLayer()
@@ -607,16 +626,18 @@ func TestNATNodePort(t *testing.T) {
 
 	dumpCTMap(ctMap)
 
-	// try a spoofed tunnel packet returnign back, should be dropped and have no effect
-	runBpfTest(t, "calico_from_host_ep", rulesDefaultAllow, func(bpfrun bpfProgRunFn) {
-		// modify the only known good src IP, we do not care about csums at this point
-		encapedPkt[26] = 235
-		res, err := bpfrun(encapedPkt)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Retval).To(Equal(resTC_ACT_SHOT))
-	})
+	/*
+		// try a spoofed tunnel packet returnign back, should be dropped and have no effect
+		runBpfTest(t, "calico_from_host_ep", rulesDefaultAllow, func(bpfrun bpfProgRunFn) {
+			// modify the only known good src IP, we do not care about csums at this point
+			encapedPkt[26] = 235
+			res, err := bpfrun(encapedPkt)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Retval).To(Equal(resTC_ACT_SHOT))
+		})
+	*/
 
-	skbMark = tc.MarkSeenBypassForward // CALI_SKB_MARK_BYPASS_FWD
+	skbMark = tc.MarkSeenBypassSkipRPF
 
 	// Response leaving to original source
 	runBpfTest(t, "calico_to_host_ep", rulesDefaultAllow, func(bpfrun bpfProgRunFn) {
@@ -661,7 +682,7 @@ func TestNATNodePort(t *testing.T) {
 		ipv4L := pktR.Layer(layers.LayerTypeIPv4)
 		Expect(ipv4L).NotTo(BeNil())
 		ipv4R := ipv4L.(*layers.IPv4)
-		Expect(ipv4R.SrcIP.String()).To(Equal(hostIP.String()))
+		Expect(ipv4R.SrcIP.String()).To(Equal(ipv4.SrcIP.String()))
 		Expect(ipv4R.DstIP.String()).To(Equal(node2ip.String()))
 
 		checkVxlanEncap(pktR, false, ipv4, udp, payload)
@@ -911,7 +932,7 @@ func TestNATNodePortMultiNIC(t *testing.T) {
 		ipv4L := pktR.Layer(layers.LayerTypeIPv4)
 		Expect(ipv4L).NotTo(BeNil())
 		ipv4R := ipv4L.(*layers.IPv4)
-		Expect(ipv4R.SrcIP.String()).To(Equal(hostIP.String()))
+		Expect(ipv4R.SrcIP.String()).To(Equal(ipv4.SrcIP.String()))
 		Expect(ipv4R.DstIP.String()).To(Equal(node2ip.String()))
 
 		checkVxlanEncap(pktR, false, ipv4, udp, payload)
@@ -940,7 +961,7 @@ func TestNATNodePortMultiNIC(t *testing.T) {
 
 	dumpCTMap(ctMap)
 
-	skbMark = tc.MarkSeenBypassForwardSourceFixup // CALI_SKB_MARK_BYPASS_FWD_SRC_FIXUP
+	skbMark = tc.MarkSeenBypassForwardSourceFixup
 
 	hostIP = node1ip
 	var encapedGoPkt gopacket.Packet
@@ -1395,7 +1416,7 @@ func TestNATNodePortIngressDSR(t *testing.T) {
 		ipv4L := pktR.Layer(layers.LayerTypeIPv4)
 		Expect(ipv4L).NotTo(BeNil())
 		ipv4R := ipv4L.(*layers.IPv4)
-		Expect(ipv4R.SrcIP.String()).To(Equal(hostIP.String()))
+		Expect(ipv4R.SrcIP.String()).To(Equal(ipv4.SrcIP.String()))
 		Expect(ipv4R.DstIP.String()).To(Equal(node2ip.String()))
 
 		checkVxlanEncap(pktR, false, ipv4, udp, payload)

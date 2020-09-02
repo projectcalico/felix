@@ -1048,10 +1048,8 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct __sk_buff *skb,
 				CALI_DEBUG("Request packet with DNF set is too big\n");
 				goto icmp_too_big;
 			}
-			state->ip_src = HOST_IP;
-			seen_mark = CALI_SKB_MARK_SKIP_RPF;
 
-			/* We cannot enforce RPF check on encapped traffic, do FIB if you can */
+			seen_mark = CALI_SKB_MARK_BYPASS_FWD_SRC_FIXUP;
 			fib = true;
 
 			goto nat_encap;
@@ -1139,6 +1137,13 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct __sk_buff *skb,
 			}
 		}
 
+		/* If replying to tunnel, do not SNAT here, do it at the original node */
+		if (dnat_return_should_encap() && state->ct_result.tun_ip) {
+			state->ip_dst = state->ct_result.tun_ip;
+			seen_mark = CALI_SKB_MARK_BYPASS_FWD_SRC_FIXUP;
+			goto nat_encap;
+		}
+
 		// Actually do the NAT.
 		ip_header->saddr = state->ct_result.nat_ip;
 
@@ -1171,12 +1176,6 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct __sk_buff *skb,
 		if (res) {
 			reason = CALI_REASON_CSUM_FAIL;
 			goto deny;
-		}
-
-		if (dnat_return_should_encap() && state->ct_result.tun_ip) {
-			state->ip_dst = state->ct_result.tun_ip;
-			seen_mark = CALI_SKB_MARK_BYPASS_FWD_SRC_FIXUP;
-			goto nat_encap;
 		}
 
 		state->sport = state->ct_result.nat_port;
