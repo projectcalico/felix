@@ -76,8 +76,9 @@ func StartDataplaneDriver(configParams *config.Config,
 		markAccept, _ := markBitsManager.NextSingleBitMark()
 		markPass, _ := markBitsManager.NextSingleBitMark()
 
+		wireguardEnabled := configParams.WireguardEnabled
 		var markWireguard uint32
-		if configParams.WireguardEnabled {
+		if wireguardEnabled {
 			log.Info("Wireguard enabled, allocating a mark bit")
 			markWireguard, _ = markBitsManager.NextSingleBitMark()
 			if markWireguard == 0 {
@@ -123,14 +124,21 @@ func StartDataplaneDriver(configParams *config.Config,
 
 		// Always allocate the wireguard table index (even when not enabled). This ensures we can tidy up entries
 		// if wireguard is disabled after being previously enabled.
-		var wireguardEnabled bool
-		var wireguardTableIndex int
+		var wireguardWorkloadTableIndex int
+		var wireguardNodeTableIndex int
 		if idx, err := routeTableIndexAllocator.GrabIndex(); err == nil {
 			log.Debugf("Assigned wireguard table index: %d", idx)
-			wireguardEnabled = configParams.WireguardEnabled
-			wireguardTableIndex = idx
+			wireguardWorkloadTableIndex = idx
 		} else {
 			log.WithError(err).Warning("Unable to assign table index for wireguard")
+			wireguardEnabled = false
+		}
+		if idx, err := routeTableIndexAllocator.GrabIndex(); err == nil {
+			log.Debugf("Assigned wireguard table index: %d", idx)
+			wireguardNodeTableIndex = idx
+		} else {
+			log.WithError(err).Warning("Unable to assign table index for wireguard")
+			wireguardEnabled = false
 		}
 
 		// If wireguard is enabled, update the failsafe ports to inculde the wireguard port.
@@ -217,13 +225,14 @@ func StartDataplaneDriver(configParams *config.Config,
 				BPFEnabled:                         configParams.BPFEnabled,
 			},
 			Wireguard: wireguard.Config{
-				Enabled:             wireguardEnabled,
-				ListeningPort:       configParams.WireguardListeningPort,
-				FirewallMark:        int(markWireguard),
-				RoutingRulePriority: configParams.WireguardRoutingRulePriority,
-				RoutingTableIndex:   wireguardTableIndex,
-				InterfaceName:       configParams.WireguardInterfaceName,
-				MTU:                 configParams.WireguardMTU,
+				Enabled:                   wireguardEnabled,
+				ListeningPort:             configParams.WireguardListeningPort,
+				FirewallMark:              int(markWireguard),
+				RoutingRulePriority:       configParams.WireguardRoutingRulePriority,
+				WorkloadRoutingTableIndex: wireguardWorkloadTableIndex,
+				NodeRoutingTableIndex:     wireguardNodeTableIndex,
+				InterfaceName:             configParams.WireguardInterfaceName,
+				MTU:                       configParams.WireguardMTU,
 			},
 			IPIPMTU:                        configParams.IpInIpMtu,
 			VXLANMTU:                       configParams.VXLANMTU,
