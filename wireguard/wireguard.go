@@ -1120,7 +1120,7 @@ func (w *Wireguard) updateRouteTableFromNodeUpdates() {
 
 		if update.ipv4EndpointAddrAdded != nil {
 			// The endpoint IP address has been added, so add the route to the node route table.
-			cidr := update.ipv4EndpointAddrDeleted.AsCIDR()
+			cidr := update.ipv4EndpointAddrAdded.AsCIDR()
 			logCxt.WithField("cidr", cidr).Debug("New endpoint address")
 			w.nodeRouteTable.RouteUpdate(ifaceName, routetable.Target{
 				Type: targetType,
