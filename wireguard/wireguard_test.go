@@ -157,13 +157,13 @@ var _ = Describe("Enable wireguard", func() {
 		wg = NewWithShims(
 			hostname,
 			&Config{
-				Enabled:             true,
-				ListeningPort:       listeningPort,
-				FirewallMark:        firewallMark,
-				RoutingRulePriority: rulePriority,
-				RoutingTableIndex:   tableIndex,
-				InterfaceName:       ifaceName,
-				MTU:                 mtu,
+				Enabled:                    true,
+				ListeningPort:              listeningPort,
+				MarkDoNotRouteViaWireguard: firewallMark,
+				RoutingRulePriority:        rulePriority,
+				WorkloadRoutingTableIndex:  tableIndex,
+				InterfaceName:              ifaceName,
+				MTU:                        mtu,
 			},
 			rtDataplane.NewMockNetlink,
 			rrDataplane.NewMockNetlink,
@@ -1282,13 +1282,13 @@ var _ = Describe("Wireguard (disabled)", func() {
 		wg = NewWithShims(
 			hostname,
 			&Config{
-				Enabled:             false,
-				ListeningPort:       1000,
-				FirewallMark:        1,
-				RoutingRulePriority: rulePriority,
-				RoutingTableIndex:   tableIndex,
-				InterfaceName:       ifaceName,
-				MTU:                 1042,
+				Enabled:                    false,
+				ListeningPort:              1000,
+				MarkDoNotRouteViaWireguard: 1,
+				RoutingRulePriority:        rulePriority,
+				WorkloadRoutingTableIndex:  tableIndex,
+				InterfaceName:              ifaceName,
+				MTU:                        1042,
 			},
 			rtDataplane.NewMockNetlink,
 			rrDataplane.NewMockNetlink,
@@ -1410,7 +1410,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 				link := wgDataplane.NameToLink[ifaceName]
 				Expect(link).To(BeNil())
 
-				// These errors will trigger netlink reconnection. The routetable retries multiple times, so just assert
+				// These errors will trigger netlink reconnection. The workloadRouteTable retries multiple times, so just assert
 				// there is >0 reconnections.
 				if failFlags&mocknetlink.FailNextRouteList != 0 {
 					Expect(rtDataplane.NumNewNetlinkCalls).To(BeNumerically(">", 1))
@@ -1458,13 +1458,13 @@ var _ = Describe("Wireguard (with no table index)", func() {
 			NewWithShims(
 				hostname,
 				&Config{
-					Enabled:             enabled,
-					ListeningPort:       1000,
-					FirewallMark:        1,
-					RoutingRulePriority: rulePriority,
-					RoutingTableIndex:   0,
-					InterfaceName:       ifaceName,
-					MTU:                 1042,
+					Enabled:                    enabled,
+					ListeningPort:              1000,
+					MarkDoNotRouteViaWireguard: 1,
+					RoutingRulePriority:        rulePriority,
+					WorkloadRoutingTableIndex:  0,
+					InterfaceName:              ifaceName,
+					MTU:                        1042,
 				},
 				rtDataplane.NewMockNetlink,
 				rrDataplane.NewMockNetlink,

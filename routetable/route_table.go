@@ -125,6 +125,17 @@ func (t Target) RouteType() int {
 	}
 }
 
+func (t Target) RouteFlags() netlink.NextHopFlag {
+	switch t.Type {
+	case TargetTypeVXLAN:
+		return syscall.RTNH_F_ONLINK
+	case TargetTypeNoEncap:
+		return syscall.RTNH_F_ONLINK
+	default:
+		return 0
+	}
+}
+
 func (t Target) RouteScope() netlink.Scope {
 	switch t.Type {
 	case TargetTypeThrow:
@@ -133,8 +144,25 @@ func (t Target) RouteScope() netlink.Scope {
 		return netlink.SCOPE_UNIVERSE
 	case TargetTypeProhibit:
 		return netlink.SCOPE_UNIVERSE
+	case TargetTypeVXLAN:
+		return netlink.SCOPE_UNIVERSE
+	case TargetTypeNoEncap:
+		return netlink.SCOPE_UNIVERSE
 	default:
 		return netlink.SCOPE_LINK
+	}
+}
+
+func (t Target) RouteIncludeSource() bool {
+	switch t.Type {
+	case TargetTypeThrow:
+		return false
+	case TargetTypeBlackhole:
+		return false
+	case TargetTypeProhibit:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -741,6 +769,7 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 	}
 	cidr := target.CIDR
 	ipNet := cidr.ToIPNet()
+
 	route := netlink.Route{
 		LinkIndex: linkIndex,
 		Dst:       &ipNet,
@@ -750,7 +779,8 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 		Table:     r.tableIndex,
 	}
 
-	if r.deviceRouteSourceAddress != nil {
+	if r.deviceRouteSourceAddress != nil && target.RouteIncludeSource() {
+		// Only include the source address
 		route.Src = r.deviceRouteSourceAddress
 	}
 
@@ -758,10 +788,7 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 		route.Gw = target.GW.AsNetIP()
 	}
 
-	if target.Type == TargetTypeVXLAN || target.Type == TargetTypeNoEncap {
-		route.Scope = netlink.SCOPE_UNIVERSE
-		route.SetFlag(syscall.RTNH_F_ONLINK)
-	}
+	route.SetFlag(target.RouteFlags())
 
 	return route
 }

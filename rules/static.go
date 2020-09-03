@@ -844,6 +844,7 @@ func (r *DefaultRuleRenderer) StaticMangleTableChains(ipVersion uint8) []*Chain 
 		r.failsafeInChain("mangle", ipVersion),
 		r.failsafeOutChain("mangle", ipVersion),
 		r.StaticManglePreroutingChain(ipVersion),
+		r.StaticMangleOutputChain(ipVersion),
 		r.StaticManglePostroutingChain(ipVersion),
 	)
 
@@ -852,6 +853,54 @@ func (r *DefaultRuleRenderer) StaticMangleTableChains(ipVersion uint8) []*Chain 
 
 func (r *DefaultRuleRenderer) StaticManglePreroutingChain(ipVersion uint8) *Chain {
 	rules := []Rule{}
+
+	markFromWorkload := r.IptablesMarkScratch0
+	if r.WireguardEnabled && ipVersion == 4 {
+		rules = append(rules,
+			// Handle wireguard specials.
+			// For new connections:
+			// - Set the wireguard bit indicating whether the origin is a non-workload interface: since this table is
+			//   not hit for locally originated packets, if the workload mark is not set by the raw table then this
+			//   must be a non-workload interface.
+			// - Set the wireguard bit indicating not to route via wireguard: for packets arriving from non-workload
+			//   interfaces and not wireguard.
+			// For established connections:
+			// - Restore the wireguard connection marks to the packet (for routing purposes).
+			Rule{
+				Match: Match().MarkClear(markFromWorkload).ConntrackState("NEW"),
+				Action: SetMaskedMarkAction{
+					Mask: uint32(r.Config.WireguardMarkNonCaliWorkloadIface),
+					Mark: uint32(r.Config.WireguardMarkNonCaliWorkloadIface),
+				},
+			},
+			Rule{
+				Match: Match().NotInInterface(r.Config.WireguardInterfaceName).MarkClear(markFromWorkload).ConntrackState("NEW"),
+				Action: SetMaskedMarkAction{
+					Mask: uint32(r.Config.WireguardMarkDoNotRouteViaWireguard),
+					Mark: uint32(r.Config.WireguardMarkDoNotRouteViaWireguard),
+				},
+			},
+			Rule{
+				Match: Match().InInterface(r.Config.WireguardInterfaceName).ConntrackState("NEW"),
+				Action: SetMaskedMarkAction{
+					Mask: uint32(r.Config.WireguardMarkNonCaliWorkloadIface + r.Config.WireguardMarkDoNotRouteViaWireguard),
+					Mark: uint32(r.Config.WireguardMarkNonCaliWorkloadIface),
+				},
+			},
+			Rule{
+				Match: Match().ConntrackState("NEW"),
+				Action: SaveConnMarkAction{
+					SaveMask: uint32(r.Config.WireguardMarkDoNotRouteViaWireguard + r.Config.WireguardMarkNonCaliWorkloadIface),
+				},
+			},
+			Rule{
+				Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+				Action: RestoreConnMarkAction{
+					RestoreMask: uint32(r.Config.WireguardMarkDoNotRouteViaWireguard + r.Config.WireguardMarkNonCaliWorkloadIface),
+				},
+			},
+		)
+	}
 
 	// ACCEPT or RETURN immediately if packet matches an existing connection.  Note that we also
 	// have a rule like this at the start of each pre-endpoint chain; the functional difference
@@ -899,6 +948,30 @@ func (r *DefaultRuleRenderer) StaticManglePreroutingChain(ipVersion uint8) *Chai
 
 	return &Chain{
 		Name:  ChainManglePrerouting,
+		Rules: rules,
+	}
+}
+
+func (r *DefaultRuleRenderer) StaticMangleOutputChain(ipVersion uint8) *Chain {
+	rules := []Rule{}
+
+	if r.WireguardEnabled && ipVersion == 4 {
+		rules = append(rules,
+			// Handle wireguard specials.
+			//
+			// For established connections:
+			// - Restore the wireguard connection marks to the packet (for routing purposes).
+			Rule{
+				Match: Match().ConntrackState("NEW,RELATED,ESTABLISHED"),
+				Action: RestoreConnMarkAction{
+					RestoreMask: uint32(r.Config.WireguardMarkDoNotRouteViaWireguard + r.Config.WireguardMarkNonCaliWorkloadIface),
+				},
+			},
+		)
+	}
+
+	return &Chain{
+		Name:  ChainMangleOutput,
 		Rules: rules,
 	}
 }
