@@ -22,6 +22,7 @@ import (
 	"os/exec"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/tc"
 
 	"github.com/projectcalico/felix/wireguard"
 
@@ -61,8 +62,10 @@ func StartDataplaneDriver(configParams *config.Config,
 
 	if configParams.UseInternalDataplaneDriver {
 		log.Info("Using internal (linux) dataplane driver.")
-		// If kube ipvs interface is present, enable ipvs support.
-		kubeIPVSSupportEnabled := ifacemonitor.IsInterfacePresent(intdataplane.KubeIPVSInterface)
+		// If kube ipvs interface is present, enable ipvs support.  In BPF mode, we bypass kube-proxy so IPVS
+		// is irrelevant.
+		kubeIPVSSupportEnabled := !configParams.BPFEnabled &&
+			ifacemonitor.IsInterfacePresent(intdataplane.KubeIPVSInterface)
 		if kubeIPVSSupportEnabled {
 			log.Info("Kube-proxy in ipvs mode, enabling felix kube-proxy ipvs support.")
 		}
@@ -70,12 +73,30 @@ func StartDataplaneDriver(configParams *config.Config,
 			log.Panic("Starting dataplane with nil callback func.")
 		}
 
-		markBitsManager := markbits.NewMarkBitsManager(configParams.IptablesMarkMask, "felix-iptables")
-		// Dedicated mark bits for accept and pass actions.  These are long lived bits
-		// that we use for communicating between chains.
-		markAccept, _ := markBitsManager.NextSingleBitMark()
-		markPass, _ := markBitsManager.NextSingleBitMark()
+		allowedMarkBits := configParams.IptablesMarkMask
+		if configParams.BPFEnabled {
+			// In BPF mode, the BPF programs use mark bits that are not configurable.  Make sure that those
+			// bits are covered by our allowed mask.
+			if allowedMarkBits&tc.MarkMaskAll != tc.MarkMaskAll {
+				log.WithFields(log.Fields{
+					"Name":            "felix-iptables",
+					"MarkMask":        allowedMarkBits,
+					"RequiredBPFBits": tc.MarkMaskAll,
+				}).Panic("IptablesMarkMask doesn't cover bits that are used (unconditionally) by eBPF mode.")
+			}
+			allowedMarkBits ^= allowedMarkBits & tc.MarkMaskAll
+			log.WithField("updatedBits", allowedMarkBits).Info(
+				"Removed BPF program bits from available mark bits.")
+		}
 
+		markBitsManager := markbits.NewMarkBitsManager(allowedMarkBits, "felix-iptables")
+
+		// Allocate mark bits; the accept, scratch-0 and wireguard bits are used in BPF mode too so we allocate
+		// those first in case we run out of bits.
+		// The accept bit is a long-lived bit used to communicate between chains.
+		markAccept, _ := markBitsManager.NextSingleBitMark()
+		// Scratch bits are short-lived bits used for calculating multi-rule results.
+		markScratch0, _ := markBitsManager.NextSingleBitMark()
 		var markWireguard uint32
 		if configParams.WireguardEnabled {
 			log.Info("Wireguard enabled, allocating a mark bit")
@@ -83,18 +104,19 @@ func StartDataplaneDriver(configParams *config.Config,
 			if markWireguard == 0 {
 				log.WithFields(log.Fields{
 					"Name":     "felix-iptables",
-					"MarkMask": configParams.IptablesMarkMask,
+					"MarkMask": allowedMarkBits,
 				}).Panic("Failed to allocate a mark bit for wireguard, not enough mark bits available.")
 			}
 		}
-
-		// Short-lived mark bits for local calculations within a chain.
-		markScratch0, _ := markBitsManager.NextSingleBitMark()
+		// The pass bit is a long lived bit used to communicate fro ma policy chain to endpoint chain.
+		markPass, _ := markBitsManager.NextSingleBitMark()
 		markScratch1, _ := markBitsManager.NextSingleBitMark()
-		if markAccept == 0 || markPass == 0 || markScratch0 == 0 || markScratch1 == 0 {
+
+		// markPass and the scratch-1 bits are only used in iptables mode.
+		if markAccept == 0 || markScratch0 == 0 || !configParams.BPFEnabled && (markPass == 0 || markScratch1 == 0) {
 			log.WithFields(log.Fields{
 				"Name":     "felix-iptables",
-				"MarkMask": configParams.IptablesMarkMask,
+				"MarkMask": allowedMarkBits,
 			}).Panic("Not enough mark bits available.")
 		}
 
@@ -103,7 +125,7 @@ func StartDataplaneDriver(configParams *config.Config,
 		if kubeIPVSSupportEnabled && allocated == 0 {
 			log.WithFields(log.Fields{
 				"Name":     "felix-iptables",
-				"MarkMask": configParams.IptablesMarkMask,
+				"MarkMask": allowedMarkBits,
 			}).Panic("Not enough mark bits available for endpoint mark.")
 		}
 		// Take lowest bit position (position 1) from endpoint mark mask reserved for non-calico endpoint.
