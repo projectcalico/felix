@@ -80,23 +80,27 @@ func newNodeData() *nodeData {
 }
 
 func (n *nodeData) allowedCidrsForWireguard() []net.IPNet {
-	cidrs := make([]net.IPNet, 0, n.cidrs.Len())
+	cidrs := make([]net.IPNet, 0, n.cidrs.Len()+1)
 	n.cidrs.Iter(func(item interface{}) error {
 		cidrs = append(cidrs, item.(ip.CIDR).ToIPNet())
 		return nil
 	})
+	if n.ipv4EndpointAddr != nil {
+		cidrs = append(cidrs, n.ipv4EndpointAddr.AsCIDR().ToIPNet())
+	}
 	return cidrs
 }
 
 type nodeUpdateData struct {
-	// Used for nodes *and* the local node.
+	// Used for remote nodes *and* the local node.
 	cidrsAdded   set.Set
 	cidrsDeleted set.Set
 
-	// Only used for nodes.
-	deleted          bool
-	ipv4EndpointAddr *ip.Addr
-	publicKey        *wgtypes.Key
+	// Only used for remote nodes.
+	deleted                 bool
+	ipv4EndpointAddrAdded   ip.Addr
+	ipv4EndpointAddrDeleted ip.Addr
+	publicKey               *wgtypes.Key
 }
 
 func newNodeUpdateData() *nodeUpdateData {
@@ -149,9 +153,10 @@ type Wireguard struct {
 	// CIDR to node mappings - this is updated synchronously.
 	cidrToNodeName map[ip.CIDR]string
 
-	// Wireguard routing table and rule managers
-	routetable *routetable.RouteTable
-	routerule  *routerule.RouteRules
+	// Wireguard routing tables and rule managers
+	nodeRouteTable     *routetable.RouteTable
+	workloadRouteTable *routetable.RouteTable
+	routerule          *routerule.RouteRules
 
 	// Callback function used to notify of public key updates for the local nodeData
 	statusCallback func(publicKey wgtypes.Key) error
@@ -195,8 +200,8 @@ func NewWithShims(
 	statusCallback func(publicKey wgtypes.Key) error,
 	opRecorder logutils.OpRecorder,
 ) *Wireguard {
-	// Create routetable. We provide dummy callbacks for ARP and conntrack processing.
-	rt := routetable.NewWithShims(
+	// Create workload and node routetables. We provide dummy callbacks for ARP and conntrack processing.
+	wrt := routetable.NewWithShims(
 		[]string{"^" + config.InterfaceName + "$", routetable.InterfaceNone},
 		ipVersion,
 		newRoutetableNetlink,
@@ -208,14 +213,29 @@ func NewWithShims(
 		nil, // deviceRouteSourceAddress
 		deviceRouteProtocol,
 		true, // removeExternalRoutes
-		config.RoutingTableIndex,
+		config.WorkloadRoutingTableIndex,
+		opRecorder,
+	)
+	nrt := routetable.NewWithShims(
+		[]string{"^" + config.InterfaceName + "$", routetable.InterfaceNone},
+		ipVersion,
+		newRoutetableNetlink,
+		false, // vxlan
+		netlinkTimeout,
+		func(cidr ip.CIDR, destMAC net.HardwareAddr, ifaceName string) error { return nil }, // addStaticARPEntry
+		&noOpConnTrack{},
+		timeShim,
+		nil, //deviceRouteSourceAddress
+		deviceRouteProtocol,
+		true, //removeExternalRoutes
+		config.NodeRoutingTableIndex,
 		opRecorder,
 	)
 	// Create routerule.
 	rr, err := routerule.New(
 		ipVersion,
 		config.RoutingRulePriority,
-		set.From(config.RoutingTableIndex),
+		set.From(config.WorkloadRoutingTableIndex, config.NodeRoutingTableIndex),
 		routerule.RulesMatchSrcFWMarkTable,
 		routerule.RulesMatchSrcFWMarkTable,
 		netlinkTimeout,
@@ -239,7 +259,8 @@ func NewWithShims(
 		cidrToNodeName:       map[ip.CIDR]string{},
 		publicKeyToNodeNames: map[wgtypes.Key]set.Set{},
 		nodeUpdates:          map[string]*nodeUpdateData{},
-		routetable:           rt,
+		workloadRouteTable:   wrt,
+		nodeRouteTable:       nrt,
 		routerule:            rr,
 		statusCallback:       statusCallback,
 		localIPs:             set.New(),
@@ -266,8 +287,9 @@ func (w *Wireguard) OnIfaceStateChanged(ifaceName string, state ifacemonitor.Sta
 		w.ifaceUp = false
 	}
 
-	// Notify the wireguard routetable module.
-	w.routetable.OnIfaceStateChanged(ifaceName, state)
+	// Notify the wireguard route tables.
+	w.workloadRouteTable.OnIfaceStateChanged(ifaceName, state)
+	w.nodeRouteTable.OnIfaceStateChanged(ifaceName, state)
 }
 
 func (w *Wireguard) EndpointUpdate(name string, ipv4Addr ip.Addr) {
@@ -284,10 +306,15 @@ func (w *Wireguard) EndpointUpdate(name string, ipv4Addr ip.Addr) {
 	update := w.getOrInitNodeUpdateData(name)
 	if existing, ok := w.nodes[name]; ok && existing.ipv4EndpointAddr == ipv4Addr {
 		logCxt.Debug("Update contains unchanged IPv4 address")
-		update.ipv4EndpointAddr = nil
+		update.ipv4EndpointAddrAdded = nil
+		update.ipv4EndpointAddrDeleted = nil
 	} else {
 		logCxt.Debug("Update contains new IPv4 address")
-		update.ipv4EndpointAddr = &ipv4Addr
+		update.ipv4EndpointAddrAdded = ipv4Addr
+		if ok {
+			// If endpoint already exists, then we must have deleted the previously programmed endpoint IP.
+			update.ipv4EndpointAddrDeleted = existing.ipv4EndpointAddr
+		}
 	}
 	w.setNodeUpdate(name, update)
 }
@@ -553,8 +580,9 @@ func (w *Wireguard) QueueResync() {
 	// the Apply processing until the next resync.
 	w.wireguardNotSupported = false
 
-	// Flag the routetable for resync.
-	w.routetable.QueueResync()
+	// Flag the routetables for resync.
+	w.workloadRouteTable.QueueResync()
+	w.nodeRouteTable.QueueResync()
 
 	// Flag the routerule for resync.
 	if w.routerule != nil {
@@ -625,10 +653,11 @@ func (w *Wireguard) Apply() (err error) {
 	wireguardPeerDelete := w.handlePeerAndRouteDeletionFromNodeUpdates(conflictingKeys)
 	w.updateCacheFromNodeUpdates(conflictingKeys)
 	w.updateRouteTableFromNodeUpdates()
+	w.updateRouteRulesFromNodeUpdates()
 
 	defer func() {
 		// Flag the programmed state to be the same as the expected state for each peer. We do this even if we failed to
-		// apply the update because the routetable processing also uses this to maintain details about whether or not it
+		// apply the update because the route table processing also uses this to maintain details about whether or not it
 		// has routed to wireguard. In the event of a failed update or wireguard config, a full resync will be performed
 		// next iteration which ignores the programmedInWireguard flag.
 		if len(w.nodeUpdates) > 0 {
@@ -685,7 +714,7 @@ func (w *Wireguard) Apply() (err error) {
 
 	// The following can be done in parallel:
 	// - Update the link address
-	// - Update the routetable
+	// - Update the route tables
 	// - Update the wireguard device.
 	var wg sync.WaitGroup
 	var errLink, errWireguard, errRoutes error
@@ -702,12 +731,14 @@ func (w *Wireguard) Apply() (err error) {
 		}()
 	}
 
-	// Apply routetable updates.
+	// Apply workloadRouteTable and nodeRouteTable updates.
 	log.Debug("Apply routing table updates for wireguard")
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		errRoutes = w.routetable.Apply()
+		if errRoutes = w.workloadRouteTable.Apply(); errRoutes == nil {
+			errRoutes = w.nodeRouteTable.Apply()
+		}
 	}()
 
 	// Apply wireguard configuration.
@@ -775,7 +806,7 @@ func (w *Wireguard) Apply() (err error) {
 	// Once the wireguard and routing configuration is in place we can add the routing rules to start using the new
 	// routing table.
 	log.Debug("Ensure routing rules are configured")
-	w.addRouteRule()
+	w.addStaticRouteRules()
 	if err = w.routerule.Apply(); err != nil {
 		// Error updating the ip rule.
 		return ErrUpdateFailed
@@ -894,15 +925,21 @@ func (w *Wireguard) handlePeerAndRouteDeletionFromNodeUpdates(conflictingKeys se
 			delete(w.nodes, name)
 
 			// Delete all of the node routes for the nodeData and remove CIDR->node association. Note that we always
-			// update the routing table routes using delta updates even during a full resync. The routetable component
+			// update the routing table routes using delta updates even during a full resync. The route table component
 			// takes care of its own kernel-cache synchronization.
 			node.cidrs.Iter(func(item interface{}) error {
 				cidr := item.(ip.CIDR)
-				w.routetable.RouteRemove(w.config.InterfaceName, cidr)
+				w.workloadRouteTable.RouteRemove(w.config.InterfaceName, cidr)
 				delete(w.cidrToNodeName, cidr)
-				logCxt.WithField("cidr", cidr).Debug("Deleting route")
+				logCxt.WithField("cidr", cidr).Debug("Deleting workload route")
 				return nil
 			})
+
+			if node.ipv4EndpointAddr != nil {
+				cidr := node.ipv4EndpointAddr.AsCIDR()
+				logCxt.WithField("cidr", cidr).Debug("Deleting node route")
+				w.nodeRouteTable.RouteRemove(w.config.InterfaceName, cidr)
+			}
 		} else if update.publicKey == nil || *update.publicKey == node.publicKey {
 			// It's not a delete, and the public key hasn't changed so no key deletion processing required.
 			logCxt.Debug("Node updated, but public key is the same - no wireguard peer deletion required")
@@ -959,9 +996,13 @@ func (w *Wireguard) updateCacheFromNodeUpdates(conflictingKeys set.Set) {
 		logCxt := log.WithField("node", name)
 		logCxt.Debug("Updating cache from update for peer")
 		updated := false
-		if update.ipv4EndpointAddr != nil {
-			logCxt.WithField("ipv4EndpointAddr", *update.ipv4EndpointAddr).Debug("Store IPv4 address")
-			node.ipv4EndpointAddr = *update.ipv4EndpointAddr
+		if update.ipv4EndpointAddrAdded != nil {
+			logCxt.WithField("ipv4EndpointAddr", update.ipv4EndpointAddrAdded).Debug("Store IPv4 address")
+			node.ipv4EndpointAddr = update.ipv4EndpointAddrAdded
+			updated = true
+		} else if update.ipv4EndpointAddrDeleted != nil {
+			logCxt.WithField("ipv4EndpointAddr", update.ipv4EndpointAddrDeleted).Debug("Delete IPv4 address")
+			node.ipv4EndpointAddr = nil
 			updated = true
 		}
 		if update.publicKey != nil {
@@ -1008,7 +1049,7 @@ func (w *Wireguard) updateCacheFromNodeUpdates(conflictingKeys set.Set) {
 
 // updateRouteTable updates the route table from the node updates.
 func (w *Wireguard) updateRouteTableFromNodeUpdates() {
-	// Do all deletes first. Then adds or updates separarately. This ensures a CIDR that has been deleted from one node
+	// Do all deletes first. Then adds or updates separately. This ensures a CIDR that has been deleted from one node
 	// and added to another will not add first then delete (which will remove the route, since the route table does not
 	// care about destination node).
 	for name, update := range w.nodeUpdates {
@@ -1021,13 +1062,20 @@ func (w *Wireguard) updateRouteTableFromNodeUpdates() {
 		logCxt := log.WithFields(log.Fields{"node": name, "ifaceName": ifaceName})
 		update.cidrsDeleted.Iter(func(item interface{}) error {
 			cidr := item.(ip.CIDR)
-			logCxt.WithField("cidr", cidr).Debug("Removing CIDR from routetable interface")
-			w.routetable.RouteRemove(ifaceName, cidr)
+			logCxt.WithField("cidr", cidr).Debug("Removing CIDR from workloadRouteTable interface")
+			w.workloadRouteTable.RouteRemove(ifaceName, cidr)
 			return nil
 		})
+
+		if update.ipv4EndpointAddrDeleted != nil {
+			// Endpoint address has been deleted, so remove route from the node route table.
+			cidr := update.ipv4EndpointAddrDeleted.AsCIDR()
+			logCxt.WithField("cidr", cidr).Debug("Removing CIDR from nodeRouteTable interface")
+			w.nodeRouteTable.RouteRemove(ifaceName, cidr)
+		}
 	}
 
-	// Now do the adds or updates. The routetable component will take care of routes that don't actually change and
+	// Now do the adds or updates. The route table component will take care of routes that don't actually change and
 	// effectively no-op the delta.
 	for name, update := range w.nodeUpdates {
 		logCxt := log.WithField("node", name)
@@ -1038,7 +1086,8 @@ func (w *Wireguard) updateRouteTableFromNodeUpdates() {
 		// route update, otherwise do an incremental update.
 		var updateSet set.Set
 		shouldRouteToWireguard := w.shouldProgramWireguardPeer(name, node)
-		if node.routingToWireguard != shouldRouteToWireguard {
+		wireguardSettingChanged := node.routingToWireguard != shouldRouteToWireguard
+		if wireguardSettingChanged {
 			logCxt.WithField("shouldNowRouteToWireguard", shouldRouteToWireguard).Debug("Wireguard routing decision has changed - need to update full set of CIDRs")
 			updateSet = node.cidrs
 		} else {
@@ -1067,22 +1116,93 @@ func (w *Wireguard) updateRouteTableFromNodeUpdates() {
 			cidr := item.(ip.CIDR)
 			updateLogCxt := logCxt.WithField("cidr", cidr)
 			updateLogCxt.Debug("Updating route for CIDR")
-			if node.routingToWireguard != shouldRouteToWireguard {
+			if wireguardSettingChanged {
 				// The wireguard setting has changed. It is possible that some of the entries we are "removing" were
-				// never added - the routetable component handles that gracefully. We need to do these deletes because
-				// routetable component groups by interface and we are essentially moving routes between the wireguard
+				// never added - the workloadRouteTable component handles that gracefully. We need to do these deletes because
+				// workloadRouteTable component groups by interface and we are essentially moving routes between the wireguard
 				// interface and the "none" interface.
 				updateLogCxt.WithField("ifacename", deleteIfaceName).Debug("Wireguard routing has changed - delete previous route for interface")
-				w.routetable.RouteRemove(deleteIfaceName, cidr)
+				w.workloadRouteTable.RouteRemove(deleteIfaceName, cidr)
 			}
-			w.routetable.RouteUpdate(ifaceName, routetable.Target{
+			w.workloadRouteTable.RouteUpdate(ifaceName, routetable.Target{
 				Type: targetType,
 				CIDR: cidr,
 			})
 			return nil
 		})
+
+		if update.ipv4EndpointAddrAdded != nil {
+			// The endpoint IP address has been added, so add the route to the node route table.
+			cidr := update.ipv4EndpointAddrAdded.AsCIDR()
+			logCxt.WithField("cidr", cidr).Debug("New endpoint address")
+			w.nodeRouteTable.RouteUpdate(ifaceName, routetable.Target{
+				Type: targetType,
+				CIDR: cidr,
+			})
+		} else if wireguardSettingChanged && node.ipv4EndpointAddr != nil {
+			// The wireguard setting for this node has changed, and there is an endpoint address. The route for this
+			// node needs to change, so remove the existing route on the old interface and add the route to the new
+			// interface.
+			cidr := node.ipv4EndpointAddr.AsCIDR()
+			logCxt.WithField("cidr", cidr).Debug("Change endpoint route")
+			w.nodeRouteTable.RouteRemove(deleteIfaceName, cidr)
+			w.nodeRouteTable.RouteUpdate(ifaceName, routetable.Target{
+				Type: targetType,
+				CIDR: cidr,
+			})
+		}
+
 		node.routingToWireguard = shouldRouteToWireguard
 	}
+}
+
+// addStaticRouteRules adds the static route rules used for routing to wg-enabled workloads, or for routing to nodes
+// when request originated over wireguard.
+func (w *Wireguard) addStaticRouteRules() {
+	// All routes that may use wireguard will attempt to route using the destination-workload table.
+	w.routerule.SetRule(routerule.NewRule(ipVersion, w.config.RoutingRulePriority).
+		GoToTable(w.config.WorkloadRoutingTableIndex).
+		MatchFWMarkWithMask(0, uint32(w.config.MarkDoNotRouteViaWireguard)))
+
+	// For externally originated packets that need to be forced over wireguard, route using the destination-node table.
+	// Arguably these could be routed via a separate "force" over wireguard table, but since the wireguard table needs
+	// to explicitly handle node and worload CIDRs there is no point in having a separate table to maintain.
+	w.routerule.SetRule(routerule.NewRule(ipVersion, w.config.RoutingRulePriority).
+		GoToTable(w.config.NodeRoutingTableIndex).
+		MatchFWMarkWithMask(uint32(w.config.MarkNonCaliWorkloadIface),
+			uint32(w.config.MarkDoNotRouteViaWireguard+w.config.MarkNonCaliWorkloadIface)))
+}
+
+// updateRouteRulesFromNodeUpdates updates the routerules from the node updates.
+func (w *Wireguard) updateRouteRulesFromNodeUpdates() {
+	// We need to add route rules for each local CIDR. Grab the updates for this local node.
+	nodeUpdate, ok := w.nodeUpdates[w.hostname]
+	if !ok {
+		return
+	}
+
+	// Add source based routes for local workloads that route to the node routing table. This table contains entries
+	// for wireguard enabled nodes to ensure we use wireguard for pod to node traffic.
+	nodeUpdate.cidrsDeleted.Iter(func(item interface{}) error {
+		cidr := item.(ip.CIDR)
+		w.routerule.RemoveRule(w.createLocalWorkloadRouteRule(cidr))
+		return nil
+	})
+	nodeUpdate.cidrsAdded.Iter(func(item interface{}) error {
+		cidr := item.(ip.CIDR)
+		w.routerule.SetRule(w.createLocalWorkloadRouteRule(cidr))
+		return nil
+	})
+}
+
+// createLocalWorkloadRouteRule creates a routing rule to route a local source CIDR to the wireguard table matching
+// on remote wireguard accessible nodes.
+func (w *Wireguard) createLocalWorkloadRouteRule(cidr ip.CIDR) *routerule.Rule {
+	rule := routerule.NewRule(ipVersion, w.config.RoutingRulePriority).
+		GoToTable(w.config.NodeRoutingTableIndex).
+		MatchFWMarkWithMask(0, uint32(w.config.MarkDoNotRouteViaWireguard)).
+		MatchSrcAddress(cidr.ToIPNet())
+	return rule
 }
 
 // constructWireguardDeltaFromNodeUpdates constructs a wireguard delta update from the set of peer updates.
@@ -1110,23 +1230,28 @@ func (w *Wireguard) constructWireguardDeltaFromNodeUpdates(conflictingKeys set.S
 					PublicKey:  peer.publicKey,
 				}
 				updatePeer := false
-				if !peer.programmedInWireguard || update.cidrsDeleted.Len() > 0 {
+				if !peer.programmedInWireguard || update.cidrsDeleted.Len() > 0 || update.ipv4EndpointAddrDeleted != nil {
 					logCxt.Debug("Peer not programmed or CIDRs were deleted - need to replace full set of CIDRs")
 					wgpeer.ReplaceAllowedIPs = true
 					wgpeer.AllowedIPs = peer.allowedCidrsForWireguard()
 					updatePeer = true
-				} else if update.cidrsAdded.Len() > 0 {
+				} else if update.cidrsAdded.Len() > 0 || update.ipv4EndpointAddrAdded != nil {
 					logCxt.Debug("Peer programmmed, no CIDRs deleted and CIDRs added")
-					wgpeer.AllowedIPs = make([]net.IPNet, 0, update.cidrsAdded.Len())
+					wgpeer.AllowedIPs = make([]net.IPNet, 0, update.cidrsAdded.Len()+1)
 					update.cidrsAdded.Iter(func(item interface{}) error {
 						wgpeer.AllowedIPs = append(wgpeer.AllowedIPs, item.(ip.CIDR).ToIPNet())
 						return nil
 					})
+					if update.ipv4EndpointAddrAdded != nil {
+						wgpeer.AllowedIPs = append(wgpeer.AllowedIPs, update.ipv4EndpointAddrAdded.AsCIDR().ToIPNet())
+					}
 					updatePeer = true
 				}
 
-				if update.ipv4EndpointAddr != nil || !peer.programmedInWireguard {
-					logCxt.WithField("ipv4EndpointAddr", update.ipv4EndpointAddr).Info("Peer endpoint address is updated")
+				if update.ipv4EndpointAddrDeleted != nil || !peer.programmedInWireguard {
+					// The old endpoint address has been deleted (i.e. replaced by a new one), or the endpoint was not
+					// programmed and now should be.
+					logCxt.WithField("ipv4EndpointAddr", update.ipv4EndpointAddrAdded).Info("Peer endpoint address is updated")
 					wgpeer.Endpoint = w.endpointUDPAddr(peer.ipv4EndpointAddr.AsNetIP())
 					updatePeer = true
 				}
@@ -1207,9 +1332,9 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 	// Determine if any configuration on the device needs updating
 	wireguardUpdate := wgtypes.Config{}
 	wireguardUpdateRequired := false
-	if device.FirewallMark != w.config.FirewallMark {
-		logCxt.WithFields(log.Fields{"existing": device.FirewallMark, "required": w.config.FirewallMark}).Info("Update firewall mark")
-		wireguardUpdate.FirewallMark = &w.config.FirewallMark
+	if device.FirewallMark != w.config.MarkDoNotRouteViaWireguard {
+		logCxt.WithFields(log.Fields{"existing": device.FirewallMark, "required": w.config.MarkDoNotRouteViaWireguard}).Info("Update firewall mark")
+		wireguardUpdate.FirewallMark = &w.config.MarkDoNotRouteViaWireguard
 		wireguardUpdateRequired = true
 	}
 	if device.ListenPort != w.config.ListeningPort {
@@ -1486,16 +1611,9 @@ func (w *Wireguard) ensureLinkAddressV4(netlinkClient netlinkshim.Interface) err
 	return nil
 }
 
-// addRouteRule adds a routing rule to use the wireguard table.
-func (w *Wireguard) addRouteRule() {
-	w.routerule.SetRule(routerule.NewRule(ipVersion, w.config.RoutingRulePriority).
-		GoToTable(w.config.RoutingTableIndex).
-		MatchFWMarkWithMask(0, uint32(w.config.FirewallMark)))
-}
-
 // ensureDisabled ensures all calico-installed wireguard configuration is removed.
 func (w *Wireguard) ensureDisabled(netlinkClient netlinkshim.Interface) error {
-	var errRule, errLink, errRoutes error
+	var errRule, errLink, errWorkloadRoutes, errNodeRoutes error
 	wg := sync.WaitGroup{}
 
 	if w.routerule != nil {
@@ -1510,23 +1628,33 @@ func (w *Wireguard) ensureDisabled(netlinkClient netlinkshim.Interface) error {
 		defer wg.Done()
 		errLink = w.ensureNoLink(netlinkClient)
 	}()
-	if w.config.RoutingTableIndex > 0 {
+	if w.config.WorkloadRoutingTableIndex > 0 {
 		// Only attempt automatic cleanup of the routing table if it is not the default table.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// The routetable configuration will be empty since we will not send updates, so applying this will remove the
+			// The workloadRouteTable configuration will be empty since we will not send updates, so applying this will remove the
 			// old routes if so configured.
-			errRoutes = w.routetable.Apply()
+			errWorkloadRoutes = w.workloadRouteTable.Apply()
 		}()
-		wg.Wait()
 	}
+	if w.config.NodeRoutingTableIndex > 0 {
+		// Only attempt automatic cleanup of the routing table if it is not the default table.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// The workloadRouteTable configuration will be empty since we will not send updates, so applying this will remove the
+			// old routes if so configured.
+			errNodeRoutes = w.nodeRouteTable.Apply()
+		}()
+	}
+	wg.Wait()
 
 	if errRule != nil || errLink != nil {
 		// Failed to delete the rule or link.  Close the netlink client as a precaution.
 		w.closeNetlinkClient()
 		return ErrUpdateFailed
-	} else if errRoutes != nil {
+	} else if errWorkloadRoutes != nil || errNodeRoutes != nil {
 		// Routes are handled by a separate module which takes care of its own netlink client lifecycle.
 		return ErrUpdateFailed
 	}
