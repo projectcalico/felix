@@ -139,7 +139,7 @@ struct bpf_map_def_extended {
 #define CALI_F_WG_INGRESS    (CALI_F_INGRESS && CALI_F_WIREGUARD)
 
 #define CALI_F_CGROUP	(((CALI_COMPILE_FLAGS) & CALI_CGROUP) != 0)
-#define CALI_F_DSR	(CALI_COMPILE_FLAGS & CALI_TC_DSR)
+#define CALI_F_DSR	((CALI_COMPILE_FLAGS & CALI_TC_DSR) != 0)
 
 #define CALI_RES_REDIR_IFINDEX	(TC_ACT_VALUE_MAX + 100) /* packet should be sent back the same iface */
 
