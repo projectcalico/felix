@@ -134,8 +134,7 @@ func TestLoadZeroProgram(t *testing.T) {
 	Expect(err).To(Equal(unix.E2BIG))
 }
 
-// runBpfTest runs a specific section of the entire bpf program in isolation
-func runBpfTest(t *testing.T, section string, rules [][][]*proto.Rule, testFn func(bpfProgRunFn)) {
+func setupAndRun(t *testing.T, loglevel string, section string, rules [][][]*proto.Rule, runFn func(progName string)) {
 	RegisterTestingT(t)
 
 	tempDir, err := ioutil.TempDir("", "calico-bpf-")
@@ -167,7 +166,7 @@ func runBpfTest(t *testing.T, section string, rules [][][]*proto.Rule, testFn fu
 	}
 
 	log.WithField("hostIP", hostIP).Info("Host IP")
-	obj += fmt.Sprintf("fib_debug_skb0x%x", skbMark)
+	obj += fmt.Sprintf("fib_%s_skb0x%x", loglevel, skbMark)
 
 	if strings.Contains(section, "_dsr") {
 		obj += "_dsr"
@@ -207,14 +206,21 @@ func runBpfTest(t *testing.T, section string, rules [][][]*proto.Rule, testFn fu
 	err = jumpMap.Update([]byte{0, 0, 0, 0}, progFDBytes)
 	Expect(err).NotTo(HaveOccurred())
 
-	t.Run(section, func(_ *testing.T) {
-		testFn(func(dataIn []byte) (bpfRunResult, error) {
-			res, err := bpftoolProgRun(bpfFsDir+"/"+section, dataIn)
-			log.Debugf("dataIn  = %+v", dataIn)
-			if err == nil {
-				log.Debugf("dataOut = %+v", res.dataOut)
-			}
-			return res, err
+	runFn(bpfFsDir + "/" + section)
+}
+
+// runBpfTest runs a specific section of the entire bpf program in isolation
+func runBpfTest(t *testing.T, section string, rules [][][]*proto.Rule, testFn func(bpfProgRunFn)) {
+	setupAndRun(t, "debug", section, rules, func(progName string) {
+		t.Run(section, func(_ *testing.T) {
+			testFn(func(dataIn []byte) (bpfRunResult, error) {
+				res, err := bpftoolProgRun(progName, dataIn)
+				log.Debugf("dataIn  = %+v", dataIn)
+				if err == nil {
+					log.Debugf("dataOut = %+v", res.dataOut)
+				}
+				return res, err
+			})
 		})
 	})
 }
@@ -342,6 +348,10 @@ func (r bpfRunResult) RetvalStr() string {
 }
 
 func bpftoolProgRun(progName string, dataIn []byte) (bpfRunResult, error) {
+	return bpftoolProgRunN(progName, dataIn, 1)
+}
+
+func bpftoolProgRunN(progName string, dataIn []byte, N int) (bpfRunResult, error) {
 	var res bpfRunResult
 
 	tempDir, err := ioutil.TempDir("", "bpftool-data-")
@@ -356,7 +366,12 @@ func bpftoolProgRun(progName string, dataIn []byte) (bpfRunResult, error) {
 		return res, errors.Errorf("failed to write input data in file: %s", err)
 	}
 
-	out, err := bpftool("prog", "run", "pinned", progName, "data_in", dataInFname, "data_out", dataOutFname)
+	args := []string{"prog", "run", "pinned", progName, "data_in", dataInFname, "data_out", dataOutFname}
+	if N > 1 {
+		args = append(args, "repeat", fmt.Sprintf("%d", N))
+	}
+
+	out, err := bpftool(args...)
 	if err != nil {
 		return res, err
 	}
