@@ -484,6 +484,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 
 			cc.ResetExpectations()
 
+			policy = api.NewGlobalNetworkPolicy()
 			policy.Name = "f01-egress-allow"
 			order = float64(10)
 			policy.Spec.Order = &order // prioritized over deny policy above.
@@ -492,6 +493,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 			_, err = client.GlobalNetworkPolicies().Create(utils.Ctx, policy, utils.NoOptions)
 			Expect(err).NotTo(HaveOccurred())
 
+			time.Sleep(5 * time.Second)
 			Eventually(func() error {
 				return readPolicy(policy.Name, api.Allow)
 			}, "5s", "100ms").ShouldNot(HaveOccurred())
