@@ -484,6 +484,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 
 			cc.ResetExpectations()
 
+			policy = api.NewGlobalNetworkPolicy()
 			policy.Name = "f01-egress-allow"
 			order = float64(10)
 			policy.Spec.Order = &order // prioritized over deny policy above.
@@ -495,6 +496,17 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 			Eventually(func() error {
 				return readPolicy(policy.Name, api.Allow)
 			}, "5s", "100ms").ShouldNot(HaveOccurred())
+
+			err, errstr := wls[0].SendPacketsTo(wls[1].IP, 5, 100)
+			if err != nil {
+				fmt.Printf("Connection from wls0 to wls1 failed: %s\n", errstr)
+			}
+			Expect(err).NotTo(HaveOccurred())
+			err, errstr = wls[1].SendPacketsTo(wls[0].IP, 5, 100)
+			if err != nil {
+				fmt.Printf("Connection from wls1 to wls0 failed: %s\n", errstr)
+			}
+			Expect(err).NotTo(HaveOccurred())
 
 			cc.ExpectSome(wls[0], wls[1])
 			cc.ExpectSome(wls[1], wls[0])
