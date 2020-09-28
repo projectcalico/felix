@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
 
 	. "github.com/onsi/ginkgo"
@@ -452,24 +454,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 			return fmt.Errorf("policy not applied")
 		}
 
-		AfterEach(func() {
-			fmt.Printf("Check if the workload connectivity is indeed bad")
-
-			fmt.Printf("Test wls0 to wls1 connectivity")
-			err, errstr := wls[0].SendPacketsTo(wls[1].IP, 5, 100)
-			if err != nil {
-				fmt.Printf("Connection from wls0 to wls1 failed: %s\n", errstr)
-			}
-			Expect(err).NotTo(HaveOccurred())
-
-			fmt.Printf("Test wls1 to wls0 connectivity")
-			err, errstr = wls[1].SendPacketsTo(wls[0].IP, 5, 100)
-			if err != nil {
-				fmt.Printf("Connection from wls1 to wls0 failed: %s\n", errstr)
-			}
-			Expect(err).NotTo(HaveOccurred())
-		})
-
 		It("between pod to pod should be encrypted using wg tunnel with egress policies applied", func() {
 			policy := api.NewGlobalNetworkPolicy()
 
@@ -515,22 +499,18 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 				return readPolicy(policy.Name, api.Allow)
 			}, "5s", "100ms").ShouldNot(HaveOccurred())
 
-			/*
-				err, errstr := wls[0].SendPacketsTo(wls[1].IP, 5, 100)
-				if err != nil {
-					fmt.Printf("Connection from wls0 to wls1 failed: %s\n", errstr)
-				}
-				Expect(err).NotTo(HaveOccurred())
-				err, errstr = wls[1].SendPacketsTo(wls[0].IP, 5, 100)
-				if err != nil {
-					fmt.Printf("Connection from wls1 to wls0 failed: %s\n", errstr)
-				}
-				Expect(err).NotTo(HaveOccurred())
-			*/
+			cc.OnFail = func(msg string) {
+				log.WithField("msg", msg).Info("Connectivity Failed after 30seconds")
+				log.Info("Checking connectivity using ping between wls0 and wls1")
 
+				err, errstr := wls[0].SendPacketsTo(wls[1].IP, 5, 100)
+				log.Infof("wls0 to wls1: err=%v, errstr=%s", err, errstr)
+				err, errstr = wls[1].SendPacketsTo(wls[0].IP, 5, 100)
+				log.Infof("wls1 to wls0: err=%v, errstr=%s", err, errstr)
+			}
 			cc.ExpectSome(wls[0], wls[1])
 			cc.ExpectSome(wls[1], wls[0])
-			cc.CheckConnectivity()
+			cc.CheckConnectivityWithTimeout(30 * time.Second)
 
 			By("verifying tunnelled packet count is non-zero")
 			for i := range felixes {
