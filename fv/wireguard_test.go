@@ -452,6 +452,24 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 			return fmt.Errorf("policy not applied")
 		}
 
+		AfterEach(func() {
+			fmt.Printf("Check if the workload connectivity is indeed bad")
+
+			fmt.Printf("Test wls0 to wls1 connectivity")
+			err, errstr := wls[0].SendPacketsTo(wls[1].IP, 5, 100)
+			if err != nil {
+				fmt.Printf("Connection from wls0 to wls1 failed: %s\n", errstr)
+			}
+			Expect(err).NotTo(HaveOccurred())
+
+			fmt.Printf("Test wls1 to wls0 connectivity")
+			err, errstr = wls[1].SendPacketsTo(wls[0].IP, 5, 100)
+			if err != nil {
+				fmt.Printf("Connection from wls1 to wls0 failed: %s\n", errstr)
+			}
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		It("between pod to pod should be encrypted using wg tunnel with egress policies applied", func() {
 			policy := api.NewGlobalNetworkPolicy()
 
@@ -497,16 +515,18 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 				return readPolicy(policy.Name, api.Allow)
 			}, "5s", "100ms").ShouldNot(HaveOccurred())
 
-			err, errstr := wls[0].SendPacketsTo(wls[1].IP, 5, 100)
-			if err != nil {
-				fmt.Printf("Connection from wls0 to wls1 failed: %s\n", errstr)
-			}
-			Expect(err).NotTo(HaveOccurred())
-			err, errstr = wls[1].SendPacketsTo(wls[0].IP, 5, 100)
-			if err != nil {
-				fmt.Printf("Connection from wls1 to wls0 failed: %s\n", errstr)
-			}
-			Expect(err).NotTo(HaveOccurred())
+			/*
+				err, errstr := wls[0].SendPacketsTo(wls[1].IP, 5, 100)
+				if err != nil {
+					fmt.Printf("Connection from wls0 to wls1 failed: %s\n", errstr)
+				}
+				Expect(err).NotTo(HaveOccurred())
+				err, errstr = wls[1].SendPacketsTo(wls[0].IP, 5, 100)
+				if err != nil {
+					fmt.Printf("Connection from wls1 to wls0 failed: %s\n", errstr)
+				}
+				Expect(err).NotTo(HaveOccurred())
+			*/
 
 			cc.ExpectSome(wls[0], wls[1])
 			cc.ExpectSome(wls[1], wls[0])
