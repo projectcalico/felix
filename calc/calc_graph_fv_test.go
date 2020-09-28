@@ -382,6 +382,9 @@ var baseTests = []StateList{
 		vxlanWithBlockDupNodeIP,
 		vxlanWithDupNodeIPRemoved,
 	},
+	{
+		nodesWithMoreIPsAndDuplicates,
+	},
 }
 
 var logOnce sync.Once
