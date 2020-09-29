@@ -382,6 +382,9 @@ var baseTests = []StateList{
 		vxlanWithBlockDupNodeIP,
 		vxlanWithDupNodeIPRemoved,
 	},
+	{
+		nodesWithMoreIPs,
+	},
 }
 
 var logOnce sync.Once
@@ -561,6 +564,8 @@ func expectCorrectDataplaneState(mockDataplane *mock.MockDataplane, state State)
 		"Active VTEPs were incorrect after moving to state: %v",
 		state.Name)
 	// Comparing stringified versions of the routes here so that, on failure, we get much more readable output.
+	log.WithField("routes", mockDataplane.ActiveRoutes())
+	log.WithField("expected routes", stringifyRoutes(state.ExpectedRoutes))
 	Expect(stringifyRoutes(mockDataplane.ActiveRoutes())).To(Equal(stringifyRoutes(state.ExpectedRoutes)),
 		"Active routes were incorrect after moving to state: %v",
 		state.Name)
