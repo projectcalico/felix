@@ -16,6 +16,7 @@ package intdataplane
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
 	"reflect"
 	"regexp"
@@ -101,6 +102,9 @@ var (
 	zeroKey          = wgtypes.Key{}
 )
 
+// interfaceExcludeRegex matches interface names to skip when attempting to determine MTU.
+var interfaceExcludeRegex *regexp.Regexp
+
 func init() {
 	prometheus.MustRegister(countDataplaneSyncErrors)
 	prometheus.MustRegister(summaryApplyTime)
@@ -109,6 +113,17 @@ func init() {
 	prometheus.MustRegister(summaryIfaceBatchSize)
 	prometheus.MustRegister(summaryAddrBatchSize)
 	processStartTime = time.Now()
+
+	// Initialize a regex for matching interfaces we want to ignore for automatic MTU detection.
+	ignores := []string{
+		"docker.*", "cbr.*", "dummy.*",
+		"virbr.*", "lxcbr.*", "veth.*", "lo",
+		"cali.*", "tunl.*", "flannel.*", "kube-ipvs.*", "cni.*",
+	}
+	var err error
+	if interfaceExcludeRegex, err = regexp.Compile("(" + strings.Join(ignores, ")|(") + ")"); err != nil {
+		panic(err)
+	}
 }
 
 type Config struct {
@@ -278,6 +293,11 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	epMarkMapper := rules.NewEndpointMarkMapper(
 		config.RulesConfig.IptablesMarkEndpoint,
 		config.RulesConfig.IptablesMarkNonCaliEndpoint)
+
+	// Determine values to use for MTU and default any unspecified fields.
+	if err := configureMTU(&config); err != nil {
+		log.WithError(err).Fatal("Unable to configure MTU, shutting down")
+	}
 
 	dp := &InternalDataplane{
 		toDataplane:      make(chan interface{}, msgPeekLimit),
@@ -864,6 +884,75 @@ func (d *InternalDataplane) SendMessage(msg interface{}) error {
 
 func (d *InternalDataplane) RecvMessage() (interface{}, error) {
 	return <-d.fromDataplane, nil
+}
+
+// configureMTU auto-detects the MTU to use for IPIP, VXLAN, and Wireguard interfaces
+// if not already set, and writes the smallest MTU to disk for use by other components.
+func configureMTU(config *Config) error {
+	// Find all the interfaces on the host.
+	links, err := netlink.LinkList()
+	if err != nil {
+		log.WithError(err).Error("Failed to list interfaces. Unable to auto-detect MTU")
+		return err
+	}
+
+	// Iterate through them, keeping track of the lowest MTU.
+	smallest := 0
+	for _, l := range links {
+		// Skip links that we know are not external interfaces.
+		fields := log.Fields{"mtu": l.Attrs().MTU, "name": l.Attrs().Name}
+		if interfaceExcludeRegex.MatchString(l.Attrs().Name) {
+			log.WithFields(fields).Debug("Skipping interface for MTU detection")
+			continue
+		}
+		log.WithFields(fields).Info("Examining link for MTU calculation")
+		if l.Attrs().MTU < smallest || smallest == 0 {
+			smallest = l.Attrs().MTU
+		}
+	}
+
+	if smallest == 0 {
+		// We couldn't find a good fit for auto-detection.
+		// Use a reasonable default. We choose 1460 here because it is the smallest MTU used by
+		// default across common cloud providers, and matches our old defaults.
+		smallest = 1460
+	}
+
+	// Fill in any unspecified MTU fields, accounting for encapsulation overhead.
+	// Keep track of the smallest MTU among enabled encap types so we can write it
+	// to disk below.
+	mtu := smallest
+	if config.RulesConfig.IPIPEnabled {
+		if config.IPIPMTU == 0 {
+			config.IPIPMTU = smallest - 20
+			log.WithField("mtu", config.IPIPMTU).Info("Defaulting IPIP MTU")
+		}
+		mtu = config.IPIPMTU
+	}
+	if config.RulesConfig.VXLANEnabled {
+		if config.VXLANMTU == 0 {
+			config.VXLANMTU = smallest - 50
+			log.WithField("mtu", config.VXLANMTU).Info("Defaulting VXLAN MTU")
+		}
+		mtu = config.VXLANMTU
+	}
+	if config.Wireguard.Enabled {
+		if config.Wireguard.MTU == 0 {
+			config.Wireguard.MTU = smallest - 60
+			log.WithField("mtu", config.Wireguard.MTU).Info("Defaulting Wireguard MTU")
+		}
+		mtu = config.Wireguard.MTU
+	}
+	log.WithField("mtu", mtu).Info("Smallest MTU after subtracting encap overhead")
+
+	// Write the smallest MTU to disk so other components can rely on this calculation consistently.
+	filename := "/var/lib/calico/mtu"
+	log.Debugf("Writing %d to "+filename, mtu)
+	if err := ioutil.WriteFile(filename, []byte(fmt.Sprintf("%d", mtu)), 0644); err != nil {
+		log.WithError(err).Error("Unable to write to " + filename)
+		return err
+	}
+	return nil
 }
 
 // doStaticDataplaneConfig sets up the kernel and our static iptables  chains.  Should be called
