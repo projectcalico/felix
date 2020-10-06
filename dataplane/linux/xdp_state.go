@@ -448,7 +448,7 @@ func (s *xdpIPState) newXDPResyncState(bpfLib bpf.BPFDataplane, ipsSource ipsets
 	if err != nil {
 		return nil, err
 	}
-	s.logCxt.WithField("ifaces", ifacesWithPinnedMaps).Debug("Interfaces with BPF blacklist maps.")
+	s.logCxt.WithField("ifaces", ifacesWithPinnedMaps).Debug("Interfaces with BPF block-list maps.")
 	ifacesWithMaps := make(map[string]mapInfo, len(ifacesWithPinnedMaps))
 	for _, iface := range ifacesWithPinnedMaps {
 		mapOk, err := bpfLib.IsValidMap(iface, s.getBpfIPFamily())
@@ -496,7 +496,7 @@ func (s *xdpIPState) newXDPResyncState(bpfLib bpf.BPFDataplane, ipsSource ipsets
 		s.logCxt.WithFields(log.Fields{
 			"iface": iface,
 			"info":  ifacesWithMaps[iface],
-		}).Debug("Information about BPF blacklist map.")
+		}).Debug("Information about BPF block-list map.")
 	}
 	visited := set.New()
 	ipsetMembers := make(map[string]set.Set)
@@ -566,7 +566,7 @@ func (s *xdpIPState) tryResync(common *xdpStateCommon, ipsSource ipsetsSource) e
 		return err
 	}
 	s.fixupXDPProgramAndMapConsistency(resyncState)
-	s.fixupBlacklistContents(resyncState)
+	s.fixupBlocklistContents(resyncState)
 	return nil
 }
 
@@ -745,7 +745,7 @@ func (s *xdpIPState) fixupXDPProgramAndMapConsistency(resyncState *xdpResyncStat
 	})
 }
 
-// fixupBlacklistContents ensures that contents of the BPF maps are in
+// fixupBlocklistContents ensures that contents of the BPF maps are in
 // sync with ipsets those maps should contain.
 //
 // There are two cases - the BPF map is going to be created/replaced,
@@ -756,7 +756,7 @@ func (s *xdpIPState) fixupXDPProgramAndMapConsistency(resyncState *xdpResyncStat
 // desired contents of the map, figure out the missing or superfluous
 // members and update the BPF actions that are about modifying the BPF
 // maps on a member level.
-func (s *xdpIPState) fixupBlacklistContents(resyncState *xdpResyncState) {
+func (s *xdpIPState) fixupBlocklistContents(resyncState *xdpResyncState) {
 	ifaces := s.getIfaces(resyncState, giNS)
 	ifaces.Iter(func(item interface{}) error {
 		iface := item.(string)
@@ -766,12 +766,12 @@ func (s *xdpIPState) fixupBlacklistContents(resyncState *xdpResyncState) {
 			"mapCreate": createMap,
 		}).Debug("Resync - fixing map contents.")
 		if createMap {
-			s.fixupBlacklistContentsFreshMap(iface)
+			s.fixupBlocklistContentsFreshMap(iface)
 		} else {
 			if _, ok := resyncState.ifacesWithMaps[iface]; !ok {
 				s.logCxt.WithField("iface", iface).Panic("Resync - iface missing from ifaces with maps in resync state!")
 			}
-			s.fixupBlacklistContentsExistingMap(resyncState, iface)
+			s.fixupBlocklistContentsExistingMap(resyncState, iface)
 		}
 		s.logCxt.WithFields(log.Fields{
 			"iface":         iface,
@@ -791,13 +791,13 @@ func (s *xdpIPState) fixupBlacklistContents(resyncState *xdpResyncState) {
 	}
 }
 
-func (s *xdpIPState) fixupBlacklistContentsFreshMap(iface string) {
+func (s *xdpIPState) fixupBlocklistContentsFreshMap(iface string) {
 	setIDToRefCount := s.getSetIDToRefCountFromNewState(iface)
 	s.bpfActions.AddToMap[iface] = setIDToRefCount
 	delete(s.bpfActions.RemoveFromMap, iface)
 }
 
-func (s *xdpIPState) fixupBlacklistContentsExistingMap(resyncState *xdpResyncState, iface string) {
+func (s *xdpIPState) fixupBlocklistContentsExistingMap(resyncState *xdpResyncState, iface string) {
 	membersInBpfMap := resyncState.ifacesWithMaps[iface].contents
 	setIDsInNS := s.getSetIDToRefCountFromNewState(iface)
 	membersInNS := make(map[string]uint32)
@@ -1792,7 +1792,7 @@ func (a *xdpBPFActions) apply(memberCache *xdpMemberCache, ipsetIDsToMembers *ip
 
 	a.RemoveMap.Iter(func(item interface{}) error {
 		iface := item.(string)
-		logCxt.WithField("iface", iface).Debug("Removing BPF blacklist map.")
+		logCxt.WithField("iface", iface).Debug("Removing BPF block-list map.")
 		if err := memberCache.bpfLib.RemoveCIDRMap(iface, memberCache.GetFamily()); err != nil {
 			opErr = err
 			return set.StopIteration
@@ -1805,7 +1805,7 @@ func (a *xdpBPFActions) apply(memberCache *xdpMemberCache, ipsetIDsToMembers *ip
 
 	a.CreateMap.Iter(func(item interface{}) error {
 		iface := item.(string)
-		logCxt.WithField("iface", iface).Debug("Creating a BPF blacklist map.")
+		logCxt.WithField("iface", iface).Debug("Creating a BPF block-list map.")
 		if _, err := memberCache.bpfLib.NewCIDRMap(iface, memberCache.GetFamily()); err != nil {
 			opErr = err
 			return set.StopIteration
@@ -1831,7 +1831,7 @@ func (a *xdpBPFActions) apply(memberCache *xdpMemberCache, ipsetIDsToMembers *ip
 				"iface":    iface,
 				"setID":    setID,
 				"refCount": refCount,
-			}).Debug("Adding members of ipset to BPF blacklist map.")
+			}).Debug("Adding members of ipset to BPF block-list map.")
 			members, err := getIPSetMembers(ipsetIDsToMembers, setID, ipsSource)
 			if err != nil {
 				return err
@@ -1862,7 +1862,7 @@ func (a *xdpBPFActions) apply(memberCache *xdpMemberCache, ipsetIDsToMembers *ip
 				"iface":    iface,
 				"setID":    setID,
 				"refCount": refCount,
-			}).Debug("Dropping members of ipset from BPF blacklist map.")
+			}).Debug("Dropping members of ipset from BPF block-list map.")
 			members, ok := ipsetIDsToMembers.GetCached(setID)
 			if !ok {
 				return fmt.Errorf("failed to remove members of %s program from %s: ipset not in cache", setID, iface)
@@ -2009,7 +2009,7 @@ func processMemberAdds(memberCache *xdpMemberCache, iface string, mi memberIter)
 				"oldCount": bpfRefCount,
 				"newCount": bpfRefCount + refCount,
 				"member":   member,
-			}).Debug("Updating refcount in BPF blacklist map.")
+			}).Debug("Updating refcount in BPF block-list map.")
 			bpfMembers[mapKey] = bpfRefCount + refCount
 			if err := memberCache.bpfLib.UpdateCIDRMap(iface, memberCache.GetFamily(), *ip, mask, bpfRefCount+refCount); err != nil {
 				return err
@@ -2019,7 +2019,7 @@ func processMemberAdds(memberCache *xdpMemberCache, iface string, mi memberIter)
 				"iface":    iface,
 				"refCount": refCount,
 				"member":   member,
-			}).Debug("Adding a member in BPF blacklist map.")
+			}).Debug("Adding a member in BPF block-list map.")
 			bpfMembers[mapKey] = refCount
 			if err := memberCache.bpfLib.UpdateCIDRMap(iface, memberCache.GetFamily(), *ip, mask, refCount); err != nil {
 				return err
@@ -2054,13 +2054,13 @@ func processMemberDeletions(memberCache *xdpMemberCache, iface string, mi member
 					"oldCount": bpfRefCount,
 					"newCount": bpfRefCount - refCount,
 					"member":   member,
-				}).Debug("Can't update refcount in BPF blacklist map.")
+				}).Debug("Can't update refcount in BPF block-list map.")
 				return fmt.Errorf("wanted to drop refcount of %s (%d) by %d, which would lead to negative refcount", member, bpfRefCount, refCount)
 			} else if bpfRefCount == refCount {
 				logCxt.WithFields(log.Fields{
 					"iface":  iface,
 					"member": member,
-				}).Debug("Dropping a member from BPF blacklist map.")
+				}).Debug("Dropping a member from BPF block-list map.")
 				delete(bpfMembers, mapKey)
 				if err := memberCache.bpfLib.RemoveItemCIDRMap(iface, memberCache.GetFamily(), *ip, mask); err != nil {
 					return err
@@ -2071,7 +2071,7 @@ func processMemberDeletions(memberCache *xdpMemberCache, iface string, mi member
 					"oldCount": bpfRefCount,
 					"newCount": bpfRefCount - refCount,
 					"member":   member,
-				}).Debug("Updating refcount of a member in BPF blacklist map.")
+				}).Debug("Updating refcount of a member in BPF block-list map.")
 				bpfMembers[mapKey] = bpfRefCount - refCount
 				if err := memberCache.bpfLib.UpdateCIDRMap(iface, memberCache.GetFamily(), *ip, mask, bpfRefCount-refCount); err != nil {
 					return err

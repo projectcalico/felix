@@ -121,7 +121,7 @@ func TestCompileTemplateRun(t *testing.T) {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Implicitly denied by normal policy: DROP
-		Expect(res.Retval).To(Equal(resTC_ACT_SHOT))
+		Expect(res.Retval).To(Equal(resTC_ACT_SHOT), "Expected TC_ACT_SHOT")
 	})
 }
 

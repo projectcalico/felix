@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2020 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -89,13 +89,13 @@ enum xdp_action prefilter(struct xdp_md* xdp)
 
 	ip4val_to_lpm(&sip, 32, ihdr->saddr);
 
-	// Drop the packet if source IP matches a blacklist entry.
+	// Drop the packet if source IP matches a block-list entry.
 	if (NULL != bpf_map_lookup_elem(&calico_prefilter_v4, &sip)) {
-		// In blacklist - "thou shall not XDP_PASS!"
+		// In block-list - "you cannot XDP_PASS!"
 		return XDP_DROP;
 	}
 
-	// Not in blacklist - pass.
+	// Not blocked, pass.
 	return XDP_PASS;
 }
 

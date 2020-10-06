@@ -520,7 +520,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	case 4:
 		// IPIP
 		if (CALI_F_HEP) {
-			// TODO IPIP whitelist.
+			// TODO IPIP allow set.
 			CALI_DEBUG("IPIP: allow\n");
 			fwd_fib_set(&fwd, false);
 			goto allow;

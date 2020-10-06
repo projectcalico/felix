@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -567,7 +567,7 @@ func (s *IPSets) tryResync() (numProblems int, err error) {
 		return
 	}
 
-	// Scan for IP sets that need to be cleaned up.  Create a whitelist containing the IP sets
+	// Scan for IP sets that need to be cleaned up.  Create an list containing the IP sets
 	// that we expect to be there.
 	expectedIPSets := set.New()
 	for _, ipSet := range s.ipSetIDToIPSet {
@@ -575,10 +575,10 @@ func (s *IPSets) tryResync() (numProblems int, err error) {
 		s.logCxt.WithFields(log.Fields{
 			"ID":       ipSet.SetID,
 			"mainName": ipSet.MainIPSetName,
-		}).Debug("Whitelisting IP sets.")
+		}).Debug("Expected IP set.")
 	}
 
-	// Include any pending deletions in the whitelist; this is mainly to separate cleanup logs
+	// Include any pending deletions in the expected set; this is mainly to separate cleanup logs
 	// from explicit deletion logs.
 	s.pendingIPSetDeletions.Iter(func(item interface{}) error {
 		expectedIPSets.Add(item)
