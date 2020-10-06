@@ -709,7 +709,7 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct ct_ctx
 		}
 		CALI_CT_VERB("B: whitelisted %d.\n", v->b_to_a.whitelisted);
 
-		if (tcp_header && v->a_to_b.whitelisted && v->b_to_a.whitelisted) {
+		if ((tcp_header || proto_orig == IPPROTO_UDP) && v->a_to_b.whitelisted && v->b_to_a.whitelisted) {
 			result.rc = CALI_CT_ESTABLISHED_BYPASS;
 		} else {
 			result.rc = CALI_CT_ESTABLISHED;
