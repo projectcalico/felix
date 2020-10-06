@@ -363,9 +363,9 @@ func TestNATNodePort(t *testing.T) {
 		ctr = ct[ctKey]
 		Expect(ctr.Type()).To(Equal(conntrack.TypeNATReverse))
 
-		// Whitelisted for both sides due to forwarding through the tunnel
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		Expect(ctr.Data().B2A.Whitelisted).To(BeTrue())
+		// approved for both sides due to forwarding through the tunnel
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		Expect(ctr.Data().B2A.Approved).To(BeTrue())
 	})
 
 	dumpCTMap(ctMap)
@@ -458,9 +458,9 @@ func TestNATNodePort(t *testing.T) {
 		Expect(ctr.Type()).To(Equal(conntrack.TypeNATReverse))
 
 		// Whitlisted source side
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		// Dest not whitelisted yet
-		Expect(ctr.Data().B2A.Whitelisted).NotTo(BeTrue())
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		// Dest not approved yet
+		Expect(ctr.Data().B2A.Approved).NotTo(BeTrue())
 
 		recvPkt = res.dataOut
 	})
@@ -507,10 +507,10 @@ func TestNATNodePort(t *testing.T) {
 		Expect(ctr.Type()).To(Equal(conntrack.TypeNATReverse),
 			fmt.Sprintf("Expected reverse conntrack entry but got %v", ctr))
 
-		// Whitelisted source side
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		// Whitelisted destination side as well
-		Expect(ctr.Data().B2A.Whitelisted).To(BeTrue())
+		// approved source side
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		// approved destination side as well
+		Expect(ctr.Data().B2A.Approved).To(BeTrue())
 	})
 
 	skbMark = 0
@@ -642,9 +642,9 @@ func TestNATNodePort(t *testing.T) {
 		ctr = ct[ctKey]
 		Expect(ctr.Type()).To(Equal(conntrack.TypeNATReverse))
 
-		// Whitelisted for both sides due to forwarding through the tunnel
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		Expect(ctr.Data().B2A.Whitelisted).To(BeTrue())
+		// approved for both sides due to forwarding through the tunnel
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		Expect(ctr.Data().B2A.Approved).To(BeTrue())
 	})
 
 	dumpCTMap(ctMap)
@@ -933,9 +933,9 @@ func TestNATNodePortMultiNIC(t *testing.T) {
 		ctr = ct[ctKey]
 		Expect(ctr.Type()).To(Equal(conntrack.TypeNATReverse))
 
-		// Whitelisted for both sides due to forwarding through the tunnel
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		Expect(ctr.Data().B2A.Whitelisted).To(BeTrue())
+		// approved for both sides due to forwarding through the tunnel
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		Expect(ctr.Data().B2A.Approved).To(BeTrue())
 	})
 
 	dumpCTMap(ctMap)
@@ -1029,9 +1029,9 @@ func TestNATNodePortMultiNIC(t *testing.T) {
 		ctr = ct[ctKey]
 		Expect(ctr.Type()).To(Equal(conntrack.TypeNATReverse))
 
-		// Whitelisted for both sides due to forwarding through the tunnel
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		Expect(ctr.Data().B2A.Whitelisted).To(BeTrue())
+		// approved for both sides due to forwarding through the tunnel
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		Expect(ctr.Data().B2A.Approved).To(BeTrue())
 	})
 
 	dumpCTMap(ctMap)

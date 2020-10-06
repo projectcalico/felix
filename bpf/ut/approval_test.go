@@ -27,9 +27,9 @@ import (
 )
 
 // Usually a packet passes through 2 programs, HEP->WEP, WEP->HEP or WEP->WEP. These test
-// make sure that both programs whitelist the traffic if their policies allow it.
+// make sure that both programs approve the traffic if their policies allow it.
 
-func TestWhitelistFromWorkloadExitHost(t *testing.T) {
+func TestApproveFromWorkloadExitHost(t *testing.T) {
 	RegisterTestingT(t)
 
 	bpfIfaceName = "WHwl"
@@ -65,10 +65,10 @@ func TestWhitelistFromWorkloadExitHost(t *testing.T) {
 
 		ctr := ct[ctKey]
 
-		// Whitelisted by WEP
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		// Not whitelisted by HEP yet
-		Expect(ctr.Data().B2A.Whitelisted).NotTo(BeTrue())
+		// approved by WEP
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		// Not approved by HEP yet
+		Expect(ctr.Data().B2A.Approved).NotTo(BeTrue())
 	})
 
 	// Leaving node 1
@@ -85,13 +85,13 @@ func TestWhitelistFromWorkloadExitHost(t *testing.T) {
 
 		ctr := ct[ctKey]
 
-		// Whitelisted by both WEP and HEP
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		Expect(ctr.Data().B2A.Whitelisted).To(BeTrue())
+		// approved by both WEP and HEP
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		Expect(ctr.Data().B2A.Approved).To(BeTrue())
 	})
 }
 
-func TestWhitelistEnterHostToWorkload(t *testing.T) {
+func TestApproveEnterHostToWorkload(t *testing.T) {
 	RegisterTestingT(t)
 
 	bpfIfaceName = "HWwl"
@@ -134,10 +134,10 @@ func TestWhitelistEnterHostToWorkload(t *testing.T) {
 
 		ctr := ct[ctKey]
 
-		// Whitelisted by HEP
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		// NOt whitelisted by WEP yet
-		Expect(ctr.Data().B2A.Whitelisted).NotTo(BeTrue())
+		// approved by HEP
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		// NOt approved by WEP yet
+		Expect(ctr.Data().B2A.Approved).NotTo(BeTrue())
 	})
 
 	skbMark = tc.MarkSeen // CALI_SKB_MARK_SEEN
@@ -153,13 +153,13 @@ func TestWhitelistEnterHostToWorkload(t *testing.T) {
 
 		ctr := ct[ctKey]
 
-		// Still whitelisted both by HEP and WEP
-		Expect(ctr.Data().B2A.Whitelisted).To(BeTrue())
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
+		// Still approved both by HEP and WEP
+		Expect(ctr.Data().B2A.Approved).To(BeTrue())
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
 	})
 }
 
-func TestWhitelistWorkloadToWorkload(t *testing.T) {
+func TestApproveWorkloadToWorkload(t *testing.T) {
 	RegisterTestingT(t)
 
 	bpfIfaceName = "WWwl"
@@ -202,10 +202,10 @@ func TestWhitelistWorkloadToWorkload(t *testing.T) {
 
 		ctr := ct[ctKey]
 
-		// Whitelisted by the first WEP (on egress from WEP)
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		// Not whitelisted by the second WEP yet
-		Expect(ctr.Data().B2A.Whitelisted).NotTo(BeTrue())
+		// approved by the first WEP (on egress from WEP)
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		// Not approved by the second WEP yet
+		Expect(ctr.Data().B2A.Approved).NotTo(BeTrue())
 	})
 
 	skbMark = tc.MarkSeen // CALI_SKB_MARK_SEEN
@@ -221,8 +221,8 @@ func TestWhitelistWorkloadToWorkload(t *testing.T) {
 
 		ctr := ct[ctKey]
 
-		// Whitelisted by both WEPs
-		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
-		Expect(ctr.Data().B2A.Whitelisted).To(BeTrue())
+		// approved by both WEPs
+		Expect(ctr.Data().A2B.Approved).To(BeTrue())
+		Expect(ctr.Data().B2A.Approved).To(BeTrue())
 	})
 }

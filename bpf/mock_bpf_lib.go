@@ -132,7 +132,7 @@ func (b *MockBPFLib) NewCIDRMap(ifName string, family IPFamily) (string, error) 
 
 	id += 1
 
-	return fmt.Sprintf("/sys/fs/bpf/calico/xdp/%s_ipv4_v1_blacklist", ifName), nil
+	return fmt.Sprintf("/sys/fs/bpf/calico/xdp/%s_ipv4_v1_blocklist", ifName), nil
 }
 
 func (b *MockBPFLib) NewFailsafeMap() (string, error) {

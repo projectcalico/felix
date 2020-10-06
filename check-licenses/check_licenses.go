@@ -1,4 +1,4 @@
-// Copyright (c) 2017, 2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017, 2019-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,13 +28,13 @@ import (
 )
 
 var (
-	whitelistedLicenses = set.From(
+	approvedLicenses = set.From(
 		"Apache License 2.0",
 		"MIT License",
 		"ISC License",
 		"BSD 3-clause \"New\" or \"Revised\" License",
 	)
-	whitelistedPkgs = set.FromArray([]pkgInfo{
+	approvedPkgs = set.FromArray([]pkgInfo{
 		// These packages are licensed under the LGPL, which is normally viral and hence
 		// incompatible with our licensing! However, they include the linking exception,
 		// allowing us to distribute a binary based on them as long as we don't modify them.
@@ -115,7 +115,7 @@ var (
 		{pkgName: "github.com/projectcalico/felix/vendor/gopkg.in/yaml.v2",
 			license: "? (The Unlicense, 35%)"},
 	})
-	whitelistedPrefixes = []string{
+	approvedPrefixes = []string{
 		// Standard golang BSD-like license.
 		"github.com/projectcalico/felix/vendor/golang.org/x/",
 	}
@@ -158,28 +158,28 @@ lineLoop:
 			logCxt.Info("One of our packages")
 			continue
 		}
-		if whitelistedLicenses.Contains(license) {
-			logCxt.Info("License is whitelisted")
+		if approvedLicenses.Contains(license) {
+			logCxt.Info("License is approved")
 			continue
 		}
-		if whitelistedPkgs.Contains(pkgInfo) {
-			logCxt.Info("Package is whitelisted")
+		if approvedPkgs.Contains(pkgInfo) {
+			logCxt.Info("Package is approved")
 			continue
 		}
-		for _, prefix := range whitelistedPrefixes {
+		for _, prefix := range approvedPrefixes {
 			if strings.HasPrefix(pkgName, prefix) {
-				logCxt.WithField("prefix", prefix).Info("Package prefix is whitelisted")
+				logCxt.WithField("prefix", prefix).Info("Package prefix is approved")
 				continue lineLoop
 			}
 		}
-		logCxt.Error("License not whitelisted")
+		logCxt.Error("License not approved")
 		badPackages = append(badPackages, pkgInfo)
 	}
 
 	if len(badPackages) > 0 {
 		log.Error("Found bad licenses")
 		for _, pkg := range badPackages {
-			log.Errorf("\n\nNon-white-listed license:\n  Package: %v\n  License: %v\n", pkg.pkgName, pkg.license)
+			log.Errorf("\n\nNon-approved license:\n  Package: %v\n  License: %v\n", pkg.pkgName, pkg.license)
 		}
 		log.Info("")
 		os.Exit(1)

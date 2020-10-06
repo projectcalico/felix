@@ -75,7 +75,7 @@ func dump() {
 		fmt.Printf("  %s: %d\n", proto, entry.Port)
 	}
 
-	fmt.Printf("Interfaces with blacklist:\n")
+	fmt.Printf("Interfaces with block-list:\n")
 	ifaces, err := bpfLib.GetXDPIfaces()
 	if err != nil {
 		log.Fatalf("%v", err)

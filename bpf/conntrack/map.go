@@ -211,14 +211,14 @@ func NewValueNATReverse(created, lastSeen time.Duration, flags uint8, legA, legB
 }
 
 type Leg struct {
-	Seqno       uint32
-	SynSeen     bool
-	AckSeen     bool
-	FinSeen     bool
-	RstSeen     bool
-	Whitelisted bool
-	Opener      bool
-	Ifindex     uint32
+	Seqno    uint32
+	SynSeen  bool
+	AckSeen  bool
+	FinSeen  bool
+	RstSeen  bool
+	Approved bool
+	Opener   bool
+	Ifindex  uint32
 }
 
 func setBit(bits *uint32, bit uint8, val bool) {
@@ -237,7 +237,7 @@ func (leg Leg) AsBytes() []byte {
 	setBit(&bits, 1, leg.AckSeen)
 	setBit(&bits, 2, leg.FinSeen)
 	setBit(&bits, 3, leg.RstSeen)
-	setBit(&bits, 4, leg.Whitelisted)
+	setBit(&bits, 4, leg.Approved)
 	setBit(&bits, 5, leg.Opener)
 
 	binary.LittleEndian.PutUint32(bytes[0:4], leg.Seqno)
@@ -261,7 +261,7 @@ func (leg Leg) Flags() uint32 {
 	if leg.RstSeen {
 		flags |= 1 << 3
 	}
-	if leg.Whitelisted {
+	if leg.Approved {
 		flags |= 1 << 4
 	}
 	if leg.Opener {
@@ -277,14 +277,14 @@ func bitSet(bits uint32, bit uint8) bool {
 func readConntrackLeg(b []byte) Leg {
 	bits := binary.LittleEndian.Uint32(b[4:8])
 	return Leg{
-		Seqno:       binary.BigEndian.Uint32(b[0:4]),
-		SynSeen:     bitSet(bits, 0),
-		AckSeen:     bitSet(bits, 1),
-		FinSeen:     bitSet(bits, 2),
-		RstSeen:     bitSet(bits, 3),
-		Whitelisted: bitSet(bits, 4),
-		Opener:      bitSet(bits, 5),
-		Ifindex:     binary.LittleEndian.Uint32(b[8:12]),
+		Seqno:    binary.BigEndian.Uint32(b[0:4]),
+		SynSeen:  bitSet(bits, 0),
+		AckSeen:  bitSet(bits, 1),
+		FinSeen:  bitSet(bits, 2),
+		RstSeen:  bitSet(bits, 3),
+		Approved: bitSet(bits, 4),
+		Opener:   bitSet(bits, 5),
+		Ifindex:  binary.LittleEndian.Uint32(b[8:12]),
 	}
 }
 

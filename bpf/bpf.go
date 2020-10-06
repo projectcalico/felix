@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package bpf provides primitives to manage Calico-specific XDP programs
-// attached to network interfaces, along with the blacklist LPM map and the
+// attached to network interfaces, along with the blocklist LPM map and the
 // failsafe map.
 //
 // It does not call the bpf() syscall itself but executes external programs
@@ -366,7 +366,7 @@ type BPFDataplane interface {
 }
 
 func getCIDRMapName(ifName string, family IPFamily) string {
-	return fmt.Sprintf("%s_%s_%s_blacklist", ifName, family, cidrMapVersion)
+	return fmt.Sprintf("%s_%s_%s_blocklist", ifName, family, cidrMapVersion)
 }
 
 func getProgName(ifName string) string {
@@ -464,7 +464,7 @@ func (b *BPFLib) ListCIDRMaps(family IPFamily) ([]string, error) {
 		return nil, err
 	}
 
-	suffix := fmt.Sprintf("_%s_%s_blacklist", family, cidrMapVersion)
+	suffix := fmt.Sprintf("_%s_%s_blocklist", family, cidrMapVersion)
 	for _, m := range maps {
 		name := m.Name()
 		if strings.HasSuffix(name, suffix) {

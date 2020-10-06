@@ -43,12 +43,12 @@ var (
 	timeouts = conntrack.DefaultTimeouts()
 
 	udpJustCreated    = tcpEntry(now-1, now-1, conntrack.Leg{}, conntrack.Leg{})
-	udpAlmostTimedOut = tcpEntry(now-(2*time.Minute), now-(59*time.Second), conntrack.Leg{Whitelisted: true}, conntrack.Leg{})
-	udpTimedOut       = tcpEntry(now-(2*time.Minute), now-(61*time.Second), conntrack.Leg{Whitelisted: true}, conntrack.Leg{})
+	udpAlmostTimedOut = tcpEntry(now-(2*time.Minute), now-(59*time.Second), conntrack.Leg{Approved: true}, conntrack.Leg{})
+	udpTimedOut       = tcpEntry(now-(2*time.Minute), now-(61*time.Second), conntrack.Leg{Approved: true}, conntrack.Leg{})
 
 	icmpJustCreated    = tcpEntry(now-1, now-1, conntrack.Leg{}, conntrack.Leg{})
-	icmpAlmostTimedOut = tcpEntry(now-(2*time.Minute), now-(4*time.Second), conntrack.Leg{Whitelisted: true}, conntrack.Leg{})
-	icmpTimedOut       = tcpEntry(now-(2*time.Minute), now-(6*time.Second), conntrack.Leg{Whitelisted: true}, conntrack.Leg{})
+	icmpAlmostTimedOut = tcpEntry(now-(2*time.Minute), now-(4*time.Second), conntrack.Leg{Approved: true}, conntrack.Leg{})
+	icmpTimedOut       = tcpEntry(now-(2*time.Minute), now-(6*time.Second), conntrack.Leg{Approved: true}, conntrack.Leg{})
 
 	tcpJustCreated        = tcpEntry(now-1, now-1, conntrack.Leg{SynSeen: true}, conntrack.Leg{})
 	tcpHandshakeTimeout   = tcpEntry(now-22*time.Second, now-21*time.Second, conntrack.Leg{SynSeen: true}, conntrack.Leg{})
