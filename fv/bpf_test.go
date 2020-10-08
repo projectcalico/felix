@@ -975,7 +975,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 							Should(BeNumerically("==", 1), matcher2)
 
 						// Check that we have not seen the spoofed packet. If there was not
-						// packet reordering, which in out setup is guaranteed not to happen,
+						// packet reordering, which in our setup is guaranteed not to happen,
 						// we know that the spoofed packet was dropped.
 						Expect(tcpdump.MatchCount("UDP-30444")).To(BeNumerically("==", 1), matcher)
 					})
@@ -991,6 +991,21 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						}
 					}()
 
+					// Now, set up a topology that mimics two host NICs by creating one workload per fake NIC.
+					// We then move a route between the two NICs to pretend that there's a workload behind the
+					//
+					//      eth20 = workload used as a NIC
+					//         - eth20 ------ movable fake workload 10.65.15.15
+					//       192.168.20.1
+					//       /
+					//    10.0.0.20
+					// Felix
+					//    10.0.0.30
+					//       \
+					//       192.168.30.1
+					//         - eth30 ------ movable fake workload 10.65.15.15
+					//      eth30 = workload used as a NIC
+					//
 					fakeWorkloadIP := "10.65.15.15"
 
 					By("setting up node's fake external ifaces", func() {
@@ -1008,12 +1023,13 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 							Protocol:      testOpts.protocol,
 							InterfaceName: "eth20",
 						}
-						eth20.Start()
+						err := eth20.Start()
+						Expect(err).NotTo(HaveOccurred())
 
 						// assign address to eth20 and add route to the .20 network
 						felixes[1].Exec("ip", "route", "add", "192.168.20.0/24", "dev", "eth20")
 						felixes[1].Exec("ip", "addr", "add", "10.0.0.20/32", "dev", "eth20")
-						_, err := eth20.RunCmd("ip", "route", "add", "10.0.0.20/32", "dev", "eth0")
+						_, err = eth20.RunCmd("ip", "route", "add", "10.0.0.20/32", "dev", "eth0")
 						Expect(err).NotTo(HaveOccurred())
 						// Add a route to the test workload to the fake external
 						// client emulated by the test-workload
@@ -1028,7 +1044,8 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 							Protocol:      testOpts.protocol,
 							InterfaceName: "eth30",
 						}
-						eth30.Start()
+						err=eth30.Start()
+						Expect(err).NotTo(HaveOccurred())
 
 						// assign address to eth30 and add route to the .30 network
 						felixes[1].Exec("ip", "route", "add", "192.168.30.0/24", "dev", "eth30")
