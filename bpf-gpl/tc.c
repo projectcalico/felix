@@ -584,7 +584,6 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 		fwd_fib_set(&fwd, false);
 	}
 
-
 	/* skip policy if we get conntrack hit */
 	if (ct_result_rc(state.ct_result.rc) != CALI_CT_NEW) {
 		goto skip_policy;
