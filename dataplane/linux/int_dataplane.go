@@ -192,6 +192,9 @@ type Config struct {
 	KubeClientSet *kubernetes.Clientset
 
 	FeatureDetectOverrides map[string]string
+
+	// Populated with the smallest host MTU based on auto-detection.
+	hostMTU int
 }
 
 // InternalDataplane implements an in-process Felix dataplane driver based on iptables
@@ -294,9 +297,24 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		config.RulesConfig.IptablesMarkEndpoint,
 		config.RulesConfig.IptablesMarkNonCaliEndpoint)
 
-	// Determine values to use for MTU and default any unspecified fields.
-	if err := configureMTU(&config); err != nil {
-		log.WithError(err).Fatal("Unable to configure MTU, shutting down")
+	// Auto-detect host MTU.
+	if mtu, err := findHostMTU(); err != nil {
+		log.WithError(err).Fatal("Unable to detect host MTU, shutting down")
+	} else {
+		// We found the host's MTU. Default any MTU configurations that have not been set.
+		config.hostMTU = mtu
+		if config.RulesConfig.IPIPEnabled && config.IPIPMTU == 0 {
+			config.IPIPMTU = mtu - 20
+		}
+		if config.RulesConfig.VXLANEnabled && config.VXLANMTU == 0 {
+			config.VXLANMTU = mtu - 50
+		}
+		if config.Wireguard.Enabled && config.Wireguard.MTU == 0 {
+			config.Wireguard.MTU = mtu - 60
+		}
+	}
+	if err := writeMTUFile(config); err != nil {
+		log.Fatal("Failed to write MTU file")
 	}
 
 	dp := &InternalDataplane{
@@ -764,6 +782,63 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	return dp
 }
 
+// findHostMTU auto-detects the smallest host interface MTU.
+func findHostMTU() (int, error) {
+	// Find all the interfaces on the host.
+	links, err := netlink.LinkList()
+	if err != nil {
+		log.WithError(err).Error("Failed to list interfaces. Unable to auto-detect MTU")
+		return 0, err
+	}
+
+	// Iterate through them, keeping track of the lowest MTU.
+	smallest := 0
+	for _, l := range links {
+		// Skip links that we know are not external interfaces.
+		fields := log.Fields{"mtu": l.Attrs().MTU, "name": l.Attrs().Name}
+		if interfaceExcludeRegex.MatchString(l.Attrs().Name) {
+			log.WithFields(fields).Debug("Skipping interface for MTU detection")
+			continue
+		}
+		log.WithFields(fields).Info("Examining link for MTU calculation")
+		if l.Attrs().MTU < smallest || smallest == 0 {
+			smallest = l.Attrs().MTU
+		}
+	}
+	return smallest, nil
+}
+
+// writeMTUFile writes the smallest MTU among enabled encapsulation types to disk
+// for use by other components (e.g., CNI plugin).
+func writeMTUFile(config Config) error {
+	// Determine the smallest MTU among enabled encap methods. If none of the encap methods are
+	// enabled, we'll just use the host's MTU.
+	mtu := config.hostMTU
+	type mtuState struct {
+		mtu     int
+		enabled bool
+	}
+	for _, s := range []mtuState{
+		{config.IPIPMTU, config.RulesConfig.IPIPEnabled},
+		{config.VXLANMTU, config.RulesConfig.VXLANEnabled},
+		{config.Wireguard.MTU, config.Wireguard.Enabled},
+	} {
+		if s.enabled && s.mtu != 0 && s.mtu < mtu {
+			mtu = s.mtu
+		}
+	}
+	log.WithField("mtu", mtu).Info("Determined smallest MTU")
+
+	// Write the smallest MTU to disk so other components can rely on this calculation consistently.
+	filename := "/var/lib/calico/mtu"
+	log.Debugf("Writing %d to "+filename, mtu)
+	if err := ioutil.WriteFile(filename, []byte(fmt.Sprintf("%d", mtu)), 0644); err != nil {
+		log.WithError(err).Error("Unable to write to " + filename)
+		return err
+	}
+	return nil
+}
+
 func cleanUpVXLANDevice() {
 	// If VXLAN is not enabled, check to see if there is a VXLAN device and delete it if there is.
 	log.Debug("Checking if we need to clean up the VXLAN device")
@@ -825,6 +900,7 @@ func (d *InternalDataplane) Start() {
 	go d.loopUpdatingDataplane()
 	go d.loopReportingStatus()
 	go d.ifaceMonitor.MonitorInterfaces()
+	go d.monitorHostMTU()
 }
 
 // onIfaceStateChange is our interface monitor callback.  It gets called from the monitor's thread.
@@ -889,73 +965,16 @@ func (d *InternalDataplane) RecvMessage() (interface{}, error) {
 	return <-d.fromDataplane, nil
 }
 
-// configureMTU auto-detects the MTU to use for IPIP, VXLAN, and Wireguard interfaces
-// if not already set, and writes the smallest MTU to disk for use by other components.
-func configureMTU(config *Config) error {
-	// Find all the interfaces on the host.
-	links, err := netlink.LinkList()
-	if err != nil {
-		log.WithError(err).Error("Failed to list interfaces. Unable to auto-detect MTU")
-		return err
-	}
-
-	// Iterate through them, keeping track of the lowest MTU.
-	smallest := 0
-	for _, l := range links {
-		// Skip links that we know are not external interfaces.
-		fields := log.Fields{"mtu": l.Attrs().MTU, "name": l.Attrs().Name}
-		if interfaceExcludeRegex.MatchString(l.Attrs().Name) {
-			log.WithFields(fields).Debug("Skipping interface for MTU detection")
-			continue
+func (d *InternalDataplane) monitorHostMTU() {
+	for {
+		mtu, err := findHostMTU()
+		if err != nil {
+			log.WithError(err).Error("Error detecting host MTU")
+		} else if d.config.hostMTU != mtu {
+			log.Fatal("Host MTU changed")
 		}
-		log.WithFields(fields).Info("Examining link for MTU calculation")
-		if l.Attrs().MTU < smallest || smallest == 0 {
-			smallest = l.Attrs().MTU
-		}
+		time.Sleep(30 * time.Second)
 	}
-
-	if smallest == 0 {
-		// We couldn't find a good fit for auto-detection.
-		// Use a reasonable default. We choose 1460 here because it is the smallest MTU used by
-		// default across common cloud providers, and matches our old defaults.
-		smallest = 1460
-	}
-
-	// Fill in any unspecified MTU fields, accounting for encapsulation overhead.
-	// Keep track of the smallest MTU among enabled encap types so we can write it
-	// to disk below.
-	mtu := smallest
-	if config.RulesConfig.IPIPEnabled {
-		if config.IPIPMTU == 0 {
-			config.IPIPMTU = smallest - 20
-			log.WithField("mtu", config.IPIPMTU).Info("Defaulting IPIP MTU")
-		}
-		mtu = config.IPIPMTU
-	}
-	if config.RulesConfig.VXLANEnabled {
-		if config.VXLANMTU == 0 {
-			config.VXLANMTU = smallest - 50
-			log.WithField("mtu", config.VXLANMTU).Info("Defaulting VXLAN MTU")
-		}
-		mtu = config.VXLANMTU
-	}
-	if config.Wireguard.Enabled {
-		if config.Wireguard.MTU == 0 {
-			config.Wireguard.MTU = smallest - 60
-			log.WithField("mtu", config.Wireguard.MTU).Info("Defaulting Wireguard MTU")
-		}
-		mtu = config.Wireguard.MTU
-	}
-	log.WithField("mtu", mtu).Info("Smallest MTU after subtracting encap overhead")
-
-	// Write the smallest MTU to disk so other components can rely on this calculation consistently.
-	filename := "/var/lib/calico/mtu"
-	log.Debugf("Writing %d to "+filename, mtu)
-	if err := ioutil.WriteFile(filename, []byte(fmt.Sprintf("%d", mtu)), 0644); err != nil {
-		log.WithError(err).Error("Unable to write to " + filename)
-		return err
-	}
-	return nil
 }
 
 // doStaticDataplaneConfig sets up the kernel and our static iptables  chains.  Should be called
