@@ -118,7 +118,7 @@ func init() {
 	ignores := []string{
 		"docker.*", "cbr.*", "dummy.*",
 		"virbr.*", "lxcbr.*", "veth.*", "lo",
-		"cali.*", "tunl.*", "flannel.*", "kube-ipvs.*", "cni.*",
+		"cali.*", "tunl.*", "flannel.*", "kube-ipvs.*", "cni.*", "vxlan.cali.*",
 	}
 	var err error
 	if interfaceExcludeRegex, err = regexp.Compile("(" + strings.Join(ignores, ")|(") + ")"); err != nil {
@@ -824,6 +824,7 @@ func writeMTUFile(config Config) error {
 			mtu = s.mtu
 		}
 	}
+
 	log.WithField("mtu", mtu).Info("Determined smallest MTU")
 
 	// Write the smallest MTU to disk so other components can rely on this calculation consistently.
