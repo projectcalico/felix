@@ -320,7 +320,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		}
 	}
 	if err := writeMTUFile(config); err != nil {
-		log.Fatal("Failed to write MTU file")
+		log.Warning("Failed to write MTU file, pod MTU may not be properly set")
 	}
 
 	dp := &InternalDataplane{
