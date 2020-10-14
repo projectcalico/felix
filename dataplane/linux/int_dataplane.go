@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -826,6 +827,11 @@ func writeMTUFile(config Config) error {
 	}
 
 	log.WithField("mtu", mtu).Info("Determined smallest MTU")
+
+	// Make sure directory exists.
+	if err := os.MkdirAll("/var/lib/calico", os.ModePerm); err != nil {
+		return err
+	}
 
 	// Write the smallest MTU to disk so other components can rely on this calculation consistently.
 	filename := "/var/lib/calico/mtu"
