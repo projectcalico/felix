@@ -280,6 +280,9 @@ type Config struct {
 
 	Variant string `config:"string;Calico"`
 
+	// Configures MTU auto-detection.
+	MTUIfacePattern *regexp.Regexp `config:"regexp;^(en[opsx].*|eth.*)"`
+
 	// State tracking.
 
 	// internalOverrides contains our highest priority config source, generated from internal constraints

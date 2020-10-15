@@ -105,9 +105,6 @@ var (
 	zeroKey          = wgtypes.Key{}
 )
 
-// interfaceExcludeRegex matches interface names to skip when attempting to determine MTU.
-var interfaceExcludeRegex *regexp.Regexp
-
 func init() {
 	prometheus.MustRegister(countDataplaneSyncErrors)
 	prometheus.MustRegister(summaryApplyTime)
@@ -116,17 +113,6 @@ func init() {
 	prometheus.MustRegister(summaryIfaceBatchSize)
 	prometheus.MustRegister(summaryAddrBatchSize)
 	processStartTime = time.Now()
-
-	// Initialize a regex for matching interfaces we want to ignore for automatic MTU detection.
-	ignores := []string{
-		"docker.*", "cbr.*", "dummy.*",
-		"virbr.*", "lxcbr.*", "veth.*", "lo",
-		"cali.*", "tunl.*", "flannel.*", "kube-ipvs.*", "cni.*", "vxlan.cali.*",
-	}
-	var err error
-	if interfaceExcludeRegex, err = regexp.Compile("(" + strings.Join(ignores, ")|(") + ")"); err != nil {
-		panic(err)
-	}
 }
 
 type Config struct {
@@ -197,7 +183,8 @@ type Config struct {
 	FeatureDetectOverrides map[string]string
 
 	// Populated with the smallest host MTU based on auto-detection.
-	hostMTU int
+	hostMTU         int
+	MTUIfacePattern *regexp.Regexp
 }
 
 // InternalDataplane implements an in-process Felix dataplane driver based on iptables
@@ -301,7 +288,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		config.RulesConfig.IptablesMarkNonCaliEndpoint)
 
 	// Auto-detect host MTU.
-	if mtu, err := findHostMTU(); err != nil {
+	if mtu, err := findHostMTU(config.MTUIfacePattern); err != nil {
 		log.WithError(err).Fatal("Unable to detect host MTU, shutting down")
 	} else {
 		// We found the host's MTU. Default any MTU configurations that have not been set.
@@ -789,7 +776,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 }
 
 // findHostMTU auto-detects the smallest host interface MTU.
-func findHostMTU() (int, error) {
+func findHostMTU(matchRegex *regexp.Regexp) (int, error) {
 	// Find all the interfaces on the host.
 	links, err := netlink.LinkList()
 	if err != nil {
@@ -802,7 +789,7 @@ func findHostMTU() (int, error) {
 	for _, l := range links {
 		// Skip links that we know are not external interfaces.
 		fields := log.Fields{"mtu": l.Attrs().MTU, "name": l.Attrs().Name}
-		if interfaceExcludeRegex.MatchString(l.Attrs().Name) {
+		if !matchRegex.MatchString(l.Attrs().Name) {
 			log.WithFields(fields).Debug("Skipping interface for MTU detection")
 			continue
 		}
@@ -992,7 +979,7 @@ func (d *InternalDataplane) RecvMessage() (interface{}, error) {
 
 func (d *InternalDataplane) monitorHostMTU() {
 	for {
-		mtu, err := findHostMTU()
+		mtu, err := findHostMTU(d.config.MTUIfacePattern)
 		if err != nil {
 			log.WithError(err).Error("Error detecting host MTU")
 		} else if d.config.hostMTU != mtu {
