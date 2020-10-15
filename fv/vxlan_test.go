@@ -425,7 +425,7 @@ var _ = infrastructure.DatastoreDescribe("VXLAN topology before adding host IPs 
 						Eventually(func() string {
 							out, _ := felix.ExecOutput("ip", "-d", "link", "show", "vxlan.calico")
 							return out
-						}, "10s", "100ms").Should(ContainSubstring("mtu 1410"))
+						}, "10s", "100ms").Should(ContainSubstring("mtu 1450"))
 					}
 
 					// Disable VXLAN in Felix.
@@ -441,7 +441,7 @@ var _ = infrastructure.DatastoreDescribe("VXLAN topology before adding host IPs 
 						Eventually(func() string {
 							out, _ := felix.ExecOutput("ip", "-d", "link", "show", "vxlan.calico")
 							return out
-						}, "10s", "100ms").ShouldNot(ContainSubstring("mtu 1410"))
+						}, "10s", "100ms").ShouldNot(ContainSubstring("mtu 1450"))
 					}
 				})
 			})
