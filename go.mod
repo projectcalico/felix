@@ -1,6 +1,6 @@
 module github.com/projectcalico/felix
 
-go 1.14
+go 1.15
 
 require (
 	github.com/Microsoft/hcsshim v0.8.9
@@ -25,9 +25,9 @@ require (
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
-	github.com/projectcalico/libcalico-go v1.7.2-0.20201006193733-ddac474575b9
+	github.com/projectcalico/libcalico-go v1.7.2-0.20201006212057-d414dc7c1c75
 	github.com/projectcalico/pod2daemon v0.0.0-20200929223531-dfc3c9936e90
-	github.com/projectcalico/typha v0.7.3-0.20201006195446-cd2abbd2fd14
+	github.com/projectcalico/typha v0.7.3-0.20201007232318-2dba00d728ad
 	github.com/prometheus/client_golang v1.0.0
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.4.2
