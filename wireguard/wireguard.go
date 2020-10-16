@@ -1223,14 +1223,18 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 		log.WithField("publicKey", publicKey).Debug("Generated new public key")
 	}
 
-	// Track which keys we have processed. The value indicates whether the data should be programmed in wireguard or
-	// not.
+	// Track which keys we have processed.
 	processedKeys := set.New()
 
 	// Handle nodes that are configured
 	for peerIdx := range device.Peers {
 		key := device.Peers[peerIdx].PublicKey
 		node := w.getNodeFromKey(key)
+
+		// Track each node that we process. Any nodes in our cache that were not processed here indicates a node that
+		// is not programmed in the dataplane. This is handled below
+		processedKeys.Add(key)
+
 		logCxt := log.WithFields(log.Fields{"publicKey": key, "node": node})
 		if node == nil {
 			logCxt.Info("Peer key is not expected or is associated with multiple nodes")
@@ -1238,7 +1242,6 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 				PublicKey: key,
 				Remove:    true,
 			})
-			processedKeys.Add(key)
 			wireguardUpdateRequired = true
 			continue
 		}
@@ -1249,35 +1252,45 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 
 		// Need to check programmed CIDRs against expected to see if any need deleting.
 		logCxt.Debug("Check programmed CIDRs for required deletions")
+		expectedAllowedCidrs := node.allowedCidrsForWireguard()
+		var allowedCidrsToSet []net.IPNet
 		for _, netCidr := range configuredCidrs {
 			cidr := ip.CIDRFromIPNet(&netCidr)
 			if !node.cidrs.Contains(cidr) {
 				// Need to delete an entry, so just replace
 				logCxt.WithField("cidr", cidr).Debug("Unexpected CIDR configured")
 				replaceCidrs = true
+				allowedCidrsToSet = expectedAllowedCidrs
 				break
 			}
 		}
 
-		// If the CIDRs need replacing or the endpoint address needs updating then wireguardUpdate the entry.
+		if !replaceCidrs && len(expectedAllowedCidrs) != len(configuredCidrs) {
+			// The configured CIDRs do not contain any extra entries, so if the number of configured does not match
+			// the number expected then we are missing some entries and need to add them as a delta.
+			configuredCidrsSet := set.FromArray(configuredCidrs)
+			for _, cidr := range expectedAllowedCidrs {
+				if !configuredCidrsSet.Contains(cidr) {
+					allowedCidrsToSet = append(allowedCidrsToSet, cidr)
+				}
+			}
+		}
+
+		// If the CIDRs need replacing or the endpoint address needs updating then update the entry.
 		expectedEndpointIP := node.ipv4EndpointAddr.AsNetIP()
 		replaceEndpointAddr := expectedEndpointIP != nil &&
 			(configuredAddr == nil || configuredAddr.Port != w.config.ListeningPort || !configuredAddr.IP.Equal(expectedEndpointIP))
-		if replaceCidrs || replaceEndpointAddr {
+		if replaceEndpointAddr || allowedCidrsToSet != nil {
 			peer := wgtypes.PeerConfig{
 				PublicKey:         key,
 				UpdateOnly:        true,
 				ReplaceAllowedIPs: replaceCidrs,
+				AllowedIPs:        allowedCidrsToSet,
 			}
 
 			if replaceEndpointAddr {
 				logCxt.Info("Endpoint address needs updating")
 				peer.Endpoint = w.endpointUDPAddr(expectedEndpointIP)
-			}
-
-			if replaceCidrs {
-				logCxt.Info("AllowedIPs need replacing")
-				peer.AllowedIPs = node.allowedCidrsForWireguard()
 			}
 
 			wireguardUpdate.Peers = append(wireguardUpdate.Peers, peer)
