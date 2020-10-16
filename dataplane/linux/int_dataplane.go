@@ -292,16 +292,19 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		log.WithError(err).Fatal("Unable to detect host MTU, shutting down")
 	} else {
 		// We found the host's MTU. Default any MTU configurations that have not been set.
+		// We default the values even if the encap is not enabled, in order to match behavior
+		// from earlier versions of Calico. However, they MTU will only be considered for allocation
+		// to pod interfaces if the encap is enabled.
 		config.hostMTU = mtu
-		if config.RulesConfig.IPIPEnabled && config.IPIPMTU == 0 {
+		if config.IPIPMTU == 0 {
 			log.Debug("Defaulting IPIP MTU based on host")
 			config.IPIPMTU = mtu - 20
 		}
-		if config.RulesConfig.VXLANEnabled && config.VXLANMTU == 0 {
+		if config.VXLANMTU == 0 {
 			log.Debug("Defaulting VXLAN MTU based on host")
 			config.VXLANMTU = mtu - 50
 		}
-		if config.Wireguard.Enabled && config.Wireguard.MTU == 0 {
+		if config.Wireguard.MTU == 0 {
 			log.Debug("Defaulting Wireguard MTU based on host")
 			config.Wireguard.MTU = mtu - 60
 		}
