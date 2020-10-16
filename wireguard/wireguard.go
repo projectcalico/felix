@@ -1231,6 +1231,11 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 	for peerIdx := range device.Peers {
 		key := device.Peers[peerIdx].PublicKey
 		node := w.getNodeFromKey(key)
+
+		// Track each node that we process. Any nodes in our cache that were not processed here indicates a node that
+		// is not programmed in the dataplane. This is handled below
+		processedKeys.Add(key)
+
 		logCxt := log.WithFields(log.Fields{"publicKey": key, "node": node})
 		if node == nil {
 			logCxt.Info("Peer key is not expected or is associated with multiple nodes")
@@ -1238,7 +1243,6 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 				PublicKey: key,
 				Remove:    true,
 			})
-			processedKeys.Add(key)
 			wireguardUpdateRequired = true
 			continue
 		}
@@ -1259,7 +1263,7 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 			}
 		}
 
-		// If the CIDRs need replacing or the endpoint address needs updating then wireguardUpdate the entry.
+		// If the CIDRs need replacing or the endpoint address needs updating then update the entry.
 		expectedEndpointIP := node.ipv4EndpointAddr.AsNetIP()
 		replaceEndpointAddr := expectedEndpointIP != nil &&
 			(configuredAddr == nil || configuredAddr.Port != w.config.ListeningPort || !configuredAddr.IP.Equal(expectedEndpointIP))
