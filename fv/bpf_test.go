@@ -1899,6 +1899,12 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 					})
 
 					It("should have connectivity from a workload to a service with multiple backends", func() {
+						// FIXME we can only do the test with regular NAT as
+						// cgroup shares one random affinity map
+						if testOpts.connTimeEnabled {
+							return
+						}
+
 						ip := testSvc.Spec.ClusterIP
 						port := uint16(testSvc.Spec.Ports[0].Port)
 
@@ -1907,12 +1913,36 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						cc.ExpectSome(w[1][1], TargetIP(ip), port)
 						cc.CheckConnectivity()
 
-						if !testOpts.connTimeEnabled {
-							// FIXME we can only do the test with regular NAT as
-							// cgroup shares one random affinity map
+						aff := dumpAffMap(felixes[1])
+						Expect(aff).To(HaveLen(1))
+
+						var mkey nat.AffinityKey
+						var mVal nat.AffinityValue
+						// get the only key
+						for k, v := range aff {
+							mkey = k
+							mVal = v
+						}
+
+						Eventually(func() nat.AffinityValue {
+							// Remove the affinity entry to emulate timer
+							// expiring / no prior affinity.
+							m := nat.AffinityMap(&bpf.MapContext{})
+							cmd, err := bpf.MapDeleteKeyCmd(m, mkey.AsBytes())
+							Expect(err).NotTo(HaveOccurred())
+							err = felixes[1].ExecMayFail(cmd...)
+							Expect(err).NotTo(HaveOccurred())
+
+							aff = dumpAffMap(felixes[1])
+							Expect(aff).To(HaveLen(0))
+
+							cc.CheckConnectivity()
+
 							aff := dumpAffMap(felixes[1])
 							Expect(aff).To(HaveLen(1))
-						}
+
+							return aff[mkey]
+						}, 60*time.Second, time.Second).ShouldNot(Equal(mVal))
 					})
 				})
 
