@@ -792,7 +792,7 @@ func findHostMTU(matchRegex *regexp.Regexp) (int, error) {
 	for _, l := range links {
 		// Skip links that we know are not external interfaces.
 		fields := log.Fields{"mtu": l.Attrs().MTU, "name": l.Attrs().Name}
-		if !matchRegex.MatchString(l.Attrs().Name) {
+		if matchRegex == nil || !matchRegex.MatchString(l.Attrs().Name) {
 			log.WithFields(fields).Debug("Skipping interface for MTU detection")
 			continue
 		}
