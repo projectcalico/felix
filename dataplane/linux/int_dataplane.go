@@ -310,7 +310,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		}
 	}
 	if err := writeMTUFile(config); err != nil {
-		log.Warning("Failed to write MTU file, pod MTU may not be properly set")
+		log.WithError(err).Error("Failed to write MTU file, pod MTU may not be properly set")
 	}
 
 	dp := &InternalDataplane{
@@ -809,7 +809,7 @@ func findHostMTU(matchRegex *regexp.Regexp) (int, error) {
 func writeMTUFile(config Config) error {
 	// Make sure directory exists.
 	if err := os.MkdirAll("/var/lib/calico", os.ModePerm); err != nil {
-		return err
+		return fmt.Errorf("failed to create directory /var/lib/calico: %s", err)
 	}
 
 	// Write the smallest MTU to disk so other components can rely on this calculation consistently.
@@ -989,9 +989,7 @@ func (d *InternalDataplane) monitorHostMTU() {
 			// Since log writing is done a background thread, we set the force-flush flag on this log to ensure that
 			// all the in-flight logs get written before we exit.
 			log.WithFields(log.Fields{lclogutils.FieldForceFlush: true}).Info("Host MTU changed")
-
-			// Exit, using the RC designated for config changes.
-			os.Exit(129)
+			d.config.ConfigChangedRestartCallback()
 		}
 		time.Sleep(30 * time.Second)
 	}

@@ -9,7 +9,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	github.com/go-ini/ini v1.44.0
-	github.com/go-sql-driver/mysql v1.5.0 // indirect
 	github.com/gogo/protobuf v1.3.1
 	github.com/golang-collections/collections v0.0.0-20130729185459-604e922904d3
 	github.com/golang/protobuf v1.4.2
@@ -26,7 +25,7 @@ require (
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
-	github.com/projectcalico/libcalico-go v1.7.2-0.20201020155110-efe8306c26d1
+	github.com/projectcalico/libcalico-go v1.7.2-0.20201020165728-728c26dd8282
 	github.com/projectcalico/pod2daemon v0.0.0-20200929223531-dfc3c9936e90
 	github.com/projectcalico/typha v0.7.3-0.20201020161316-1f62871794a5
 	github.com/prometheus/client_golang v1.0.0
