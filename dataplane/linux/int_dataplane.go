@@ -810,9 +810,9 @@ func findHostMTU(matchRegex *regexp.Regexp) (int, error) {
 		if matchRegex != nil {
 			pattern = matchRegex.String()
 		}
-		log.WithFields(log.Fields{"interfaceNames": names, "regex": pattern}).Warn(
-			"No host interfaces matched the MTUIfacePattern regular expression; either set MTUIfacePattern " +
-				"to match your host interfaces or force explicit MTU settings.")
+		return 0, fmt.Errorf("no host interfaces matched the MTU detection interface pattern; " +
+			"set MTUIfacePattern to match (only) your host's data interfaces (interface names: %v; pattern: %v)",
+			names, pattern)
 	}
 
 	return smallest, nil
