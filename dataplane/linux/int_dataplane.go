@@ -927,23 +927,26 @@ func (d *InternalDataplane) Start() {
 }
 
 // onIfaceStateChange is our interface monitor callback.  It gets called from the monitor's thread.
-func (d *InternalDataplane) onIfaceStateChange(ifaceName string, state ifacemonitor.State, ifIndex int) {
+func (d *InternalDataplane) onIfaceStateChange(ifaceName string, state ifacemonitor.IfaceState) {
 	log.WithFields(log.Fields{
 		"ifaceName": ifaceName,
-		"ifIndex":   ifIndex,
-		"state":     state,
+		"ifIndex":   state.IfIndex,
+		"state":     state.State,
+		"hwaddr":    state.HardwareAddr,
 	}).Info("Linux interface state changed.")
 	d.ifaceUpdates <- &ifaceUpdate{
-		Name:  ifaceName,
-		State: state,
-		Index: ifIndex,
+		Name:         ifaceName,
+		State:        state.State,
+		Index:        state.IfIndex,
+		HardwareAddr: state.HardwareAddr,
 	}
 }
 
 type ifaceUpdate struct {
-	Name  string
-	State ifacemonitor.State
-	Index int
+	Name         string
+	State        ifacemonitor.State
+	Index        int
+	HardwareAddr net.HardwareAddr
 }
 
 // Check if current felix ipvs config is correct when felix gets an kube-ipvs0 interface update.
