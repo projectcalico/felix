@@ -32,6 +32,7 @@ type netlinkStub interface {
 	Subscribe(
 		linkUpdates chan netlink.LinkUpdate,
 		routeUpdates chan netlink.RouteUpdate,
+		neighUpdates chan netlink.NeighUpdate,
 	) error
 	LinkList() ([]netlink.Link, error)
 	ListLocalRoutes(link netlink.Link, family int) ([]netlink.Route, error)
@@ -51,8 +52,16 @@ type IfaceState struct {
 	HardwareAddr net.HardwareAddr
 }
 
+type NeighAddr struct {
+	Exists  bool
+	IfIndex int
+	IP      net.IP
+	HWAddr  net.HardwareAddr
+}
+
 type InterfaceStateCallback func(ifaceName string, state IfaceState)
 type AddrStateCallback func(ifaceName string, addrs set.Set)
+type NeighAddrCallback func(neigh NeighAddr)
 
 type Config struct {
 	// InterfaceExcludes is a list of interface names that we don't want callbacks for.
@@ -63,13 +72,14 @@ type Config struct {
 type InterfaceMonitor struct {
 	Config
 
-	netlinkStub   netlinkStub
-	resyncC       <-chan time.Time
-	upIfaces      map[string]int // Map from interface name to index.
-	StateCallback InterfaceStateCallback
-	AddrCallback  AddrStateCallback
-	ifaceName     map[int]string
-	ifaceAddrs    map[int]set.Set
+	netlinkStub      netlinkStub
+	resyncC          <-chan time.Time
+	upIfaces         map[string]int // Map from interface name to index.
+	StateCallback    InterfaceStateCallback
+	AddrCallback     AddrStateCallback
+	NeighAddrCallbak NeighAddrCallback
+	ifaceName        map[int]string
+	ifaceAddrs       map[int]set.Set
 }
 
 func New(config Config) *InterfaceMonitor {
@@ -105,12 +115,18 @@ func (m *InterfaceMonitor) MonitorInterfaces() {
 
 	updates := make(chan netlink.LinkUpdate, 10)
 	routeUpdates := make(chan netlink.RouteUpdate, 10)
-	if err := m.netlinkStub.Subscribe(updates, routeUpdates); err != nil {
+	neighUpdates := make(chan netlink.NeighUpdate, 10)
+	if err := m.netlinkStub.Subscribe(updates, routeUpdates, neighUpdates); err != nil {
 		log.WithError(err).Panic("Failed to subscribe to netlink stub")
 	}
 	filteredUpdates := make(chan netlink.LinkUpdate, 10)
 	filteredRouteUpdates := make(chan netlink.RouteUpdate, 10)
-	go FilterUpdates(context.Background(), filteredRouteUpdates, routeUpdates, filteredUpdates, updates)
+	filteredNeighUpdates := make(chan netlink.NeighUpdate, 10)
+	go FilterUpdates(context.Background(),
+		filteredRouteUpdates, routeUpdates,
+		filteredUpdates, updates,
+		filteredNeighUpdates, neighUpdates,
+	)
 	log.Info("Subscribed to netlink updates.")
 
 	// Start of day, do a resync to notify all our existing interfaces.  We also do periodic
@@ -126,6 +142,7 @@ readLoop:
 		log.WithFields(log.Fields{
 			"updates":      filteredUpdates,
 			"routeUpdates": filteredRouteUpdates,
+			"neighUpdates": filteredNeighUpdates,
 			"resyncC":      m.resyncC,
 		}).Debug("About to select on possible triggers")
 		select {
@@ -143,6 +160,13 @@ readLoop:
 				break readLoop
 			}
 			m.handleNetlinkRouteUpdate(routeUpdate)
+		case update, ok := <-filteredNeighUpdates:
+			log.WithField("update", update).Debug("Neighbor update")
+			if !ok {
+				log.Warn("Failed to read a neighbor update")
+				break readLoop
+			}
+			m.handleNetlinkNeighUpdate(update)
 		case <-m.resyncC:
 			log.Debug("Resync trigger")
 			err := m.resync()
@@ -222,6 +246,15 @@ func (m *InterfaceMonitor) handleNetlinkRouteUpdate(update netlink.RouteUpdate) 
 			m.notifyIfaceAddrs(ifIndex)
 		}
 	}
+}
+
+func (m *InterfaceMonitor) handleNetlinkRouteUpdate(update netlink.NeighUpdate) {
+	m.NeighAddrCallback(NeighAddr{
+		Exists:  update.Type == unix.RTM_NEWNEIGH,
+		IfIndex: update.Neigh.LinkIndex,
+		IP:      update.Neigh.IP,
+		HWAddr:  update.Neigh.HardwareAddr,
+	})
 }
 
 func (m *InterfaceMonitor) notifyIfaceAddrs(ifIndex int) {
