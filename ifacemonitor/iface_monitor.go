@@ -16,6 +16,7 @@ package ifacemonitor
 
 import (
 	"context"
+	"net"
 	"regexp"
 	"syscall"
 	"time"
@@ -44,7 +45,13 @@ const (
 	StateDown    = "down"
 )
 
-type InterfaceStateCallback func(ifaceName string, ifaceState State, ifIndex int)
+type IfaceState struct {
+	State        State
+	IfIndex      int
+	HardwareAddr net.HardwareAddr
+}
+
+type InterfaceStateCallback func(ifaceName string, state IfaceState)
 type AddrStateCallback func(ifaceName string, addrs set.Set)
 
 type Config struct {
@@ -296,11 +303,19 @@ func (m *InterfaceMonitor) storeAndNotifyLinkInner(ifaceExists bool, ifaceName s
 	if ifaceIsUp && !ifaceWasUp {
 		logCxt.Debug("Interface now up")
 		m.upIfaces[ifaceName] = ifIndex
-		m.StateCallback(ifaceName, StateUp, ifIndex)
+		m.StateCallback(ifaceName, IfaceState{
+			State:        StateUp,
+			IfIndex:      ifIndex,
+			HardwareAddr: attrs.HardwareAddr,
+		})
 	} else if ifaceWasUp && !ifaceIsUp {
 		logCxt.Debug("Interface now down")
 		delete(m.upIfaces, ifaceName)
-		m.StateCallback(ifaceName, StateDown, oldIfIndex)
+		m.StateCallback(ifaceName, IfaceState{
+			State:        StateDown,
+			IfIndex:      oldIfIndex,
+			HardwareAddr: attrs.HardwareAddr,
+		})
 	} else {
 		logCxt.WithField("ifaceIsUp", ifaceIsUp).Debug("Nothing to notify")
 	}
@@ -362,7 +377,11 @@ func (m *InterfaceMonitor) resync() error {
 			continue
 		}
 		log.WithField("ifaceName", name).Info("Spotted interface removal on resync.")
-		m.StateCallback(name, StateDown, ifIndex)
+		m.StateCallback(name, IfaceState{
+			State:        StateDown,
+			IfIndex:      ifIndex,
+			HardwareAddr: nil, // XXX we can plumb it here is we ever need it on removal.
+		})
 		m.AddrCallback(name, nil)
 		delete(m.upIfaces, name)
 		delete(m.ifaceAddrs, ifIndex)
