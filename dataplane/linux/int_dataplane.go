@@ -295,6 +295,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		// We default the values even if the encap is not enabled, in order to match behavior
 		// from earlier versions of Calico. However, they MTU will only be considered for allocation
 		// to pod interfaces if the encap is enabled.
+		log.WithField("mtu", mtu).Info("Detected host MTU.")
 		config.hostMTU = mtu
 		if config.IPIPMTU == 0 {
 			log.Debug("Defaulting IPIP MTU based on host")
@@ -789,8 +790,10 @@ func findHostMTU(matchRegex *regexp.Regexp) (int, error) {
 
 	// Iterate through them, keeping track of the lowest MTU.
 	smallest := 0
+	var names []string
 	for _, l := range links {
 		// Skip links that we know are not external interfaces.
+		names = append(names, l.Attrs().Name)
 		fields := log.Fields{"mtu": l.Attrs().MTU, "name": l.Attrs().Name}
 		if matchRegex == nil || !matchRegex.MatchString(l.Attrs().Name) {
 			log.WithFields(fields).Debug("Skipping interface for MTU detection")
@@ -801,6 +804,17 @@ func findHostMTU(matchRegex *regexp.Regexp) (int, error) {
 			smallest = l.Attrs().MTU
 		}
 	}
+
+	if smallest == 0 {
+		pattern := "<nil>"
+		if matchRegex != nil {
+			pattern = matchRegex.String()
+		}
+		return 0, fmt.Errorf("no host interfaces matched the MTU detection interface pattern; " +
+			"set MTUIfacePattern to match (only) your host's data interfaces (interface names: %v; pattern: %v)",
+			names, pattern)
+	}
+
 	return smallest, nil
 }
 
