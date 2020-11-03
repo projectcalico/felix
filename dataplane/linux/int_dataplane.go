@@ -1357,60 +1357,67 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 		}
 	}
 
+	// Process the message we received, then opportunistically process any other
+	// pending messages.
+	processBatch := func(first interface{}, pollFn func() interface{}, processFn func(interface{})) {
+		batchSize := 1
+		processFn(first)
+		for i := 0; i < msgPeekLimit; i++ {
+			next := pollFn()
+			if next == nil {
+				break
+			}
+			processFn(next)
+			batchSize++
+		}
+		d.dataplaneNeedsSync = true
+		summaryBatchSize.Observe(float64(batchSize))
+	}
+
 	for {
 		select {
 		case msg := <-d.toDataplane:
-			// Process the message we received, then opportunistically process any other
-			// pending messages.
-			batchSize := 1
-			processMsgFromCalcGraph(msg)
-		msgLoop1:
-			for i := 0; i < msgPeekLimit; i++ {
-				select {
-				case msg := <-d.toDataplane:
-					processMsgFromCalcGraph(msg)
-					batchSize++
-				default:
-					// Channel blocked so we must be caught up.
-					break msgLoop1
-				}
-			}
-			d.dataplaneNeedsSync = true
-			summaryBatchSize.Observe(float64(batchSize))
-		case ifaceUpdate := <-d.ifaceUpdates:
-			// Process the message we received, then opportunistically process any other
-			// pending messages.
-			batchSize := 1
-			processIfaceUpdate(ifaceUpdate)
-		msgLoop2:
-			for i := 0; i < msgPeekLimit; i++ {
-				select {
-				case ifaceUpdate := <-d.ifaceUpdates:
-					processIfaceUpdate(ifaceUpdate)
-					batchSize++
-				default:
-					// Channel blocked so we must be caught up.
-					break msgLoop2
-				}
-			}
-			d.dataplaneNeedsSync = true
-			summaryIfaceBatchSize.Observe(float64(batchSize))
-		case ifaceAddrsUpdate := <-d.ifaceAddrUpdates:
-			batchSize := 1
-			processAddrsUpdate(ifaceAddrsUpdate)
-		msgLoop3:
-			for i := 0; i < msgPeekLimit; i++ {
-				select {
-				case ifaceAddrsUpdate := <-d.ifaceAddrUpdates:
-					processAddrsUpdate(ifaceAddrsUpdate)
-					batchSize++
-				default:
-					// Channel blocked so we must be caught up.
-					break msgLoop3
-				}
-			}
-			summaryAddrBatchSize.Observe(float64(batchSize))
-			d.dataplaneNeedsSync = true
+			processBatch(msg,
+				func() interface{} {
+					select {
+					case msg := <-d.toDataplane:
+						return msg
+					default:
+						return nil
+					}
+				},
+				func(i interface{}) {
+					processMsgFromCalcGraph(i)
+				},
+			)
+		case msg := <-d.ifaceUpdates:
+			processBatch(msg,
+				func() interface{} {
+					select {
+					case msg := <-d.ifaceUpdates:
+						return msg
+					default:
+						return nil
+					}
+				},
+				func(i interface{}) {
+					processIfaceUpdate(i.(*ifaceUpdate))
+				},
+			)
+		case msg := <-d.ifaceAddrUpdates:
+			processBatch(msg,
+				func() interface{} {
+					select {
+					case msg := <-d.ifaceAddrUpdates:
+						return msg
+					default:
+						return nil
+					}
+				},
+				func(i interface{}) {
+					processAddrsUpdate(i.(*ifaceAddrsUpdate))
+				},
+			)
 		case <-ipSetsRefreshC:
 			log.Debug("Refreshing IP sets state")
 			d.forceIPSetsRefresh = true
