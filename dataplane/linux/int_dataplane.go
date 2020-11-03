@@ -801,6 +801,13 @@ func findHostMTU(matchRegex *regexp.Regexp) (int, error) {
 			smallest = l.Attrs().MTU
 		}
 	}
+
+	if smallest == 0 {
+		// We failed to find a usable interface. Default the MTU of the host
+		// to 1460 - the smallest among common cloud providers.
+		log.Warn("Failed to auto-detect host MTU, assuming 1460")
+		return 1460, nil
+	}
 	return smallest, nil
 }
 
