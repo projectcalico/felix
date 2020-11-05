@@ -36,6 +36,7 @@ type netlinkStub interface {
 	) error
 	LinkList() ([]netlink.Link, error)
 	ListLocalRoutes(link netlink.Link, family int) ([]netlink.Route, error)
+	ListNeighs() ([]netlink.Neigh, error)
 }
 
 type State string
@@ -52,7 +53,7 @@ type IfaceState struct {
 	HardwareAddr net.HardwareAddr
 }
 
-type NeighAddr struct {
+type Neigh struct {
 	Exists  bool
 	IfIndex int
 	IP      net.IP
@@ -61,7 +62,7 @@ type NeighAddr struct {
 
 type InterfaceStateCallback func(ifaceName string, state IfaceState)
 type AddrStateCallback func(ifaceName string, addrs set.Set)
-type NeighAddrCallback func(neigh NeighAddr)
+type NeighCallback func(neigh Neigh)
 
 type Config struct {
 	// InterfaceExcludes is a list of interface names that we don't want callbacks for.
@@ -72,14 +73,14 @@ type Config struct {
 type InterfaceMonitor struct {
 	Config
 
-	netlinkStub      netlinkStub
-	resyncC          <-chan time.Time
-	upIfaces         map[string]int // Map from interface name to index.
-	StateCallback    InterfaceStateCallback
-	AddrCallback     AddrStateCallback
-	NeighAddrCallbak NeighAddrCallback
-	ifaceName        map[int]string
-	ifaceAddrs       map[int]set.Set
+	netlinkStub   netlinkStub
+	resyncC       <-chan time.Time
+	upIfaces      map[string]int // Map from interface name to index.
+	StateCallback InterfaceStateCallback
+	AddrCallback  AddrStateCallback
+	NeighCallback NeighCallback
+	ifaceName     map[int]string
+	ifaceAddrs    map[int]set.Set
 }
 
 func New(config Config) *InterfaceMonitor {
@@ -248,9 +249,9 @@ func (m *InterfaceMonitor) handleNetlinkRouteUpdate(update netlink.RouteUpdate) 
 	}
 }
 
-func (m *InterfaceMonitor) handleNetlinkRouteUpdate(update netlink.NeighUpdate) {
-	m.NeighAddrCallback(NeighAddr{
-		Exists:  update.Type == unix.RTM_NEWNEIGH,
+func (m *InterfaceMonitor) handleNetlinkNeighUpdate(update netlink.NeighUpdate) {
+	m.NeighCallback(Neigh{
+		Exists:  update.Type == unix.RTM_NEWNEIGH && neighValid(update.Neigh),
 		IfIndex: update.Neigh.LinkIndex,
 		IP:      update.Neigh.IP,
 		HWAddr:  update.Neigh.HardwareAddr,
@@ -420,6 +421,30 @@ func (m *InterfaceMonitor) resync() error {
 		delete(m.ifaceAddrs, ifIndex)
 		delete(m.ifaceName, ifIndex)
 	}
+
+	neighs, err := m.netlinkStub.ListNeighs()
+	if err != nil {
+		log.WithError(err).Warn("Netlink listing neigbours failed.")
+		return err
+	}
+	for _, neigh := range neighs {
+		m.NeighCallback(Neigh{
+			Exists:  neighValid(neigh),
+			IfIndex: neigh.LinkIndex,
+			IP:      neigh.IP,
+			HWAddr:  neigh.HardwareAddr,
+		})
+	}
+
 	log.Debug("Resync complete")
 	return nil
+}
+
+func neighValid(n netlink.Neigh) bool {
+	switch n.State {
+	case netlink.NUD_REACHABLE, netlink.NUD_STALE, netlink.NUD_NOARP, netlink.NUD_PERMANENT:
+		return true
+	}
+
+	return false
 }

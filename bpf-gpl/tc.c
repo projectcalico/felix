@@ -211,8 +211,15 @@ static CALI_BPF_INLINE int forward_or_drop(struct __sk_buff *skb,
 		struct arp_value *arpv;
 		__u32 iface = state->ct_result.ifindex_fwd;
 
-		arpv = cali_v4_arp_lookup_elem(&state->ip_dst);
+		struct arp_key arpk = {
+			.ip = state->ip_dst,
+			.ifindex = iface,
+		};
+
+		arpv = cali_v4_arp_lookup_elem(&arpk);
 		if (!arpv) {
+			CALI_DEBUG("ARP lookup failed for %x dev %d\n",
+					be32_to_host(state->ip_dst), iface);
 			goto skip_redir_ifindex;
 		}
 
@@ -475,10 +482,6 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	}
 
 	ip_header = skb_iphdr(skb);
-	/* N.B. we need to grab the eth header here, instead of in the vxlan
-	 * decap branch, to make verifier happy.
-	 */
-	struct ethhdr *eth = (void *)(long)skb->data;
 
 	if (dnat_should_decap() && is_vxlan_tunnel(ip_header)) {
 		struct udphdr *udp_header = (void*)(ip_header+1);
@@ -489,12 +492,6 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 				vxlan_size_ok(skb, udp_header) &&
 				vxlan_vni_is_valid(skb, udp_header) &&
 				vxlan_vni(skb, udp_header) == CALI_VXLAN_VNI) {
-
-			/* We update the map straight with the packet data, eth header is
-			 * dst:src but the value is src:dst so it flips it automatically
-			 * when we use it on xmit.
-			 */
-			cali_v4_arp_update_elem(&ip_header->saddr, eth, 0);
 
 			state.tun_ip = ip_header->saddr;
 			CALI_DEBUG("vxlan decap\n");

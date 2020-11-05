@@ -234,6 +234,7 @@ type InternalDataplane struct {
 	ifaceMonitor     *ifacemonitor.InterfaceMonitor
 	ifaceUpdates     chan *ifaceUpdate
 	ifaceAddrUpdates chan *ifaceAddrsUpdate
+	neighUpdates     chan *neighUpdate
 
 	endpointStatusCombiner *endpointStatusCombiner
 
@@ -321,12 +322,14 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		ifaceMonitor:     ifacemonitor.New(config.IfaceMonitorConfig),
 		ifaceUpdates:     make(chan *ifaceUpdate, 100),
 		ifaceAddrUpdates: make(chan *ifaceAddrsUpdate, 100),
+		neighUpdates:     make(chan *neighUpdate, 100),
 		config:           config,
 		applyThrottle:    throttle.New(10),
 	}
 	dp.applyThrottle.Refill() // Allow the first apply() immediately.
 	dp.ifaceMonitor.StateCallback = dp.onIfaceStateChange
 	dp.ifaceMonitor.AddrCallback = dp.onIfaceAddrsChange
+	dp.ifaceMonitor.NeighCallback = dp.onNeighChange
 
 	backendMode := iptables.DetectBackend(config.LookPathOverride, iptables.NewRealCmd, config.IptablesBackend)
 
@@ -538,18 +541,21 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		bpfRTMgr := newBPFRouteManager(config.Hostname, bpfMapContext)
 		dp.RegisterManager(bpfRTMgr)
 
+		arpMap := arp.Map(bpfMapContext)
+		err := arpMap.EnsureExists()
+		if err != nil {
+			log.WithError(err).Panic("Failed to create ARP BPF map.")
+		}
+
+		bpfARPMgr := newBPFARPManager(arpMap)
+		dp.RegisterManager(bpfARPMgr)
+
 		// Forwarding into a tunnel seems to fail silently, disable FIB lookup if tunnel is enabled for now.
 		fibLookupEnabled := !config.RulesConfig.IPIPEnabled && !config.RulesConfig.VXLANEnabled
 		stateMap := state.Map(bpfMapContext)
-		err := stateMap.EnsureExists()
+		err = stateMap.EnsureExists()
 		if err != nil {
 			log.WithError(err).Panic("Failed to create state BPF map.")
-		}
-
-		arpMap := arp.Map(bpfMapContext)
-		err = arpMap.EnsureExists()
-		if err != nil {
-			log.WithError(err).Panic("Failed to create ARP BPF map.")
 		}
 
 		workloadIfaceRegex := regexp.MustCompile(strings.Join(interfaceRegexes, "|"))
@@ -980,6 +986,19 @@ func (d *InternalDataplane) onIfaceAddrsChange(ifaceName string, addrs set.Set) 
 type ifaceAddrsUpdate struct {
 	Name  string
 	Addrs set.Set
+}
+
+type neighUpdate = ifacemonitor.Neigh
+
+func (d *InternalDataplane) onNeighChange(neigh ifacemonitor.Neigh) {
+	log.WithFields(log.Fields{
+		"new":     neigh.Exists,
+		"ifindex": neigh.IfIndex,
+		"IP":      neigh.IP,
+		"HWAddr":  neigh.HWAddr,
+	}).Info("Linux neighbour changed.")
+
+	d.neighUpdates <- &neigh
 }
 
 func (d *InternalDataplane) SendMessage(msg interface{}) error {
@@ -1416,6 +1435,22 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 				},
 				func(i interface{}) {
 					processAddrsUpdate(i.(*ifaceAddrsUpdate))
+				},
+			)
+		case msg := <-d.neighUpdates:
+			processBatch(msg,
+				func() interface{} {
+					select {
+					case msg := <-d.neighUpdates:
+						return msg
+					default:
+						return nil
+					}
+				},
+				func(i interface{}) {
+					for _, mgr := range d.allManagers {
+						mgr.OnUpdate(i)
+					}
 				},
 			)
 		case <-ipSetsRefreshC:
