@@ -51,6 +51,7 @@ func WithTimeShim(t timeshim.Interface) UpdateFilterOp {
 func FilterUpdates(ctx context.Context,
 	addrOutC chan<- netlink.RouteUpdate, routeInC <-chan netlink.RouteUpdate,
 	linkOutC chan<- netlink.LinkUpdate, linkInC <-chan netlink.LinkUpdate,
+	neighOutC chan<- netlink.NeighUpdate, neighInC <-chan netlink.NeighUpdate,
 	options ...UpdateFilterOp) {
 
 	u := &updateFilter{
@@ -154,6 +155,9 @@ mainLoop:
 			}
 			upds = append(upds, timestampedUpd{ReadyAt: readyToSendTime, Update: routeUpd})
 			updatesByIfaceIdx[idx] = upds
+		case neighUpd := <-neighInC:
+			// XXX hook it into filtering
+			neighOutC <- neighUpd
 		case <-timerC:
 			logrus.Debug("FilterUpdates: timer popped.")
 			timerC = nil

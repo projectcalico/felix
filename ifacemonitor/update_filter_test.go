@@ -230,10 +230,15 @@ func setUpFilterTest(t *testing.T) (*filterUpdatesHarness, context.CancelFunc) {
 
 	linkIn := make(chan netlink.LinkUpdate, 10)
 	routeIn := make(chan netlink.RouteUpdate, 10)
+	neighIn := make(chan netlink.NeighUpdate, 10)
 	linkOut := make(chan netlink.LinkUpdate, 10)
 	routeOut := make(chan netlink.RouteUpdate, 10)
+	neighOut := make(chan netlink.NeighUpdate, 10)
 
-	go ifacemonitor.FilterUpdates(ctx, routeOut, routeIn, linkOut, linkIn, ifacemonitor.WithTimeShim(mockTime))
+	go ifacemonitor.FilterUpdates(ctx,
+		routeOut, routeIn, linkOut, linkIn, neighOut, neighIn,
+		ifacemonitor.WithTimeShim(mockTime))
+
 	return &filterUpdatesHarness{
 		Ctx:    ctx,
 		Cancel: cancel,

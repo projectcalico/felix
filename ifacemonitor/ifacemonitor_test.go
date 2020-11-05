@@ -16,6 +16,7 @@ package ifacemonitor_test
 
 import (
 	"fmt"
+	"net"
 	"regexp"
 	"strings"
 	"sync"
@@ -41,13 +42,20 @@ type linkModel struct {
 	addrs set.Set
 }
 
+type neighKey struct {
+	ip      string
+	ifindex int
+}
+
 type netlinkTest struct {
 	linkUpdates    chan netlink.LinkUpdate
 	routeUpdates   chan netlink.RouteUpdate
+	neighUpdates   chan netlink.NeighUpdate
 	userSubscribed chan int
 
 	nextIndex int
 	links     map[string]linkModel
+	neighs    map[neighKey]netlink.Neigh
 
 	// Mutex protecting the two items above.  Note that in many cases we unlock as soon as
 	// possible after we've read and/or written that data - instead of using defer - because we
@@ -68,8 +76,9 @@ type linkUpdate struct {
 }
 
 type mockDataplane struct {
-	linkC chan linkUpdate
-	addrC chan addrState
+	linkC  chan linkUpdate
+	addrC  chan addrState
+	neighC chan ifacemonitor.Neigh
 }
 
 func (nl *netlinkTest) addLink(name string) {
@@ -222,9 +231,11 @@ func (nl *netlinkTest) signalAddr(name string, addr string, exists bool) {
 func (nl *netlinkTest) Subscribe(
 	linkUpdates chan netlink.LinkUpdate,
 	routeUpdates chan netlink.RouteUpdate,
+	neighUpdates chan netlink.NeighUpdate,
 ) error {
 	nl.linkUpdates = linkUpdates
 	nl.routeUpdates = routeUpdates
+	nl.neighUpdates = neighUpdates
 	nl.userSubscribed <- 1
 	return nil
 }
@@ -315,12 +326,76 @@ func (nl *netlinkTest) AddrList(link netlink.Link, family int) ([]netlink.Addr, 
 	return addrs, nil
 }
 
-func (dp *mockDataplane) linkStateCallback(ifaceName string, ifaceState ifacemonitor.State, idx int) {
-	log.WithFields(log.Fields{"name": ifaceName, "state": ifaceState}).Info("CALLBACK LINK")
+func (nl *netlinkTest) ListNeighs() ([]netlink.Neigh, error) {
+	nl.linksMutex.Lock()
+	defer nl.linksMutex.Unlock()
+
+	ret := make([]netlink.Neigh, 0, len(nl.neighs))
+
+	for _, n := range nl.neighs {
+		ret = append(ret, n)
+	}
+
+	return ret, nil
+}
+
+func (nl *netlinkTest) addNeighNoSignal(n netlink.Neigh) {
+	nl.linksMutex.Lock()
+	defer nl.linksMutex.Unlock()
+
+	if nl.neighs == nil {
+		nl.neighs = make(map[neighKey]netlink.Neigh)
+	}
+	nl.neighs[neighKey{ip: n.IP.String(), ifindex: n.LinkIndex}] = n
+}
+
+func (nl *netlinkTest) addNeigh(n netlink.Neigh) {
+	nl.addNeighNoSignal(n)
+	nl.signalNeigh(n)
+}
+
+func (nl *netlinkTest) delNeighNoSignal(ip net.IP, ifindex int) {
+	nl.linksMutex.Lock()
+	defer nl.linksMutex.Unlock()
+
+	if nl.neighs != nil {
+		delete(nl.neighs, neighKey{ip: ip.String(), ifindex: ifindex})
+	}
+}
+
+func (nl *netlinkTest) delNeigh(ip net.IP, ifindex int) {
+	nl.delNeighNoSignal(ip, ifindex)
+	nl.signalNeigh(netlink.Neigh{
+		IP:        ip,
+		LinkIndex: ifindex,
+	})
+}
+
+func (nl *netlinkTest) signalNeigh(n netlink.Neigh) {
+	nl.linksMutex.Lock()
+	_, ok := nl.neighs[neighKey{ip: n.IP.String(), ifindex: n.LinkIndex}]
+	nl.linksMutex.Unlock()
+
+	upd := netlink.NeighUpdate{
+		Type:  unix.RTM_NEWNEIGH,
+		Neigh: n,
+	}
+
+	if !ok {
+		upd.Type = unix.RTM_DELNEIGH
+	}
+
+	log.Info("Test code signaling a neigh update")
+	nl.neighUpdates <- upd
+	log.Infof("Test code signaled a neigh update %+v", n)
+}
+
+func (dp *mockDataplane) linkStateCallback(ifaceName string, state ifacemonitor.IfaceState) {
+	log.WithFields(log.Fields{"name": ifaceName, "state": state.State}).Info("CALLBACK LINK")
 	dp.linkC <- linkUpdate{
 		name:  ifaceName,
-		state: ifaceState,
-		index: idx,
+		state: state.State,
+		index: state.IfIndex,
 	}
 	log.Info("mock dataplane reported link callback")
 }
@@ -383,6 +458,17 @@ func (dp *mockDataplane) expectAddrStateCb(ifaceName string, addr string, presen
 	}
 }
 
+func (dp *mockDataplane) neighCallback(neigh ifacemonitor.Neigh) {
+	log.WithField("neigh", neigh).Info("neighCallback")
+	dp.neighC <- neigh
+}
+
+func (dp *mockDataplane) expectNeighCb(n ifacemonitor.Neigh) {
+	var cbv ifacemonitor.Neigh
+	Eventually(dp.neighC).Should(Receive(&cbv))
+	ExpectWithOffset(1, cbv).To(Equal(n), "Received unexpected neigh callback value.")
+}
+
 var _ = Describe("ifacemonitor", func() {
 	var nl *netlinkTest
 	var resyncC chan time.Time
@@ -416,11 +502,13 @@ var _ = Describe("ifacemonitor", func() {
 		// expectAddrStateCb takes care to check that we eventually get the callback that we
 		// expect.
 		dp = &mockDataplane{
-			linkC: make(chan linkUpdate, 1),
-			addrC: make(chan addrState, 2),
+			linkC:  make(chan linkUpdate, 1),
+			addrC:  make(chan addrState, 2),
+			neighC: make(chan ifacemonitor.Neigh, 1),
 		}
 		im.StateCallback = dp.linkStateCallback
 		im.AddrCallback = dp.addrStateCallback
+		im.NeighCallback = dp.neighCallback
 
 		// Start the monitor running, and wait until it has subscribed to our test netlink
 		// stub.
@@ -534,6 +622,56 @@ var _ = Describe("ifacemonitor", func() {
 		// ready to read it.)
 		resyncC <- time.Time{}
 		resyncC <- time.Time{}
+
+		nl.addNeighNoSignal(netlink.Neigh{
+			LinkIndex:    5,
+			State:        netlink.NUD_REACHABLE,
+			IP:           net.IPv4(1, 2, 3, 4),
+			HardwareAddr: net.HardwareAddr([]byte{1, 2, 3, 4, 5, 6}),
+		})
+
+		resyncC <- time.Time{}
+		dp.expectNeighCb(ifacemonitor.Neigh{
+			Exists:  true,
+			IfIndex: 5,
+			IP:      net.IPv4(1, 2, 3, 4),
+			HWAddr:  net.HardwareAddr([]byte{1, 2, 3, 4, 5, 6}),
+		})
+
+		// The same neighbour showing an issue
+		nl.addNeigh(netlink.Neigh{
+			State: netlink.NUD_INCOMPLETE,
+			IP:    net.IPv4(1, 2, 3, 4),
+		})
+
+		// Results in the entry being removed
+		dp.expectNeighCb(ifacemonitor.Neigh{
+			Exists: false,
+			IP:     net.IPv4(1, 2, 3, 4),
+		})
+
+		nl.addNeigh(netlink.Neigh{
+			LinkIndex:    123,
+			State:        netlink.NUD_REACHABLE,
+			IP:           net.IPv4(4, 3, 2, 1),
+			HardwareAddr: net.HardwareAddr([]byte{0, 1, 0, 1, 0, 1}),
+		})
+
+		dp.expectNeighCb(ifacemonitor.Neigh{
+			Exists:  true,
+			IfIndex: 123,
+			IP:      net.IPv4(4, 3, 2, 1),
+			HWAddr:  net.HardwareAddr([]byte{0, 1, 0, 1, 0, 1}),
+		})
+
+		// Delete the neigh
+		nl.delNeigh(net.IPv4(4, 3, 2, 1), 123)
+
+		dp.expectNeighCb(ifacemonitor.Neigh{
+			Exists:  false,
+			IfIndex: 123,
+			IP:      net.IPv4(4, 3, 2, 1),
+		})
 	})
 
 	It("should handle an interface rename", func() {

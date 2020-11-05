@@ -44,6 +44,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/arp"
 	"github.com/projectcalico/felix/bpf/conntrack"
 	bpfipsets "github.com/projectcalico/felix/bpf/ipsets"
 	"github.com/projectcalico/felix/bpf/nat"
@@ -233,6 +234,7 @@ type InternalDataplane struct {
 	ifaceMonitor     *ifacemonitor.InterfaceMonitor
 	ifaceUpdates     chan *ifaceUpdate
 	ifaceAddrUpdates chan *ifaceAddrsUpdate
+	neighUpdates     chan *neighUpdate
 
 	endpointStatusCombiner *endpointStatusCombiner
 
@@ -320,12 +322,14 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		ifaceMonitor:     ifacemonitor.New(config.IfaceMonitorConfig),
 		ifaceUpdates:     make(chan *ifaceUpdate, 100),
 		ifaceAddrUpdates: make(chan *ifaceAddrsUpdate, 100),
+		neighUpdates:     make(chan *neighUpdate, 100),
 		config:           config,
 		applyThrottle:    throttle.New(10),
 	}
 	dp.applyThrottle.Refill() // Allow the first apply() immediately.
 	dp.ifaceMonitor.StateCallback = dp.onIfaceStateChange
 	dp.ifaceMonitor.AddrCallback = dp.onIfaceAddrsChange
+	dp.ifaceMonitor.NeighCallback = dp.onNeighChange
 
 	backendMode := iptables.DetectBackend(config.LookPathOverride, iptables.NewRealCmd, config.IptablesBackend)
 
@@ -537,13 +541,23 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		bpfRTMgr := newBPFRouteManager(config.Hostname, bpfMapContext)
 		dp.RegisterManager(bpfRTMgr)
 
+		arpMap := arp.Map(bpfMapContext)
+		err := arpMap.EnsureExists()
+		if err != nil {
+			log.WithError(err).Panic("Failed to create ARP BPF map.")
+		}
+
+		bpfARPMgr := newBPFARPManager(arpMap)
+		dp.RegisterManager(bpfARPMgr)
+
 		// Forwarding into a tunnel seems to fail silently, disable FIB lookup if tunnel is enabled for now.
 		fibLookupEnabled := !config.RulesConfig.IPIPEnabled && !config.RulesConfig.VXLANEnabled
 		stateMap := state.Map(bpfMapContext)
-		err := stateMap.EnsureExists()
+		err = stateMap.EnsureExists()
 		if err != nil {
 			log.WithError(err).Panic("Failed to create state BPF map.")
 		}
+
 		workloadIfaceRegex := regexp.MustCompile(strings.Join(interfaceRegexes, "|"))
 		dp.RegisterManager(newBPFEndpointManager(
 			config.BPFLogLevel,
@@ -919,23 +933,26 @@ func (d *InternalDataplane) Start() {
 }
 
 // onIfaceStateChange is our interface monitor callback.  It gets called from the monitor's thread.
-func (d *InternalDataplane) onIfaceStateChange(ifaceName string, state ifacemonitor.State, ifIndex int) {
+func (d *InternalDataplane) onIfaceStateChange(ifaceName string, state ifacemonitor.IfaceState) {
 	log.WithFields(log.Fields{
 		"ifaceName": ifaceName,
-		"ifIndex":   ifIndex,
-		"state":     state,
+		"ifIndex":   state.IfIndex,
+		"state":     state.State,
+		"hwaddr":    state.HardwareAddr,
 	}).Info("Linux interface state changed.")
 	d.ifaceUpdates <- &ifaceUpdate{
-		Name:  ifaceName,
-		State: state,
-		Index: ifIndex,
+		Name:         ifaceName,
+		State:        state.State,
+		Index:        state.IfIndex,
+		HardwareAddr: state.HardwareAddr,
 	}
 }
 
 type ifaceUpdate struct {
-	Name  string
-	State ifacemonitor.State
-	Index int
+	Name         string
+	State        ifacemonitor.State
+	Index        int
+	HardwareAddr net.HardwareAddr
 }
 
 // Check if current felix ipvs config is correct when felix gets an kube-ipvs0 interface update.
@@ -969,6 +986,19 @@ func (d *InternalDataplane) onIfaceAddrsChange(ifaceName string, addrs set.Set) 
 type ifaceAddrsUpdate struct {
 	Name  string
 	Addrs set.Set
+}
+
+type neighUpdate = ifacemonitor.Neigh
+
+func (d *InternalDataplane) onNeighChange(neigh ifacemonitor.Neigh) {
+	log.WithFields(log.Fields{
+		"new":     neigh.Exists,
+		"ifindex": neigh.IfIndex,
+		"IP":      neigh.IP,
+		"HWAddr":  neigh.HWAddr,
+	}).Info("Linux neighbour changed.")
+
+	d.neighUpdates <- &neigh
 }
 
 func (d *InternalDataplane) SendMessage(msg interface{}) error {
@@ -1346,60 +1376,83 @@ func (d *InternalDataplane) loopUpdatingDataplane() {
 		}
 	}
 
+	// Process the message we received, then opportunistically process any other
+	// pending messages.
+	processBatch := func(first interface{}, pollFn func() interface{}, processFn func(interface{})) {
+		batchSize := 1
+		processFn(first)
+		for i := 0; i < msgPeekLimit; i++ {
+			next := pollFn()
+			if next == nil {
+				break
+			}
+			processFn(next)
+			batchSize++
+		}
+		d.dataplaneNeedsSync = true
+		summaryBatchSize.Observe(float64(batchSize))
+	}
+
 	for {
 		select {
 		case msg := <-d.toDataplane:
-			// Process the message we received, then opportunistically process any other
-			// pending messages.
-			batchSize := 1
-			processMsgFromCalcGraph(msg)
-		msgLoop1:
-			for i := 0; i < msgPeekLimit; i++ {
-				select {
-				case msg := <-d.toDataplane:
-					processMsgFromCalcGraph(msg)
-					batchSize++
-				default:
-					// Channel blocked so we must be caught up.
-					break msgLoop1
-				}
-			}
-			d.dataplaneNeedsSync = true
-			summaryBatchSize.Observe(float64(batchSize))
-		case ifaceUpdate := <-d.ifaceUpdates:
-			// Process the message we received, then opportunistically process any other
-			// pending messages.
-			batchSize := 1
-			processIfaceUpdate(ifaceUpdate)
-		msgLoop2:
-			for i := 0; i < msgPeekLimit; i++ {
-				select {
-				case ifaceUpdate := <-d.ifaceUpdates:
-					processIfaceUpdate(ifaceUpdate)
-					batchSize++
-				default:
-					// Channel blocked so we must be caught up.
-					break msgLoop2
-				}
-			}
-			d.dataplaneNeedsSync = true
-			summaryIfaceBatchSize.Observe(float64(batchSize))
-		case ifaceAddrsUpdate := <-d.ifaceAddrUpdates:
-			batchSize := 1
-			processAddrsUpdate(ifaceAddrsUpdate)
-		msgLoop3:
-			for i := 0; i < msgPeekLimit; i++ {
-				select {
-				case ifaceAddrsUpdate := <-d.ifaceAddrUpdates:
-					processAddrsUpdate(ifaceAddrsUpdate)
-					batchSize++
-				default:
-					// Channel blocked so we must be caught up.
-					break msgLoop3
-				}
-			}
-			summaryAddrBatchSize.Observe(float64(batchSize))
-			d.dataplaneNeedsSync = true
+			processBatch(msg,
+				func() interface{} {
+					select {
+					case msg := <-d.toDataplane:
+						return msg
+					default:
+						return nil
+					}
+				},
+				func(i interface{}) {
+					processMsgFromCalcGraph(i)
+				},
+			)
+		case msg := <-d.ifaceUpdates:
+			processBatch(msg,
+				func() interface{} {
+					select {
+					case msg := <-d.ifaceUpdates:
+						return msg
+					default:
+						return nil
+					}
+				},
+				func(i interface{}) {
+					processIfaceUpdate(i.(*ifaceUpdate))
+				},
+			)
+		case msg := <-d.ifaceAddrUpdates:
+			processBatch(msg,
+				func() interface{} {
+					select {
+					case msg := <-d.ifaceAddrUpdates:
+						return msg
+					default:
+						return nil
+					}
+				},
+				func(i interface{}) {
+					processAddrsUpdate(i.(*ifaceAddrsUpdate))
+				},
+			)
+		case msg := <-d.neighUpdates:
+			processBatch(msg,
+				func() interface{} {
+					select {
+					case msg := <-d.neighUpdates:
+						return msg
+					default:
+						return nil
+					}
+				},
+				func(i interface{}) {
+					for _, mgr := range d.allManagers {
+						mgr.OnUpdate(i)
+					}
+				},
+			)
 		case <-ipSetsRefreshC:
 			log.Debug("Refreshing IP sets state")
 			d.forceIPSetsRefresh = true
