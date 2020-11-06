@@ -90,7 +90,7 @@ func (m *bpfARPManager) CompleteDeferredWork() error {
 		}
 
 		if err != nil {
-			log.WithError(err).Warnf("Failed to %s ARP for IP %s", op, n.IP)
+			log.WithError(err).Warnf("Failed to %s ARP for IP dev %d%s", op, n.IP, n.Ifindex)
 		} else {
 			log.Debugf("ARP %s for IP %s iface %d dstMAC %s", op, n.IP, n.IfIndex, n.HWAddr)
 		}

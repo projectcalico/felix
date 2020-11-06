@@ -71,6 +71,59 @@ func FilterUpdates(ctx context.Context,
 
 	updatesByIfaceIdx := map[int][]timestampedUpd{}
 
+	dispatch := func(update interface{}) {
+		switch u := update.(type) {
+		case netlink.RouteUpdate:
+			addrOutC <- u
+		case netlink.LinkUpdate:
+			linkOutC <- u
+		case netlink.NeighUpdate:
+			neighOutC <- u
+		}
+	}
+
+	delayAlgorithm := func(idx int, update interface{},
+		mayFlap func(interface{}) bool, removePrev func(timestampedUpd, interface{}) bool) {
+
+		oldUpds := updatesByIfaceIdx[idx]
+
+		var readyToSendTime time.Time
+		if !mayFlap(update) {
+			if len(oldUpds) == 0 {
+				// This is an add for a new IP and there's nothing else in the queue for this interface.
+				// Short circuit.  We care about flaps where IPs are temporarily removed so no need to
+				// delay an add.
+				logrus.Debug("FilterUpdates: add with empty queue, short circuit.")
+				dispatch(update)
+				return
+			}
+
+			// Else, there's something else in the queue, need to process the queue...
+			logrus.Debug("FilterUpdates: add with non-empty queue.")
+			// We don't actually need to delay the add itself so we don't set any delay here.  It will
+			// still be queued up behind other updates.
+			readyToSendTime = u.Time.Now()
+		} else {
+			// Got a delete, it might be a flap so queue the update.
+			// XXX				logrus.WithField("update", routeUpd.Dst).Debug("FilterUpdates: got address DEL")
+			readyToSendTime = u.Time.Now().Add(FlapDampingDelay)
+		}
+
+		// Coalesce updates for the same IP by squashing any previous updates for the same CIDR before
+		// we append this update to the queue.  We need to scan the whole queue because there may be
+		// updates for different IPs in flight.
+		upds := oldUpds[:0]
+		for _, upd := range oldUpds {
+			logrus.WithField("previous", upd).Debug("FilterUpdates: examining previous update.")
+			if removePrev(upd, update) {
+				continue
+			}
+			upds = append(upds, upd)
+		}
+		upds = append(upds, timestampedUpd{ReadyAt: readyToSendTime, Update: update})
+		updatesByIfaceIdx[idx] = upds
+	}
+
 mainLoop:
 	for {
 		select {
@@ -112,52 +165,42 @@ mainLoop:
 			}
 
 			idx := routeUpd.LinkIndex
-			oldUpds := updatesByIfaceIdx[idx]
 
-			var readyToSendTime time.Time
-			if routeUpd.Type == unix.RTM_NEWROUTE {
-				logrus.WithField("addr", routeUpd.Dst).Debug("FilterUpdates: got address ADD")
-				if len(oldUpds) == 0 {
-					// This is an add for a new IP and there's nothing else in the queue for this interface.
-					// Short circuit.  We care about flaps where IPs are temporarily removed so no need to
-					// delay an add.
-					logrus.Debug("FilterUpdates: add with empty queue, short circuit.")
-					addrOutC <- routeUpd
-					continue
-				}
-
-				// Else, there's something else in the queue, need to process the queue...
-				logrus.Debug("FilterUpdates: add with non-empty queue.")
-				// We don't actually need to delay the add itself so we don't set any delay here.  It will
-				// still be queued up behind other updates.
-				readyToSendTime = u.Time.Now()
-			} else {
-				// Got a delete, it might be a flap so queue the update.
-				logrus.WithField("addr", routeUpd.Dst).Debug("FilterUpdates: got address DEL")
-				readyToSendTime = u.Time.Now().Add(FlapDampingDelay)
-			}
-
-			// Coalesce updates for the same IP by squashing any previous updates for the same CIDR before
-			// we append this update to the queue.  We need to scan the whole queue because there may be
-			// updates for different IPs in flight.
-			upds := oldUpds[:0]
-			for _, upd := range oldUpds {
-				logrus.WithField("previous", upd).Debug("FilterUpdates: examining previous update.")
-				if oldAddrUpd, ok := upd.Update.(netlink.RouteUpdate); ok {
-					if ipNetsEqual(oldAddrUpd.Dst, routeUpd.Dst) {
-						// New update for the same IP, suppress the old update
-						logrus.WithField("address", oldAddrUpd.Dst.String()).Debug(
-							"Received update for same IP within a short time, squashed the old update.")
-						continue
+			delayAlgorithm(idx, routeUpd,
+				func(update interface{}) bool {
+					return update.(netlink.RouteUpdate).Type != unix.RTM_NEWROUTE
+				},
+				func(prev timestampedUpd, update interface{}) bool {
+					if oldAddrUpd, ok := prev.Update.(netlink.RouteUpdate); ok {
+						if ipNetsEqual(oldAddrUpd.Dst, update.(netlink.RouteUpdate).Dst) {
+							// New update for the same IP, suppress the old update
+							logrus.WithField("address", oldAddrUpd.Dst.String()).Debug(
+								"Received update for same IP within a short time, squashed the old update.")
+							return true
+						}
 					}
-				}
-				upds = append(upds, upd)
-			}
-			upds = append(upds, timestampedUpd{ReadyAt: readyToSendTime, Update: routeUpd})
-			updatesByIfaceIdx[idx] = upds
+					return false
+				},
+			)
 		case neighUpd := <-neighInC:
-			// XXX hook it into filtering
-			neighOutC <- neighUpd
+			idx := neighUpd.Neigh.LinkIndex
+
+			delayAlgorithm(idx, neighUpd,
+				func(update interface{}) bool {
+					return update.(netlink.NeighUpdate).Type != unix.RTM_NEWNEIGH
+				},
+				func(prev timestampedUpd, update interface{}) bool {
+					if old, ok := prev.Update.(netlink.NeighUpdate); ok {
+						if old.Neigh.IP.Equal(update.(netlink.NeighUpdate).IP) {
+							// New update for the same IP, suppress the old update
+							logrus.WithField("neigh", old.Neigh.IP.String()).Debug(
+								"Received update for same neighbour within a short time, squashed the old update.")
+							return true
+						}
+					}
+					return false
+				},
+			)
 		case <-timerC:
 			logrus.Debug("FilterUpdates: timer popped.")
 			timerC = nil
@@ -179,12 +222,7 @@ mainLoop:
 					// Either update is old enough to prevent flapping or it's an address being added.
 					// Ready to send...
 					logrus.WithField("update", firstUpd).Debug("FilterUpdates: update ready to send.")
-					switch u := firstUpd.Update.(type) {
-					case netlink.RouteUpdate:
-						addrOutC <- u
-					case netlink.LinkUpdate:
-						linkOutC <- u
-					}
+					dispatch(firstUpd.Update)
 					upds = upds[1:]
 				} else {
 					// Update is too new, figure out when it'll be safe to send it.
