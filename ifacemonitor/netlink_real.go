@@ -27,6 +27,7 @@ type netlinkReal struct {
 func (nl *netlinkReal) Subscribe(
 	linkUpdates chan netlink.LinkUpdate,
 	routeUpdates chan netlink.RouteUpdate,
+	neighUpdates chan netlink.NeighUpdate,
 ) error {
 	cancel := make(chan struct{})
 
@@ -36,6 +37,10 @@ func (nl *netlinkReal) Subscribe(
 	}
 	if err := netlink.RouteSubscribe(routeUpdates, cancel); err != nil {
 		log.WithError(err).Panic("Failed to subscribe to addr updates")
+		return err
+	}
+	if err := netlink.NeighSubscribe(neighUpdates, cancel); err != nil {
+		log.WithError(err).Panic("Failed to subscribe to neigh updates")
 		return err
 	}
 
@@ -53,4 +58,8 @@ func (nl *netlinkReal) ListLocalRoutes(link netlink.Link, family int) ([]netlink
 	}
 	routeFilter.Table = unix.RT_TABLE_LOCAL
 	return netlink.RouteListFiltered(family, routeFilter, netlink.RT_FILTER_TABLE|netlink.RT_FILTER_OIF)
+}
+
+func (nl *netlinkReal) ListNeighs() ([]netlink.Neigh, error) {
+	return netlink.NeighList(0, 0)
 }

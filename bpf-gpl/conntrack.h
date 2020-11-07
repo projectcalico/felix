@@ -391,6 +391,7 @@ struct calico_ct_result {
 	__be32 nat_ip;
 	__u32 nat_port;
 	__be32 tun_ip;
+	__u32 ifindex_fwd; /* if set, the ifindex where the packet should be forwarded */
 };
 
 /* skb_is_icmp_err_unpack fills in ctx, but only what needs to be changed. For instance, keeps the
@@ -818,6 +819,14 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct ct_ctx
 					src_to_dst->ifindex, ctx->skb->ingress_ifindex);
 			src_to_dst->ifindex = ctx->skb->ingress_ifindex;
 		}
+	}
+
+	if (CALI_F_TO_HOST) {
+		/* Fill in the ifindex we recorded in the opposite direction. The caller
+		 * may use it directly forward the packet to the same interface where
+		 * packets in the opposite direction are coming from.
+		 */
+		result.ifindex_fwd = dst_to_src->ifindex;
 	}
 
 	CALI_CT_DEBUG("result: %d\n", result.rc);
