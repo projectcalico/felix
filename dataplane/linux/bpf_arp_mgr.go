@@ -34,6 +34,8 @@ type bpfARPManager struct {
 
 	neighDirty []*neighUpdate
 	ifaceDirty []*ifaceUpdate
+
+	unresolved map[int]map[ip.V4Addr]*neighUpdate
 }
 
 func newBPFARPManager(m bpf.Map) *bpfARPManager {
@@ -41,6 +43,7 @@ func newBPFARPManager(m bpf.Map) *bpfARPManager {
 		arpMap:      m,
 		ifaceToMac:  make(map[int]net.HardwareAddr),
 		remoteNodes: make(map[ip.V4Addr]struct{}),
+		unresolved:  make(map[int]map[ip.V4Addr]*neighUpdate),
 	}
 }
 
@@ -81,7 +84,22 @@ func (m *bpfARPManager) onRouteUpdate(update *proto.RouteUpdate) {
 		return
 	}
 
-	m.remoteNodes[v4CIDR.Addr().(ip.V4Addr)] = struct{}{}
+	ipv4 := v4CIDR.Addr().(ip.V4Addr)
+	m.remoteNodes[ipv4] = struct{}{}
+
+	log.Debugf("Resolving neighbours for a now known node IP %s", ipv4)
+	for ifindex, ifaceMap := range m.unresolved {
+		srcMAC, ok := m.ifaceToMac[ifindex]
+		if !ok {
+			continue
+		}
+
+		if n := ifaceMap[ipv4]; n != nil {
+			m.updateBPFMap(srcMAC, n)
+			delete(ifaceMap, ipv4)
+		}
+	}
+	log.Debugf("Resolved neighbours for a now known node IP %s", ipv4)
 }
 
 func (m *bpfARPManager) onRouteRemove(update *proto.RouteRemove) {
@@ -95,12 +113,33 @@ func (m *bpfARPManager) onRouteRemove(update *proto.RouteRemove) {
 	delete(m.remoteNodes, v4CIDR.Addr().(ip.V4Addr))
 }
 
+func (m *bpfARPManager) updateBPFMap(srcMAC net.HardwareAddr, n *neighUpdate) {
+	k := arp.NewKey(n.IP, uint32(n.IfIndex))
+	v := arp.NewValue(srcMAC, n.HWAddr)
+	err := m.arpMap.Update(k[:], v[:])
+	if err != nil {
+		log.WithError(err).Warnf("Failed to update ARP for IP %s dev %d", n.IP, n.IfIndex)
+	} else {
+		log.Debugf("ARP updated for IP %s iface %d dstMAC %s", n.IP, n.IfIndex, n.HWAddr)
+	}
+}
+
 func (m *bpfARPManager) CompleteDeferredWork() error {
 	for _, i := range m.ifaceDirty {
 		if i.State != ifacemonitor.StateUp {
 			delete(m.ifaceToMac, i.Index)
+			delete(m.unresolved, i.Index)
 		} else {
 			m.ifaceToMac[i.Index] = i.HardwareAddr
+
+			log.Debugf("Resolving neighbours for a now known iface %d", i.Index)
+			for _, n := range m.unresolved[i.Index] {
+				m.updateBPFMap(i.HardwareAddr, n)
+				var ipv4 [4]byte
+				copy(ipv4[:], n.IP.To4())
+				delete(m.unresolved[i.Index], ip.V4Addr(ipv4))
+			}
+			log.Debugf("Resolved neighbours for a now known iface %d", i.Index)
 		}
 	}
 
@@ -114,14 +153,8 @@ func (m *bpfARPManager) CompleteDeferredWork() error {
 		var ipv4key [4]byte
 		copy(ipv4key[:], ipv4)
 
-		if _, ok := m.remoteNodes[ip.V4Addr(ipv4key)]; !ok {
-			// Throw away anything that is not pointing to a node as that is what we need
-			// and we do not want to overfill the table in a large cluster. If we through
-			// away something that does not have the route to remote node yet, we will get
-			// it again after ifacemonitor resync.
-			//
-			// We do not want to hold on to neigh updates that are not for nodes.
-			log.WithField("IP", n.IP).Info("Ignoring non-node IP.")
+		if _, ok := m.remoteNodes[ip.V4Addr(ipv4key)]; n.Exists && !ok {
+			m.keepUnresolved(n)
 			continue
 		}
 
@@ -136,14 +169,15 @@ func (m *bpfARPManager) CompleteDeferredWork() error {
 				err = m.arpMap.Update(k[:], v[:])
 				op = "update"
 			} else {
-				err = m.arpMap.Delete(k[:])
+				m.keepUnresolved(n)
 			}
 		} else {
 			err = m.arpMap.Delete(k[:])
+			m.removeUnresolved(n)
 		}
 
 		if err != nil {
-			log.WithError(err).Warnf("Failed to %s ARP for IP dev %d%s", op, n.IP, n.IfIndex)
+			log.WithError(err).Warnf("Failed to %s ARP for IP %s dev %d", op, n.IP, n.IfIndex)
 		} else {
 			log.Debugf("ARP %s for IP %s iface %d dstMAC %s", op, n.IP, n.IfIndex, n.HWAddr)
 		}
@@ -153,4 +187,30 @@ func (m *bpfARPManager) CompleteDeferredWork() error {
 	m.ifaceDirty = nil
 
 	return nil
+}
+
+func (m *bpfARPManager) keepUnresolved(neigh *neighUpdate) {
+	var ifaceMap map[ip.V4Addr]*neighUpdate
+
+	if ifaceMap = m.unresolved[neigh.IfIndex]; ifaceMap == nil {
+		ifaceMap = make(map[ip.V4Addr]*neighUpdate)
+		m.unresolved[neigh.IfIndex] = ifaceMap
+	}
+
+	var ipv4 [4]byte
+	copy(ipv4[:], neigh.IP.To4())
+
+	ifaceMap[ip.V4Addr(ipv4)] = neigh
+}
+
+func (m *bpfARPManager) removeUnresolved(neigh *neighUpdate) {
+	ifaceMap := m.unresolved[neigh.IfIndex]
+	if ifaceMap == nil {
+		return
+	}
+
+	var ipv4 [4]byte
+	copy(ipv4[:], neigh.IP.To4())
+
+	delete(ifaceMap, ip.V4Addr(ipv4))
 }

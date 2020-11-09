@@ -23,16 +23,18 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+var MapParams = bpf.MapParameters{
+	Filename:   "/sys/fs/bpf/tc/globals/cali_v4_arp",
+	Type:       "lru_hash",
+	KeySize:    KeySize,
+	ValueSize:  ValueSize,
+	MaxEntries: 10000, // max number of nodes that can forward nodeports to a single node
+	Name:       "cali_v4_arp",
+	Version:    2,
+}
+
 func Map(mc *bpf.MapContext) bpf.Map {
-	return mc.NewPinnedMap(bpf.MapParameters{
-		Filename:   "/sys/fs/bpf/tc/globals/cali_v4_arp",
-		Type:       "lru_hash",
-		KeySize:    KeySize,
-		ValueSize:  ValueSize,
-		MaxEntries: 10000, // max number of node that can forward nodeports to a single node
-		Name:       "cali_v4_arp",
-		Version:    2,
-	})
+	return mc.NewPinnedMap(MapParams)
 }
 
 const KeySize = 8
