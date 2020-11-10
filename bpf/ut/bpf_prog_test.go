@@ -48,6 +48,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/arp"
 	"github.com/projectcalico/felix/bpf/conntrack"
 	"github.com/projectcalico/felix/bpf/nat"
 	"github.com/projectcalico/felix/bpf/routes"
@@ -246,8 +247,8 @@ func bpftool(args ...string) ([]byte, error) {
 var (
 	mapInitOnce sync.Once
 
-	natMap, natBEMap, ctMap, rtMap, ipsMap, stateMap, testStateMap, jumpMap, affinityMap bpf.Map
-	allMaps                                                                              []bpf.Map
+	natMap, natBEMap, ctMap, rtMap, ipsMap, stateMap, testStateMap, jumpMap, affinityMap, arpMap bpf.Map
+	allMaps                                                                                      []bpf.Map
 )
 
 func initMapsOnce() {
@@ -263,8 +264,9 @@ func initMapsOnce() {
 		testStateMap = state.MapForTest(mc)
 		jumpMap = jump.MapForTest(mc)
 		affinityMap = nat.AffinityMap(mc)
+		arpMap = arp.Map(mc)
 
-		allMaps = []bpf.Map{natMap, natBEMap, ctMap, rtMap, ipsMap, stateMap, testStateMap, jumpMap, affinityMap}
+		allMaps = []bpf.Map{natMap, natBEMap, ctMap, rtMap, ipsMap, stateMap, testStateMap, jumpMap, affinityMap, arpMap}
 		for _, m := range allMaps {
 			err := m.EnsureExists()
 			if err != nil {
