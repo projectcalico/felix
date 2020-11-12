@@ -311,7 +311,7 @@ func (w *Workload) ConfigureInInfraAsSpoofInterface(infra infrastructure.Datasto
 	Expect(err).NotTo(HaveOccurred(), "Failed to add workload")
 }
 
-// ConfigureOtherWEPInInfraAsSpoofInterface creates a WEP for hte spoof interface that does not match this Workload's
+// ConfigureOtherWEPInInfraAsSpoofInterface creates a WEP for the spoof interface that does not match this Workload's
 // IP address.
 func (w *Workload) ConfigureOtherWEPInInfraAsSpoofInterface(infra infrastructure.DatastoreInfra) {
 	wep := w.WorkloadEndpoint.DeepCopy()
@@ -332,7 +332,7 @@ func (w *Workload) RemoveSpoofWEPFromInfra(infra infrastructure.DatastoreInfra) 
 	Expect(err).NotTo(HaveOccurred(), "Failed to remove workload")
 }
 
-// RemoveFromInfra removed the WEP created by ConfigureInInfra.
+// RemoveFromInfra removes the WEP created by ConfigureInInfra.
 func (w *Workload) RemoveFromInfra(infra infrastructure.DatastoreInfra) {
 	err := infra.RemoveWorkload(w.WorkloadEndpoint.Namespace, w.WorkloadEndpoint.Name)
 	Expect(err).NotTo(HaveOccurred(), "Failed to remove workload")
