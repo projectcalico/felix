@@ -16,7 +16,9 @@ package intdataplane
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
 	"reflect"
 	"regexp"
 	"strings"
@@ -33,6 +35,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
@@ -41,6 +44,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/arp"
 	"github.com/projectcalico/felix/bpf/conntrack"
 	bpfipsets "github.com/projectcalico/felix/bpf/ipsets"
 	"github.com/projectcalico/felix/bpf/nat"
@@ -56,6 +60,7 @@ import (
 	"github.com/projectcalico/felix/rules"
 	"github.com/projectcalico/felix/throttle"
 	"github.com/projectcalico/felix/wireguard"
+	lclogutils "github.com/projectcalico/libcalico-go/lib/logutils"
 )
 
 const (
@@ -177,6 +182,10 @@ type Config struct {
 	KubeClientSet *kubernetes.Clientset
 
 	FeatureDetectOverrides map[string]string
+
+	// Populated with the smallest host MTU based on auto-detection.
+	hostMTU         int
+	MTUIfacePattern *regexp.Regexp
 }
 
 // InternalDataplane implements an in-process Felix dataplane driver based on iptables
@@ -278,6 +287,32 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	epMarkMapper := rules.NewEndpointMarkMapper(
 		config.RulesConfig.IptablesMarkEndpoint,
 		config.RulesConfig.IptablesMarkNonCaliEndpoint)
+
+	// Auto-detect host MTU.
+	if mtu, err := findHostMTU(config.MTUIfacePattern); err != nil {
+		log.WithError(err).Fatal("Unable to detect host MTU, shutting down")
+	} else {
+		// We found the host's MTU. Default any MTU configurations that have not been set.
+		// We default the values even if the encap is not enabled, in order to match behavior
+		// from earlier versions of Calico. However, they MTU will only be considered for allocation
+		// to pod interfaces if the encap is enabled.
+		config.hostMTU = mtu
+		if config.IPIPMTU == 0 {
+			log.Debug("Defaulting IPIP MTU based on host")
+			config.IPIPMTU = mtu - 20
+		}
+		if config.VXLANMTU == 0 {
+			log.Debug("Defaulting VXLAN MTU based on host")
+			config.VXLANMTU = mtu - 50
+		}
+		if config.Wireguard.MTU == 0 {
+			log.Debug("Defaulting Wireguard MTU based on host")
+			config.Wireguard.MTU = mtu - 60
+		}
+	}
+	if err := writeMTUFile(config); err != nil {
+		log.WithError(err).Error("Failed to write MTU file, pod MTU may not be properly set")
+	}
 
 	dp := &InternalDataplane{
 		toDataplane:      make(chan interface{}, msgPeekLimit),
@@ -510,6 +545,13 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		if err != nil {
 			log.WithError(err).Panic("Failed to create state BPF map.")
 		}
+
+		arpMap := arp.Map(bpfMapContext)
+		err = arpMap.EnsureExists()
+		if err != nil {
+			log.WithError(err).Panic("Failed to create ARP BPF map.")
+		}
+
 		workloadIfaceRegex := regexp.MustCompile(strings.Join(interfaceRegexes, "|"))
 		dp.RegisterManager(newBPFEndpointManager(
 			config.BPFLogLevel,
@@ -645,6 +687,8 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	dp.wireguardManager = newWireguardManager(cryptoRouteTableWireguard)
 	dp.RegisterManager(dp.wireguardManager) // IPv4-only
 
+	dp.RegisterManager(newServiceLoopManager(filterTableV4, ruleRenderer, 4))
+
 	if config.IPv6Enabled {
 		mangleTableV6 := iptables.NewTable(
 			"mangle",
@@ -715,6 +759,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			callbacks))
 		dp.RegisterManager(newFloatingIPManager(natTableV6, ruleRenderer, 6))
 		dp.RegisterManager(newMasqManager(ipSetsV6, natTableV6, ruleRenderer, config.MaxIPSetSize, 6))
+		dp.RegisterManager(newServiceLoopManager(filterTableV6, ruleRenderer, 6))
 	}
 
 	dp.allIptablesTables = append(dp.allIptablesTables, dp.iptablesMangleTables...)
@@ -739,6 +784,89 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	}
 
 	return dp
+}
+
+// findHostMTU auto-detects the smallest host interface MTU.
+func findHostMTU(matchRegex *regexp.Regexp) (int, error) {
+	// Find all the interfaces on the host.
+	links, err := netlink.LinkList()
+	if err != nil {
+		log.WithError(err).Error("Failed to list interfaces. Unable to auto-detect MTU")
+		return 0, err
+	}
+
+	// Iterate through them, keeping track of the lowest MTU.
+	smallest := 0
+	for _, l := range links {
+		// Skip links that we know are not external interfaces.
+		fields := log.Fields{"mtu": l.Attrs().MTU, "name": l.Attrs().Name}
+		if matchRegex == nil || !matchRegex.MatchString(l.Attrs().Name) {
+			log.WithFields(fields).Debug("Skipping interface for MTU detection")
+			continue
+		}
+		log.WithFields(fields).Debug("Examining link for MTU calculation")
+		if l.Attrs().MTU < smallest || smallest == 0 {
+			smallest = l.Attrs().MTU
+		}
+	}
+
+	if smallest == 0 {
+		// We failed to find a usable interface. Default the MTU of the host
+		// to 1460 - the smallest among common cloud providers.
+		log.Warn("Failed to auto-detect host MTU - no interfaces matched the MTU interface pattern. To use auto-MTU, set mtuIfacePattern to match your host's interfaces")
+		return 1460, nil
+	}
+	return smallest, nil
+}
+
+// writeMTUFile writes the smallest MTU among enabled encapsulation types to disk
+// for use by other components (e.g., CNI plugin).
+func writeMTUFile(config Config) error {
+	// Make sure directory exists.
+	if err := os.MkdirAll("/var/lib/calico", os.ModePerm); err != nil {
+		return fmt.Errorf("failed to create directory /var/lib/calico: %s", err)
+	}
+
+	// Write the smallest MTU to disk so other components can rely on this calculation consistently.
+	mtu := determinePodMTU(config)
+	filename := "/var/lib/calico/mtu"
+	log.Debugf("Writing %d to "+filename, mtu)
+	if err := ioutil.WriteFile(filename, []byte(fmt.Sprintf("%d", mtu)), 0644); err != nil {
+		log.WithError(err).Error("Unable to write to " + filename)
+		return err
+	}
+	return nil
+}
+
+// determinePodMTU looks at the configured MTUs and enabled encapsulations to determine which
+// value for MTU should be used for pod interfaces.
+func determinePodMTU(config Config) int {
+	// Determine the smallest MTU among enabled encap methods. If none of the encap methods are
+	// enabled, we'll just use the host's MTU.
+	mtu := 0
+	type mtuState struct {
+		mtu     int
+		enabled bool
+	}
+	for _, s := range []mtuState{
+		{config.IPIPMTU, config.RulesConfig.IPIPEnabled},
+		{config.VXLANMTU, config.RulesConfig.VXLANEnabled},
+		{config.Wireguard.MTU, config.Wireguard.Enabled},
+	} {
+		if s.enabled && s.mtu != 0 && (s.mtu < mtu || mtu == 0) {
+			mtu = s.mtu
+		}
+	}
+
+	if mtu == 0 {
+		// No enabled encapsulation. Just use the host MTU.
+		mtu = config.hostMTU
+	} else if mtu > config.hostMTU {
+		fields := logrus.Fields{"mtu": mtu, "hostMTU": config.hostMTU}
+		log.WithFields(fields).Warn("Configured MTU is larger than detected host interface MTU")
+	}
+	log.WithField("mtu", mtu).Info("Determined pod MTU")
+	return mtu
 }
 
 func cleanUpVXLANDevice() {
@@ -802,6 +930,7 @@ func (d *InternalDataplane) Start() {
 	go d.loopUpdatingDataplane()
 	go d.loopReportingStatus()
 	go d.ifaceMonitor.MonitorInterfaces()
+	go d.monitorHostMTU()
 }
 
 // onIfaceStateChange is our interface monitor callback.  It gets called from the monitor's thread.
@@ -864,6 +993,21 @@ func (d *InternalDataplane) SendMessage(msg interface{}) error {
 
 func (d *InternalDataplane) RecvMessage() (interface{}, error) {
 	return <-d.fromDataplane, nil
+}
+
+func (d *InternalDataplane) monitorHostMTU() {
+	for {
+		mtu, err := findHostMTU(d.config.MTUIfacePattern)
+		if err != nil {
+			log.WithError(err).Error("Error detecting host MTU")
+		} else if d.config.hostMTU != mtu {
+			// Since log writing is done a background thread, we set the force-flush flag on this log to ensure that
+			// all the in-flight logs get written before we exit.
+			log.WithFields(log.Fields{lclogutils.FieldForceFlush: true}).Info("Host MTU changed")
+			d.config.ConfigChangedRestartCallback()
+		}
+		time.Sleep(30 * time.Second)
+	}
 }
 
 // doStaticDataplaneConfig sets up the kernel and our static iptables  chains.  Should be called

@@ -112,12 +112,12 @@ type Config struct {
 	WireguardListeningPort       int    `config:"int;51820"`
 	WireguardRoutingRulePriority int    `config:"int;99"`
 	WireguardInterfaceName       string `config:"iface-param;wireguard.cali;non-zero"`
-	WireguardMTU                 int    `config:"int;1420;non-zero"`
+	WireguardMTU                 int    `config:"int;0"`
 
 	BPFEnabled                         bool           `config:"bool;false"`
 	BPFDisableUnprivileged             bool           `config:"bool;true"`
 	BPFLogLevel                        string         `config:"oneof(off,info,debug);off;non-zero"`
-	BPFDataIfacePattern                *regexp.Regexp `config:"regexp;^(en[opsx].*|eth.*|tunl0$|wireguard.cali$)"`
+	BPFDataIfacePattern                *regexp.Regexp `config:"regexp;^((en|wl|ww|sl|ib)[opsx].*|(eth|wlan|wwan).*|tunl0$|wireguard.cali$)"`
 	BPFConnectTimeLoadBalancingEnabled bool           `config:"bool;true"`
 	BPFExternalServiceMode             string         `config:"oneof(tunnel,dsr);tunnel;non-zero"`
 	BPFKubeProxyIptablesCleanupEnabled bool           `config:"bool;true"`
@@ -205,12 +205,12 @@ type Config struct {
 	VXLANEnabled        bool   `config:"bool;false"`
 	VXLANPort           int    `config:"int;4789"`
 	VXLANVNI            int    `config:"int;4096"`
-	VXLANMTU            int    `config:"int;1410;non-zero"`
+	VXLANMTU            int    `config:"int;0"`
 	IPv4VXLANTunnelAddr net.IP `config:"ipv4;"`
 	VXLANTunnelMACAddr  string `config:"string;"`
 
 	IpInIpEnabled    bool   `config:"bool;false"`
-	IpInIpMtu        int    `config:"int;1440;non-zero"`
+	IpInIpMtu        int    `config:"int;0"`
 	IpInIpTunnelAddr net.IP `config:"ipv4;"`
 
 	// Knobs provided to explicitly control whether we add rules to drop encap traffic
@@ -219,6 +219,8 @@ type Config struct {
 	AllowIPIPPacketsFromWorkloads  bool `config:"bool;false"`
 
 	AWSSrcDstCheck string `config:"oneof(DoNothing,Enable,Disable);DoNothing;non-zero"`
+
+	ServiceLoopPrevention string `config:"oneof(Drop,Reject,Disabled);Drop"`
 
 	ReportingIntervalSecs time.Duration `config:"seconds;30"`
 	ReportingTTLSecs      time.Duration `config:"seconds;90"`
@@ -277,6 +279,9 @@ type Config struct {
 	GenericXDPEnabled          bool `config:"bool;false"`
 
 	Variant string `config:"string;Calico"`
+
+	// Configures MTU auto-detection.
+	MTUIfacePattern *regexp.Regexp `config:"regexp;^((en|wl|ww|sl|ib)[opsx].*|(eth|wlan|wwan).*)"`
 
 	// State tracking.
 

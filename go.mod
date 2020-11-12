@@ -4,7 +4,7 @@ go 1.15
 
 require (
 	github.com/Microsoft/hcsshim v0.8.9
-	github.com/aws/aws-sdk-go v1.31.15
+	github.com/aws/aws-sdk-go v1.35.7
 	github.com/containernetworking/plugins v0.8.2
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
@@ -25,15 +25,16 @@ require (
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
-	github.com/projectcalico/libcalico-go v1.7.2-0.20201006212057-d414dc7c1c75
-	github.com/projectcalico/pod2daemon v0.0.0-20200929223531-dfc3c9936e90
-	github.com/projectcalico/typha v0.7.3-0.20201007232318-2dba00d728ad
+	github.com/projectcalico/libcalico-go v1.7.2-0.20201110235728-977c570b2f4b
+	github.com/projectcalico/pod2daemon v0.0.0-20201110235807-ac6493bc3a0a
+	github.com/projectcalico/typha v0.7.3-0.20201111004003-06c5c9e04e70
 	github.com/prometheus/client_golang v1.0.0
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v0.0.5
 	github.com/spf13/viper v1.6.1
-	github.com/vishvananda/netlink v1.0.0
+	github.com/stretchr/testify v1.5.1 // indirect
+	github.com/vishvananda/netlink v1.1.0
 	golang.org/x/net v0.0.0-20200520004742-59133d7f0dd7
 	golang.org/x/sync v0.0.0-20200625203802-6e8e738ad208
 	golang.org/x/sys v0.0.0-20200519105757-fe76b779f299

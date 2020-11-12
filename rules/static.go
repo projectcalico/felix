@@ -514,6 +514,13 @@ func (r *DefaultRuleRenderer) StaticFilterForwardChains() []*Chain {
 		},
 	)
 
+	// Jump to chain for blocking service CIDR loops.
+	rules = append(rules,
+		Rule{
+			Action: JumpAction{Target: ChainCIDRBlock},
+		},
+	)
+
 	return []*Chain{{
 		Name:  ChainFilterForward,
 		Rules: rules,

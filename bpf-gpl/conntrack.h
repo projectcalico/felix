@@ -262,10 +262,12 @@ create:
 
 	dump_ct_key(k);
 
+	__u32 ifindex = skb_ingress_ifindex(ctx->skb);
+
 	src_to_dst->seqno = seq;
 	src_to_dst->syn_seen = syn;
 	src_to_dst->opener = 1;
-	src_to_dst->ifindex = ctx->skb->ingress_ifindex;
+	src_to_dst->ifindex = ifindex;
 	CALI_DEBUG("NEW src_to_dst->ifindex %d\n", src_to_dst->ifindex);
 	dst_to_src->ifindex = CT_INVALID_IFINDEX;
 
@@ -391,6 +393,7 @@ struct calico_ct_result {
 	__be32 nat_ip;
 	__u32 nat_port;
 	__be32 tun_ip;
+	__u32 ifindex_fwd; /* if set, the ifindex where the packet should be forwarded */
 };
 
 /* skb_is_icmp_err_unpack fills in ctx, but only what needs to be changed. For instance, keeps the
@@ -794,7 +797,9 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct ct_ctx
 		ct_tcp_entry_update(tcp_header, src_to_dst, dst_to_src);
 	}
 
-	if (src_to_dst->ifindex != ctx->skb->ingress_ifindex) {
+	__u32 ifindex = skb_ingress_ifindex(ctx->skb);
+
+	if (src_to_dst->ifindex != ifindex) {
 		// Conntrack entry records a different ingress interface than the one the
 		// packet arrived on (or it has no record yet).
 		if (CALI_F_TO_HOST) {
@@ -802,12 +807,12 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct ct_ctx
 			if (src_to_dst->ifindex == CT_INVALID_IFINDEX) {
 				// Conntrack entry has no record of the ingress interface, this should
 				// be a response packet but we can't be 100% sure.
-				CALI_CT_DEBUG("First response packet? ifindex=%d\n", ctx->skb->ingress_ifindex);
+				CALI_CT_DEBUG("First response packet? ifindex=%d\n", ifindex);
 			} else {
 				// The interface has changed; either a change to routing or someone's doing
 				// something nasty.
 				CALI_CT_DEBUG("CT RPF failed ifindex %d != %d\n",
-						src_to_dst->ifindex, ctx->skb->ingress_ifindex);
+						src_to_dst->ifindex, ifindex);
 			}
 			if (ct_result_rc(result.rc) == CALI_CT_ESTABLISHED_BYPASS) {
 				// Disable bypass so the kernel can do its RPF check.
@@ -820,9 +825,17 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct ct_ctx
 			 * host IP stack and RPF check allowed it, so update our records.
 			 */
 			CALI_CT_DEBUG("Updating ifindex from %d to %d\n",
-					src_to_dst->ifindex, ctx->skb->ingress_ifindex);
-			src_to_dst->ifindex = ctx->skb->ingress_ifindex;
+					src_to_dst->ifindex, ifindex);
+			src_to_dst->ifindex = ifindex;
 		}
+	}
+
+	if (CALI_F_TO_HOST) {
+		/* Fill in the ifindex we recorded in the opposite direction. The caller
+		 * may use it directly forward the packet to the same interface where
+		 * packets in the opposite direction are coming from.
+		 */
+		result.ifindex_fwd = dst_to_src->ifindex;
 	}
 
 	CALI_CT_DEBUG("result: %d\n", result.rc);
