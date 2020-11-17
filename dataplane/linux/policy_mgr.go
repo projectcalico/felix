@@ -104,12 +104,15 @@ func (m *policyManager) OnUpdate(msg interface{}) {
 		log.WithField("id", msg.Id).Debug("Updating profile chains")
 		chains := m.ruleRenderer.ProfileToIptablesChains(msg.Id, msg.Profile, m.ipVersion)
 		m.filterTable.UpdateChains(chains)
+		m.mangleTable.UpdateChains(chains)
 	case *proto.ActiveProfileRemove:
 		log.WithField("id", msg.Id).Debug("Removing profile chains")
 		inName := rules.ProfileChainName(rules.ProfileInboundPfx, msg.Id)
 		outName := rules.ProfileChainName(rules.ProfileOutboundPfx, msg.Id)
 		m.filterTable.RemoveChainByName(inName)
 		m.filterTable.RemoveChainByName(outName)
+		m.mangleTable.RemoveChainByName(inName)
+		m.mangleTable.RemoveChainByName(outName)
 	}
 }
 
