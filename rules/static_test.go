@@ -226,6 +226,7 @@ var _ = Describe("Static", func() {
 								// Outgoing host endpoint chains.
 								{Action: JumpAction{Target: ChainDispatchToHostEndpointForward}},
 								{Action: JumpAction{Target: ChainCIDRBlock}},
+								{Action: SetMarkAction{Mark: 0x10}},
 							},
 						}))
 					})
@@ -307,7 +308,10 @@ var _ = Describe("Static", func() {
 
 									// Non-workload traffic, send to host chains.
 									{Action: ClearMarkAction{Mark: 0xf0}},
-									{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+									{
+										Match:  Match().NotConntrackState("DNAT"),
+										Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+									},
 									{
 										Match:   Match().MarkSingleBitSet(0x10),
 										Action:  AcceptAction{},
@@ -329,7 +333,10 @@ var _ = Describe("Static", func() {
 
 									// Non-workload traffic, send to host chains.
 									{Action: ClearMarkAction{Mark: 0xf0}},
-									{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+									{
+										Match:  Match().NotConntrackState("DNAT"),
+										Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+									},
 									{
 										Match:   Match().MarkSingleBitSet(0x10),
 										Action:  AcceptAction{},
@@ -693,7 +700,10 @@ var _ = Describe("Static", func() {
 
 					// Non-workload traffic, send to host chains.
 					{Action: ClearMarkAction{Mark: 0xf0}},
-					{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+					{
+						Match:  Match().NotConntrackState("DNAT"),
+						Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+					},
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
@@ -723,7 +733,10 @@ var _ = Describe("Static", func() {
 
 					// Non-workload traffic, send to host chains.
 					{Action: ClearMarkAction{Mark: 0xf0}},
-					{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+					{
+						Match:  Match().NotConntrackState("DNAT"),
+						Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+					},
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
@@ -750,7 +763,10 @@ var _ = Describe("Static", func() {
 
 					// Non-workload traffic, send to host chains.
 					{Action: ClearMarkAction{Mark: 0xf0}},
-					{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+					{
+						Match:  Match().NotConntrackState("DNAT"),
+						Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+					},
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
@@ -771,7 +787,10 @@ var _ = Describe("Static", func() {
 
 					// Non-workload traffic, send to host chains.
 					{Action: ClearMarkAction{Mark: 0xf0}},
-					{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+					{
+						Match:  Match().NotConntrackState("DNAT"),
+						Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+					},
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
@@ -1203,6 +1222,7 @@ var _ = Describe("Static", func() {
 						// Outgoing host endpoint chains.
 						{Action: JumpAction{Target: ChainDispatchToHostEndpointForward}},
 						{Action: JumpAction{Target: ChainCIDRBlock}},
+						{Action: SetMarkAction{Mark: 0x10}},
 					},
 				}))
 			})
@@ -1243,7 +1263,10 @@ var _ = Describe("Static", func() {
 
 						// Non-workload traffic, send to host chains.
 						{Action: ClearMarkAction{Mark: 0xf0}},
-						{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+						{
+							Match:  Match().NotConntrackState("DNAT"),
+							Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+						},
 						{
 							Match:   Match().MarkSingleBitSet(0x10),
 							Action:  ReturnAction{},
