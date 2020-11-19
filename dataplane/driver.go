@@ -327,12 +327,12 @@ func StartDataplaneDriver(configParams *config.Config,
 
 			go func(check, healthName string, healthAgg *health.HealthAggregator) {
 				log.Infof("Setting AWS EC2 source-destination-check to %s", check)
-				err := aws.UpdateSrcDstCheck(check)
-				if err != nil {
+				ready := true
+				if err := aws.UpdateSrcDstCheck(check); err != nil {
 					log.WithField("src-dst-check", check).Errorf("Failed to set source-destination-check: %v", err)
-					// set not-ready.
-					healthAggregator.Report(healthName, &health.HealthReport{Live: true, Ready: false})
+					ready = false
 				}
+				healthAggregator.Report(healthName, &health.HealthReport{Live: true, Ready: ready})
 			}(configParams.AWSSrcDstCheck, healthName, healthAggregator)
 		}
 
