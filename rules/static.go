@@ -875,6 +875,9 @@ func (r *DefaultRuleRenderer) StaticManglePostroutingChain(ipVersion uint8) *Cha
 		r.addIPIPVXLANEgressAllowRules(&rules)
 	}
 
+	// Think we may need to exclude traffic to local workloads here, so that it doesn't
+	// accidentally hit policy for the "all-interfaces" host endpoint.
+
 	// Apply host endpoint policy to non-forwarded traffic that has been DNAT'd.  We do this
 	// here, rather than in filter-OUTPUT, because Linux is weird: when a host-originated packet
 	// is DNAT'd (typically in nat-OUTPUT), its destination IP is changed immediately, but Linux
