@@ -15,7 +15,9 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,6 +36,7 @@ var _ = Describe("Typha address discovery", func() {
 		configParams *config.Config
 		endpoints    *v1.Endpoints
 		k8sClient    *fake.Clientset
+		ctx context.Context
 	)
 
 	refreshClient := func() {
@@ -82,24 +85,25 @@ var _ = Describe("Typha address discovery", func() {
 		}
 
 		refreshClient()
+		ctx, _ = context.WithTimeout(context.Background(), 10*time.Second)
 	})
 
 	It("should return address if configured", func() {
 		configParams.TyphaAddr = "10.0.0.1:8080"
-		typhaAddr, err := discoverTyphaAddr(configParams, nil)
+		typhaAddr, err := discoverTyphaAddr(ctx, configParams, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(typhaAddr).To(Equal("10.0.0.1:8080"))
 	})
 
 	It("should return nothing if no service name", func() {
 		configParams.TyphaK8sServiceName = ""
-		typhaAddr, err := discoverTyphaAddr(configParams, nil)
+		typhaAddr, err := discoverTyphaAddr(ctx, configParams, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(typhaAddr).To(Equal(""))
 	})
 
 	It("should return IP from endpoints", func() {
-		typhaAddr, err := discoverTyphaAddr(configParams, k8sClient)
+		typhaAddr, err := discoverTyphaAddr(ctx, configParams, k8sClient)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(typhaAddr).To(Equal("10.0.0.2:8156"))
 	})
@@ -107,7 +111,7 @@ var _ = Describe("Typha address discovery", func() {
 	It("should bracket an IPv6 Typha address", func() {
 		endpoints.Subsets[1].Addresses[0].IP = "fd5f:65af::2"
 		refreshClient()
-		typhaAddr, err := discoverTyphaAddr(configParams, k8sClient)
+		typhaAddr, err := discoverTyphaAddr(ctx, configParams, k8sClient)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(typhaAddr).To(Equal("[fd5f:65af::2]:8156"))
 	})
@@ -115,7 +119,7 @@ var _ = Describe("Typha address discovery", func() {
 	It("should error if no Typhas", func() {
 		endpoints.Subsets = nil
 		refreshClient()
-		_, err := discoverTyphaAddr(configParams, k8sClient)
+		_, err := discoverTyphaAddr(ctx, configParams, k8sClient)
 		Expect(err).To(HaveOccurred())
 	})
 
@@ -126,7 +130,7 @@ var _ = Describe("Typha address discovery", func() {
 		refreshClient()
 
 		for i := 0; i < 32; i++ {
-			addr, err := discoverTyphaAddr(configParams, k8sClient)
+			addr, err := discoverTyphaAddr(ctx, configParams, k8sClient)
 			Expect(err).NotTo(HaveOccurred())
 			seenAddresses.Add(addr)
 			if seenAddresses.ContainsAll(expected) {

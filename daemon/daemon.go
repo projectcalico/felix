@@ -315,7 +315,7 @@ configRetry:
 		}
 
 		// If we're configured to discover Typha, do that now so we can retry if we fail.
-		typhaAddr, err = discoverTyphaAddr(configParams, k8sClientSet)
+		typhaAddr, err = discoverTyphaAddr(ctx, configParams, k8sClientSet)
 		if err != nil {
 			log.WithError(err).Error("Typha discovery enabled but discovery failed.")
 			time.Sleep(1 * time.Second)
@@ -1208,7 +1208,7 @@ func (fc *DataplaneConnector) Start() {
 
 var ErrServiceNotReady = errors.New("Kubernetes service missing IP or port.")
 
-func discoverTyphaAddr(configParams *config.Config, k8sClientSet kubernetes.Interface) (string, error) {
+func discoverTyphaAddr(ctx context.Context, configParams *config.Config, k8sClientSet kubernetes.Interface) (string, error) {
 	if configParams.TyphaAddr != "" {
 		// Explicit address; trumps other sources of config.
 		return configParams.TyphaAddr, nil
@@ -1225,7 +1225,7 @@ func discoverTyphaAddr(configParams *config.Config, k8sClientSet kubernetes.Inte
 
 	// If we get here, we need to look up the Typha service endpoints using the k8s API.
 	epClient := k8sClientSet.CoreV1().Endpoints(configParams.TyphaK8sNamespace)
-	eps, err := epClient.Get(configParams.TyphaK8sServiceName, metav1.GetOptions{})
+	eps, err := epClient.Get(ctx, configParams.TyphaK8sServiceName, metav1.GetOptions{})
 	if err != nil {
 		log.WithError(err).Error("Unable to get Typha service endpoints from Kubernetes.")
 		return "", err
