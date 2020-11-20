@@ -978,13 +978,13 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						defer pc.Stop()
 
 						expectPongs := func() {
-							EventuallyWithOffset(1, w[0][0].SinceLastPong, "5s").Should(
+							EventuallyWithOffset(1, pc.SinceLastPong, "5s").Should(
 								BeNumerically("<", time.Second),
 								"Expected to see pong responses on the connection but didn't receive any")
 							log.Info("Pongs received within last 1s")
 						}
 						expectNoPongs := func() {
-							EventuallyWithOffset(1, w[0][0].SinceLastPong, "5s").Should(
+							EventuallyWithOffset(1, pc.SinceLastPong, "5s").Should(
 								BeNumerically(">", time.Second),
 								"Expected to see pong responses stop but continued to receive them")
 							log.Info("No pongs received for >1s")
@@ -2269,6 +2269,11 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 									})
 								}
 							})
+
+							if testOpts.protocol == "tcp" {
+								It("should survive conntrack cleanup sweep", func() {
+								})
+							}
 
 							if !testOpts.dsr {
 								// When DSR is enabled, we need to have away how to pass the
