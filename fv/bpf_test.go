@@ -193,6 +193,8 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 		o(&testOpts)
 	}
 
+	TestIfTCP := testOpts.protocol == "tcp"
+
 	protoExt := ""
 	if testOpts.udpUnConnected {
 		protoExt = "-unconnected"
@@ -2271,50 +2273,48 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 								}
 							})
 
-							if testOpts.protocol == "tcp" {
-								It("should survive conntrack cleanup sweep", func() {
-									By("checking the connectivity and thus syncing with service creation", func() {
-										cc.ExpectSome(externalClient, TargetIP(felixes[1].IP), npPort)
-										cc.CheckConnectivity()
-									})
-
-									By("monitoring a persistent connection", func() {
-										pc := &PersistentConnection{
-											Runtime:             externalClient,
-											RuntimeName:         externalClient.Name,
-											IP:                  felixes[1].IP,
-											Port:                int(npPort),
-											Protocol:            testOpts.protocol,
-											MonitorConnectivity: true,
-										}
-
-										err := pc.Start()
-										Expect(err).NotTo(HaveOccurred())
-										defer pc.Stop()
-
-										EventuallyWithOffset(1, pc.PongCount, "5s").Should(
-											BeNumerically(">", 0),
-											"Expected to see pong responses on the connection but didn't receive any")
-										log.Info("Pongs received within last 1s")
-
-										// We make sure that at least one iteration of the conntrack
-										// cleanup executes and we periodically monitor the connection if
-										// it is alive by checking that the number of PONGs keeps
-										// increasing.
-										start := time.Now()
-										prevCount := pc.PongCount()
-										for time.Since(start) < 2*proxy.ConntrackCleanerPeriod {
-											time.Sleep(time.Second)
-											newCount := pc.PongCount()
-											Expect(prevCount).Should(
-												BeNumerically("<", newCount),
-												"No new pongs since the last iteration. Connection broken?",
-											)
-											prevCount = newCount
-										}
-									})
+							ConditionIt(TestIfTCP, "should survive conntrack cleanup sweep", func() {
+								By("checking the connectivity and thus syncing with service creation", func() {
+									cc.ExpectSome(externalClient, TargetIP(felixes[1].IP), npPort)
+									cc.CheckConnectivity()
 								})
-							}
+
+								By("monitoring a persistent connection", func() {
+									pc := &PersistentConnection{
+										Runtime:             externalClient,
+										RuntimeName:         externalClient.Name,
+										IP:                  felixes[1].IP,
+										Port:                int(npPort),
+										Protocol:            testOpts.protocol,
+										MonitorConnectivity: true,
+									}
+
+									err := pc.Start()
+									Expect(err).NotTo(HaveOccurred())
+									defer pc.Stop()
+
+									EventuallyWithOffset(1, pc.PongCount, "5s").Should(
+										BeNumerically(">", 0),
+										"Expected to see pong responses on the connection but didn't receive any")
+									log.Info("Pongs received within last 1s")
+
+									// We make sure that at least one iteration of the conntrack
+									// cleanup executes and we periodically monitor the connection if
+									// it is alive by checking that the number of PONGs keeps
+									// increasing.
+									start := time.Now()
+									prevCount := pc.PongCount()
+									for time.Since(start) < 2*proxy.ConntrackCleanerPeriod {
+										time.Sleep(time.Second)
+										newCount := pc.PongCount()
+										Expect(prevCount).Should(
+											BeNumerically("<", newCount),
+											"No new pongs since the last iteration. Connection broken?",
+										)
+										prevCount = newCount
+									}
+								})
+							})
 
 							if !testOpts.dsr {
 								// When DSR is enabled, we need to have away how to pass the
