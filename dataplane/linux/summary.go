@@ -96,10 +96,11 @@ func (l *LogAccumulator) DoLog() {
 	if longestIteration == nil {
 		return
 	}
-	avgDuration := sumOfDurations / time.Duration(numUpdates)
+	avgDuration := (sumOfDurations / time.Duration(numUpdates)).Round(time.Millisecond)
 	longestOps := longestIteration.Operations
 	sort.Strings(longestOps)
-	log.Infof("Summarising %d updates to dataplane over %v: avg=%v longest=%v (%v)",
-		numUpdates, time.Since(l.lastLogTime), avgDuration, longestIteration.Duration,
+	log.Infof("Summarising %d dataplane reconciliation loops over %v: avg=%v longest=%v (%v)",
+		numUpdates, time.Since(l.lastLogTime).Round(100*time.Millisecond), avgDuration,
+		longestIteration.Duration.Round(time.Millisecond),
 		strings.Join(longestOps, ","))
 }
