@@ -20,6 +20,8 @@ import (
 	. "github.com/onsi/ginkgo"
 )
 
+// ConditionIt add the It() node only if a condition is true. This saves some
+// indentationin the code where we would need to nest it in if{}.
 func ConditionIt(cond bool, title string, code func()) {
 	if cond {
 		It(title, code)
