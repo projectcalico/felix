@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/projectcalico/felix/fv/connectivity"
 
@@ -146,7 +147,6 @@ func describeNamedPortTests(testSourcePorts bool, protocol string) {
 	})
 
 	AfterEach(func() {
-
 		if CurrentGinkgoTestDescription().Failed {
 			log.Warn("Test failed, dumping diags...")
 			utils.Run("docker", "logs", felix.Name)
