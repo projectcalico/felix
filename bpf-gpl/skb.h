@@ -20,9 +20,9 @@
 
 
 #include <linux/if_ether.h>
-#include <linux/ip.h>
-#include <linux/udp.h>
-#include <linux/tcp.h>
+#include <uapi/linux/ip.h>
+#include <uapi/linux/udp.h>
+#include <uapi/linux/tcp.h>
 
 #include "bpf.h"
 #include "log.h"
