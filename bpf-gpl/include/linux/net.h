@@ -71,13 +71,13 @@ enum sock_type {
  * remaining bits are used as flags. */
 #define SOCK_TYPE_MASK 0xf
 
-///* Flags for socket, socketpair, accept4 */
-//#define SOCK_CLOEXEC	O_CLOEXEC
-//#ifndef SOCK_NONBLOCK
-//#define SOCK_NONBLOCK	O_NONBLOCK
-//#endif
-//
-//#endif /* ARCH_HAS_SOCKET_TYPES */
+/* Flags for socket, socketpair, accept4 */
+#define SOCK_CLOEXEC	O_CLOEXEC
+#ifndef SOCK_NONBLOCK
+#define SOCK_NONBLOCK	O_NONBLOCK
+#endif
+
+#endif /* ARCH_HAS_SOCKET_TYPES */
 //
 ///**
 // * enum sock_shutdown_cmd - Shutdown types
