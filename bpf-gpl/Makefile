@@ -20,10 +20,6 @@
 
 CFLAGS +=  \
 	-D__KERNEL__ \
-	-Wno-unused-value \
-	-Wno-pointer-sign \
-	-Wno-compare-distinct-pointer-types \
-	-Wunused \
 	-Wall \
 	-Werror \
 	-fno-stack-protector \
