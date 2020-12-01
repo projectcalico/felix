@@ -21,7 +21,7 @@
 CFLAGS +=  \
 	-D__KERNEL__ \
 	-D__ASM_SYSREG_H \
-	-D__LINUX_BPF_H__ \
+	-D__x86_64__ \
 	-Wno-unused-value \
 	-Wno-pointer-sign \
 	-Wno-compare-distinct-pointer-types \
@@ -32,11 +32,10 @@ CFLAGS +=  \
 	-O2 \
 	-target bpf \
 	-emit-llvm \
-	-nostdinc \
-	-nostdlib \
 	-I ./include/ \
 	-I ./include/uapi/ \
-	-I ./include/generated/uapi/
+	-I ./include/generated/uapi/ \
+	-I ./include/libbpf/src/
 
 
 CC := clang
@@ -68,7 +67,7 @@ UT_CFLAGS=\
 
 # Mini-UT programs that test one or two functions.  These are each in their own files.
 ut/%.ll: ut/%.c ut/ut.h tc.c tc.d
-	$(CC) $(CFLAGS) $(UT_CFLAGS) -c $< -o $@
+	$(CC) $(UT_CFLAGS) $(CFLAGS) -c $< -o $@
 
 # Production and UT versions of the main binaries.
 # Combining the targets into one rule causes make to fail to rebuild the .ll files.  Not sure why.
