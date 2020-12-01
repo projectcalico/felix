@@ -18,19 +18,30 @@
 # Disable implicit rules.
 .SUFFIXES:
 
+# BPF programs need access to some kernel-defined datastructures such
+# as the definitions for iphdr/tcphdr etc so compile the headers in kernel
+# mode.
 CFLAGS +=  \
 	-D__KERNEL__ \
+
+# C flags for compiling BPF programs. "-target bpf" enables some workarounds
+# for BPF programs and makes inline assembly aware of the BPF registers.
+CFLAGS +=  \
 	-Wall \
 	-Werror \
 	-fno-stack-protector \
 	-O2 \
 	-target bpf \
-	-emit-llvm \
+	-emit-llvm
+
+# Include our vendored copy of hte kernel headers, which have some
+# kernel-side headers largely commented out to make them compile cleanly
+# with clang in BPF mode.
+CFLAGS +=  \
 	-I ./include/ \
 	-I ./include/uapi/ \
 	-I ./include/generated/uapi/ \
 	-I ./include/libbpf/src/
-
 
 CC := clang
 LD := llc
