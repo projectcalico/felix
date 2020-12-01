@@ -63,34 +63,6 @@
 
 #define BPF_REDIR_EGRESS 0
 #define BPF_REDIR_INGRESS 1
-//MAKEFUNC(int, msg_redirect_hash,
-//	struct sk_msg_md*, struct bpf_map_def*, void*, __u64)
-//MAKEFUNC(int, sock_hash_update,
-//	struct bpf_sock_ops*, struct bpf_map_def*, void*, __u64)
-//MAKEFUNC(void*, map_lookup_elem, void*, const void*)
-//MAKEFUNC(int, map_delete_elem, void*, const void*)
-//MAKEFUNC(__u64, ktime_get_ns, void)
-//MAKEFUNC(int, map_update_elem, void* map, const void *key, const void *value, __u64 flags)
-//MAKEFUNC(int, skb_load_bytes, void *ctx, int off, void *to, int len)
-//MAKEFUNC(__u32, get_prandom_u32)
-//MAKEFUNC(void, trace_printk, const char *fmt, int fmt_size, ...)
-//MAKEFUNC(int, redirect, int ifindex, __u32 flags)
-//MAKEFUNC(int, redirect_map, void *map, __u32 key, __u64 flags)
-//MAKEFUNC(void, tail_call, void *ctx, void *map, uint32_t index)
-//MAKEFUNC(void, skb_store_bytes, void *ctx, __u32 offset, const void *from, __u32 len, __u64 flags)
-//MAKEFUNC(int, l4_csum_replace, void *ctx, __u32 offset, __u64 from, __u64 to, __u64 flags)
-//MAKEFUNC(int, l3_csum_replace, void *ctx, __u32 offset, __u64 from, __u64 to, __u64 flags)
-//MAKEFUNC(int, fib_lookup, void *ctx, struct bpf_fib_lookup *params, int plen, __u32 flags)
-//MAKEFUNC(int, skb_change_head, void *ctx, __u32 len, __u64 flags)
-//MAKEFUNC(int, skb_change_tail, void *ctx, __u32 len, __u64 flags)
-//MAKEFUNC(int, skb_adjust_room, void *ctx, __s32 len, __u32 mode, __u64 flags)
-//MAKEFUNC(int, skb_pull_data, void *ctx, __u32 len)
-//MAKEFUNC(int, csum_diff, __be32 *from, __u32 from_size, __be32 *to, __u32 to_size, __wsum seed)
-//MAKEFUNC(uint64_t, get_socket_cookie, void *ctx)
-
-CALI_BPF_INLINE __u32 port_to_host(__u32 port) {
-	return be32_to_host(port) >> 16;
-}
 
 /* Extended map definition for compatibility with iproute2 loader. */
 struct bpf_map_def_extended {
