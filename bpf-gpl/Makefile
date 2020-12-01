@@ -20,8 +20,6 @@
 
 CFLAGS +=  \
 	-D__KERNEL__ \
-	-D__ASM_SYSREG_H \
-	-D__x86_64__ \
 	-Wno-unused-value \
 	-Wno-pointer-sign \
 	-Wno-compare-distinct-pointer-types \

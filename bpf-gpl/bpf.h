@@ -53,14 +53,6 @@
 #error "COMPILER ERROR: cannot determine target endianness."
 #endif
 
-
-/*
- * BPF helper function stubs
- */
-
-#define MAKEFUNC(ret_type,fname,...) \
-	static ret_type (*bpf_ ## fname)(__VA_ARGS__) = (void*) BPF_FUNC_ ## fname;
-
 #define BPF_REDIR_EGRESS 0
 #define BPF_REDIR_INGRESS 1
 
