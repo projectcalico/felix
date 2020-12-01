@@ -19,11 +19,8 @@
 #define __CALI_NAT_H__
 
 #include <stddef.h>
-#include <stdbool.h>
-#include <linux/in.h>
-#include <linux/ip.h>
-#include <linux/if_ether.h>
-#include <linux/udp.h>
+#include <uapi/linux/if_ether.h>
+#include <uapi/linux/udp.h>
 
 #include "bpf.h"
 #include "skb.h"
