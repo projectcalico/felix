@@ -16,7 +16,7 @@
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include <linux/bpf.h>
-#include <sys/socket.h>
+#include <linux/net.h>
 
 #include "bpf.h"
 #include "log.h"
