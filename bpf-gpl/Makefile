@@ -38,11 +38,11 @@ CFLAGS +=  \
 	-I ./include/libbpf/src/ \
 	-I ./include/libbpf/include/uapi
 
-# We need a couple of definitions from the standard library (such as
-# the socket type enum).  Pull in the x86 version, which is close
-# enough.
-CFLAGS +=  \
-	-I /usr/include/x86_64-linux-gnu
+# Workaround for Debian placing "asm/types.h" in /usr/include/x86_64-linux-gnu
+# We also pick up a couple of other definitions from here, such as the socket
+# type constants (which are architecture dependent for historical reasons).
+TRIPLET := $(shell gcc -dumpmachine)
+CFLAGS += -I/usr/include/$(TRIPLET)
 
 CC := clang
 LD := llc
