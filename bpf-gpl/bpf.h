@@ -18,40 +18,21 @@
 #ifndef __CALI_BPF_H__
 #define __CALI_BPF_H__
 
-#ifndef KERNEL_VERSION
-#include <linux/version.h>
-#endif
-
-// Due to some late-found issues with pre-5.2.0, requiring v5.2.0+ for now.
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,2,0)
-#error Attempt to build against too-old kernel headers.
-#endif
+// After switching to a build based on libbpf we're now using a mix
+// of headers: newer versions of bpf.h from libbpf and some other
+// older headers from the system so it's not meaninful to pull in
+// the system version.h.
+#define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
+#define LINUX_VERSION_CODE KERNEL_VERSION(5,2,0)
 
 #include <linux/types.h>
 #include <linux/bpf.h>
-#include <bpf_helpers.h>    // for bpftool dyn loader struct 'bpf_map_def'
+#include <bpf_helpers.h>   /* For bpf_xxx helper functions. */
+#include <bpf_endian.h>    /* For bpf_ntohX etc. */
 #include <stddef.h>
 #include <linux/ip.h>
 
 #define CALI_BPF_INLINE inline __attribute__((always_inline))
-
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-#define be64_to_host(value) __builtin_bswap64(value)
-#define host_to_be64(value) __builtin_bswap64(value)
-#define be32_to_host(value) __builtin_bswap32(value)
-#define host_to_be32(value) __builtin_bswap32(value)
-#define be16_to_host(value) __builtin_bswap16(value)
-#define host_to_be16(value) __builtin_bswap16(value)
-#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-#define be64_to_host(value) (value)
-#define host_to_be64(value) (value)
-#define be32_to_host(value) (value)
-#define host_to_be32(value) (value)
-#define be16_to_host(value) (value)
-#define host_to_be16(value) (value)
-#else
-#error "COMPILER ERROR: cannot determine target endianness."
-#endif
 
 #define BPF_REDIR_EGRESS 0
 #define BPF_REDIR_INGRESS 1
@@ -141,8 +122,8 @@ enum calico_skb_mark {
 	CALI_SKB_MARK_NAT_OUT                = CALI_SKB_MARK_BYPASS  | 0x00800000,
 };
 
-#define ip_is_dnf(ip) ((ip)->frag_off & host_to_be16(0x4000))
-#define ip_frag_no(ip) ((ip)->frag_off & host_to_be16(0x1fff))
+#define ip_is_dnf(ip) ((ip)->frag_off & bpf_htons(0x4000))
+#define ip_frag_no(ip) ((ip)->frag_off & bpf_htons(0x1fff))
 
 static CALI_BPF_INLINE void ip_dec_ttl(struct iphdr *ip)
 {
@@ -150,8 +131,8 @@ static CALI_BPF_INLINE void ip_dec_ttl(struct iphdr *ip)
 	/* since we change only a single byte, as per RFC-1141 we an adjust it
 	 * inline without helpers.
 	 */
-	uint32_t sum = ip->check;
-	sum += host_to_be16(0x0100);
+	__u32 sum = ip->check;
+	sum += bpf_htons(0x0100);
 	ip->check = (__be16) (sum + (sum >> 16));
 }
 

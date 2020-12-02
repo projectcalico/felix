@@ -18,12 +18,6 @@
 # Disable implicit rules.
 .SUFFIXES:
 
-# BPF programs need access to some kernel-defined datastructures such
-# as the definitions for iphdr/tcphdr etc so compile the headers in kernel
-# mode.
-CFLAGS +=  \
-	-D__KERNEL__ \
-
 # C flags for compiling BPF programs. "-target bpf" enables some workarounds
 # for BPF programs and makes inline assembly aware of the BPF registers.
 CFLAGS +=  \
@@ -34,14 +28,21 @@ CFLAGS +=  \
 	-target bpf \
 	-emit-llvm
 
-# Include our vendored copy of the kernel headers, which have some
-# kernel-side headers largely commented out to make them compile cleanly
-# with clang in BPF mode.
+# Build against libbpf and its recent copy of the kernel headers.
+# We link against the user API version of the headers because they contain
+# everything we need for now.
+#
+# Note: for headers that aren't in the libbpf include directory, we'll
+# fall back on the system headers, which may be old.
 CFLAGS +=  \
-	-I ./include/ \
-	-I ./include/uapi/ \
-	-I ./include/generated/uapi/ \
-	-I ./include/libbpf/src/
+	-I ./include/libbpf/src/ \
+	-I ./include/libbpf/include/uapi
+
+# We need a couple of definitions from the standard library (such as
+# the socket type enum).  Pull in the x86 version, which is close
+# enough.
+CFLAGS +=  \
+	-I /usr/include/x86_64-linux-gnu
 
 CC := clang
 LD := llc
