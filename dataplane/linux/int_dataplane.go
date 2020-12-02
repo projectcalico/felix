@@ -225,7 +225,7 @@ type InternalDataplane struct {
 	iptablesNATTables    []*iptables.Table
 	iptablesRawTables    []*iptables.Table
 	iptablesFilterTables []*iptables.Table
-	ipSets               []*ipsets.IPSets
+	ipSets               []ipsetsDataplane
 
 	ipipManager *ipipManager
 
@@ -534,7 +534,13 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		// metadata name is set whereas TC doesn't set that field.
 		ipSetIDAllocator := idalloc.New()
 		ipSetsMap := bpfipsets.Map(bpfMapContext)
-		dp.RegisterManager(newBPFIPSetManager(ipSetIDAllocator, ipSetsMap))
+		ipSetsV4 := bpfipsets.NewBPFIPSets(
+			ipSetsConfigV4,
+			ipSetIDAllocator,
+			ipSetsMap,
+		)
+		dp.ipSets = append(dp.ipSets, ipSetsV4)
+		dp.RegisterManager(newIPSetsManager(ipSetsV4, config.MaxIPSetSize, callbacks))
 		bpfRTMgr := newBPFRouteManager(config.Hostname, bpfMapContext)
 		dp.RegisterManager(bpfRTMgr)
 
@@ -1609,7 +1615,7 @@ func (d *InternalDataplane) apply() {
 	var ipSetsWG sync.WaitGroup
 	for _, ipSets := range d.ipSets {
 		ipSetsWG.Add(1)
-		go func(ipSets *ipsets.IPSets) {
+		go func(ipSets ipsetsDataplane) {
 			ipSets.ApplyUpdates()
 			d.reportHealth()
 			ipSetsWG.Done()
@@ -1658,7 +1664,7 @@ func (d *InternalDataplane) apply() {
 	// Now clean up any left-over IP sets.
 	for _, ipSets := range d.ipSets {
 		ipSetsWG.Add(1)
-		go func(s *ipsets.IPSets) {
+		go func(s ipsetsDataplane) {
 			s.ApplyDeletions()
 			d.reportHealth()
 			ipSetsWG.Done()
