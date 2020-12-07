@@ -1234,7 +1234,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct __sk_buff *skb,
 			goto deny;
 		}
 
-		if (dnat_return_should_encap() && state->ct_result.tun_ip) {
+		if ((dnat_return_should_encap() || CALI_F_TO_HEP) && state->ct_result.tun_ip) {
 			state->ip_dst = state->ct_result.tun_ip;
 			seen_mark = CALI_SKB_MARK_BYPASS_FWD_SRC_FIXUP;
 			goto nat_encap;
