@@ -15,14 +15,14 @@
 package rules_test
 
 import (
-	. "github.com/projectcalico/felix/rules"
+	. "github.com/alauda/felix/rules"
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/felix/ipsets"
-	. "github.com/projectcalico/felix/iptables"
+	"github.com/alauda/felix/ipsets"
+	. "github.com/alauda/felix/iptables"
 )
 
 var _ = Describe("NAT", func() {

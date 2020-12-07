@@ -18,9 +18,9 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/felix/iptables"
-	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/felix/rules"
+	"github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 )
 
 var _ = Describe("Policy manager", func() {

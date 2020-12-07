@@ -20,10 +20,10 @@ import (
 
 	"time"
 
-	"github.com/projectcalico/felix/ip"
-	. "github.com/projectcalico/felix/ipsets"
-	"github.com/projectcalico/felix/labelindex"
-	"github.com/projectcalico/felix/rules"
+	"github.com/alauda/felix/ip"
+	. "github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/labelindex"
+	"github.com/alauda/felix/rules"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 
@@ -548,7 +548,7 @@ var _ = Describe("IP sets dataplane", func() {
 			})
 			It("should not be detected and fixed after an inconsistent remove", func() {
 				// We use '--exist' on 'del' commands to reduce the impact of
-				// https://github.com/projectcalico/felix/issues/1347.  If we resync
+				// https://github.com/alauda/felix/issues/1347.  If we resync
 				// after every remove failure when updating a large IP set we can
 				// end up in a resync loop requiring many retries to bring the
 				// set into sync.  That means that we won't spot the inconsistency

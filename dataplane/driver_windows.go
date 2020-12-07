@@ -19,8 +19,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/config"
-	"github.com/projectcalico/felix/dataplane/windows"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/dataplane/windows"
 	"github.com/projectcalico/libcalico-go/lib/health"
 )
 

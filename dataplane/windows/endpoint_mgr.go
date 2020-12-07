@@ -25,8 +25,8 @@ import (
 	hns "github.com/Microsoft/hcsshim"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/dataplane/windows/policysets"
-	"github.com/projectcalico/felix/proto"
+	"github.com/alauda/felix/dataplane/windows/policysets"
+	"github.com/alauda/felix/proto"
 )
 
 const (

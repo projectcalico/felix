@@ -15,7 +15,7 @@
 package ip_test
 
 import (
-	. "github.com/projectcalico/felix/ip"
+	. "github.com/alauda/felix/ip"
 
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"

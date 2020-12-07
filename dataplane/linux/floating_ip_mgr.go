@@ -19,9 +19,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/iptables"
-	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/felix/rules"
+	"github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 )
 
 // A floating IP is an IP that can be used to reach a particular workload endpoint, but that the

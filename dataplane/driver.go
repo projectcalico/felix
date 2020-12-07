@@ -25,14 +25,14 @@ import (
 
 	"runtime/debug"
 
-	"github.com/projectcalico/felix/config"
-	"github.com/projectcalico/felix/dataplane/external"
-	"github.com/projectcalico/felix/dataplane/linux"
-	"github.com/projectcalico/felix/ifacemonitor"
-	"github.com/projectcalico/felix/ipsets"
-	"github.com/projectcalico/felix/logutils"
-	"github.com/projectcalico/felix/markbits"
-	"github.com/projectcalico/felix/rules"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/dataplane/external"
+	"github.com/alauda/felix/dataplane/linux"
+	"github.com/alauda/felix/ifacemonitor"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/logutils"
+	"github.com/alauda/felix/markbits"
+	"github.com/alauda/felix/rules"
 	"github.com/projectcalico/libcalico-go/lib/health"
 )
 

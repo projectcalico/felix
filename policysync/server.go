@@ -20,7 +20,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/proto"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/pod2daemon/binder"
 
 	"google.golang.org/grpc"

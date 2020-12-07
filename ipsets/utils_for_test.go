@@ -33,7 +33,7 @@ import (
 	"bytes"
 	"regexp"
 
-	. "github.com/projectcalico/felix/ipsets"
+	. "github.com/alauda/felix/ipsets"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 

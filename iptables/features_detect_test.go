@@ -19,7 +19,7 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	. "github.com/projectcalico/felix/iptables"
+	. "github.com/alauda/felix/iptables"
 )
 
 func TestFeatureDetection(t *testing.T) {

@@ -21,9 +21,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
-	"github.com/projectcalico/felix/ipsets"
-	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/felix/rules"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 )
 
 // ipipManager manages the all-hosts IP set, which is used by some rules in our static chains

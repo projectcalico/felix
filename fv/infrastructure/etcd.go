@@ -17,8 +17,8 @@ package infrastructure
 import (
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/fv/containers"
-	"github.com/projectcalico/felix/fv/utils"
+	"github.com/alauda/felix/fv/containers"
+	"github.com/alauda/felix/fv/utils"
 )
 
 func RunEtcd() *containers.Container {

@@ -22,13 +22,13 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/ip"
-	"github.com/projectcalico/felix/ipsets"
-	"github.com/projectcalico/felix/iptables"
-	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/felix/routetable"
-	"github.com/projectcalico/felix/rules"
-	"github.com/projectcalico/felix/testutils"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/routetable"
+	"github.com/alauda/felix/rules"
+	"github.com/alauda/felix/testutils"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 

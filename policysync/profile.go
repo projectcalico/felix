@@ -15,7 +15,7 @@
 package policysync
 
 import (
-	"github.com/projectcalico/felix/proto"
+	"github.com/alauda/felix/proto"
 )
 
 type profileInfo struct {

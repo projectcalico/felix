@@ -18,7 +18,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/felix/proto"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 

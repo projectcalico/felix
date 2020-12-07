@@ -21,7 +21,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/config"
+	"github.com/alauda/felix/config"
 	"github.com/projectcalico/libcalico-go/lib/logutils"
 )
 

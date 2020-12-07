@@ -20,7 +20,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/ipsets"
+	"github.com/alauda/felix/ipsets"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 

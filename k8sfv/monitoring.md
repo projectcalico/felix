@@ -51,7 +51,7 @@ k8sfv puts the following labels on these metrics.
 -   **code_level:** Indicates the line of development of the code used for
     that test, e.g. as `<repository name>-<branch>`.  So
     measurements with
-    `https://github.com/projectcalico/felix.git-master`
+    `https://github.com/alauda/felix.git-master`
     indicate checked-in Felix master code.  Tests with
     non-checked in code should have `dev` here.
 

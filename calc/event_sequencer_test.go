@@ -22,9 +22,9 @@ import (
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/felix/calc"
-	"github.com/projectcalico/felix/config"
-	"github.com/projectcalico/felix/proto"
+	"github.com/alauda/felix/calc"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/net"
 )

@@ -15,7 +15,7 @@
 package conntrack_test
 
 import (
-	. "github.com/projectcalico/felix/conntrack"
+	. "github.com/alauda/felix/conntrack"
 
 	"errors"
 	"net"

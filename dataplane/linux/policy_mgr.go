@@ -17,9 +17,9 @@ package intdataplane
 import (
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/iptables"
-	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/felix/rules"
+	"github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 )
 
 // policyManager simply renders policy/profile updates into iptables.Chain objects and sends

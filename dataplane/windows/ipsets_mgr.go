@@ -19,8 +19,8 @@ package windataplane
 import (
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/dataplane/windows/ipsets"
-	"github.com/projectcalico/felix/proto"
+	"github.com/alauda/felix/dataplane/windows/ipsets"
+	"github.com/alauda/felix/proto"
 )
 
 // ipSetsManager simply passes through IP set updates from the datastore to the ipsets.IPSets

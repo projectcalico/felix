@@ -41,5 +41,5 @@ gocovmerge $(find . -name '*.coverprofile') > combined.coverprofile
 # Print the coverage.  We use sed to remove the verbose prefix and trim down
 # the whitespace.
 go tool cover -func combined.coverprofile | \
-  sed 's=github.com/projectcalico/felix/==' | \
+  sed 's=github.com/alauda/felix/==' | \
   column -t

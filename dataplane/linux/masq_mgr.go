@@ -19,9 +19,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/felix/ipsets"
-	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/felix/rules"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 	"github.com/projectcalico/libcalico-go/lib/set"
 )
 

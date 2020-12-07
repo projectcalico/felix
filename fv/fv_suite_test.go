@@ -23,8 +23,8 @@ import (
 	"github.com/onsi/ginkgo/reporters"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/felix/fv/infrastructure"
-	"github.com/projectcalico/felix/fv/workload"
+	"github.com/alauda/felix/fv/infrastructure"
+	"github.com/alauda/felix/fv/workload"
 
 	"github.com/projectcalico/libcalico-go/lib/testutils"
 )

@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/projectcalico/felix/dataplane/mock"
-	"github.com/projectcalico/felix/proto"
+	"github.com/alauda/felix/dataplane/mock"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/set"

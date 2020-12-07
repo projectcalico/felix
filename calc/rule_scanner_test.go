@@ -15,7 +15,7 @@
 package calc_test
 
 import (
-	. "github.com/projectcalico/felix/calc"
+	. "github.com/alauda/felix/calc"
 
 	"reflect"
 	"strings"
@@ -28,7 +28,7 @@ import (
 
 	"sort"
 
-	"github.com/projectcalico/felix/proto"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/libcalico-go/lib/hash"

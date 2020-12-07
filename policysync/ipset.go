@@ -17,8 +17,8 @@ package policysync
 import (
 	"fmt"
 
-	"github.com/projectcalico/felix/ipsets"
-	"github.com/projectcalico/felix/proto"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/libcalico-go/lib/set"
 
 	log "github.com/sirupsen/logrus"
