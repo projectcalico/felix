@@ -15,9 +15,13 @@
 package conntrack
 
 import (
+	"sync"
+	"time"
+
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/jitter"
 )
 
 // ScanVerdict represents the set of values returned by EntryScan
@@ -28,6 +32,9 @@ const (
 	ScanVerdictOK ScanVerdict = iota
 	// ScanVerdictDelete means entry should be deleted
 	ScanVerdictDelete
+
+	// ScanPeriod determines how often we iterate over the conntrack table.
+	ScanPeriod = 10 * time.Second
 )
 
 // EntryGet is a function prototype provided to EntryScanner in case it needs to
@@ -56,6 +63,10 @@ type EntryScannerSynced interface {
 type Scanner struct {
 	ctMap    bpf.Map
 	scanners []EntryScanner
+
+	wg       sync.WaitGroup
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 // NewScanner returns a scanner for the given conntrack map and the set of
@@ -64,11 +75,15 @@ func NewScanner(ctMap bpf.Map, scanners ...EntryScanner) *Scanner {
 	return &Scanner{
 		ctMap:    ctMap,
 		scanners: scanners,
+		stopCh:   make(chan struct{}),
 	}
 }
 
 // Scan executes a scanning iteration
 func (s *Scanner) Scan() {
+	s.iterStart()
+	defer s.iterEnd()
+
 	debug := log.GetLevel() >= log.DebugLevel
 
 	var ctKey Key
@@ -109,4 +124,58 @@ func (s *Scanner) get(k Key) (Value, error) {
 	}
 
 	return ValueFromBytes(v), nil
+}
+
+// Start the periodic scanner
+func (s *Scanner) Start() {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+
+		log.Debug("Conntrack scanner thread started")
+		defer log.Debug("Conntrack scanner thread stopped")
+
+		ticker := jitter.NewTicker(ScanPeriod, 100*time.Millisecond)
+
+		for {
+			s.Scan()
+
+			select {
+			case <-ticker.C:
+				log.Debug("Conntrack cleanup timer popped")
+			case <-s.stopCh:
+				log.Debug("Conntrack cleanup got stop signal")
+				return
+			}
+		}
+	}()
+}
+
+func (s *Scanner) iterStart() {
+	for _, scanner := range s.scanners {
+		if synced, ok := scanner.(EntryScannerSynced); ok {
+			synced.IterationStart()
+		}
+	}
+}
+
+func (s *Scanner) iterEnd() {
+	for _, scanner := range s.scanners {
+		if synced, ok := scanner.(EntryScannerSynced); ok {
+			synced.IterationEnd()
+		}
+	}
+}
+
+// Stop stops the Scanner and waits for it finishing.
+func (s *Scanner) Stop() {
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+		s.wg.Wait()
+	})
+}
+
+// AddUnlocked adds an additional EntryScanner to a non-running Scanner
+func (s *Scanner) AddUnlocked(scanner EntryScanner) {
+	s.scanners = append(s.scanners, scanner)
 }

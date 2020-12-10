@@ -182,10 +182,15 @@ func (l *LivenessScanner) EntryExpired(nowNanos int64, proto uint8, entry Value)
 }
 
 // NATChecker returns true a given combination of frontend-backend exists
-type NATChecker func(frontIP net.IP, frontPort uint16, backIP net.IP, backPort uint16, proto uint8) bool
+type NATChecker interface {
+	ConntrackScanStart()
+	ConntrackScanEnd()
+	ConntrackFrontendHasBackend(ip net.IP, port uint16, backendIP net.IP, backendPort uint16, proto uint8) bool
+}
 
+// StaleNATScanner removes any entries to frontend that do not have the backend anymore.
 type StaleNATScanner struct {
-	frontendHasBackend NATChecker
+	natChecker NATChecker
 }
 
 // NewStaleNATScanner returns an EntryScanner that checks if entries have
@@ -193,11 +198,12 @@ type StaleNATScanner struct {
 // them.
 func NewStaleNATScanner(frontendHasBackend NATChecker) *StaleNATScanner {
 	return &StaleNATScanner{
-		frontendHasBackend: frontendHasBackend,
+		natChecker: frontendHasBackend,
 	}
 }
 
-func (nc *StaleNATScanner) Check(k Key, v Value, _ EntryGet) ScanVerdict {
+// Check checks the conntrack entry
+func (sns *StaleNATScanner) Check(k Key, v Value, _ EntryGet) ScanVerdict {
 	debug := log.GetLevel() >= log.DebugLevel
 
 	switch v.Type() {
@@ -218,8 +224,8 @@ func (nc *StaleNATScanner) Check(k Key, v Value, _ EntryGet) ScanVerdict {
 		// We cannot tell which leg is EP and which is the client, we must
 		// try both. If there is a record for one of them, it is still most
 		// likely an active entry.
-		if !nc.frontendHasBackend(svcIP, svcPort, ipA, portA, proto) &&
-			!nc.frontendHasBackend(svcIP, svcPort, ipB, portB, proto) {
+		if !sns.natChecker.ConntrackFrontendHasBackend(svcIP, svcPort, ipA, portA, proto) &&
+			!sns.natChecker.ConntrackFrontendHasBackend(svcIP, svcPort, ipB, portB, proto) {
 			if debug {
 				log.WithField("key", k).Debugf("TypeNATReverse is stale")
 			}
@@ -274,7 +280,7 @@ func (nc *StaleNATScanner) Check(k Key, v Value, _ EntryGet) ScanVerdict {
 			return ScanVerdictOK // don't touch, will get deleted when expired
 		}
 
-		if !nc.frontendHasBackend(svcIP, svcPort, epIP, epPort, proto) {
+		if !sns.natChecker.ConntrackFrontendHasBackend(svcIP, svcPort, epIP, epPort, proto) {
 			if debug {
 				log.WithField("key", k).Debugf("TypeNATForward is stale")
 			}
@@ -289,4 +295,14 @@ func (nc *StaleNATScanner) Check(k Key, v Value, _ EntryGet) ScanVerdict {
 	}
 
 	return ScanVerdictOK
+}
+
+// IterationStart satisfies EntryScannerSynced
+func (sns *StaleNATScanner) IterationStart() {
+	sns.natChecker.ConntrackScanStart()
+}
+
+// IterationEnd satisfies EntryScannerSynced
+func (sns *StaleNATScanner) IterationEnd() {
+	sns.natChecker.ConntrackScanEnd()
 }
