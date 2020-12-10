@@ -80,7 +80,7 @@ func StartKubeProxy(k8s kubernetes.Interface, hostname string,
 		// free up the conntrack table asap as it may take time to sync up the
 		// proxy and kick off the first full cleaner scan.
 		lc := conntrack.NewLivenessScanner(kp.conntrackTimeouts, kp.dsrEnabled)
-		connScan := conntrack.NewScanner(kp.ctMap, lc.ScanEntry)
+		connScan := conntrack.NewScanner(kp.ctMap, lc)
 		connScan.Scan()
 
 		err := kp.start()
@@ -121,7 +121,7 @@ func (kp *KubeProxy) run(hostIPs []net.IP) error {
 
 	lc := conntrack.NewLivenessScanner(kp.conntrackTimeouts, kp.dsrEnabled)
 	connScan := conntrack.NewScanner(kp.ctMap,
-		lc.ScanEntry,
+		lc,
 		conntrack.NewStaleNATScanner(syncer.ConntrackFrontendHasBackend),
 	)
 
