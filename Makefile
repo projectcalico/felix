@@ -179,7 +179,7 @@ bin/calico-felix-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	mkdir -p bin
 	if [ "$(SEMAPHORE)" != "true" -o ! -e $@ ] ; then \
 	  $(DOCKER_GO_BUILD_CGO) \
-	     sh -c 'go build -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix"'; \
+	     sh -c 'go build -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix" ; go build -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix"' ; \
 	fi
 
 bin/calico-felix-race-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
@@ -187,7 +187,7 @@ bin/calico-felix-race-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	mkdir -p bin
 	if [ "$(SEMAPHORE)" != "true" -o ! -e $@ ] ; then \
 	  $(DOCKER_GO_BUILD_CGO) \
-	     sh -c 'go build -v -race -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix"'; \
+	     sh -c 'go build -v -race -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix" ; go build -v -race -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix"'; \
 	fi
 
 # Generate the protobuf bindings for go. The proto/felixbackend.pb.go file is included in SRC_FILES
@@ -522,7 +522,7 @@ bin/calico-bpf: $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	@echo Building calico-bpf...
 	mkdir -p bin
 	$(DOCKER_GO_BUILD_CGO) \
-	    sh -c 'go build -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-bpf"'
+	    sh -c 'go build -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-bpf" ; go build -v -i -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-bpf"'
 
 bin/pktgen: $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	@echo Building pktgen...
