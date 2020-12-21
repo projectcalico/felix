@@ -26,15 +26,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var debug bool
+
 func init() {
+	ipsetsDumpCmd.Flags().BoolVar(&debug, "debug", false, "")
 	ipsetsCmd.AddCommand(ipsetsDumpCmd)
 	rootCmd.AddCommand(ipsetsCmd)
 }
 
 var ipsetsDumpCmd = &cobra.Command{
-	Use:   "dump",
+	Use:   "dump [--debug]",
 	Short: "dumps ipsets",
 	Run: func(cmd *cobra.Command, args []string) {
+		if debug {
+			log.SetLevel(log.DebugLevel)
+		}
 		if err := dumpIPSets(); err != nil {
 			log.WithError(err).Error("Failed to dump IP sets map.")
 		}
@@ -56,6 +62,8 @@ func dumpIPSets() error {
 
 	membersBySet := map[uint64][]string{}
 	err := ipsetMap.Iter(func(k, v []byte) bpf.IteratorAction {
+		log.Debugf("K: %v", k)
+		log.Debugf("V: %v", v)
 		var entry ipsets.IPSetEntry
 		copy(entry[:], k[:])
 		var member string
