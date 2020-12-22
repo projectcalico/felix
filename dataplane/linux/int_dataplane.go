@@ -1064,8 +1064,6 @@ func (d *InternalDataplane) doStaticDataplaneConfig() {
 }
 
 func (d *InternalDataplane) setUpIptablesBPF() {
-	// TODO Make make bits configurable.
-
 	for _, t := range d.iptablesFilterTables {
 		fwdRules := []iptables.Rule{
 			{
@@ -1077,7 +1075,38 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 			},
 		}
 
-		var inputRules []iptables.Rule
+		var inputRules, outputRules []iptables.Rule
+
+		// Handle packets for flows that pre-date the BPF programs.  The BPF program doesn't have any conntrack
+		// state for these so it allows them to fall through to iptables with a mark set.
+		inputRules = append(inputRules,
+			iptables.Rule{
+				Match: iptables.Match().
+					MarkMatchesWithMask(tc.MarkSeenFallThrough, tc.MarkSeenFallThroughMask).
+					ConntrackState("ESTABLISHED,RELATED"),
+				Comment: []string{"Accept packets from flows that pre-date BPF."},
+				Action:  iptables.AcceptAction{},
+			},
+			iptables.Rule{
+				Match:   iptables.Match().MarkMatchesWithMask(tc.MarkSeenFallThrough, tc.MarkSeenFallThroughMask),
+				Comment: []string{"Drop packets from unknown flows."},
+				Action:  iptables.DropAction{},
+			},
+		)
+
+		// Mark traffic leaving the host that already has an established linux conntrack entry.
+		outputRules = append(outputRules,
+			iptables.Rule{
+				Match: iptables.Match().
+					ConntrackState("ESTABLISHED,RELATED"),
+				Comment: []string{"Mark flows pre-established host flows."},
+				Action: iptables.SetMaskedMarkAction{
+					Mark: tc.MarkSeenBypassMask,
+					Mask: tc.MarkSeenBypass,
+				},
+			},
+		)
+
 		for _, prefix := range d.config.RulesConfig.WorkloadIfacePrefixes {
 			fwdRules = append(fwdRules,
 				// Drop packets that have come from a workload but have not been through our BPF program.
@@ -1096,6 +1125,7 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 					Action: iptables.AcceptAction{},
 				})
 			}
+
 			// Catch any workload to host packets that haven't been through the BPF program.
 			inputRules = append(inputRules, iptables.Rule{
 				Match:  iptables.Match().InInterface(prefix+"+").NotMarkMatchesWithMask(tc.MarkSeen, tc.MarkSeenMask),
@@ -1144,6 +1174,7 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 
 		t.InsertOrAppendRules("INPUT", inputRules)
 		t.InsertOrAppendRules("FORWARD", fwdRules)
+		t.InsertOrAppendRules("OUTPUT", outputRules)
 	}
 
 	for _, t := range d.iptablesNATTables {

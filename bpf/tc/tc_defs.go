@@ -21,6 +21,8 @@ const (
 	MarkSeenMask                     = MarkCalicoMask | MarkSeen
 	MarkSeenBypass                   = MarkSeen | 0x02000000
 	MarkSeenBypassMask               = MarkSeenMask | MarkSeenBypass
+	MarkSeenFallThrough              = MarkSeen | 0x04000000
+	MarkSeenFallThroughMask          = MarkSeenMask | MarkSeenFallThrough
 	MarkSeenBypassForward            = MarkSeenBypass | 0x00300000
 	MarkSeenBypassForwardSourceFixup = MarkSeenBypass | 0x00500000
 	MarkSeenBypassSkipRPF            = MarkSeenBypass | 0x00400000
