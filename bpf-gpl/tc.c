@@ -94,7 +94,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 		/* We're leaving the host namespace, check for other bypass mark bits.
 		 * These are a bit more complex to handle so we do it after creating the
 		 * context/state. */
-		switch (skb->mark) {
+		switch (skb->mark & CALI_SKB_MARK_BYPASS_MASK) {
 		case CALI_SKB_MARK_BYPASS_FWD:
 			CALI_DEBUG("Packet approved for forward.\n");
 			ctx.fwd.reason = CALI_REASON_BYPASS;
@@ -268,7 +268,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	}
 
 	if (CALI_F_TO_WEP &&
-			skb->mark != CALI_SKB_MARK_SEEN &&
+			!skb_seen(skb) &&
 			cali_rt_flags_local_host(cali_rt_lookup_flags(ctx.state->ip_src))) {
 		/* Host to workload traffic always allowed.  We discount traffic that was
 		 * seen by another program since it must have come in via another interface.
