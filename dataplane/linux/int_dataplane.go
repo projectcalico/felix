@@ -1134,6 +1134,18 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 				})
 			}
 		} else {
+			// Let the BPF programs know if Linux conntrack knows about the flow.
+			fwdRules = append(fwdRules,
+				iptables.Rule{
+					Match: iptables.Match().
+						ConntrackState("ESTABLISHED,RELATED"),
+					Comment: []string{"Mark pre-established flows."},
+					Action: iptables.SetMaskedMarkAction{
+						Mark: tc.MarkLinuxConntrackEstablished,
+						Mask: tc.MarkLinuxConntrackEstablishedMask,
+					},
+				},
+			)
 			// The packet may be about to go to a local workload.  However, the local workload may not have a BPF
 			// program attached (yet).  To catch that case, we send the packet through a dispatch chain.  We only
 			// add interfaces to the dispatch chain if the BPF program is in place.
