@@ -30,5 +30,8 @@ const (
 	MarkSeenNATOutgoing              = MarkSeenBypass | 0x00800000
 	MarkSeenNATOutgoingMask          = MarkSeenBypassMask | MarkSeenNATOutgoing
 
+	MarkLinuxConntrackEstablished = MarkCalico | 0x08000000
+	MarkLinuxConntrackEstablishedMask = MarkCalico | 0x08000000
+
 	MarksMask = 0xfff00000
 )

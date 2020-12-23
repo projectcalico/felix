@@ -1090,10 +1090,10 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 			iptables.Rule{
 				Match: iptables.Match().
 					ConntrackState("ESTABLISHED,RELATED"),
-				Comment: []string{"Mark flows pre-established host flows."},
+				Comment: []string{"Mark pre-established host flows."},
 				Action: iptables.SetMaskedMarkAction{
-					Mark: tc.MarkSeenBypassMask,
-					Mask: tc.MarkSeenBypass,
+					Mark: tc.MarkLinuxConntrackEstablished,
+					Mask: tc.MarkLinuxConntrackEstablishedMask,
 				},
 			},
 		)
