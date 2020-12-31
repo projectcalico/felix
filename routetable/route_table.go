@@ -770,8 +770,6 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 	cidr := target.CIDR
 	ipNet := cidr.ToIPNet()
 
-
-
 	route := netlink.Route{
 		LinkIndex: linkIndex,
 		Dst:       &ipNet,

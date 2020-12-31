@@ -806,7 +806,7 @@ func (w *Wireguard) Apply() (err error) {
 	// Once the wireguard and routing configuration is in place we can add the routing rules to start using the new
 	// routing table.
 	log.Debug("Ensure routing rules are configured")
-	w.addWorkloadRouteRule()
+	w.addStaticRouteRules()
 	if err = w.routerule.Apply(); err != nil {
 		// Error updating the ip rule.
 		return ErrUpdateFailed
@@ -1075,7 +1075,7 @@ func (w *Wireguard) updateRouteTableFromNodeUpdates() {
 		}
 	}
 
-	// Now do the adds or updates. The workloadRouteTable component will take care of routes that don't actually change and
+	// Now do the adds or updates. The route table component will take care of routes that don't actually change and
 	// effectively no-op the delta.
 	for name, update := range w.nodeUpdates {
 		logCxt := log.WithField("node", name)
@@ -1156,11 +1156,21 @@ func (w *Wireguard) updateRouteTableFromNodeUpdates() {
 	}
 }
 
-// addWorkloadRouteRule adds a routing rule to use the wireguard table.
-func (w *Wireguard) addWorkloadRouteRule() {
+// addStaticRouteRules adds the static route rules used for routing to wg-enabled workloads, or for routing to nodes
+// when request originated over wireguard.
+func (w *Wireguard) addStaticRouteRules() {
+	// All routes that may use wireguard will attempt to route using the destination-workload table.
 	w.routerule.SetRule(routerule.NewRule(ipVersion, w.config.RoutingRulePriority).
 		GoToTable(w.config.WorkloadRoutingTableIndex).
-		MatchFWMarkWithMask(0, uint32(w.config.FirewallMark)))
+		MatchFWMarkWithMask(0, uint32(w.config.MarkDoNotRouteViaWireguard)))
+
+	// For externally originated packets that need to be forced over wireguard, route using the destination-node table.
+	// Arguably these could be routed via a separate "force" over wireguard table, but since the wireguard table needs
+	// to explicitly handle node and worload CIDRs there is no point in having a separate table to maintain.
+	w.routerule.SetRule(routerule.NewRule(ipVersion, w.config.RoutingRulePriority).
+		GoToTable(w.config.NodeRoutingTableIndex).
+		MatchFWMarkWithMask(uint32(w.config.MarkNonCaliWorkloadIface),
+			uint32(w.config.MarkDoNotRouteViaWireguard+w.config.MarkNonCaliWorkloadIface)))
 }
 
 // updateRouteRulesFromNodeUpdates updates the routerules from the node updates.
@@ -1185,12 +1195,12 @@ func (w *Wireguard) updateRouteRulesFromNodeUpdates() {
 	})
 }
 
-// createLocalWorkloadRouteRule creates a routing rule to route a local source CIDR to the wireguard table (if wireguard firewall
-// mark is not set).
+// createLocalWorkloadRouteRule creates a routing rule to route a local source CIDR to the wireguard table matching
+// on remote wireguard accessible nodes.
 func (w *Wireguard) createLocalWorkloadRouteRule(cidr ip.CIDR) *routerule.Rule {
 	rule := routerule.NewRule(ipVersion, w.config.RoutingRulePriority).
 		GoToTable(w.config.NodeRoutingTableIndex).
-		MatchFWMarkWithMask(0, uint32(w.config.FirewallMark)).
+		MatchFWMarkWithMask(0, uint32(w.config.MarkDoNotRouteViaWireguard)).
 		MatchSrcAddress(cidr.ToIPNet())
 	return rule
 }
@@ -1322,9 +1332,9 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 	// Determine if any configuration on the device needs updating
 	wireguardUpdate := wgtypes.Config{}
 	wireguardUpdateRequired := false
-	if device.FirewallMark != w.config.FirewallMark {
-		logCxt.WithFields(log.Fields{"existing": device.FirewallMark, "required": w.config.FirewallMark}).Info("Update firewall mark")
-		wireguardUpdate.FirewallMark = &w.config.FirewallMark
+	if device.FirewallMark != w.config.MarkDoNotRouteViaWireguard {
+		logCxt.WithFields(log.Fields{"existing": device.FirewallMark, "required": w.config.MarkDoNotRouteViaWireguard}).Info("Update firewall mark")
+		wireguardUpdate.FirewallMark = &w.config.MarkDoNotRouteViaWireguard
 		wireguardUpdateRequired = true
 	}
 	if device.ListenPort != w.config.ListeningPort {
