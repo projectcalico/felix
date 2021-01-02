@@ -99,11 +99,7 @@ func (m MatchCriteria) OutInterface(ifaceMatch string) MatchCriteria {
 }
 
 func (m MatchCriteria) NotInInterface(ifaceMatch string) MatchCriteria {
-	return append(m, fmt.Sprintf("--in-interface ! %s", ifaceMatch))
-}
-
-func (m MatchCriteria) NotOutInterface(ifaceMatch string) MatchCriteria {
-	return append(m, fmt.Sprintf("--out-interface ! %s", ifaceMatch))
+	return append(m, fmt.Sprintf("! --in-interface %s", ifaceMatch))
 }
 
 func (m MatchCriteria) RPFCheckPassed(acceptLocal bool) MatchCriteria {
