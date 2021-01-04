@@ -103,7 +103,7 @@ func (m MatchCriteria) NotInInterface(ifaceMatch string) MatchCriteria {
 }
 
 func (m MatchCriteria) RPFCheckPassed(acceptLocal bool) MatchCriteria {
-	ret := append(m, "-m rpfilter")
+	ret := append(m, "-m rpfilter --validmark")
 	if acceptLocal {
 		ret = append(ret, "--accept-local")
 	}
