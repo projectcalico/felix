@@ -98,8 +98,12 @@ func (m MatchCriteria) OutInterface(ifaceMatch string) MatchCriteria {
 	return append(m, fmt.Sprintf("--out-interface %s", ifaceMatch))
 }
 
+func (m MatchCriteria) NotInInterface(ifaceMatch string) MatchCriteria {
+	return append(m, fmt.Sprintf("! --in-interface %s", ifaceMatch))
+}
+
 func (m MatchCriteria) RPFCheckPassed(acceptLocal bool) MatchCriteria {
-	ret := append(m, "-m rpfilter")
+	ret := append(m, "-m rpfilter --validmark")
 	if acceptLocal {
 		ret = append(ret, "--accept-local")
 	}
@@ -107,7 +111,7 @@ func (m MatchCriteria) RPFCheckPassed(acceptLocal bool) MatchCriteria {
 }
 
 func (m MatchCriteria) RPFCheckFailed(acceptLocal bool) MatchCriteria {
-	ret := append(m, "-m rpfilter --invert")
+	ret := append(m, "-m rpfilter --validmark --invert")
 	if acceptLocal {
 		ret = append(ret, "--accept-local")
 	}
