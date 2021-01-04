@@ -820,6 +820,13 @@ func (r *DefaultRuleRenderer) StaticManglePreroutingChain(ipVersion uint8) *Chai
 				},
 			},
 			Rule{
+				Match: Match().InInterface(r.Config.WireguardInterfaceName).ConntrackState("NEW"),
+				Action: SetMaskedMarkAction{
+					Mask: uint32(r.Config.WireguardMarkNonCaliWorkloadIface + r.Config.WireguardMarkDoNotRouteViaWireguard),
+					Mark: uint32(r.Config.WireguardMarkNonCaliWorkloadIface),
+				},
+			},
+			Rule{
 				Match: Match().NotInInterface(r.Config.WireguardInterfaceName).ConntrackState("NEW"),
 				Action: SaveConnMarkAction{
 					SaveMask: uint32(r.Config.WireguardMarkDoNotRouteViaWireguard + r.Config.WireguardMarkNonCaliWorkloadIface),
