@@ -1078,11 +1078,6 @@ func RPFilter(ipVersion uint8, mark, mask uint32, openStackSpecialCasesEnabled, 
 		Action: DropAction{},
 	})
 
-	rules = append(rules, Rule{
-		Match:  Match().InInterface("wireguard.cali").RPFCheckFailed(acceptLocal),
-		Action: DropAction{},
-	})
-
 	return rules
 }
 

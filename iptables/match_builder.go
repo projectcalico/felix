@@ -103,7 +103,7 @@ func (m MatchCriteria) NotInInterface(ifaceMatch string) MatchCriteria {
 }
 
 func (m MatchCriteria) RPFCheckPassed(acceptLocal bool) MatchCriteria {
-	ret := append(m, "-m rpfilter --validmark")
+	ret := append(m, "-m rpfilter")
 	if acceptLocal {
 		ret = append(ret, "--accept-local")
 	}
@@ -111,7 +111,7 @@ func (m MatchCriteria) RPFCheckPassed(acceptLocal bool) MatchCriteria {
 }
 
 func (m MatchCriteria) RPFCheckFailed(acceptLocal bool) MatchCriteria {
-	ret := append(m, "-m rpfilter --validmark --invert")
+	ret := append(m, "-m rpfilter --invert")
 	if acceptLocal {
 		ret = append(ret, "--accept-local")
 	}
