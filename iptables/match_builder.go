@@ -111,7 +111,7 @@ func (m MatchCriteria) RPFCheckPassed(acceptLocal bool) MatchCriteria {
 }
 
 func (m MatchCriteria) RPFCheckFailed(acceptLocal bool) MatchCriteria {
-	ret := append(m, "-m rpfilter --invert")
+	ret := append(m, "-m rpfilter --validmark --invert")
 	if acceptLocal {
 		ret = append(ret, "--accept-local")
 	}
