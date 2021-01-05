@@ -1,5 +1,5 @@
 // Project Calico BPF dataplane programs.
-// Copyright (c) 2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2021 Tigera, Inc. All rights reserved.
 //
 // This program is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -178,7 +178,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	case 4:
 		// IPIP
 		if (CALI_F_HEP) {
-			// TODO IPIP whitelist.
+			// TODO-HEPs IPIP whitelist.
 			CALI_DEBUG("IPIP: allow\n");
 			fwd_fib_set(&ctx.fwd, false);
 			goto allow;
@@ -196,7 +196,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 		break;
 	default:
 		if (CALI_F_HEP) {
-			// FIXME: allow unknown protocols through on host endpoints.
+			// TODO-HEPs allow unknown protocols through on host endpoints.
 			goto allow;
 		}
 		// FIXME non-port based conntrack.

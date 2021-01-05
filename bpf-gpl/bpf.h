@@ -1,5 +1,5 @@
 // Project Calico BPF dataplane programs.
-// Copyright (c) 2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // This program is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -122,6 +122,9 @@ enum calico_skb_mark {
 	CALI_SKB_MARK_BYPASS_MASK            = CALI_SKB_MARK_SEEN_MASK | 0x02700000,
 	CALI_SKB_MARK_SKIP_RPF               = CALI_SKB_MARK_BYPASS  | 0x00400000,
 	CALI_SKB_MARK_NAT_OUT                = CALI_SKB_MARK_BYPASS  | 0x00800000,
+
+	CALI_SKB_MARK_CT_ESTABLISHED         = CALI_MARK_CALICO      | 0x08000000,
+	CALI_SKB_MARK_CT_ESTABLISHED_MASK    = CALI_MARK_CALICO      | 0x08000000,
 };
 
 /* bpf_exit inserts a BPF exit instruction with the given return value. In a fully-inlined
