@@ -1,5 +1,5 @@
 // Project Calico BPF dataplane programs.
-// Copyright (c) 2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // This program is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -53,6 +53,10 @@ struct bpf_map_def_extended {
 #define CALI_TC_DSR		(1<<4)
 #define CALI_TC_WIREGUARD	(1<<5)
 
+#ifndef CALI_DROP_WORKLOAD_TO_HOST
+#define CALI_DROP_WORKLOAD_TO_HOST false
+#endif
+
 #ifndef CALI_COMPILE_FLAGS
 #define CALI_COMPILE_FLAGS 0
 #endif
@@ -85,7 +89,11 @@ struct bpf_map_def_extended {
 							  * state->ct_result->ifindex_fwd
 							  */
 
-#define FIB_ENABLED (!CALI_F_L3 && CALI_FIB_LOOKUP_ENABLED && CALI_F_TO_HOST)
+#ifndef CALI_FIB_LOOKUP_ENABLED
+#define CALI_FIB_LOOKUP_ENABLED true
+#endif
+
+#define CALI_FIB_ENABLED (!CALI_F_L3 && CALI_FIB_LOOKUP_ENABLED && CALI_F_TO_HOST)
 
 #define COMPILE_TIME_ASSERT(expr) {typedef char array[(expr) ? 1 : -1];}
 static CALI_BPF_INLINE void __compile_asserts(void) {
@@ -103,17 +111,38 @@ static CALI_BPF_INLINE void __compile_asserts(void) {
 }
 
 enum calico_skb_mark {
-	// TODO allocate marks from the mark pool.
 	CALI_MARK_CALICO                     = 0xc0000000,
 	CALI_MARK_CALICO_MASK                = 0xf0000000,
 	CALI_SKB_MARK_SEEN                   = CALI_MARK_CALICO      | 0x01000000,
 	CALI_SKB_MARK_SEEN_MASK              = CALI_MARK_CALICO_MASK | CALI_SKB_MARK_SEEN,
 	CALI_SKB_MARK_BYPASS                 = CALI_SKB_MARK_SEEN    | 0x02000000,
+	CALI_SKB_MARK_FALLTHROUGH            = CALI_SKB_MARK_SEEN    | 0x04000000,
 	CALI_SKB_MARK_BYPASS_FWD             = CALI_SKB_MARK_BYPASS  | 0x00300000,
 	CALI_SKB_MARK_BYPASS_FWD_SRC_FIXUP   = CALI_SKB_MARK_BYPASS  | 0x00500000,
+	CALI_SKB_MARK_BYPASS_MASK            = CALI_SKB_MARK_SEEN_MASK | 0x02700000,
 	CALI_SKB_MARK_SKIP_RPF               = CALI_SKB_MARK_BYPASS  | 0x00400000,
 	CALI_SKB_MARK_NAT_OUT                = CALI_SKB_MARK_BYPASS  | 0x00800000,
+
+	CALI_SKB_MARK_CT_ESTABLISHED         = CALI_MARK_CALICO      | 0x08000000,
+	CALI_SKB_MARK_CT_ESTABLISHED_MASK    = CALI_MARK_CALICO      | 0x08000000,
 };
+
+/* bpf_exit inserts a BPF exit instruction with the given return value. In a fully-inlined
+ * BPF program this allows us to terminate early.  However(!) the exit instruction is also used
+ * for function return so we need to be careful if we ever start using functions in anger. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-noreturn"
+static CALI_BPF_INLINE _Noreturn void bpf_exit(int rc) {
+	// Need volatile here because we don't use rc after this assembler fragment.
+	// The BPF assembler rejects an input-only operand so we make r0 an in/out operand.
+	asm volatile ( \
+		"exit" \
+		: "=r0" (rc) /*out*/ \
+		: "0" (rc) /*in*/ \
+		: /*clobber*/ \
+	);
+}
+#pragma clang diagnostic pop
 
 #define ip_is_dnf(ip) ((ip)->frag_off & bpf_htons(0x4000))
 #define ip_frag_no(ip) ((ip)->frag_off & bpf_htons(0x1fff))
