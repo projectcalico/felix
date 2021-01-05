@@ -448,6 +448,14 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct cali_t
 				 return result;
 			}
 		}
+		if (CALI_F_TO_HOST && proto_orig == IPPROTO_TCP) {
+			// Miss for a mid-flow TCP packet towards the host.  This may be part of a
+			// connection that predates the BPF program so we need to let it fall through
+			// to iptables.
+			CALI_DEBUG("BPF CT Miss for mid-flow TCP\n");
+			result.rc = CALI_CT_MID_FLOW_MISS;
+			return result;
+		}
 		if (ct_ctx->proto != IPPROTO_ICMP) {
 			// Not ICMP so can't be a "related" packet.
 			CALI_CT_DEBUG("Miss.\n");
@@ -482,6 +490,15 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct cali_t
 				// TODO-HEP Create a tracking entry for uplifted flow so that we handle the reverse traffic more efficiently.
 				CALI_DEBUG("BPF CT related miss but have Linux CT entry: established\n");
 				result.rc = CALI_CT_ESTABLISHED;
+				return result;
+			}
+
+			if (CALI_F_TO_HOST && ct_ctx->proto) {
+				// Miss for a related packet towards the host.  This may be part of a
+				// connection that predates the BPF program so we need to let it fall through
+				// to iptables.
+				CALI_DEBUG("BPF CT related miss for mid-flow TCP\n");
+				result.rc = CALI_CT_MID_FLOW_MISS;
 				return result;
 			}
 

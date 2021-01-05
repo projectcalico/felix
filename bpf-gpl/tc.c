@@ -224,6 +224,18 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 		fwd_fib_set(&ctx.fwd, false);
 	}
 
+	if (ct_result_rc(ctx.state->ct_result.rc) == CALI_CT_MID_FLOW_MISS) {
+		/* Mid-flow miss: let iptables handle it in case it's an existing flow
+		 * in the Linux conntrack table. We can't apply policy or DNAT because
+		 * it's too late in the flow.  iptables will drop if the flow is not
+		 * known.
+		 */
+		CALI_DEBUG("CT mid-flow miss; fall through to iptables.\n");
+		ctx.fwd.mark = CALI_SKB_MARK_FALLTHROUGH;
+		fwd_fib_set(&ctx.fwd, false);
+		goto finalize;
+	}
+
 	/* Skip policy if we get conntrack hit */
 	if (ct_result_rc(ctx.state->ct_result.rc) != CALI_CT_NEW) {
 		if (ctx.state->ct_result.flags & CALI_CT_FLAG_SKIP_FIB) {
