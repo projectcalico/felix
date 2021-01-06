@@ -839,7 +839,7 @@ func (r *DefaultRuleRenderer) StaticManglePreroutingChain(ipVersion uint8) *Chai
 				},
 			},
 			Rule{
-				Match: Match().InInterface(r.Config.WireguardInterfaceName).RPFCheckFailed(true, true),
+				Match: Match().InInterface(r.Config.WireguardInterfaceName).RPFCheckFailed(true, false),
 				Action: DropAction{},
 			},
 		)
