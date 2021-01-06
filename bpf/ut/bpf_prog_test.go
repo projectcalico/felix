@@ -329,6 +329,9 @@ func bpftoolProgLoadAll(fname, bpfFsDir string) error {
 		"map", "name", arpMap.GetName(), "pinned", arpMap.Path(),
 	)
 	if err != nil {
+		if err, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("bpftool failed with RC=%d\nSTDERR=%s", err.ExitCode(), string(err.Stderr))
+		}
 		return err
 	}
 
