@@ -653,7 +653,7 @@ func (w *Wireguard) Apply() (err error) {
 	wireguardPeerDelete := w.handlePeerAndRouteDeletionFromNodeUpdates(conflictingKeys)
 	w.updateCacheFromNodeUpdates(conflictingKeys)
 	w.updateRouteTableFromNodeUpdates()
-	w.updateRouteRulesFromNodeUpdates()
+	//w.updateRouteRulesFromNodeUpdates()
 
 	defer func() {
 		// Flag the programmed state to be the same as the expected state for each peer. We do this even if we failed to

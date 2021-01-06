@@ -899,6 +899,10 @@ func (r *DefaultRuleRenderer) StaticManglePreroutingChain(ipVersion uint8) *Chai
 					RestoreMask: uint32(r.Config.WireguardMarkDoNotRouteViaWireguard + r.Config.WireguardMarkNonCaliWorkloadIface),
 				},
 			},
+			Rule{
+				Match: Match().InInterface(r.Config.WireguardInterfaceName).ConntrackState("NEW").RPFCheckFailed(true, true),
+				Action: DropAction{},
+			},
 		)
 	}
 
@@ -1135,7 +1139,7 @@ func RPFilter(ipVersion uint8, mark, mask uint32, openStackSpecialCasesEnabled, 
 	}
 
 	rules = append(rules, Rule{
-		Match:  Match().MarkMatchesWithMask(mark, mask).RPFCheckFailed(acceptLocal),
+		Match:  Match().MarkMatchesWithMask(mark, mask).RPFCheckFailed(acceptLocal, false),
 		Action: DropAction{},
 	})
 
