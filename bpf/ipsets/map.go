@@ -42,7 +42,7 @@ type IPSetEntry [IPSetEntrySize]byte
 
 func Map(mc *bpf.MapContext) bpf.Map {
 	return mc.NewPinnedMap(bpf.MapParameters{
-		Filename:   "/sys/fs/bpf/tc/globals/cali_v4_ip_sets",
+		Filename:   "/tc/globals/cali_v4_ip_sets",
 		Type:       "lpm_trie",
 		KeySize:    IPSetEntrySize,
 		ValueSize:  4,

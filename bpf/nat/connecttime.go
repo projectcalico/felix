@@ -74,7 +74,7 @@ func RemoveConnectTimeLoadBalancer(cgroupv2 string) error {
 		}
 	}
 
-	bpf.CleanUpCalicoPins("/sys/fs/bpf/calico_connect4")
+	bpf.CleanUpCalicoPins("/calico_connect4")
 
 	return nil
 }

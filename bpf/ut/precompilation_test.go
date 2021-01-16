@@ -35,7 +35,7 @@ func TestPrecompiledBinariesAreLoadable(t *testing.T) {
 
 	bpffs, err := bpf.MaybeMountBPFfs()
 	Expect(err).NotTo(HaveOccurred())
-	Expect(bpffs).To(Equal("/sys/fs/bpf"))
+	Expect(bpffs).To(Equal(bpf.FSRoot))
 
 	for _, logLevel := range []string{"OFF", "INFO", "DEBUG"} {
 		logLevel := logLevel

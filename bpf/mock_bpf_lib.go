@@ -115,7 +115,7 @@ func NewMockBPFLib(binDir string) *MockBPFLib {
 }
 
 func (b *MockBPFLib) GetBPFCalicoDir() string {
-	return "/sys/fs/bpf/calico"
+	return FSRoot + "/calico"
 }
 
 func (b *MockBPFLib) NewCIDRMap(ifName string, family IPFamily) (string, error) {
@@ -132,7 +132,7 @@ func (b *MockBPFLib) NewCIDRMap(ifName string, family IPFamily) (string, error) 
 
 	id += 1
 
-	return fmt.Sprintf("/sys/fs/bpf/calico/xdp/%s_ipv4_v1_blacklist", ifName), nil
+	return fmt.Sprintf(FSRoot+"/calico/xdp/%s_ipv4_v1_blacklist", ifName), nil
 }
 
 func (b *MockBPFLib) NewFailsafeMap() (string, error) {
@@ -140,7 +140,7 @@ func (b *MockBPFLib) NewFailsafeMap() (string, error) {
 
 	id += 1
 
-	return "/sys/fs/bpf/calico/xdp/calico_failsafe_ports_v1", nil
+	return FSRoot + "/calico/xdp/calico_failsafe_ports_v1", nil
 }
 
 func (b *MockBPFLib) DumpCIDRMap(ifName string, family IPFamily) (map[CIDRMapKey]uint32, error) {
@@ -668,7 +668,7 @@ func (b *MockBPFLib) NewSockmapEndpointsMap() (string, error) {
 
 	id += 1
 
-	return "/sys/fs/bpf/calico/sockmap/calico_sockmap_endpoints", nil
+	return FSRoot + "/calico/sockmap/calico_sockmap_endpoints", nil
 }
 
 func (b *MockBPFLib) NewSockmap() (string, error) {
@@ -677,7 +677,7 @@ func (b *MockBPFLib) NewSockmap() (string, error) {
 
 	id += 1
 
-	return "/sys/fs/bpf/calico/sockmap/calico_sock_map", nil
+	return FSRoot + "/calico/sockmap/calico_sock_map", nil
 }
 
 func (b *MockBPFLib) UpdateSockmapEndpoints(ip net.IP, mask int) error {
