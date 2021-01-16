@@ -76,8 +76,6 @@ const (
 	sockMapName                = "calico_sock_map_" + sockMapVersion
 	sockmapEndpointsMapVersion = "v1"
 	sockmapEndpointsMapName    = "calico_sk_endpoints_" + sockmapEndpointsMapVersion
-
-	defaultBPFfsPath = "/sys/fs/bpf"
 )
 
 var (
@@ -195,20 +193,20 @@ func NewBPFLib(binDir string) (*BPFLib, error) {
 
 func MaybeMountBPFfs() (string, error) {
 	var err error
-	bpffsPath := defaultBPFfsPath
+	bpffsPath := FSRoot
 
-	mnt, err := isMount(defaultBPFfsPath)
+	mnt, err := isMount(FSRoot)
 	if err != nil {
 		return "", err
 	}
 
-	fsBPF, err := isBPF(defaultBPFfsPath)
+	fsBPF, err := isBPF(FSRoot)
 	if err != nil {
 		return "", err
 	}
 
 	if !mnt {
-		err = mountBPFfs(defaultBPFfsPath)
+		err = mountBPFfs(FSRoot)
 	} else if !fsBPF {
 		var runfsBPF bool
 

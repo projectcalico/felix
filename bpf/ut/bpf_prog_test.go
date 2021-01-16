@@ -154,7 +154,7 @@ func setupAndRun(logger testLogger, loglevel string, section string, rules polpr
 	defer os.RemoveAll(tempDir)
 
 	unique := path.Base(tempDir)
-	bpfFsDir := "/sys/fs/bpf/" + unique
+	bpfFsDir := "/" + unique
 
 	err = os.Mkdir(bpfFsDir, os.ModePerm)
 	Expect(err).NotTo(HaveOccurred())
@@ -415,7 +415,7 @@ func runBpfUnitTest(t *testing.T, source string, testFn func(bpfProgRunFn)) {
 	defer os.RemoveAll(tempDir)
 
 	unique := path.Base(tempDir)
-	bpfFsDir := "/sys/fs/bpf/" + unique
+	bpfFsDir := "/" + unique
 
 	err = os.Mkdir(bpfFsDir, os.ModePerm)
 	Expect(err).NotTo(HaveOccurred())
@@ -719,7 +719,7 @@ func TestMapIterWithDelete(t *testing.T) {
 	RegisterTestingT(t)
 
 	m := (&bpf.MapContext{}).NewPinnedMap(bpf.MapParameters{
-		Filename:   "/sys/fs/bpf/tc/globals/cali_tmap",
+		Filename:   "/tc/globals/cali_tmap",
 		Type:       "hash",
 		KeySize:    8,
 		ValueSize:  8,
@@ -767,7 +767,7 @@ func TestMapIterWithDeleteLastOfBatch(t *testing.T) {
 	RegisterTestingT(t)
 
 	m := (&bpf.MapContext{}).NewPinnedMap(bpf.MapParameters{
-		Filename:   "/sys/fs/bpf/tc/globals/cali_tmap",
+		Filename:   "/tc/globals/cali_tmap",
 		Type:       "hash",
 		KeySize:    8,
 		ValueSize:  8,

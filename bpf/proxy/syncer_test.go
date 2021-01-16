@@ -913,7 +913,7 @@ func (m *mockNATMap) GetName() string {
 }
 
 func (m *mockNATMap) Path() string {
-	return "/sys/fs/bpf/tc/nat"
+	return "/tc/nat"
 }
 
 func (m *mockNATMap) Iter(iter bpf.IterCallback) error {
@@ -998,7 +998,7 @@ func (m *mockNATBackendMap) GetName() string {
 }
 
 func (m *mockNATBackendMap) Path() string {
-	return "/sys/fs/bpf/tc/natbe"
+	return "/tc/natbe"
 }
 
 func (m *mockNATBackendMap) Iter(iter bpf.IterCallback) error {
@@ -1079,7 +1079,7 @@ func (m *mockAffinityMap) GetName() string {
 }
 
 func (m *mockAffinityMap) Path() string {
-	return "/sys/fs/bpf/tc/aff"
+	return "/tc/aff"
 }
 
 func (m *mockAffinityMap) Iter(iter bpf.IterCallback) error {

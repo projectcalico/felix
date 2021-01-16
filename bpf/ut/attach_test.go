@@ -33,7 +33,7 @@ func TestJumpMapCleanup(t *testing.T) {
 
 	bpffs, err := bpf.MaybeMountBPFfs()
 	Expect(err).NotTo(HaveOccurred())
-	Expect(bpffs).To(Equal("/sys/fs/bpf"))
+	Expect(bpffs).To(Equal(bpf.FSRoot))
 
 	ap := tc.AttachPoint{
 		Type:     tc.EpTypeWorkload,
@@ -92,7 +92,7 @@ func TestJumpMapCleanup(t *testing.T) {
 
 func countJumpMaps() int {
 	var count int
-	err := filepath.Walk("/sys/fs/bpf/tc", func(p string, info os.FileInfo, err error) error {
+	err := filepath.Walk(bpf.FSRoot+"/tc", func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func countJumpMaps() int {
 
 func countTCDirs() int {
 	var count int
-	err := filepath.Walk("/sys/fs/bpf/tc", func(p string, info os.FileInfo, err error) error {
+	err := filepath.Walk(bpf.FSRoot+"/tc", func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}

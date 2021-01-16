@@ -244,7 +244,7 @@ func CleanUpJumpMaps() {
 
 	// Find the maps we care about by walking the BPF filesystem.
 	mapIDToPath := make(map[int]string)
-	err := filepath.Walk("/sys/fs/bpf/tc", func(p string, info os.FileInfo, err error) error {
+	err := filepath.Walk(bpf.FSRoot+"/tc", func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -336,7 +336,7 @@ func CleanUpJumpMaps() {
 
 	// Look for empty dirs.
 	emptyAutoDirs := set.New()
-	err = filepath.Walk("/sys/fs/bpf/tc", func(p string, info os.FileInfo, err error) error {
+	err = filepath.Walk(bpf.FSRoot+"/tc", func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}

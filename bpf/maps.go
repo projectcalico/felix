@@ -29,6 +29,8 @@ import (
 
 type IteratorAction string
 
+var FSRoot = "/sys/fs/bpf"
+
 const (
 	IterNone   IteratorAction = ""
 	IterDelete IteratorAction = "delete"
@@ -77,7 +79,7 @@ func (mp *MapParameters) versionedName() string {
 }
 
 func (mp *MapParameters) versionedFilename() string {
-	return versionedStr(mp.Version, mp.Filename)
+	return versionedStr(mp.Version, FSRoot+mp.Filename)
 }
 
 type MapContext struct {
@@ -139,6 +141,7 @@ func DumpMapCmd(m Map) ([]string, error) {
 	if pm, ok := m.(*PinnedMap); ok {
 		return []string{
 			"bpftool",
+			"--bpffs", FSRoot,
 			"--json",
 			"--pretty",
 			"map",
@@ -159,6 +162,7 @@ func MapDeleteKeyCmd(m Map, key []byte) ([]string, error) {
 		}
 		cmd := []string{
 			"bpftool",
+			"--bpffs", FSRoot,
 			"--json",
 			"--pretty",
 			"map",
@@ -278,7 +282,7 @@ func (b *PinnedMap) Open() error {
 		return err
 	}
 	// FIXME hard-coded dir
-	err = os.MkdirAll("/sys/fs/bpf/tc/globals", 0700)
+	err = os.MkdirAll(FSRoot+"/tc/globals", 0700)
 	if err != nil {
 		logrus.WithError(err).Error("Failed create dir")
 		return err
@@ -324,7 +328,9 @@ func (b *PinnedMap) EnsureExists() error {
 	}
 
 	logrus.Debug("Map didn't exist, creating it")
-	cmd := exec.Command("bpftool", "map", "create", b.versionedFilename(),
+	cmd := exec.Command("bpftool",
+		"--bpffs", FSRoot,
+		"map", "create", b.versionedFilename(),
 		"type", b.Type,
 		"key", fmt.Sprint(b.KeySize),
 		"value", fmt.Sprint(b.ValueSize),
@@ -352,7 +358,7 @@ type bpftoolMapMeta struct {
 }
 
 func RepinMap(name string, filename string) error {
-	cmd := exec.Command("bpftool", "map", "list", "-j")
+	cmd := exec.Command("bpftool", "--bpffs", FSRoot, "map", "list", "-j")
 	out, err := cmd.Output()
 	if err != nil {
 		return errors.Wrap(err, "bpftool map list failed")
@@ -368,7 +374,7 @@ func RepinMap(name string, filename string) error {
 	for _, m := range maps {
 		if m.Name == name {
 			// Found the map, try to repin it.
-			cmd := exec.Command("bpftool", "map", "pin", "id", fmt.Sprint(m.ID), filename)
+			cmd := exec.Command("bpftool", "--bpffs", FSRoot, "map", "pin", "id", fmt.Sprint(m.ID), filename)
 			return errors.Wrap(cmd.Run(), "bpftool failed to repin map")
 		}
 	}
