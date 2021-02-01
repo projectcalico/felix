@@ -60,7 +60,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	 */
 	skb->mark = CALI_SET_SKB_MARK;
 #endif
-	CALI_DEBUG("New packet; mark=%x\n", skb->mark);
+	CALI_DEBUG("New packet at ifindex=%d; mark=%x\n", skb->ifindex, skb->mark);
 
 	/* Optimisation: if another BPF program has already pre-approved the packet,
 	 * skip all processing. */
