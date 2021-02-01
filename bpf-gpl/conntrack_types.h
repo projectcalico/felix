@@ -170,6 +170,7 @@ struct calico_ct_result {
 	__u32 nat_port;
 	__be32 tun_ip;
 	__u32 ifindex_fwd; /* if set, the ifindex where the packet should be forwarded */
+	__u32 ifindex_created; /* if set, the ifindex where the CT state was created */
 };
 
 #endif /* __CALI_CONNTRAC_TYPESK_H__ */
