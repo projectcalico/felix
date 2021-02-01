@@ -95,7 +95,7 @@ func Map(mc *bpf.MapContext) bpf.Map {
 		ValueSize:  expectedSize,
 		MaxEntries: 1,
 		Name:       "cali_v4_state",
-		Version:    2,
+		Version:    3,
 	})
 }
 
