@@ -171,7 +171,11 @@ create:
 	src_to_dst->seqno = seq;
 	src_to_dst->syn_seen = syn;
 	src_to_dst->opener = 1;
-	src_to_dst->ifindex = ct_ctx->skb->ifindex;
+	if (CALI_F_TO_HOST) {
+		src_to_dst->ifindex = skb_ingress_ifindex(ct_ctx->skb);
+	} else {
+		src_to_dst->ifindex = CT_INVALID_IFINDEX;
+	}
 	CALI_DEBUG("NEW src_to_dst->ifindex %d\n", src_to_dst->ifindex);
 	dst_to_src->ifindex = CT_INVALID_IFINDEX;
 
@@ -778,6 +782,13 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct cali_t
 				ct_result_set_rc(result.rc, CALI_CT_ESTABLISHED);
 			}
 			ct_result_set_flag(result.rc, CALI_CT_RPF_FAILED);
+		} else if (src_to_dst->ifindex != CT_INVALID_IFINDEX) {
+			/* if the devices do not match, we got here without bypassing the
+			 * host IP stack and RPF check allowed it, so update our records.
+			 */
+			CALI_CT_DEBUG("Updating ifindex from %d to %d\n",
+					src_to_dst->ifindex, ifindex);
+			src_to_dst->ifindex = ifindex;
 		}
 	}
 
