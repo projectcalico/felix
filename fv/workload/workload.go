@@ -695,6 +695,6 @@ func (w *Workload) InterfaceIndex() int {
 	Expect(err).NotTo(HaveOccurred())
 	ifIndex, err := strconv.Atoi(strings.SplitN(out, ":", 2)[0])
 	Expect(err).NotTo(HaveOccurred())
-	log.Info("%v is ifindex %v", w.InterfaceName, ifIndex)
+	log.Infof("%v is ifindex %v", w.InterfaceName, ifIndex)
 	return ifIndex
 }
