@@ -39,7 +39,7 @@ import (
 var _ = describeConnCheckTests("tcp")
 var _ = describeConnCheckTests("sctp")
 var _ = describeConnCheckTests("udp")
-var _ = describeConnCheckTests("253")
+var _ = describeConnCheckTests("ip4:253")
 var _ = describeConnCheckTests("udp-recvmsg")
 var _ = describeConnCheckTests("udp-noconn")
 
