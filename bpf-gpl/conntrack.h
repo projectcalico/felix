@@ -443,17 +443,16 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct cali_t
 		.ifindex_created = CT_INVALID_IFINDEX,
 	};
 
-	if (tcp_header && tcp_header->syn && !tcp_header->ack) {
-		// SYN should always go through policy.
-		CALI_CT_DEBUG("Packet is a SYN, short-circuiting lookup.\n");
-		goto out_lookup_fail;
-	}
-
 	bool srcLTDest = src_lt_dest(ip_src, ip_dst, sport, dport);
 	struct calico_ct_key k = ct_make_key(srcLTDest, ct_ctx->proto, ip_src, ip_dst, sport, dport);
 
 	struct calico_ct_value *v = cali_v4_ct_lookup_elem(&k);
 	if (!v) {
+		if (tcp_header && tcp_header->syn && !tcp_header->ack) {
+			// SYN packet (new flow); send it to policy.
+			CALI_CT_DEBUG("Packet is a SYN, short-circuiting lookup.\n");
+			goto out_lookup_fail;
+		}
 		if (CALI_F_FROM_HOST && proto_orig == IPPROTO_TCP) {
 			// Mid-flow TCP packet with no conntrack entry leaving the host namespace.
 			CALI_DEBUG("BPF CT Miss for mid-flow TCP\n");
