@@ -66,11 +66,41 @@ func TestStaticRuleRendering(t *testing.T) {
 	// Should read rules.
 	Expect(readStaticRules(r)).To(Equal([]*hns.ACLPolicy{
 		// Default deny rule.
-		{Type: hns.ACL, Protocol: 6, Action: hns.Block, Direction: hns.Out, RuleType: hns.Switch,
-			Priority: 200, RemoteAddresses: "10.0.0.1/32", RemotePorts: "80"},
-		{Type: hns.ACL, Protocol: 17, Action: hns.Allow, Direction: hns.In, RuleType: hns.Host,
-			Priority: 300, RemoteAddresses: "10.0.0.2/32", RemotePorts: "90"},
-	}), "unexpected rules returned")
+		{Type: hns.ACL, Id: "MyPlatform-block-server", Protocol: 6, Action: hns.Block, Direction: hns.Out,
+			RuleType: hns.Switch, Priority: 200, RemoteAddresses: "10.0.0.1/32", RemotePorts: "80"},
+		{Type: hns.ACL, Id: "MyPlatform-block-client", Protocol: 17, Action: hns.Allow, Direction: hns.In,
+			RuleType: hns.Host, Priority: 300, RemoteAddresses: "10.0.0.2/32", RemotePorts: "90"},
+	}))
+}
+
+var ruleNoProvider string = `
+{
+    "rules": [
+        {
+            "Name": "EndpointPolicy",
+            "Value": {
+                "Action": "Block",
+                "Direction": "Out",
+                "Id": "block-server",
+                "Priority": 200,
+                "Protocol": 6,
+                "RemoteAddresses": "10.0.0.1/32",
+                "RemotePorts": "80",
+                "RuleType": "Switch",
+                "Type": "ACL"
+            }
+        }
+    ],
+    "version": "0.1.0"
+}
+`
+
+func TestNoProviderRendering(t *testing.T) {
+	RegisterTestingT(t)
+
+	r := mockReader(ruleNoProvider)
+	// Should not render any rule.
+	Expect(len(readStaticRules(r))).Should(BeZero())
 }
 
 type mockReader string
