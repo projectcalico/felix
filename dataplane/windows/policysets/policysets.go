@@ -55,7 +55,7 @@ func NewPolicySets(hns HNSAPI, ipsets []IPSetCache) *PolicySets {
 
 		IpSets:            ipsets,
 		supportedFeatures: supportedFeatures,
-		staticACLRules:    readStaticRules(),
+		staticACLRules:    readStaticRules(fileReader(staticFileName)),
 	}
 }
 

@@ -16,6 +16,7 @@ package policysets
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -30,41 +31,48 @@ const (
 	staticFileName = "static-rules.json"
 )
 
+var (
+	ErrNoRuleSpecified = errors.New("no rule specified")
+)
+
 type staticACLRule struct {
 	Type            hns.PolicyType
 	Id              string // An ID has to be provided for flow logs.
-	Protocols       string `json:"Protocols,omitempty"`
+	Protocol        uint16
 	Action          hns.ActionType
 	Direction       hns.DirectionType
-	LocalAddresses  string       `json:"LocalAddresses,omitempty"`
-	RemoteAddresses string       `json:"RemoteAddresses,omitempty"`
-	LocalPorts      string       `json:"LocalPorts,omitempty"`
-	RemotePorts     string       `json:"RemotePorts,omitempty"`
-	RuleType        hns.RuleType `json:"RuleType"`
+	LocalAddresses  string `json:"LocalAddresses,omitempty"`
+	RemoteAddresses string `json:"RemoteAddresses,omitempty"`
+	LocalPorts      string `json:"LocalPorts,omitempty"`
+	RemotePorts     string `json:"RemotePorts,omitempty"`
+	RuleType        hns.RuleType
 	Priority        uint16
 }
 
 func (p staticACLRule) ToHnsACLPolicy(prefix string) (*hns.ACLPolicy, error) {
 	if len(p.Id) == 0 {
-		return nil, fmt.Errorf("Id is missing")
+		return nil, fmt.Errorf("'Id' is missing")
+	}
+	if p.Priority == 0 {
+		return nil, fmt.Errorf("'Priority' should not be zero")
 	}
 	if p.Type != hns.ACL {
-		return nil, fmt.Errorf("Type is not ACL")
+		return nil, fmt.Errorf("'Type' is not ACL")
 	}
 	if (p.RuleType != hns.Host) && (p.RuleType != hns.Switch) {
-		return nil, fmt.Errorf("RuleType %s is invalid", p.RuleType)
+		return nil, fmt.Errorf("'RuleType' %s is invalid", p.RuleType)
 	}
 	if (p.Action != hns.Allow) && (p.Action != hns.Block) {
-		return nil, fmt.Errorf("Action %s is invalid", p.Action)
+		return nil, fmt.Errorf("'Action' %s is invalid", p.Action)
 	}
 	if (p.Direction != hns.In) && (p.Direction != hns.Out) {
-		return nil, fmt.Errorf("Direction %s is invalid", p.Direction)
+		return nil, fmt.Errorf("'Direction' %s is invalid", p.Direction)
 	}
 
 	return &hns.ACLPolicy{
 		Type:            p.Type,
 		Id:              prefix + "-" + p.Id,
-		Protocols:       p.Protocols,
+		Protocol:        p.Protocol,
 		Action:          p.Action,
 		Direction:       p.Direction,
 		LocalAddresses:  p.LocalAddresses,
@@ -85,16 +93,31 @@ type staticEndpointPolicies struct {
 	} `json:"Rules"`
 }
 
-// Read ACL policy rules from static rule file.
-func readStaticRules() (policies []*hns.ACLPolicy) {
+// staticRulesReader is a wrapper to read a file.
+// So we can have a mock reader for UT.
+type staticRulesReader interface {
+	readData() ([]byte, error)
+}
+
+type fileReader string
+
+func (f fileReader) readData() ([]byte, error) {
 	rootDir := filepath.Dir(os.Args[0])
-	ruleFile := filepath.Join(rootDir, staticFileName)
+	ruleFile := filepath.Join(rootDir, string(f))
 
 	if _, err := os.Stat(ruleFile); os.IsNotExist(err) {
-		log.Infof("Ignoring absent static rule file: %v", ruleFile)
+		return []byte{}, ErrNoRuleSpecified
+	}
+	return ioutil.ReadFile(ruleFile)
+}
+
+// Read ACL policy rules from static rule file.
+func readStaticRules(r staticRulesReader) (policies []*hns.ACLPolicy) {
+	data, err := r.readData()
+	if err == ErrNoRuleSpecified {
+		log.Info("Ignoring absent static rule file")
 		return
 	}
-	data, err := ioutil.ReadFile(ruleFile)
 	if err != nil {
 		log.WithError(err).Errorf("Failed to read static rule file.")
 		return
