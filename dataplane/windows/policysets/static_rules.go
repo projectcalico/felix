@@ -16,6 +16,7 @@ package policysets
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -43,7 +44,23 @@ type staticACLRule struct {
 	Priority        uint16
 }
 
-func (p staticACLRule) ToHnsACLPolicy(prefix string) *hns.ACLPolicy {
+func (p staticACLRule) ToHnsACLPolicy(prefix string) (*hns.ACLPolicy, error) {
+	if len(p.Id) == 0 {
+		return nil, fmt.Errorf("Id is missing")
+	}
+	if p.Type != hns.ACL {
+		return nil, fmt.Errorf("Type is not ACL")
+	}
+	if (p.RuleType != hns.Host) && (p.RuleType != hns.Switch) {
+		return nil, fmt.Errorf("RuleType %s is invalid", p.RuleType)
+	}
+	if (p.Action != hns.Allow) && (p.Action != hns.Block) {
+		return nil, fmt.Errorf("Action %s is invalid", p.Action)
+	}
+	if (p.Direction != hns.In) && (p.Direction != hns.Out) {
+		return nil, fmt.Errorf("Direction %s is invalid", p.Direction)
+	}
+
 	return &hns.ACLPolicy{
 		Type:            p.Type,
 		Id:              prefix + "-" + p.Id,
@@ -56,7 +73,7 @@ func (p staticACLRule) ToHnsACLPolicy(prefix string) *hns.ACLPolicy {
 		RemotePorts:     p.RemotePorts,
 		RuleType:        p.RuleType,
 		Priority:        p.Priority,
-	}
+	}, nil
 }
 
 type staticEndpointPolicies struct {
@@ -100,7 +117,11 @@ func readStaticRules() (policies []*hns.ACLPolicy) {
 			log.WithField("static rules", r.Value).Errorf("Incorrect static rule")
 			continue
 		}
-		hnsRule := r.Value.ToHnsACLPolicy(staticPolicies.Provider)
+		hnsRule, err := r.Value.ToHnsACLPolicy(staticPolicies.Provider)
+		if err != nil {
+			log.WithError(err).Errorf("Failed to convert static rule to ACL rule.")
+			continue
+		}
 		log.WithField("static ACL rules", hnsRule).Info("Reading static ACL rules")
 		policies = append(policies, hnsRule)
 	}
