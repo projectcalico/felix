@@ -43,6 +43,9 @@ type PolicySets struct {
 
 	supportedFeatures      hns.HNSSupportedFeatures
 	policySetIdToPolicySet map[string]*policySet
+
+	// staticACLRules contains the list of static endpoint ACL rules.
+	staticACLRules []*hns.ACLPolicy
 }
 
 func NewPolicySets(hns HNSAPI, ipsets []IPSetCache) *PolicySets {
@@ -52,6 +55,7 @@ func NewPolicySets(hns HNSAPI, ipsets []IPSetCache) *PolicySets {
 
 		IpSets:            ipsets,
 		supportedFeatures: supportedFeatures,
+		staticACLRules:    readStaticRules(fileReader(staticFileName)),
 	}
 }
 
@@ -120,6 +124,13 @@ func (s *PolicySets) GetPolicySetRules(setIds []string, isInbound bool) (rules [
 	}
 
 	debug := log.GetLevel() >= log.DebugLevel
+
+	// Append static rules first.
+	for _, r := range s.staticACLRules {
+		if r.Direction == direction {
+			rules = append(rules, r)
+		}
+	}
 
 	var lastRule *hns.ACLPolicy
 	for _, setId := range setIds {
