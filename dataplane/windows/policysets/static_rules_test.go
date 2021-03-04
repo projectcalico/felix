@@ -109,12 +109,12 @@ var secondRuleMissingDirection string = `
 }
 `
 
-func TestNoProviderRendering(t *testing.T) {
+func TestFailedRendering(t *testing.T) {
 	RegisterTestingT(t)
 
 	r := mockReader(secondRuleMissingDirection)
 	// Should not render any rule.
-	Expect(readStaticRules(r)).To(Panic())
+	Expect(func() { readStaticRules(r) }).To(Panic())
 }
 
 type mockReader string
