@@ -73,20 +73,34 @@ func TestStaticRuleRendering(t *testing.T) {
 	}))
 }
 
-var ruleNoProvider string = `
+var secondRuleMissingDirection string = `
 {
-    "rules": [
+    "Provider": "MyPlatform",
+    "Rules": [
         {
             "Name": "EndpointPolicy",
-            "Value": {
+            "Rule": {
                 "Action": "Block",
                 "Direction": "Out",
-                "Id": "block-server",
+                "ID": "block-server",
                 "Priority": 200,
                 "Protocol": 6,
                 "RemoteAddresses": "10.0.0.1/32",
                 "RemotePorts": "80",
                 "RuleType": "Switch",
+                "Type": "ACL"
+            }
+        },
+        {
+            "Name": "EndpointPolicy",
+            "Rule": {
+                "Action": "Allow",
+                "Id": "block-client",
+                "Priority": 300,
+                "Protocol": 17,
+                "RemoteAddresses": "10.0.0.2/32",
+                "RemotePorts": "90",
+                "RuleType": "Host",
                 "Type": "ACL"
             }
         }
@@ -98,13 +112,16 @@ var ruleNoProvider string = `
 func TestNoProviderRendering(t *testing.T) {
 	RegisterTestingT(t)
 
-	r := mockReader(ruleNoProvider)
+	r := mockReader(secondRuleMissingDirection)
 	// Should not render any rule.
-	Expect(len(readStaticRules(r))).Should(BeZero())
+	Expect(readStaticRules(r)).To(Panic())
 }
 
 type mockReader string
 
 func (m mockReader) ReadData() ([]byte, error) {
+	if len(m) == 0 {
+		return []byte{}, ErrNoRuleSpecified
+	}
 	return []byte(string(m)), nil
 }

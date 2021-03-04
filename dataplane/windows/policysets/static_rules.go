@@ -123,33 +123,30 @@ func readStaticRules(r StaticRulesReader) (policies []*hns.ACLPolicy) {
 		log.Info("Ignoring absent static rules file")
 		return
 	}
+
+	// If anything wrong with static rules file, Felix should panic.
 	if err != nil {
-		log.WithError(err).Errorf("Failed to read static rules file.")
-		return
+		log.WithError(err).Panic("Failed to read static rules file.")
 	}
 
 	staticPolicies := staticEndpointPolicies{}
 
 	if err = json.Unmarshal(data, &staticPolicies); err != nil {
-		log.WithError(err).Errorf("Failed to unmarshal static rules file <provider %s, version %s>.",
+		log.WithError(err).Panic("Failed to unmarshal static rules file <provider %s, version %s>.",
 			staticPolicies.Provider, staticPolicies.Version)
-		return
 	}
 
 	if len(staticPolicies.Provider) == 0 {
-		log.WithError(err).Errorf("Provider is not specified")
-		return
+		log.WithError(err).Panic("Provider is not specified")
 	}
 
 	for _, r := range staticPolicies.Rules {
 		if r.Rule.Type != hns.ACL {
-			log.WithField("static rules", r.Rule).Errorf("Incorrect static rule")
-			continue
+			log.WithField("static rules", r.Rule).Panic("Incorrect static rule")
 		}
 		hnsRule, err := r.Rule.ToHnsACLPolicy(staticPolicies.Provider)
 		if err != nil {
-			log.WithError(err).Errorf("Failed to convert static rule to ACL rule.")
-			continue
+			log.WithError(err).Panic("Failed to convert static rule to ACL rule.")
 		}
 		log.WithField("static ACL rules", hnsRule).Info("Reading static ACL rules")
 		policies = append(policies, hnsRule)
