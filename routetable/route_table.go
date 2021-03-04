@@ -167,6 +167,7 @@ type RouteTable struct {
 	ifaceNameToL2Targets           map[string][]L2Target
 	ifaceNameToFirstSeen           map[string]time.Time
 	pendingIfaceNameToDeltaTargets map[string]map[ip.CIDR]*Target
+	pendingIfaceNameToBlackholes   map[string]map[ip.CIDR]struct{}
 	pendingIfaceNameToL2Targets    map[string][]L2Target
 
 	pendingConntrackCleanups map[ip.Addr]chan struct{}
@@ -268,6 +269,7 @@ func NewWithShims(
 		ifaceNameToL2Targets:           map[string][]L2Target{},
 		ifaceNameToFirstSeen:           map[string]time.Time{},
 		pendingIfaceNameToDeltaTargets: map[string]map[ip.CIDR]*Target{},
+		pendingIfaceNameToBlackholes:   map[string]map[ip.CIDR]struct{}{},
 		pendingIfaceNameToL2Targets:    map[string][]L2Target{},
 		reSync:                         true,
 		ifaceNameToUpdateType:          map[string]updateType{},
@@ -336,7 +338,14 @@ func (r *RouteTable) SetRoutes(ifaceName string, targets []Target) {
 	}
 
 	// Add the new targets.
+T:
 	for _, target := range targets {
+		// if any of our targets are blackholes, postprocess them after
+		if target.Type == TargetTypeBlackhole {
+			r.upsertBlackhole(ifaceName, target.CIDR)
+			continue T
+		}
+
 		if current, ok := currentCIDRsToTarget[target.CIDR]; ok && current.Equal(target) {
 			// Entry is unchanged.  Remove from the deltas.
 			log.Debugf("Expected target unchanged for CIDR: %v", target.CIDR)
@@ -352,6 +361,17 @@ func (r *RouteTable) SetRoutes(ifaceName string, targets []Target) {
 	// Store the routes.  Remove any delta routes since this is a full set of routes.
 	r.pendingIfaceNameToDeltaTargets[ifaceName] = deltas
 	r.markIfaceForUpdate(ifaceName, false)
+}
+
+func (r *RouteTable) upsertBlackhole(ifaceName string, cidr ip.CIDR) {
+	// don't even try to generate a blackhole for a /32 even if asked to
+	if cidr.Prefix() == 32 {
+		return
+	}
+	if _, ok := r.pendingIfaceNameToBlackholes[ifaceName]; !ok {
+		r.pendingIfaceNameToBlackholes[ifaceName] = make(map[ip.CIDR]struct{})
+	}
+	r.pendingIfaceNameToBlackholes[ifaceName][cidr] = struct{}{}
 }
 
 // RouteUpdate updates the route keyed off the target CIDR. These deltas will be applied to any routes set using
@@ -646,6 +666,12 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool, firstTry
 	// data that we use to tidy up routes and conntrack entries).
 	for _, target := range targetsToDelete {
 		routesToDelete = append(routesToDelete, r.createL3Route(linkAttrs, target))
+
+		if ifbl, ok := r.pendingIfaceNameToBlackholes[ifaceName]; ok {
+			for cidr := range ifbl {
+				routesToDelete = append(routesToDelete, r.createL3Blackhole(linkAttrs, cidr))
+			}
+		}
 	}
 
 	// Delete the combined set of routes.
@@ -678,6 +704,17 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool, firstTry
 				logCxt.WithError(err).Warn("Failed to set ARP entry")
 				updatesFailed = true
 			}
+		}
+
+		if ifbl, ok := r.pendingIfaceNameToBlackholes[ifaceName]; ok {
+			for cidr := range ifbl {
+				bhr := r.createL3Blackhole(linkAttrs, cidr)
+				if err := nl.RouteAdd(&bhr); err != nil {
+					logCxt.WithError(err).Warn("Failed to add route")
+					updatesFailed = true
+				}
+			}
+			delete(r.pendingIfaceNameToBlackholes, ifaceName)
 		}
 	}
 
@@ -764,6 +801,23 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 	}
 
 	return route
+}
+
+func (r *RouteTable) createL3Blackhole(linkAttrs *netlink.LinkAttrs, cidr ip.CIDR) netlink.Route {
+	var linkIndex int
+	if linkAttrs != nil {
+		linkIndex = linkAttrs.Index
+	}
+
+	ipNet := cidr.ToIPNet()
+	return netlink.Route{
+		LinkIndex: linkIndex,
+		Dst:       &ipNet,
+		Type:      syscall.RTN_BLACKHOLE,
+		Protocol:  r.deviceRouteProtocol,
+		Scope:     netlink.SCOPE_UNIVERSE,
+		Table:     r.tableIndex,
+	}
 }
 
 // fullResyncRoutesForLink performs a full resync of the routes by first listing current routes and correlating against
