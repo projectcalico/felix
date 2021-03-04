@@ -132,7 +132,7 @@ func readStaticRules(r StaticRulesReader) (policies []*hns.ACLPolicy) {
 	staticPolicies := staticEndpointPolicies{}
 
 	if err = json.Unmarshal(data, &staticPolicies); err != nil {
-		log.WithError(err).Panic("Failed to unmarshal static rules file <provider %s, version %s>.",
+		log.WithError(err).Panicf("Failed to unmarshal static rules file <provider %s, version %s>.",
 			staticPolicies.Provider, staticPolicies.Version)
 	}
 
