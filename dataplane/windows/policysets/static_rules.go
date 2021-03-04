@@ -105,8 +105,8 @@ type FileReader string
 
 func (f FileReader) ReadData() ([]byte, error) {
 	// The value of os.Args[0] is "c:\CalicoWindows\calico-node.exe" which
-	// is how Felix service get started. The static file is located at
-	// same directory with "calico-node.exe".
+	// is the executable for CalicoFelix service. The static rules file is located
+	// at same directory with "calico-node.exe".
 	rootDir := filepath.Dir(os.Args[0])
 	ruleFile := filepath.Join(rootDir, string(f))
 
@@ -120,7 +120,7 @@ func (f FileReader) ReadData() ([]byte, error) {
 func readStaticRules(r StaticRulesReader) (policies []*hns.ACLPolicy) {
 	data, err := r.ReadData()
 	if err == ErrNoRuleSpecified {
-		log.Info("Ignoring absent static rule file")
+		log.Info("Ignoring absent static rules file")
 		return
 	}
 	if err != nil {
