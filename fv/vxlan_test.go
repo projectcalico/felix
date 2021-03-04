@@ -175,6 +175,22 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					cc.CheckConnectivity()
 				})
 
+				It("should have some blackhole routes installed", func() {
+					if routeSource == "WorkloadIPs" {
+						Skip("not applicable for workload ips")
+						return
+					}
+
+					Eventually(func() string {
+						var out string
+						for _, felix := range felixes {
+							o, _ := felix.ExecOutput("ip", "r", "s", "type", "blackhole")
+							out += o
+						}
+						return out
+					}, "10s", "100ms").Should(Equal("blackhole 10.65.0.0/26 \nblackhole 10.65.1.0/26 \n"))
+				})
+
 				It("should have host to workload connectivity", func() {
 					cc.ExpectSome(felixes[0], w[1])
 					cc.ExpectSome(felixes[0], w[0])
