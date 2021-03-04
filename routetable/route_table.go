@@ -666,12 +666,6 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool, firstTry
 	// data that we use to tidy up routes and conntrack entries).
 	for _, target := range targetsToDelete {
 		routesToDelete = append(routesToDelete, r.createL3Route(linkAttrs, target))
-
-		if ifbl, ok := r.pendingIfaceNameToBlackholes[ifaceName]; ok {
-			for cidr := range ifbl {
-				routesToDelete = append(routesToDelete, r.createL3Blackhole(linkAttrs, cidr))
-			}
-		}
 	}
 
 	// Delete the combined set of routes.
@@ -705,17 +699,21 @@ func (r *RouteTable) syncRoutesForLink(ifaceName string, fullSync bool, firstTry
 				updatesFailed = true
 			}
 		}
+	}
 
-		if ifbl, ok := r.pendingIfaceNameToBlackholes[ifaceName]; ok {
-			for cidr := range ifbl {
-				bhr := r.createL3Blackhole(linkAttrs, cidr)
-				if err := nl.RouteAdd(&bhr); err != nil {
-					logCxt.WithError(err).Warn("Failed to add route")
-					updatesFailed = true
-				}
+	// process any pending blackhole requests for this iface
+	if ifbl, ok := r.pendingIfaceNameToBlackholes[ifaceName]; ok {
+		for cidr := range ifbl {
+			bhr := r.createL3Blackhole(linkAttrs, cidr)
+			logCxt.WithField("cidr", cidr).Info("processing blackhole cidr")
+			if err := nl.RouteDel(&bhr); err != nil {
+				logCxt.WithError(err).Warn("failed to rm blackhole route")
 			}
-			delete(r.pendingIfaceNameToBlackholes, ifaceName)
+			if err := nl.RouteAdd(&bhr); err != nil {
+				logCxt.WithError(err).Warn("failed to add blackhole route")
+			}
 		}
+		delete(r.pendingIfaceNameToBlackholes, ifaceName)
 	}
 
 	if updatesFailed {
@@ -803,20 +801,18 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 	return route
 }
 
-func (r *RouteTable) createL3Blackhole(linkAttrs *netlink.LinkAttrs, cidr ip.CIDR) netlink.Route {
-	var linkIndex int
-	if linkAttrs != nil {
-		linkIndex = linkAttrs.Index
+func (r *RouteTable) createL3Blackhole(la *netlink.LinkAttrs, cidr ip.CIDR) netlink.Route {
+	var linkIdx int
+	if la != nil {
+		linkIdx = la.Index
 	}
 
 	ipNet := cidr.ToIPNet()
 	return netlink.Route{
-		LinkIndex: linkIndex,
-		Dst:       &ipNet,
-		Type:      syscall.RTN_BLACKHOLE,
-		Protocol:  r.deviceRouteProtocol,
-		Scope:     netlink.SCOPE_UNIVERSE,
-		Table:     r.tableIndex,
+		Dst:        &ipNet,
+		Type:       syscall.RTN_BLACKHOLE,
+		Scope:      syscall.RT_SCOPE_LINK,
+		ILinkIndex: linkIdx,
 	}
 }
 
