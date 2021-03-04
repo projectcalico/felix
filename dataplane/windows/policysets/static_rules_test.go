@@ -22,16 +22,16 @@ import (
 	"github.com/projectcalico/felix/dataplane/windows/hns"
 )
 
-var rules string = `
+var staticRules string = `
 {
-    "provider": "MyPlatform",
-    "rules": [
+    "Provider": "MyPlatform",
+    "Rules": [
         {
             "Name": "EndpointPolicy",
-            "Value": {
+            "Rule": {
                 "Action": "Block",
                 "Direction": "Out",
-                "Id": "block-server",
+                "ID": "block-server",
                 "Priority": 200,
                 "Protocol": 6,
                 "RemoteAddresses": "10.0.0.1/32",
@@ -42,7 +42,7 @@ var rules string = `
         },
         {
             "Name": "EndpointPolicy",
-            "Value": {
+            "Rule": {
                 "Action": "Allow",
                 "Direction": "In",
                 "Id": "block-client",
@@ -62,7 +62,7 @@ var rules string = `
 func TestStaticRuleRendering(t *testing.T) {
 	RegisterTestingT(t)
 
-	r := mockReader(rules)
+	r := mockReader(staticRules)
 	// Should read rules.
 	Expect(readStaticRules(r)).To(Equal([]*hns.ACLPolicy{
 		// Default deny rule.
@@ -105,6 +105,6 @@ func TestNoProviderRendering(t *testing.T) {
 
 type mockReader string
 
-func (m mockReader) readData() ([]byte, error) {
+func (m mockReader) ReadData() ([]byte, error) {
 	return []byte(string(m)), nil
 }

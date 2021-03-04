@@ -28,7 +28,7 @@ import (
 
 const (
 	// static rule file name
-	staticFileName = "static-rules.json"
+	StaticFileName = "static-rules.json"
 )
 
 var (
@@ -36,17 +36,17 @@ var (
 )
 
 type staticACLRule struct {
-	Type            hns.PolicyType
-	Id              string // An ID has to be provided for flow logs.
-	Protocol        uint16
-	Action          hns.ActionType
-	Direction       hns.DirectionType
-	LocalAddresses  string `json:"LocalAddresses,omitempty"`
-	RemoteAddresses string `json:"RemoteAddresses,omitempty"`
-	LocalPorts      string `json:"LocalPorts,omitempty"`
-	RemotePorts     string `json:"RemotePorts,omitempty"`
-	RuleType        hns.RuleType
-	Priority        uint16
+	Type            hns.PolicyType    `json:"Type"`
+	Id              string            `json:"ID"`
+	Protocol        uint16            `json:"Protocol"`
+	Action          hns.ActionType    `json:"Action"`
+	Direction       hns.DirectionType `json:"Direction"`
+	LocalAddresses  string            `json:"LocalAddresses,omitempty"`
+	RemoteAddresses string            `json:"RemoteAddresses,omitempty"`
+	LocalPorts      string            `json:"LocalPorts,omitempty"`
+	RemotePorts     string            `json:"RemotePorts,omitempty"`
+	RuleType        hns.RuleType      `json:"RuleType"`
+	Priority        uint16            `json:"Priority"`
 }
 
 func (p staticACLRule) ToHnsACLPolicy(prefix string) (*hns.ACLPolicy, error) {
@@ -84,24 +84,29 @@ func (p staticACLRule) ToHnsACLPolicy(prefix string) (*hns.ACLPolicy, error) {
 	}, nil
 }
 
+type staticEndpointPolicy struct {
+	Name string        `json:"Name"`
+	Rule staticACLRule `json:"Rule"`
+}
+
 type staticEndpointPolicies struct {
-	Provider string `json:"Provider"`
-	Version  string `json:"Version"`
-	Rules    []struct {
-		Name  string        `json:"Name"`
-		Value staticACLRule `json:"Value"`
-	} `json:"Rules"`
+	Provider string                 `json:"Provider"`
+	Version  string                 `json:"Version"`
+	Rules    []staticEndpointPolicy `json:"Rules"`
 }
 
 // staticRulesReader is a wrapper to read a file.
 // So we can have a mock reader for UT.
-type staticRulesReader interface {
-	readData() ([]byte, error)
+type StaticRulesReader interface {
+	ReadData() ([]byte, error)
 }
 
-type fileReader string
+type FileReader string
 
-func (f fileReader) readData() ([]byte, error) {
+func (f FileReader) ReadData() ([]byte, error) {
+	// The value of os.Args[0] is "c:\CalicoWindows\calico-node.exe" which
+	// is how Felix service get started. The static file is located at
+	// same directory with "calico-node.exe".
 	rootDir := filepath.Dir(os.Args[0])
 	ruleFile := filepath.Join(rootDir, string(f))
 
@@ -112,21 +117,22 @@ func (f fileReader) readData() ([]byte, error) {
 }
 
 // Read ACL policy rules from static rule file.
-func readStaticRules(r staticRulesReader) (policies []*hns.ACLPolicy) {
-	data, err := r.readData()
+func readStaticRules(r StaticRulesReader) (policies []*hns.ACLPolicy) {
+	data, err := r.ReadData()
 	if err == ErrNoRuleSpecified {
 		log.Info("Ignoring absent static rule file")
 		return
 	}
 	if err != nil {
-		log.WithError(err).Errorf("Failed to read static rule file.")
+		log.WithError(err).Errorf("Failed to read static rules file.")
 		return
 	}
 
 	staticPolicies := staticEndpointPolicies{}
 
 	if err = json.Unmarshal(data, &staticPolicies); err != nil {
-		log.WithError(err).Errorf("Failed to read static rule file.")
+		log.WithError(err).Errorf("Failed to unmarshal static rules file <provider %s, version %s>.",
+			staticPolicies.Provider, staticPolicies.Version)
 		return
 	}
 
@@ -136,11 +142,11 @@ func readStaticRules(r staticRulesReader) (policies []*hns.ACLPolicy) {
 	}
 
 	for _, r := range staticPolicies.Rules {
-		if r.Value.Type != hns.ACL {
-			log.WithField("static rules", r.Value).Errorf("Incorrect static rule")
+		if r.Rule.Type != hns.ACL {
+			log.WithField("static rules", r.Rule).Errorf("Incorrect static rule")
 			continue
 		}
-		hnsRule, err := r.Value.ToHnsACLPolicy(staticPolicies.Provider)
+		hnsRule, err := r.Rule.ToHnsACLPolicy(staticPolicies.Provider)
 		if err != nil {
 			log.WithError(err).Errorf("Failed to convert static rule to ACL rule.")
 			continue

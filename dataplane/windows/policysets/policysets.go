@@ -48,14 +48,14 @@ type PolicySets struct {
 	staticACLRules []*hns.ACLPolicy
 }
 
-func NewPolicySets(hns HNSAPI, ipsets []IPSetCache) *PolicySets {
+func NewPolicySets(hns HNSAPI, ipsets []IPSetCache, reader StaticRulesReader) *PolicySets {
 	supportedFeatures := hns.GetHNSSupportedFeatures()
 	return &PolicySets{
 		policySetIdToPolicySet: map[string]*policySet{},
 
 		IpSets:            ipsets,
 		supportedFeatures: supportedFeatures,
-		staticACLRules:    readStaticRules(fileReader(staticFileName)),
+		staticACLRules:    readStaticRules(reader),
 	}
 }
 
