@@ -46,17 +46,18 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 			routeSource := routeSource
 			Describe(fmt.Sprintf("VXLAN mode set to %s, routeSource %s", vxlanMode, routeSource), func() {
 				var (
-					infra   infrastructure.DatastoreInfra
-					felixes []*infrastructure.Felix
-					client  client.Interface
-					w       [3]*workload.Workload
-					hostW   [3]*workload.Workload
-					cc      *connectivity.Checker
+					infra           infrastructure.DatastoreInfra
+					felixes         []*infrastructure.Felix
+					client          client.Interface
+					w               [3]*workload.Workload
+					hostW           [3]*workload.Workload
+					cc              *connectivity.Checker
+					topologyOptions infrastructure.TopologyOptions
 				)
 
 				BeforeEach(func() {
 					infra = getInfra()
-					topologyOptions := infrastructure.DefaultTopologyOptions()
+					topologyOptions = infrastructure.DefaultTopologyOptions()
 					topologyOptions.VXLANMode = vxlanMode
 					topologyOptions.IPIPEnabled = false
 					topologyOptions.ExtraEnvVars["FELIX_ROUTESOURCE"] = routeSource
@@ -65,7 +66,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					// Install a default profile that allows all ingress and egress, in the absence of any Policy.
 					infra.AddDefaultAllow()
 
-					// Wait until the vxlan device appears.
+					// Wait until the vxlan deShouldvice appears.
 					Eventually(func() error {
 						for i, f := range felixes {
 							out, err := f.ExecOutput("ip", "link")
@@ -121,6 +122,10 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					}
 					for _, felix := range felixes {
 						felix.Stop()
+
+						// see if blackhole routes go away with felix
+						o, _ := felix.ExecOutput("ip", "r", "s", "type", "blackhole")
+						Expect(o).To(Equal(""))
 					}
 
 					if CurrentGinkgoTestDescription().Failed {
@@ -149,14 +154,30 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 						return
 					}
 
-					Eventually(func() string {
-						var out string
-						for _, felix := range felixes {
-							o, _ := felix.ExecOutput("ip", "r", "s", "type", "blackhole")
-							out += o
-						}
-						return out
-					}, "10s", "100ms").Should(Equal("blackhole 10.65.0.0/26 \nblackhole 10.65.1.0/26 \n"))
+					nodes := []string{
+						"blackhole 10.65.0.0/26 proto 80",
+						"blackhole 10.65.1.0/26 proto 80",
+						"blackhole 10.65.2.0/26 proto 80",
+					}
+
+					for n, result := range nodes {
+						Eventually(func() string {
+							o, _ := felixes[n].ExecOutput("ip", "r", "s", "type", "blackhole")
+							return o
+						}, "10s", "100ms").Should(ContainSubstring(result))
+						wName := fmt.Sprintf("w%d", n)
+
+						err := client.IPAM().ReleaseByHandle(context.TODO(), wName)
+						Expect(err).NotTo(HaveOccurred())
+
+						err = client.IPAM().ReleaseHostAffinities(context.TODO(), felixes[n].Hostname, true)
+						Expect(err).NotTo(HaveOccurred())
+
+						Eventually(func() string {
+							o, _ := felixes[n].ExecOutput("ip", "r", "s", "type", "blackhole")
+							return o
+						}, "10s", "100ms").Should(BeEmpty())
+					}
 				})
 
 				It("should have host to workload connectivity", func() {
