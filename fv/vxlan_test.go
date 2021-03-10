@@ -156,7 +156,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 							out += o
 						}
 						return out
-					}, "10s", "100ms").Should(Equal("blackhole 10.65.0.0/26 \nblackhole 10.65.1.0/26 \n"))
+					}, "20s", "100ms").Should(Equal("blackhole 10.65.0.0/26 \nblackhole 10.65.1.0/26 \nblackhole 10.65.2.0/26 \n"))
 				})
 
 				It("should have host to workload connectivity", func() {

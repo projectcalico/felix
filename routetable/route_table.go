@@ -167,7 +167,7 @@ type RouteTable struct {
 	ifaceNameToL2Targets           map[string][]L2Target
 	ifaceNameToFirstSeen           map[string]time.Time
 	pendingIfaceNameToDeltaTargets map[string]map[ip.CIDR]*Target
-	pendingBlackholeRoutes         map[ip.CIDR]struct{}
+	pendingBlackholeRoutes         map[string]ip.CIDR
 	pendingIfaceNameToL2Targets    map[string][]L2Target
 
 	pendingConntrackCleanups map[ip.Addr]chan struct{}
@@ -269,7 +269,7 @@ func NewWithShims(
 		ifaceNameToL2Targets:           map[string][]L2Target{},
 		ifaceNameToFirstSeen:           map[string]time.Time{},
 		pendingIfaceNameToDeltaTargets: map[string]map[ip.CIDR]*Target{},
-		pendingBlackholeRoutes:         map[ip.CIDR]struct{}{},
+		pendingBlackholeRoutes:         map[string]ip.CIDR{},
 		pendingIfaceNameToL2Targets:    map[string][]L2Target{},
 		reSync:                         true,
 		ifaceNameToUpdateType:          map[string]updateType{},
@@ -364,10 +364,14 @@ T:
 }
 
 func (r *RouteTable) upsertBlackhole(cidr ip.CIDR) {
-	r.pendingBlackholeRoutes[cidr] = struct{}{}
+	r.pendingBlackholeRoutes[cidr.String()] = cidr
 }
 
 func (r *RouteTable) clearBlackholeRoutes() {
+	if !r.removeExternalRoutes && r.deviceRouteProtocol != syscall.RTPROT_BOOT {
+		return
+	}
+
 	nl, err := r.getNetlink()
 	if err != nil {
 		r.logCxt.WithError(err).Warn("clearBlackholeRoutes: cannot acquire netlink")
@@ -375,15 +379,19 @@ func (r *RouteTable) clearBlackholeRoutes() {
 	}
 	routes, err := nl.RouteListFiltered(
 		netlink.FAMILY_V4,
-		&netlink.Route{Protocol: r.deviceRouteProtocol, Type: syscall.RTN_BLACKHOLE},
-		netlink.RT_FILTER_PROTOCOL|netlink.RT_FILTER_TYPE,
+		&netlink.Route{Protocol: r.deviceRouteProtocol, Type: syscall.RTN_BLACKHOLE, Table: r.tableIndex},
+		netlink.RT_FILTER_PROTOCOL|netlink.RT_FILTER_TYPE|netlink.RT_FILTER_TABLE,
 	)
 	if err != nil {
 		r.logCxt.WithError(err).Warn("clearBlackholeRoutes: failed to list matching routes")
 		return
 	}
 
+T:
 	for _, route := range routes {
+		if _, ok := r.pendingBlackholeRoutes[route.Dst.String()]; ok {
+			continue T
+		}
 		if err := nl.RouteDel(&route); err != nil {
 			r.logCxt.WithError(err).Warn("clearBlackholeRoutes: could not delete route")
 		}
@@ -401,7 +409,7 @@ func (r *RouteTable) installBlackholeRoutes() {
 		return
 	}
 
-	for cidr := range r.pendingBlackholeRoutes {
+	for _, cidr := range r.pendingBlackholeRoutes {
 		route := r.createL3Route(nil, Target{
 			Type: TargetTypeBlackhole,
 			CIDR: cidr,
