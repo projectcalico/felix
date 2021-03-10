@@ -76,7 +76,6 @@ type vxlanManager struct {
 	ipSetMetadata     ipsets.IPSetMetadata
 	externalNodeCIDRs []string
 	vtepsDirty        bool
-	ipamBlocksDirty   bool
 	nlHandle          netlinkHandle
 	dpConfig          Config
 	noEncapProtocol   int
@@ -140,7 +139,6 @@ func newVXLANManagerWithShims(
 		externalNodeCIDRs:  dpConfig.ExternalNodesCidrs,
 		routesDirty:        true,
 		vtepsDirty:         true,
-		ipamBlocksDirty:    false,
 		dpConfig:           dpConfig,
 		nlHandle:           nlHandle,
 		noEncapProtocol:    noEncapProtocol,
@@ -164,7 +162,7 @@ func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
 		if msg.Type == proto.RouteType_LOCAL_WORKLOAD && msg.IpPoolType == proto.IPPoolType_VXLAN && !msg.LocalWorkload {
 			logrus.WithField("msg", msg).Info("VXLAN data plane received route update for IPAM block")
 			m.ipamBlocks[msg.Dst] = msg
-			m.ipamBlocksDirty = true
+			m.routesDirty = true
 		}
 	case *proto.RouteRemove:
 		m.deleteRoute(msg.Dst)
@@ -239,23 +237,20 @@ func (m *vxlanManager) GetRouteTableSyncers() []routeTableSyncer {
 	return rts
 }
 
-func (m *vxlanManager) vxlanRoutesFromIPAMBlocks() []routetable.Target {
-	rtt := make([]routetable.Target, 0)
-	if m.ipamBlocksDirty {
-		for dst := range m.ipamBlocks {
-			cidr, err := ip.CIDRFromString(dst)
-			if err != nil {
-				logrus.WithError(err).Debug(
-					"Error processing IPAM block CIDR: ", dst,
-				)
-				continue
-			}
-			rtt = append(rtt, routetable.Target{
-				Type: routetable.TargetTypeBlackhole,
-				CIDR: cidr,
-			})
+func (m *vxlanManager) vxlanBlackholeRoutes() []routetable.Target {
+	var rtt []routetable.Target
+	for dst := range m.ipamBlocks {
+		cidr, err := ip.CIDRFromString(dst)
+		if err != nil {
+			logrus.WithError(err).Debug(
+				"Error processing IPAM block CIDR: ", dst,
+			)
+			continue
 		}
-		m.ipamBlocksDirty = false
+		rtt = append(rtt, routetable.Target{
+			Type: routetable.TargetTypeBlackhole,
+			CIDR: cidr,
+		})
 	}
 	return rtt
 }
@@ -344,7 +339,7 @@ func (m *vxlanManager) CompleteDeferredWork() error {
 		}
 
 		logrus.WithField("vxlanroutes", vxlanRoutes).Debug("VXLAN manager sending VXLAN L3 updates")
-		m.routeTable.SetRoutes(m.vxlanDevice, append(vxlanRoutes, m.vxlanRoutesFromIPAMBlocks()...))
+		m.routeTable.SetRoutes(m.vxlanDevice, append(vxlanRoutes, m.vxlanBlackholeRoutes()...))
 
 		noEncapRouteTable := m.getNoEncapRouteTable()
 		// only set the noEncapRouteTable table if it's nil, as you will lose the routes that are being managed already
