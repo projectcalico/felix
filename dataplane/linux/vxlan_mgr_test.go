@@ -85,24 +85,25 @@ func (m *mockVXLANDataplane) LinkDel(netlink.Link) error {
 
 var _ = Describe("VXLANManager", func() {
 	var manager *vxlanManager
-	var rt *mockRouteTable
-	var prt *mockRouteTable
+	var rt, brt, prt *mockRouteTable
 
 	BeforeEach(func() {
 		rt = &mockRouteTable{
-			currentRoutes:     map[string][]routetable.Target{},
-			currentBlackholes: map[string]map[ip.CIDR]struct{}{},
-			currentL2Routes:   map[string][]routetable.L2Target{},
+			currentRoutes:   map[string][]routetable.Target{},
+			currentL2Routes: map[string][]routetable.L2Target{},
+		}
+		brt = &mockRouteTable{
+			currentRoutes:   map[string][]routetable.Target{},
+			currentL2Routes: map[string][]routetable.L2Target{},
 		}
 		prt = &mockRouteTable{
-			currentRoutes:     map[string][]routetable.Target{},
-			currentBlackholes: map[string]map[ip.CIDR]struct{}{},
-			currentL2Routes:   map[string][]routetable.L2Target{},
+			currentRoutes:   map[string][]routetable.Target{},
+			currentL2Routes: map[string][]routetable.L2Target{},
 		}
 
 		manager = newVXLANManagerWithShims(
 			newMockIPSets(),
-			rt,
+			rt, brt,
 			"vxlan.calico",
 			Config{
 				MaxIPSetSize:       5,
@@ -180,13 +181,13 @@ var _ = Describe("VXLANManager", func() {
 		})
 
 		Expect(rt.currentRoutes["vxlan.calico"]).To(HaveLen(0))
-		Expect(rt.currentBlackholes["vxlan.calico"]).To(HaveLen(0))
+		Expect(brt.currentRoutes[routetable.InterfaceNone]).To(HaveLen(0))
 
 		err = manager.CompleteDeferredWork()
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rt.currentRoutes["vxlan.calico"]).To(HaveLen(1))
-		Expect(rt.currentBlackholes["vxlan.calico"]).To(HaveLen(1))
+		Expect(brt.currentRoutes[routetable.InterfaceNone]).To(HaveLen(1))
 		Expect(prt.currentRoutes["eth0"]).NotTo(BeNil())
 	})
 
