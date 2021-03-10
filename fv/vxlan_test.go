@@ -149,14 +149,18 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 						return
 					}
 
-					Eventually(func() string {
-						var out string
-						for _, felix := range felixes {
-							o, _ := felix.ExecOutput("ip", "r", "s", "type", "blackhole")
-							out += o
-						}
-						return out
-					}, "10s", "100ms").Should(Equal("blackhole 10.65.0.0/26 \nblackhole 10.65.1.0/26 \n"))
+					nodes := map[int]string{
+						0: "blackhole 10.65.0.0/26",
+						1: "blackhole 10.65.1.0/26",
+						2: "blackhole 10.65.2.0/26",
+					}
+
+					for i, result := range nodes {
+						Eventually(func() string {
+							o, _ := felixes[i].ExecOutput("ip", "r", "s", "type", "blackhole")
+							return o
+						}, "20s", "100ms").Should(ContainSubstring(result))
+					}
 				})
 
 				It("should have host to workload connectivity", func() {
