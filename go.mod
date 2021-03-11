@@ -31,6 +31,7 @@ require (
 	github.com/projectcalico/pod2daemon v0.0.0-20210303174516-f4d124e8d7e6
 	github.com/projectcalico/typha v0.7.3-0.20210218201053-5a8f32effd7f
 	github.com/prometheus/client_golang v1.0.0
+	github.com/prometheus/common v0.4.1
 	github.com/satori/go.uuid v1.2.0
 	github.com/sirupsen/logrus v1.4.2
 	github.com/spf13/cobra v0.0.5
