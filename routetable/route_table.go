@@ -167,6 +167,7 @@ type RouteTable struct {
 	ifaceNameToL2Targets           map[string][]L2Target
 	ifaceNameToFirstSeen           map[string]time.Time
 	pendingIfaceNameToDeltaTargets map[string]map[ip.CIDR]*Target
+	pendingBlackholeRoutes         map[string]ip.CIDR
 	pendingIfaceNameToL2Targets    map[string][]L2Target
 
 	pendingConntrackCleanups map[ip.Addr]chan struct{}
@@ -268,6 +269,7 @@ func NewWithShims(
 		ifaceNameToL2Targets:           map[string][]L2Target{},
 		ifaceNameToFirstSeen:           map[string]time.Time{},
 		pendingIfaceNameToDeltaTargets: map[string]map[ip.CIDR]*Target{},
+		pendingBlackholeRoutes:         map[string]ip.CIDR{},
 		pendingIfaceNameToL2Targets:    map[string][]L2Target{},
 		reSync:                         true,
 		ifaceNameToUpdateType:          map[string]updateType{},
@@ -336,7 +338,14 @@ func (r *RouteTable) SetRoutes(ifaceName string, targets []Target) {
 	}
 
 	// Add the new targets.
+T:
 	for _, target := range targets {
+		// if any of our targets are blackholes, postprocess them after
+		if target.Type == TargetTypeBlackhole {
+			r.upsertBlackhole(target.CIDR)
+			continue T
+		}
+
 		if current, ok := currentCIDRsToTarget[target.CIDR]; ok && current.Equal(target) {
 			// Entry is unchanged.  Remove from the deltas.
 			log.Debugf("Expected target unchanged for CIDR: %v", target.CIDR)
@@ -352,6 +361,63 @@ func (r *RouteTable) SetRoutes(ifaceName string, targets []Target) {
 	// Store the routes.  Remove any delta routes since this is a full set of routes.
 	r.pendingIfaceNameToDeltaTargets[ifaceName] = deltas
 	r.markIfaceForUpdate(ifaceName, false)
+}
+
+func (r *RouteTable) upsertBlackhole(cidr ip.CIDR) {
+	r.pendingBlackholeRoutes[cidr.String()] = cidr
+}
+
+func (r *RouteTable) clearBlackholeRoutes() {
+	if !r.removeExternalRoutes && r.deviceRouteProtocol != syscall.RTPROT_BOOT {
+		return
+	}
+
+	nl, err := r.getNetlink()
+	if err != nil {
+		r.logCxt.WithError(err).Warn("clearBlackholeRoutes: cannot acquire netlink")
+		return
+	}
+	routes, err := nl.RouteListFiltered(
+		netlink.FAMILY_V4,
+		&netlink.Route{Protocol: r.deviceRouteProtocol, Type: syscall.RTN_BLACKHOLE, Table: r.tableIndex},
+		netlink.RT_FILTER_PROTOCOL|netlink.RT_FILTER_TYPE|netlink.RT_FILTER_TABLE,
+	)
+	if err != nil {
+		r.logCxt.WithError(err).Warn("clearBlackholeRoutes: failed to list matching routes")
+		return
+	}
+
+T:
+	for _, route := range routes {
+		if _, ok := r.pendingBlackholeRoutes[route.Dst.String()]; ok {
+			continue T
+		}
+		if err := nl.RouteDel(&route); err != nil {
+			r.logCxt.WithError(err).Warn("clearBlackholeRoutes: could not delete route")
+		}
+	}
+}
+
+func (r *RouteTable) installBlackholeRoutes() {
+	if !(len(r.pendingBlackholeRoutes) > 0) {
+		return
+	}
+
+	nl, err := r.getNetlink()
+	if err != nil {
+		r.logCxt.WithError(err).Warn("installBlackholeRoutes: cannot acquire netlink")
+		return
+	}
+
+	for _, cidr := range r.pendingBlackholeRoutes {
+		route := r.createL3Route(nil, Target{
+			Type: TargetTypeBlackhole,
+			CIDR: cidr,
+		})
+		if err := nl.RouteAdd(&route); err != nil {
+			r.logCxt.WithError(err).Warn("cannot install blackhole route ", cidr)
+		}
+	}
 }
 
 // RouteUpdate updates the route keyed off the target CIDR. These deltas will be applied to any routes set using
@@ -449,6 +515,9 @@ func (r *RouteTable) closeNetlink() {
 }
 
 func (r *RouteTable) Apply() error {
+	r.clearBlackholeRoutes()
+	defer r.installBlackholeRoutes()
+
 	if r.reSync {
 		r.opReporter.RecordOperation(fmt.Sprint("resync-routes-v", r.ipVersion))
 
@@ -742,13 +811,18 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 	cidr := target.CIDR
 	ipNet := cidr.ToIPNet()
 	route := netlink.Route{
-		LinkIndex: linkIndex,
-		Dst:       &ipNet,
-		Type:      target.RouteType(),
-		Protocol:  r.deviceRouteProtocol,
-		Scope:     target.RouteScope(),
-		Table:     r.tableIndex,
+		Dst:      &ipNet,
+		Type:     target.RouteType(),
+		Protocol: r.deviceRouteProtocol,
+		Scope:    target.RouteScope(),
 	}
+
+	if target.Type == TargetTypeBlackhole {
+		return route
+	}
+
+	route.Table = r.tableIndex
+	route.LinkIndex = linkIndex
 
 	if r.deviceRouteSourceAddress != nil {
 		route.Src = r.deviceRouteSourceAddress

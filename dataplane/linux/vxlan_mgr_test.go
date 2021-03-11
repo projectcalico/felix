@@ -90,12 +90,14 @@ var _ = Describe("VXLANManager", func() {
 
 	BeforeEach(func() {
 		rt = &mockRouteTable{
-			currentRoutes:   map[string][]routetable.Target{},
-			currentL2Routes: map[string][]routetable.L2Target{},
+			currentRoutes:     map[string][]routetable.Target{},
+			currentBlackholes: map[string]map[ip.CIDR]struct{}{},
+			currentL2Routes:   map[string][]routetable.L2Target{},
 		}
 		prt = &mockRouteTable{
-			currentRoutes:   map[string][]routetable.Target{},
-			currentL2Routes: map[string][]routetable.L2Target{},
+			currentRoutes:     map[string][]routetable.Target{},
+			currentBlackholes: map[string]map[ip.CIDR]struct{}{},
+			currentL2Routes:   map[string][]routetable.L2Target{},
 		}
 
 		manager = newVXLANManagerWithShims(
@@ -168,12 +170,23 @@ var _ = Describe("VXLANManager", func() {
 			DstNodeIp:   "172.8.8.8",
 		})
 
+		manager.OnUpdate(&proto.RouteUpdate{
+			Type:        proto.RouteType_LOCAL_WORKLOAD,
+			IpPoolType:  proto.IPPoolType_VXLAN,
+			Dst:         "172.0.0.0/26",
+			DstNodeName: "node0",
+			DstNodeIp:   "172.8.8.8",
+			SameSubnet:  true,
+		})
+
 		Expect(rt.currentRoutes["vxlan.calico"]).To(HaveLen(0))
+		Expect(rt.currentBlackholes["vxlan.calico"]).To(HaveLen(0))
 
 		err = manager.CompleteDeferredWork()
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rt.currentRoutes["vxlan.calico"]).To(HaveLen(1))
+		Expect(rt.currentBlackholes["vxlan.calico"]).To(HaveLen(1))
 		Expect(prt.currentRoutes["eth0"]).NotTo(BeNil())
 	})
 
