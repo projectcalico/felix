@@ -94,9 +94,21 @@ func newVXLANManager(
 ) *vxlanManager {
 	nlHandle, _ := netlink.NewHandle()
 
+	brt := routetable.New(
+		[]string{routetable.InterfaceNone},
+		4,
+		false,
+		dpConfig.NetlinkTimeout,
+		dpConfig.DeviceRouteSourceAddress,
+		dpConfig.DeviceRouteProtocol,
+		dpConfig.RemoveExternalRoutes,
+		0,
+		opRecorder,
+	)
+
 	return newVXLANManagerWithShims(
 		ipsetsDataplane,
-		rt,
+		rt, brt,
 		deviceName,
 		dpConfig,
 		nlHandle,
@@ -106,19 +118,17 @@ func newVXLANManager(
 				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0,
 				opRecorder)
 		},
-		opRecorder,
 	)
 }
 
 func newVXLANManagerWithShims(
 	ipsetsDataplane ipsetsDataplane,
-	rt routeTable,
+	rt, brt routeTable,
 	deviceName string,
 	dpConfig Config,
 	nlHandle netlinkHandle,
 	noEncapRTConstruct func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
 		deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable,
-	opRecorder logutils.OpRecorder,
 ) *vxlanManager {
 	noEncapProtocol := 80
 	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
@@ -131,32 +141,22 @@ func newVXLANManagerWithShims(
 			SetID:   rules.IPSetIDAllVXLANSourceNets,
 			Type:    ipsets.IPSetTypeHashNet,
 		},
-		hostname:   dpConfig.Hostname,
-		routeTable: rt,
-		blackholeRouteTable: routetable.New(
-			[]string{routetable.InterfaceNone},
-			4,
-			false,
-			dpConfig.NetlinkTimeout,
-			dpConfig.DeviceRouteSourceAddress,
-			dpConfig.DeviceRouteProtocol,
-			dpConfig.RemoveExternalRoutes,
-			0,
-			opRecorder,
-		),
-		routesByDest:       map[string]*proto.RouteUpdate{},
-		ipamBlocks:         map[string]*proto.RouteUpdate{},
-		vtepsByNode:        map[string]*proto.VXLANTunnelEndpointUpdate{},
-		vxlanDevice:        deviceName,
-		vxlanID:            dpConfig.RulesConfig.VXLANVNI,
-		vxlanPort:          dpConfig.RulesConfig.VXLANPort,
-		externalNodeCIDRs:  dpConfig.ExternalNodesCidrs,
-		routesDirty:        true,
-		vtepsDirty:         true,
-		dpConfig:           dpConfig,
-		nlHandle:           nlHandle,
-		noEncapProtocol:    noEncapProtocol,
-		noEncapRTConstruct: noEncapRTConstruct,
+		hostname:            dpConfig.Hostname,
+		routeTable:          rt,
+		blackholeRouteTable: brt,
+		routesByDest:        map[string]*proto.RouteUpdate{},
+		ipamBlocks:          map[string]*proto.RouteUpdate{},
+		vtepsByNode:         map[string]*proto.VXLANTunnelEndpointUpdate{},
+		vxlanDevice:         deviceName,
+		vxlanID:             dpConfig.RulesConfig.VXLANVNI,
+		vxlanPort:           dpConfig.RulesConfig.VXLANPort,
+		externalNodeCIDRs:   dpConfig.ExternalNodesCidrs,
+		routesDirty:         true,
+		vtepsDirty:          true,
+		dpConfig:            dpConfig,
+		nlHandle:            nlHandle,
+		noEncapProtocol:     noEncapProtocol,
+		noEncapRTConstruct:  noEncapRTConstruct,
 	}
 }
 
