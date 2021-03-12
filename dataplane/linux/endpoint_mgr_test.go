@@ -573,9 +573,8 @@ func chainsForIfaces(ifaceMetadata []string,
 }
 
 type mockRouteTable struct {
-	currentRoutes     map[string][]routetable.Target
-	currentBlackholes map[string]map[ip.CIDR]struct{}
-	currentL2Routes   map[string][]routetable.L2Target
+	currentRoutes   map[string][]routetable.Target
+	currentL2Routes map[string][]routetable.L2Target
 }
 
 func (t *mockRouteTable) SetRoutes(ifaceName string, targets []routetable.Target) {
@@ -583,32 +582,6 @@ func (t *mockRouteTable) SetRoutes(ifaceName string, targets []routetable.Target
 		"ifaceName": ifaceName,
 		"targets":   targets,
 	}).Debug("SetRoutes")
-
-	if t.currentBlackholes == nil {
-		t.currentBlackholes = map[string]map[ip.CIDR]struct{}{}
-	}
-	if _, ok := t.currentBlackholes[ifaceName]; !ok {
-		t.currentBlackholes[ifaceName] = make(map[ip.CIDR]struct{})
-	}
-
-	noBlackholes := []routetable.Target{}
-	var hasBlackholes bool
-T:
-	for _, tgt := range targets {
-		if tgt.Type == routetable.TargetTypeBlackhole {
-			hasBlackholes = true
-			t.currentBlackholes[ifaceName][tgt.CIDR] = struct{}{}
-			continue T
-		}
-
-		noBlackholes = append(noBlackholes, tgt)
-	}
-
-	if hasBlackholes {
-		t.currentRoutes[ifaceName] = noBlackholes
-		return
-	}
-
 	t.currentRoutes[ifaceName] = targets
 }
 
