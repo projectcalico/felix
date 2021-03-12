@@ -18,6 +18,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/projectcalico/felix/logutils"
 	"github.com/projectcalico/felix/rules"
 
 	"github.com/projectcalico/felix/ip"
@@ -120,6 +121,7 @@ var _ = Describe("VXLANManager", func() {
 				deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable {
 				return prt
 			},
+			logutils.NewSummarizer("test loop"),
 		)
 	})
 
