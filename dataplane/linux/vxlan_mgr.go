@@ -94,14 +94,19 @@ func newVXLANManager(
 ) *vxlanManager {
 	nlHandle, _ := netlink.NewHandle()
 
+	blackHoleProto := 202
+	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
+		blackHoleProto = dpConfig.DeviceRouteProtocol
+	}
+
 	brt := routetable.New(
 		[]string{routetable.InterfaceNone},
 		4,
 		false,
 		dpConfig.NetlinkTimeout,
 		dpConfig.DeviceRouteSourceAddress,
-		dpConfig.DeviceRouteProtocol,
-		dpConfig.RemoveExternalRoutes,
+		blackHoleProto,
+		false,
 		0,
 		opRecorder,
 	)
