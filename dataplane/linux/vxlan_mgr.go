@@ -53,12 +53,14 @@ type vxlanManager struct {
 	sync.Mutex
 
 	// Our dependencies.
-	hostname          string
-	routeTable        routeTable
-	noEncapRouteTable routeTable
+	hostname            string
+	routeTable          routeTable
+	blackholeRouteTable routeTable
+	noEncapRouteTable   routeTable
 
 	// Hold pending updates.
 	routesByDest map[string]*proto.RouteUpdate
+	ipamBlocks   map[string]*proto.RouteUpdate
 	vtepsByNode  map[string]*proto.VXLANTunnelEndpointUpdate
 
 	// Holds this node's VTEP information.
@@ -92,9 +94,26 @@ func newVXLANManager(
 ) *vxlanManager {
 	nlHandle, _ := netlink.NewHandle()
 
+	blackHoleProto := 202
+	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
+		blackHoleProto = dpConfig.DeviceRouteProtocol
+	}
+
+	brt := routetable.New(
+		[]string{routetable.InterfaceNone},
+		4,
+		false,
+		dpConfig.NetlinkTimeout,
+		dpConfig.DeviceRouteSourceAddress,
+		blackHoleProto,
+		false,
+		0,
+		opRecorder,
+	)
+
 	return newVXLANManagerWithShims(
 		ipsetsDataplane,
-		rt,
+		rt, brt,
 		deviceName,
 		dpConfig,
 		nlHandle,
@@ -109,7 +128,7 @@ func newVXLANManager(
 
 func newVXLANManagerWithShims(
 	ipsetsDataplane ipsetsDataplane,
-	rt routeTable,
+	rt, brt routeTable,
 	deviceName string,
 	dpConfig Config,
 	nlHandle netlinkHandle,
@@ -127,25 +146,27 @@ func newVXLANManagerWithShims(
 			SetID:   rules.IPSetIDAllVXLANSourceNets,
 			Type:    ipsets.IPSetTypeHashNet,
 		},
-		hostname:           dpConfig.Hostname,
-		routeTable:         rt,
-		routesByDest:       map[string]*proto.RouteUpdate{},
-		vtepsByNode:        map[string]*proto.VXLANTunnelEndpointUpdate{},
-		vxlanDevice:        deviceName,
-		vxlanID:            dpConfig.RulesConfig.VXLANVNI,
-		vxlanPort:          dpConfig.RulesConfig.VXLANPort,
-		externalNodeCIDRs:  dpConfig.ExternalNodesCidrs,
-		routesDirty:        true,
-		vtepsDirty:         true,
-		dpConfig:           dpConfig,
-		nlHandle:           nlHandle,
-		noEncapProtocol:    noEncapProtocol,
-		noEncapRTConstruct: noEncapRTConstruct,
+		hostname:            dpConfig.Hostname,
+		routeTable:          rt,
+		blackholeRouteTable: brt,
+		routesByDest:        map[string]*proto.RouteUpdate{},
+		ipamBlocks:          map[string]*proto.RouteUpdate{},
+		vtepsByNode:         map[string]*proto.VXLANTunnelEndpointUpdate{},
+		vxlanDevice:         deviceName,
+		vxlanID:             dpConfig.RulesConfig.VXLANVNI,
+		vxlanPort:           dpConfig.RulesConfig.VXLANPort,
+		externalNodeCIDRs:   dpConfig.ExternalNodesCidrs,
+		routesDirty:         true,
+		vtepsDirty:          true,
+		dpConfig:            dpConfig,
+		nlHandle:            nlHandle,
+		noEncapProtocol:     noEncapProtocol,
+		noEncapRTConstruct:  noEncapRTConstruct,
 	}
 }
 
 func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
-	switch msg := protoBufMsg.(type) {
+	switch msg := protoBufMsg.(type) { // uncle roger approve
 	case *proto.RouteUpdate:
 		// In case the route changes type to one we no longer care about...
 		m.deleteRoute(msg.Dst)
@@ -153,6 +174,13 @@ func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
 		if msg.Type == proto.RouteType_REMOTE_WORKLOAD && msg.IpPoolType == proto.IPPoolType_VXLAN {
 			logrus.WithField("msg", msg).Debug("VXLAN data plane received route update")
 			m.routesByDest[msg.Dst] = msg
+			m.routesDirty = true
+		}
+
+		// Process IPAM blocks that aren't associated to a single or /32 local workload
+		if msg.Type == proto.RouteType_LOCAL_WORKLOAD && msg.IpPoolType == proto.IPPoolType_VXLAN && !msg.LocalWorkload {
+			logrus.WithField("msg", msg).Info("VXLAN data plane received route update for IPAM block")
+			m.ipamBlocks[msg.Dst] = msg
 			m.routesDirty = true
 		}
 	case *proto.RouteRemove:
@@ -218,7 +246,7 @@ func (m *vxlanManager) setNoEncapRouteTable(rt routeTable) {
 }
 
 func (m *vxlanManager) GetRouteTableSyncers() []routeTableSyncer {
-	rts := []routeTableSyncer{m.routeTable}
+	rts := []routeTableSyncer{m.routeTable, m.blackholeRouteTable}
 
 	noEncapRouteTable := m.getNoEncapRouteTable()
 	if noEncapRouteTable != nil {
@@ -226,6 +254,24 @@ func (m *vxlanManager) GetRouteTableSyncers() []routeTableSyncer {
 	}
 
 	return rts
+}
+
+func (m *vxlanManager) blackholeRoutes() []routetable.Target {
+	var rtt []routetable.Target
+	for dst := range m.ipamBlocks {
+		cidr, err := ip.CIDRFromString(dst)
+		if err != nil {
+			logrus.WithError(err).Debug(
+				"Error processing IPAM block CIDR: ", dst,
+			)
+			continue
+		}
+		rtt = append(rtt, routetable.Target{
+			Type: routetable.TargetTypeBlackhole,
+			CIDR: cidr,
+		})
+	}
+	return rtt
 }
 
 func (m *vxlanManager) CompleteDeferredWork() error {
@@ -313,6 +359,11 @@ func (m *vxlanManager) CompleteDeferredWork() error {
 
 		logrus.WithField("vxlanroutes", vxlanRoutes).Debug("VXLAN manager sending VXLAN L3 updates")
 		m.routeTable.SetRoutes(m.vxlanDevice, vxlanRoutes)
+
+		rb := m.blackholeRoutes()
+		if len(rb) > 0 {
+			m.blackholeRouteTable.SetRoutes(routetable.InterfaceNone, rb)
+		}
 
 		noEncapRouteTable := m.getNoEncapRouteTable()
 		// only set the noEncapRouteTable table if it's nil, as you will lose the routes that are being managed already
