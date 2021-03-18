@@ -36,7 +36,8 @@ import (
 )
 
 var (
-	FelixRouteProtocol = syscall.RTPROT_BOOT
+	FelixRouteProtocol       = 202
+	FelixDeviceRouteProtocol = syscall.RTPROT_BOOT
 
 	mac1 = testutils.MustParseMAC("00:11:22:33:44:51")
 	mac2 = testutils.MustParseMAC("00:11:22:33:44:52")
@@ -67,6 +68,7 @@ var _ = Describe("RouteTable v6", func() {
 			dataplane,
 			t,
 			nil,
+			FelixDeviceRouteProtocol,
 			FelixRouteProtocol,
 			true,
 			0,
@@ -121,7 +123,7 @@ var _ = Describe("RouteTable", func() {
 			dataplane,
 			t,
 			nil,
-			FelixRouteProtocol,
+			FelixDeviceRouteProtocol,
 			true,
 			0,
 			logutils.NewSummarizer("test"),
@@ -163,7 +165,7 @@ var _ = Describe("RouteTable", func() {
 				LinkIndex: cali1.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.1/32"),
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
 			dataplane.AddMockRoute(&cali1Route)
@@ -171,14 +173,14 @@ var _ = Describe("RouteTable", func() {
 				LinkIndex: cali3.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.3/32"),
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
 			dataplane.AddMockRoute(&cali3Route)
 			gatewayRoute = netlink.Route{
 				LinkIndex: eth0.LinkAttrs.Index,
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Gw:        net.ParseIP("12.0.0.1"),
 			}
@@ -230,7 +232,7 @@ var _ = Describe("RouteTable", func() {
 				LinkIndex: updateLink.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.5/32"),
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Src:       net.ParseIP("192.168.0.1"),
 			}
@@ -263,7 +265,7 @@ var _ = Describe("RouteTable", func() {
 					dataplane,
 					t,
 					deviceRouteSourceAddress,
-					FelixRouteProtocol,
+					FelixDeviceRouteProtocol,
 					true,
 					0,
 					logutils.NewSummarizer("test"),
@@ -287,7 +289,7 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: addLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.6/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 					Src:       deviceRouteSourceAddress,
 				}))
@@ -300,7 +302,7 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: noopLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.4/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 					Src:       deviceRouteSourceAddress,
 				}
@@ -322,7 +324,7 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: updateLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.5/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}
 				rt.SetRoutes(updateLink.LinkAttrs.Name, []Target{
@@ -347,7 +349,7 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: updateLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.5/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 					Src:       net.ParseIP("192.168.0.2"),
 				}
@@ -605,7 +607,7 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 			})
@@ -618,7 +620,7 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 			})
@@ -643,14 +645,14 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
 					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.20.0/24"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 			})
@@ -676,14 +678,14 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
 					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.20.0/24"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 			})
@@ -708,14 +710,14 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.20.30.40/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 				Expect(dataplane.RouteKeyToRoute).To(ContainElement(netlink.Route{
 					LinkIndex: cali3.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.20.0/24"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 			})
@@ -800,7 +802,7 @@ var _ = Describe("RouteTable", func() {
 						LinkIndex: 1,
 						Dst:       &ip1,
 						Type:      syscall.RTN_UNICAST,
-						Protocol:  FelixRouteProtocol,
+						Protocol:  FelixDeviceRouteProtocol,
 						Scope:     netlink.SCOPE_LINK,
 					}))
 					Expect(dataplane.AddedRouteKeys.Contains("254-1-10.0.0.1/32")).To(BeFalse())
@@ -811,7 +813,7 @@ var _ = Describe("RouteTable", func() {
 						LinkIndex: 2,
 						Dst:       &ip2,
 						Type:      syscall.RTN_UNICAST,
-						Protocol:  FelixRouteProtocol,
+						Protocol:  FelixDeviceRouteProtocol,
 						Scope:     netlink.SCOPE_LINK,
 					}))
 				})
@@ -821,7 +823,7 @@ var _ = Describe("RouteTable", func() {
 						LinkIndex: 3,
 						Dst:       &ip13,
 						Type:      syscall.RTN_UNICAST,
-						Protocol:  FelixRouteProtocol,
+						Protocol:  FelixDeviceRouteProtocol,
 						Scope:     netlink.SCOPE_LINK,
 					}))
 					Expect(dataplane.DeletedRouteKeys.Contains("254-3-10.0.0.3/32")).To(BeTrue())
@@ -908,7 +910,7 @@ var _ = Describe("RouteTable", func() {
 				LinkIndex: cali1.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.1/32"),
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
 			dataplane.AddMockRoute(&cali1Route)
@@ -995,7 +997,7 @@ var _ = Describe("RouteTable (main table)", func() {
 			dataplane,
 			t,
 			nil,
-			FelixRouteProtocol,
+			FelixDeviceRouteProtocol,
 			true,
 			0,
 			logutils.NewSummarizer("test"),
@@ -1016,7 +1018,7 @@ var _ = Describe("RouteTable (main table)", func() {
 				LinkIndex: cali1.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.1/32"),
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
 			dataplane.AddMockRoute(&cali1Route)
@@ -1024,7 +1026,7 @@ var _ = Describe("RouteTable (main table)", func() {
 				LinkIndex: cali1.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.3/32"),
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Table:     100,
 			}
@@ -1032,7 +1034,7 @@ var _ = Describe("RouteTable (main table)", func() {
 			gatewayRoute = netlink.Route{
 				LinkIndex: eth0.LinkAttrs.Index,
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Gw:        net.ParseIP("12.0.0.1"),
 			}
@@ -1094,7 +1096,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 			dataplane,
 			t,
 			nil,
-			FelixRouteProtocol,
+			FelixDeviceRouteProtocol,
 			true,
 			100,
 			logutils.NewSummarizer("test"),
@@ -1115,7 +1117,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 				LinkIndex: cali.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.1/32"),
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 			}
 			dataplane.AddMockRoute(&caliRoute)
@@ -1123,7 +1125,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 				LinkIndex: cali.LinkAttrs.Index,
 				Dst:       mustParseCIDR("10.0.0.3/32"),
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Table:     100,
 			}
@@ -1131,7 +1133,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 			gatewayRoute = netlink.Route{
 				LinkIndex: eth0.LinkAttrs.Index,
 				Type:      syscall.RTN_UNICAST,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_LINK,
 				Gw:        net.ParseIP("12.0.0.1"),
 			}
@@ -1140,7 +1142,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 				LinkIndex: 0,
 				Dst:       mustParseCIDR("10.10.10.10/32"),
 				Type:      syscall.RTN_THROW,
-				Protocol:  FelixRouteProtocol,
+				Protocol:  FelixDeviceRouteProtocol,
 				Scope:     netlink.SCOPE_UNIVERSE,
 				Table:     100,
 			}
@@ -1237,7 +1239,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 					LinkIndex: 0,
 					Dst:       mustParseCIDR("10.10.10.10/32"),
 					Type:      syscall.RTN_BLACKHOLE,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_UNIVERSE,
 					Table:     100,
 				}))
@@ -1267,7 +1269,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 					LinkIndex: 0,
 					Dst:       mustParseCIDR("10.10.10.10/32"),
 					Type:      syscall.RTN_PROHIBIT,
-					Protocol:  FelixRouteProtocol,
+					Protocol:  FelixDeviceRouteProtocol,
 					Scope:     netlink.SCOPE_UNIVERSE,
 					Table:     100,
 				}))
@@ -1301,7 +1303,7 @@ var _ = Describe("Tests to verify ip version is policed", func() {
 				dataplane,
 				t,
 				nil,
-				FelixRouteProtocol,
+				FelixDeviceRouteProtocol,
 				true,
 				100,
 				logutils.NewSummarizer("test"),

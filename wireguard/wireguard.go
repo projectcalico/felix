@@ -162,7 +162,7 @@ func New(
 	hostname string,
 	config *Config,
 	netlinkTimeout time.Duration,
-	deviceRouteProtocol int,
+	deviceRouteProtocol, routeProtocol int,
 	statusCallback func(publicKey wgtypes.Key) error,
 	opRecorder logutils.OpRecorder,
 ) *Wireguard {
@@ -176,6 +176,7 @@ func New(
 		netlinkTimeout,
 		timeshim.RealTime(),
 		deviceRouteProtocol,
+		routeProtocol,
 		statusCallback,
 		opRecorder,
 	)
@@ -191,7 +192,7 @@ func NewWithShims(
 	newWireguardDevice func() (netlinkshim.Wireguard, error),
 	netlinkTimeout time.Duration,
 	timeShim timeshim.Interface,
-	deviceRouteProtocol int,
+	deviceRouteProtocol, routeProtocol int,
 	statusCallback func(publicKey wgtypes.Key) error,
 	opRecorder logutils.OpRecorder,
 ) *Wireguard {
@@ -207,6 +208,7 @@ func NewWithShims(
 		timeShim,
 		nil, // deviceRouteSourceAddress
 		deviceRouteProtocol,
+		routeProtocol,
 		true, // removeExternalRoutes
 		config.RoutingTableIndex,
 		opRecorder,
