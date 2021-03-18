@@ -124,6 +124,7 @@ var _ = Describe("RouteTable", func() {
 			t,
 			nil,
 			FelixDeviceRouteProtocol,
+			FelixRouteProtocol,
 			true,
 			0,
 			logutils.NewSummarizer("test"),
@@ -266,6 +267,7 @@ var _ = Describe("RouteTable", func() {
 					t,
 					deviceRouteSourceAddress,
 					FelixDeviceRouteProtocol,
+					FelixRouteProtocol,
 					true,
 					0,
 					logutils.NewSummarizer("test"),
@@ -371,6 +373,7 @@ var _ = Describe("RouteTable", func() {
 
 		Describe("With a device route protocol set", func() {
 			deviceRouteProtocol := 10
+			routeProtocol := 203
 			// Modify the route table to have the device route source address set
 			BeforeEach(func() {
 				rt = NewWithShims(
@@ -384,6 +387,7 @@ var _ = Describe("RouteTable", func() {
 					t,
 					nil,
 					deviceRouteProtocol,
+					routeProtocol,
 					true,
 					0,
 					logutils.NewSummarizer("test"),
@@ -998,6 +1002,7 @@ var _ = Describe("RouteTable (main table)", func() {
 			t,
 			nil,
 			FelixDeviceRouteProtocol,
+			FelixRouteProtocol,
 			true,
 			0,
 			logutils.NewSummarizer("test"),
@@ -1097,6 +1102,7 @@ var _ = Describe("RouteTable (table 100)", func() {
 			t,
 			nil,
 			FelixDeviceRouteProtocol,
+			FelixRouteProtocol,
 			true,
 			100,
 			logutils.NewSummarizer("test"),
@@ -1304,6 +1310,7 @@ var _ = Describe("Tests to verify ip version is policed", func() {
 				t,
 				nil,
 				FelixDeviceRouteProtocol,
+				FelixRouteProtocol,
 				true,
 				100,
 				logutils.NewSummarizer("test"),
