@@ -85,11 +85,14 @@ func (m *mockVXLANDataplane) LinkDel(netlink.Link) error {
 
 var _ = Describe("VXLANManager", func() {
 	var manager *vxlanManager
-	var rt *mockRouteTable
-	var prt *mockRouteTable
+	var rt, brt, prt *mockRouteTable
 
 	BeforeEach(func() {
 		rt = &mockRouteTable{
+			currentRoutes:   map[string][]routetable.Target{},
+			currentL2Routes: map[string][]routetable.L2Target{},
+		}
+		brt = &mockRouteTable{
 			currentRoutes:   map[string][]routetable.Target{},
 			currentL2Routes: map[string][]routetable.L2Target{},
 		}
@@ -100,7 +103,7 @@ var _ = Describe("VXLANManager", func() {
 
 		manager = newVXLANManagerWithShims(
 			newMockIPSets(),
-			rt,
+			rt, brt,
 			"vxlan.calico",
 			Config{
 				MaxIPSetSize:       5,
@@ -115,7 +118,7 @@ var _ = Describe("VXLANManager", func() {
 				links: []netlink.Link{&mockLink{attrs: netlink.LinkAttrs{Name: "eth0"}}},
 			},
 			func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-				deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable {
+				deviceRouteSourceAddress net.IP, deviceRouteProtocol, routeProtocol int, removeExternalRoutes bool) routeTable {
 				return prt
 			},
 		)
@@ -168,12 +171,23 @@ var _ = Describe("VXLANManager", func() {
 			DstNodeIp:   "172.8.8.8",
 		})
 
+		manager.OnUpdate(&proto.RouteUpdate{
+			Type:        proto.RouteType_LOCAL_WORKLOAD,
+			IpPoolType:  proto.IPPoolType_VXLAN,
+			Dst:         "172.0.0.0/26",
+			DstNodeName: "node0",
+			DstNodeIp:   "172.8.8.8",
+			SameSubnet:  true,
+		})
+
 		Expect(rt.currentRoutes["vxlan.calico"]).To(HaveLen(0))
+		Expect(brt.currentRoutes[routetable.InterfaceNone]).To(HaveLen(0))
 
 		err = manager.CompleteDeferredWork()
 
 		Expect(err).NotTo(HaveOccurred())
 		Expect(rt.currentRoutes["vxlan.calico"]).To(HaveLen(1))
+		Expect(brt.currentRoutes[routetable.InterfaceNone]).To(HaveLen(1))
 		Expect(prt.currentRoutes["eth0"]).NotTo(BeNil())
 	})
 

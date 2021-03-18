@@ -80,4 +80,6 @@ replace (
 	k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.18.12
 	k8s.io/metrics => k8s.io/metrics v0.18.12
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.18.12
+
+	github.com/projectcalico/libcalico-go => github.com/electricjesus/libcalico-go v1.7.2-0.20210318103414-f72d47697f03
 )
