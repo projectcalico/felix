@@ -76,4 +76,6 @@ replace (
 	k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.19.6
 	k8s.io/metrics => k8s.io/metrics v0.19.6
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.19.6
+
+	github.com/projectcalico/libcalico-go => github.com/electricjesus/libcalico-go v1.7.2-0.20210318110747-220388fbe2a0
 )
