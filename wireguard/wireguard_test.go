@@ -38,19 +38,20 @@ import (
 )
 
 var (
-	zeroKey            = wgtypes.Key{}
-	ifaceName          = "wireguard-if"
-	hostname           = "my-host"
-	peer1              = "peer1"
-	peer2              = "peer2"
-	peer3              = "peer3"
-	peer4              = "peer4"
-	FelixRouteProtocol = syscall.RTPROT_BOOT
-	tableIndex         = 99
-	rulePriority       = 98
-	firewallMark       = 10
-	listeningPort      = 1000
-	mtu                = 2000
+	zeroKey                  = wgtypes.Key{}
+	ifaceName                = "wireguard-if"
+	hostname                 = "my-host"
+	peer1                    = "peer1"
+	peer2                    = "peer2"
+	peer3                    = "peer3"
+	peer4                    = "peer4"
+	FelixDeviceRouteProtocol = syscall.RTPROT_BOOT
+	FelixRouteProtocol       = 202
+	tableIndex               = 99
+	rulePriority             = 98
+	firewallMark             = 10
+	listeningPort            = 1000
+	mtu                      = 2000
 
 	ipv4_int1 = ip.FromString("192.168.0.0")
 	ipv4_int2 = ip.FromString("192.168.10.0")
@@ -171,6 +172,7 @@ var _ = Describe("Enable wireguard", func() {
 			wgDataplane.NewMockWireguard,
 			10*time.Second,
 			t,
+			FelixDeviceRouteProtocol,
 			FelixRouteProtocol,
 			s.status,
 			logutils.NewSummarizer("test loop"),
@@ -639,7 +641,7 @@ var _ = Describe("Enable wireguard", func() {
 								LinkIndex: link.LinkAttrs.Index,
 								Dst:       &ipnet_1,
 								Type:      syscall.RTN_UNICAST,
-								Protocol:  FelixRouteProtocol,
+								Protocol:  FelixDeviceRouteProtocol,
 								Scope:     netlink.SCOPE_LINK,
 								Table:     tableIndex,
 							}))
@@ -647,7 +649,7 @@ var _ = Describe("Enable wireguard", func() {
 								LinkIndex: link.LinkAttrs.Index,
 								Dst:       &ipnet_2,
 								Type:      syscall.RTN_UNICAST,
-								Protocol:  FelixRouteProtocol,
+								Protocol:  FelixDeviceRouteProtocol,
 								Scope:     netlink.SCOPE_LINK,
 								Table:     tableIndex,
 							}))
@@ -655,14 +657,14 @@ var _ = Describe("Enable wireguard", func() {
 								LinkIndex: link.LinkAttrs.Index,
 								Dst:       &ipnet_3,
 								Type:      syscall.RTN_UNICAST,
-								Protocol:  FelixRouteProtocol,
+								Protocol:  FelixDeviceRouteProtocol,
 								Scope:     netlink.SCOPE_LINK,
 								Table:     tableIndex,
 							}))
 							Expect(rtDataplane.RouteKeyToRoute[routekey_4_throw]).To(Equal(netlink.Route{
 								Dst:      &ipnet_4,
 								Type:     syscall.RTN_THROW,
-								Protocol: FelixRouteProtocol,
+								Protocol: FelixDeviceRouteProtocol,
 								Scope:    netlink.SCOPE_UNIVERSE,
 								Table:    tableIndex,
 							}))
@@ -786,7 +788,7 @@ var _ = Describe("Enable wireguard", func() {
 								Expect(rtDataplane.RouteKeyToRoute[routekey_3_throw]).To(Equal(netlink.Route{
 									Dst:      &ipnet_3,
 									Type:     syscall.RTN_THROW,
-									Protocol: FelixRouteProtocol,
+									Protocol: FelixDeviceRouteProtocol,
 									Scope:    netlink.SCOPE_UNIVERSE,
 									Table:    tableIndex,
 								}))
@@ -843,7 +845,7 @@ var _ = Describe("Enable wireguard", func() {
 									LinkIndex: link.LinkAttrs.Index,
 									Dst:       &ipnet_4,
 									Type:      syscall.RTN_UNICAST,
-									Protocol:  FelixRouteProtocol,
+									Protocol:  FelixDeviceRouteProtocol,
 									Scope:     netlink.SCOPE_LINK,
 									Table:     tableIndex,
 								}))
@@ -1296,6 +1298,7 @@ var _ = Describe("Wireguard (disabled)", func() {
 			wgDataplane.NewMockWireguard,
 			10*time.Second,
 			t,
+			FelixDeviceRouteProtocol,
 			FelixRouteProtocol,
 			s.status,
 			logutils.NewSummarizer("test loop"),
@@ -1472,6 +1475,7 @@ var _ = Describe("Wireguard (with no table index)", func() {
 				wgDataplane.NewMockWireguard,
 				10*time.Second,
 				t,
+				FelixDeviceRouteProtocol,
 				FelixRouteProtocol,
 				s.status,
 				logutils.NewSummarizer("test loop"),
