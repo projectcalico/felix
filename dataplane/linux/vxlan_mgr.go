@@ -178,7 +178,12 @@ func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
 			logrus.WithField("msg", msg).Info("VXLAN data plane received route update for IPAM block")
 			m.localIPAMBlocks[msg.Dst] = msg
 			m.routesDirty = true
+		} else if _, ok := m.localIPAMBlocks[msg.Dst]; ok {
+			logrus.WithField("msg", msg).Info("VXLAN data plane IPAM block changed to something else")
+			delete(m.localIPAMBlocks, msg.Dst)
+			m.routesDirty = true
 		}
+
 	case *proto.RouteRemove:
 		m.deleteRoute(msg.Dst)
 	case *proto.VXLANTunnelEndpointUpdate:
