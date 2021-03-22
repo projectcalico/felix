@@ -148,6 +148,8 @@ type bpfEndpointManager struct {
 
 	// UT-able BPF dataplane interface.
 	dp bpfDataplane
+
+	ifaceToIpMap map[string]net.IP
 }
 
 type bpfAllowChainRenderer interface {
@@ -204,6 +206,7 @@ func newBPFEndpointManager(
 		}),
 		onStillAlive:     livenessCallback,
 		hostIfaceToEpMap: map[string]proto.HostEndpoint{},
+		ifaceToIpMap:     map[string]net.IP{},
 	}
 
 	// Normally this endpoint manager uses its own dataplane implementation, but we have an
@@ -249,7 +252,8 @@ func (m *bpfEndpointManager) OnUpdate(msg interface{}) {
 	// Interface updates.
 	case *ifaceUpdate:
 		m.onInterfaceUpdate(msg)
-
+	case *ifaceAddrsUpdate:
+		m.onInterfaceAddrsUpdate(msg)
 	// Updates from the datamodel:
 
 	// Workloads.
@@ -285,6 +289,22 @@ func (m *bpfEndpointManager) OnUpdate(msg interface{}) {
 				log.WithField("HostMetadataUpdate", msg).Warn("Cannot parse IP, no change applied")
 			}
 		}
+	}
+}
+
+func (m *bpfEndpointManager) onInterfaceAddrsUpdate(update *ifaceAddrsUpdate) {
+	if update.Addrs != nil && update.Addrs.Len() > 0 {
+		log.Debugf("Interface %+v received address update %+v", update.Name, update.Addrs)
+		update.Addrs.Iter(func(item interface{}) error {
+			ip := net.ParseIP(item.(string))
+			if ip.To4() != nil {
+				m.ifaceToIpMap[update.Name] = ip
+				m.ifacesLock.Lock()
+				m.dirtyIfaceNames.Add(update.Name)
+				m.ifacesLock.Unlock()
+			}
+			return nil
+		})
 	}
 }
 
@@ -708,6 +728,7 @@ func (m *bpfEndpointManager) attachWorkloadProgram(ifaceName string, endpoint *p
 	//   for resizing the packet, so we have to reduce the apparent MTU by another 50 bytes
 	//   when we cannot encap the packet - non-GSO & too close to veth MTU
 	ap.TunnelMTU = uint16(m.vxlanMTU - 50)
+	ap.IntfIP = net.IPv4zero
 
 	jumpMapFD, err := m.dp.ensureProgramAttached(&ap, polDirection)
 	if err != nil {
@@ -782,9 +803,14 @@ func (m *bpfEndpointManager) ifaceIsUp(ifaceName string) (up bool) {
 }
 
 func (m *bpfEndpointManager) attachDataIfaceProgram(ifaceName string, ep *proto.HostEndpoint, polDirection PolDirection) error {
+	ip, err := m.getInterfaceIP(ifaceName)
+	if err != nil {
+		log.Debugf("Error getting IP for interface %+v", ifaceName)
+	}
 	ap := m.calculateTCAttachPoint(polDirection, ifaceName)
 	ap.HostIP = m.hostIP
 	ap.TunnelMTU = uint16(m.vxlanMTU)
+	ap.IntfIP = ip
 
 	jumpMapFD, err := m.dp.ensureProgramAttached(&ap, polDirection)
 	if err != nil {
@@ -1343,4 +1369,24 @@ func FindJumpMap(ap *tc.AttachPoint) (mapFD bpf.MapFD, err error) {
 		}
 	}
 	return 0, errors.New("failed to find TC program")
+}
+
+func (m *bpfEndpointManager) getInterfaceIP(ifaceName string) (net.IP, error) {
+	if ip, ok := m.ifaceToIpMap[ifaceName]; ok {
+		return ip, nil
+	}
+	intf, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return net.IPv4zero, err
+	}
+	addrs, err := intf.Addrs()
+	if err != nil {
+		return net.IPv4zero, err
+	}
+	for _, addr := range addrs {
+		if ipv4Addr := addr.(*net.IPNet).IP.To4(); ipv4Addr != nil {
+			return ipv4Addr, nil
+		}
+	}
+	return net.IPv4zero, errors.New("IP address not present")
 }
