@@ -162,7 +162,7 @@ func newVXLANManagerWithShims(
 }
 
 func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
-	switch msg := protoBufMsg.(type) { // uncle roger approve
+	switch msg := protoBufMsg.(type) {
 	case *proto.RouteUpdate:
 		// In case the route changes type to one we no longer care about...
 		m.deleteRoute(msg.Dst)
