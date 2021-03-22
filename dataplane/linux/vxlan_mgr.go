@@ -361,10 +361,7 @@ func (m *vxlanManager) CompleteDeferredWork() error {
 		logrus.WithField("vxlanroutes", vxlanRoutes).Debug("VXLAN manager sending VXLAN L3 updates")
 		m.routeTable.SetRoutes(m.vxlanDevice, vxlanRoutes)
 
-		rb := m.blackholeRoutes()
-		if len(rb) > 0 {
-			m.blackholeRouteTable.SetRoutes(routetable.InterfaceNone, rb)
-		}
+		m.blackholeRouteTable.SetRoutes(routetable.InterfaceNone, m.blackholeRoutes())
 
 		noEncapRouteTable := m.getNoEncapRouteTable()
 		// only set the noEncapRouteTable table if it's nil, as you will lose the routes that are being managed already
