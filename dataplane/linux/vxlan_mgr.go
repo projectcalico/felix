@@ -82,7 +82,7 @@ type vxlanManager struct {
 	noEncapProtocol   int
 	// Used so that we can shim the no encap route table for the tests
 	noEncapRTConstruct func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-		deviceRouteSourceAddress net.IP, deviceRouteProtocol, routeProtocol int, removeExternalRoutes bool) routeTable
+		deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable
 }
 
 func newVXLANManager(
@@ -94,14 +94,18 @@ func newVXLANManager(
 ) *vxlanManager {
 	nlHandle, _ := netlink.NewHandle()
 
+	blackHoleProto := 202
+	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
+		blackHoleProto = dpConfig.DeviceRouteProtocol
+	}
+
 	brt := routetable.New(
 		[]string{routetable.InterfaceNone},
 		4,
 		false,
 		dpConfig.NetlinkTimeout,
 		dpConfig.DeviceRouteSourceAddress,
-		dpConfig.DeviceRouteProtocol,
-		dpConfig.RouteProtocol,
+		blackHoleProto,
 		false,
 		0,
 		opRecorder,
@@ -114,9 +118,9 @@ func newVXLANManager(
 		dpConfig,
 		nlHandle,
 		func(interfaceRegexes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-			deviceRouteSourceAddress net.IP, deviceRouteProtocol, routeProtocol int, removeExternalRoutes bool) routeTable {
+			deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable {
 			return routetable.New(interfaceRegexes, ipVersion, vxlan, netlinkTimeout,
-				deviceRouteSourceAddress, deviceRouteProtocol, routeProtocol, removeExternalRoutes, 0,
+				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0,
 				opRecorder)
 		},
 	)
@@ -129,7 +133,7 @@ func newVXLANManagerWithShims(
 	dpConfig Config,
 	nlHandle netlinkHandle,
 	noEncapRTConstruct func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-		deviceRouteSourceAddress net.IP, deviceRouteProtocol, routeProtocol int, removeExternalRoutes bool) routeTable,
+		deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable,
 ) *vxlanManager {
 	noEncapProtocol := 80
 	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
@@ -406,7 +410,7 @@ func (m *vxlanManager) KeepVXLANDeviceInSync(mtu int, wait time.Duration) {
 		} else {
 			if m.getNoEncapRouteTable() == nil {
 				noEncapRouteTable := m.noEncapRTConstruct([]string{"^" + parent.Attrs().Name + "$"}, 4, false, m.dpConfig.NetlinkTimeout, m.dpConfig.DeviceRouteSourceAddress,
-					m.noEncapProtocol, m.dpConfig.RouteProtocol, false)
+					m.noEncapProtocol, false)
 				m.setNoEncapRouteTable(noEncapRouteTable)
 			}
 		}
