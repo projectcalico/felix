@@ -59,9 +59,9 @@ type vxlanManager struct {
 	noEncapRouteTable   routeTable
 
 	// Hold pending updates.
-	routesByDest map[string]*proto.RouteUpdate
-	ipamBlocks   map[string]*proto.RouteUpdate
-	vtepsByNode  map[string]*proto.VXLANTunnelEndpointUpdate
+	routesByDest    map[string]*proto.RouteUpdate
+	localIPAMBlocks map[string]*proto.RouteUpdate
+	vtepsByNode     map[string]*proto.VXLANTunnelEndpointUpdate
 
 	// Holds this node's VTEP information.
 	myVTEP *proto.VXLANTunnelEndpointUpdate
@@ -146,7 +146,7 @@ func newVXLANManagerWithShims(
 		routeTable:          rt,
 		blackholeRouteTable: brt,
 		routesByDest:        map[string]*proto.RouteUpdate{},
-		ipamBlocks:          map[string]*proto.RouteUpdate{},
+		localIPAMBlocks:     map[string]*proto.RouteUpdate{},
 		vtepsByNode:         map[string]*proto.VXLANTunnelEndpointUpdate{},
 		vxlanDevice:         deviceName,
 		vxlanID:             dpConfig.RulesConfig.VXLANVNI,
@@ -176,7 +176,7 @@ func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
 		// Process IPAM blocks that aren't associated to a single or /32 local workload
 		if msg.Type == proto.RouteType_LOCAL_WORKLOAD && msg.IpPoolType == proto.IPPoolType_VXLAN && !msg.LocalWorkload {
 			logrus.WithField("msg", msg).Info("VXLAN data plane received route update for IPAM block")
-			m.ipamBlocks[msg.Dst] = msg
+			m.localIPAMBlocks[msg.Dst] = msg
 			m.routesDirty = true
 		}
 	case *proto.RouteRemove:
@@ -254,7 +254,7 @@ func (m *vxlanManager) GetRouteTableSyncers() []routeTableSyncer {
 
 func (m *vxlanManager) blackholeRoutes() []routetable.Target {
 	var rtt []routetable.Target
-	for dst := range m.ipamBlocks {
+	for dst := range m.localIPAMBlocks {
 		cidr, err := ip.CIDRFromString(dst)
 		if err != nil {
 			logrus.WithError(err).Debug(
