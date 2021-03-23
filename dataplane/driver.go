@@ -219,6 +219,8 @@ func StartDataplaneDriver(configParams *config.Config,
 		// TODO: find where this is set in the env var level
 		if configParams.DeviceRouteProtocol != syscall.RTPROT_BOOT {
 			log.Warn("DeviceRouteProtocol is being deprecated. Please migrate to RouteProtocol instead.")
+			// mirror the setting to RouteProtocol for now
+			configParams.RouteProtocol = configParams.DeviceRouteProtocol
 		}
 
 		dpConfig := intdataplane.Config{
@@ -303,7 +305,6 @@ func StartDataplaneDriver(configParams *config.Config,
 			IptablesRefreshInterval:        configParams.IptablesRefreshInterval,
 			RouteRefreshInterval:           configParams.RouteRefreshInterval,
 			DeviceRouteSourceAddress:       configParams.DeviceRouteSourceAddress,
-			DeviceRouteProtocol:            configParams.DeviceRouteProtocol,
 			RouteProtocol:                  configParams.RouteProtocol,
 			RemoveExternalRoutes:           configParams.RemoveExternalRoutes,
 			IPSetsRefreshInterval:          configParams.IpsetsRefreshInterval,

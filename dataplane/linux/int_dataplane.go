@@ -128,7 +128,6 @@ type Config struct {
 	IPSetsRefreshInterval          time.Duration
 	RouteRefreshInterval           time.Duration
 	DeviceRouteSourceAddress       net.IP
-	DeviceRouteProtocol            int
 	RouteProtocol                  int
 	RemoveExternalRoutes           bool
 	IptablesRefreshInterval        time.Duration
@@ -433,7 +432,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 
 	if config.RulesConfig.VXLANEnabled {
 		routeTableVXLAN := routetable.New([]string{"^vxlan.calico$"}, 4, true, config.NetlinkTimeout,
-			config.DeviceRouteSourceAddress, config.DeviceRouteProtocol, true, 0,
+			config.DeviceRouteSourceAddress, config.RouteProtocol, true, 0,
 			dp.loopSummarizer)
 
 		vxlanManager := newVXLANManager(
@@ -704,7 +703,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	}
 
 	routeTableV4 := routetable.New(interfaceRegexes, 4, false, config.NetlinkTimeout,
-		config.DeviceRouteSourceAddress, config.DeviceRouteProtocol, config.RemoveExternalRoutes, 0,
+		config.DeviceRouteSourceAddress, config.RouteProtocol, config.RemoveExternalRoutes, 0,
 		dp.loopSummarizer)
 
 	epManager := newEndpointManager(
@@ -734,7 +733,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	// Add a manager for wireguard configuration. This is added irrespective of whether wireguard is actually enabled
 	// because it may need to tidy up some of the routing rules when disabled.
 	cryptoRouteTableWireguard := wireguard.New(config.Hostname, &config.Wireguard, config.NetlinkTimeout,
-		config.DeviceRouteProtocol, func(publicKey wgtypes.Key) error {
+		config.RouteProtocol, func(publicKey wgtypes.Key) error {
 			if publicKey == zeroKey {
 				dp.fromDataplane <- &proto.WireguardStatusUpdate{PublicKey: ""}
 			} else {
@@ -792,7 +791,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 
 		routeTableV6 := routetable.New(
 			interfaceRegexes, 6, false, config.NetlinkTimeout,
-			config.DeviceRouteSourceAddress, config.DeviceRouteProtocol, config.RemoveExternalRoutes, 0,
+			config.DeviceRouteSourceAddress, config.RouteProtocol, config.RemoveExternalRoutes, 0,
 			dp.loopSummarizer)
 
 		if !config.BPFEnabled {
