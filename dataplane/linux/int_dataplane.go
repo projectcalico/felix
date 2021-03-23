@@ -129,6 +129,7 @@ type Config struct {
 	RouteRefreshInterval           time.Duration
 	DeviceRouteSourceAddress       net.IP
 	DeviceRouteProtocol            int
+	RouteProtocol                  int
 	RemoveExternalRoutes           bool
 	IptablesRefreshInterval        time.Duration
 	IptablesPostWriteCheckInterval time.Duration

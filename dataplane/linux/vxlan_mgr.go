@@ -82,7 +82,7 @@ type vxlanManager struct {
 	noEncapProtocol   int
 	// Used so that we can shim the no encap route table for the tests
 	noEncapRTConstruct func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-		deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable
+		deviceRouteSourceAddress net.IP, routeProtocol int, removeExternalRoutes bool) routeTable
 }
 
 func newVXLANManager(
@@ -94,18 +94,13 @@ func newVXLANManager(
 ) *vxlanManager {
 	nlHandle, _ := netlink.NewHandle()
 
-	blackHoleProto := 202
-	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
-		blackHoleProto = dpConfig.DeviceRouteProtocol
-	}
-
 	brt := routetable.New(
 		[]string{routetable.InterfaceNone},
 		4,
 		false,
 		dpConfig.NetlinkTimeout,
 		dpConfig.DeviceRouteSourceAddress,
-		blackHoleProto,
+		dpConfig.RouteProtocol,
 		false,
 		0,
 		opRecorder,
@@ -118,9 +113,9 @@ func newVXLANManager(
 		dpConfig,
 		nlHandle,
 		func(interfaceRegexes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-			deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable {
+			deviceRouteSourceAddress net.IP, routeProtocol int, removeExternalRoutes bool) routeTable {
 			return routetable.New(interfaceRegexes, ipVersion, vxlan, netlinkTimeout,
-				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0,
+				deviceRouteSourceAddress, routeProtocol, removeExternalRoutes, 0,
 				opRecorder)
 		},
 	)
@@ -133,12 +128,9 @@ func newVXLANManagerWithShims(
 	dpConfig Config,
 	nlHandle netlinkHandle,
 	noEncapRTConstruct func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-		deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable,
+		deviceRouteSourceAddress net.IP, routeProtocol int, removeExternalRoutes bool) routeTable,
 ) *vxlanManager {
-	noEncapProtocol := 80
-	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
-		noEncapProtocol = dpConfig.DeviceRouteProtocol
-	}
+
 	return &vxlanManager{
 		ipsetsDataplane: ipsetsDataplane,
 		ipSetMetadata: ipsets.IPSetMetadata{
@@ -160,7 +152,7 @@ func newVXLANManagerWithShims(
 		vtepsDirty:          true,
 		dpConfig:            dpConfig,
 		nlHandle:            nlHandle,
-		noEncapProtocol:     noEncapProtocol,
+		noEncapProtocol:     dpConfig.RouteProtocol,
 		noEncapRTConstruct:  noEncapRTConstruct,
 	}
 }

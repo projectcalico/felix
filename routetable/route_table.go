@@ -176,7 +176,7 @@ type RouteTable struct {
 
 	deviceRouteSourceAddress net.IP
 
-	deviceRouteProtocol  int
+	routeProtocol        int
 	removeExternalRoutes bool
 
 	// The route table index. A value of 0 defaults to the main table.
@@ -197,7 +197,7 @@ func New(
 	vxlan bool,
 	netlinkTimeout time.Duration,
 	deviceRouteSourceAddress net.IP,
-	deviceRouteProtocol int,
+	routeProtocol int,
 	removeExternalRoutes bool,
 	tableIndex int,
 	opReporter logutils.OpRecorder,
@@ -212,7 +212,7 @@ func New(
 		conntrack.New(),
 		timeshim.RealTime(),
 		deviceRouteSourceAddress,
-		deviceRouteProtocol,
+		routeProtocol,
 		removeExternalRoutes,
 		tableIndex,
 		opReporter,
@@ -230,7 +230,7 @@ func NewWithShims(
 	conntrack conntrackIface,
 	timeShim timeshim.Interface,
 	deviceRouteSourceAddress net.IP,
-	deviceRouteProtocol int,
+	routeProtocol int,
 	removeExternalRoutes bool,
 	tableIndex int,
 	opReporter logutils.OpRecorder,
@@ -279,7 +279,7 @@ func NewWithShims(
 		time:                           timeShim,
 		vxlan:                          vxlan,
 		deviceRouteSourceAddress:       deviceRouteSourceAddress,
-		deviceRouteProtocol:            deviceRouteProtocol,
+		routeProtocol:                  routeProtocol,
 		removeExternalRoutes:           removeExternalRoutes,
 		tableIndex:                     tableIndex,
 		opReporter:                     opReporter,
@@ -745,7 +745,7 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 		LinkIndex: linkIndex,
 		Dst:       &ipNet,
 		Type:      target.RouteType(),
-		Protocol:  r.deviceRouteProtocol,
+		Protocol:  r.routeProtocol,
 		Scope:     target.RouteScope(),
 		Table:     r.tableIndex,
 	}
@@ -835,7 +835,7 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 		}
 		logCxt := logCxt.WithField("dest", dest)
 		// Check if we should remove routes not added by us
-		if !r.removeExternalRoutes && route.Protocol != r.deviceRouteProtocol {
+		if !r.removeExternalRoutes && route.Protocol != r.routeProtocol {
 			logCxt.Debug("Syncing routes: not removing route as it is not marked as Felix route")
 			continue
 		}
@@ -850,7 +850,7 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 			if !r.deviceRouteSourceAddress.Equal(route.Src) {
 				routeProblems = append(routeProblems, "incorrect source address")
 			}
-			if r.deviceRouteProtocol != route.Protocol {
+			if r.routeProtocol != route.Protocol {
 				routeProblems = append(routeProblems, "incorrect protocol")
 			}
 			if expectedTargetFound && expectedTarget.RouteType() != route.Type {
