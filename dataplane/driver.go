@@ -21,6 +21,7 @@ import (
 	"net"
 	"os/exec"
 	"runtime/debug"
+	"syscall"
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
@@ -214,6 +215,14 @@ func StartDataplaneDriver(configParams *config.Config,
 			}
 		}
 
+		// if DeviceRouteProtocol is explicitly set to non-default
+		// TODO: find where this is set in the env var level
+		if configParams.DeviceRouteProtocol != syscall.RTPROT_BOOT {
+			log.Warn("DeviceRouteProtocol is being deprecated. Please migrate to RouteProtocol instead.")
+			// mirror the setting to RouteProtocol for now
+			configParams.RouteProtocol = configParams.DeviceRouteProtocol
+		}
+
 		dpConfig := intdataplane.Config{
 			Hostname: configParams.FelixHostname,
 			IfaceMonitorConfig: ifacemonitor.Config{
@@ -296,7 +305,7 @@ func StartDataplaneDriver(configParams *config.Config,
 			IptablesRefreshInterval:        configParams.IptablesRefreshInterval,
 			RouteRefreshInterval:           configParams.RouteRefreshInterval,
 			DeviceRouteSourceAddress:       configParams.DeviceRouteSourceAddress,
-			DeviceRouteProtocol:            configParams.DeviceRouteProtocol,
+			RouteProtocol:                  configParams.RouteProtocol,
 			RemoveExternalRoutes:           configParams.RemoveExternalRoutes,
 			IPSetsRefreshInterval:          configParams.IpsetsRefreshInterval,
 			IptablesPostWriteCheckInterval: configParams.IptablesPostWriteCheckIntervalSecs,

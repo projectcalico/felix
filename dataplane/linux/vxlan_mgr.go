@@ -53,13 +53,15 @@ type vxlanManager struct {
 	sync.Mutex
 
 	// Our dependencies.
-	hostname          string
-	routeTable        routeTable
-	noEncapRouteTable routeTable
+	hostname            string
+	routeTable          routeTable
+	blackholeRouteTable routeTable
+	noEncapRouteTable   routeTable
 
 	// Hold pending updates.
-	routesByDest map[string]*proto.RouteUpdate
-	vtepsByNode  map[string]*proto.VXLANTunnelEndpointUpdate
+	routesByDest    map[string]*proto.RouteUpdate
+	localIPAMBlocks map[string]*proto.RouteUpdate
+	vtepsByNode     map[string]*proto.VXLANTunnelEndpointUpdate
 
 	// Holds this node's VTEP information.
 	myVTEP *proto.VXLANTunnelEndpointUpdate
@@ -80,7 +82,7 @@ type vxlanManager struct {
 	noEncapProtocol   int
 	// Used so that we can shim the no encap route table for the tests
 	noEncapRTConstruct func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-		deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable
+		deviceRouteSourceAddress net.IP, routeProtocol int, removeExternalRoutes bool) routeTable
 }
 
 func newVXLANManager(
@@ -92,16 +94,28 @@ func newVXLANManager(
 ) *vxlanManager {
 	nlHandle, _ := netlink.NewHandle()
 
+	brt := routetable.New(
+		[]string{routetable.InterfaceNone},
+		4,
+		false,
+		dpConfig.NetlinkTimeout,
+		dpConfig.DeviceRouteSourceAddress,
+		dpConfig.RouteProtocol,
+		false,
+		0,
+		opRecorder,
+	)
+
 	return newVXLANManagerWithShims(
 		ipsetsDataplane,
-		rt,
+		rt, brt,
 		deviceName,
 		dpConfig,
 		nlHandle,
 		func(interfaceRegexes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-			deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable {
+			deviceRouteSourceAddress net.IP, routeProtocol int, removeExternalRoutes bool) routeTable {
 			return routetable.New(interfaceRegexes, ipVersion, vxlan, netlinkTimeout,
-				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0,
+				deviceRouteSourceAddress, routeProtocol, removeExternalRoutes, 0,
 				opRecorder)
 		},
 	)
@@ -109,17 +123,14 @@ func newVXLANManager(
 
 func newVXLANManagerWithShims(
 	ipsetsDataplane ipsetsDataplane,
-	rt routeTable,
+	rt, brt routeTable,
 	deviceName string,
 	dpConfig Config,
 	nlHandle netlinkHandle,
 	noEncapRTConstruct func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
-		deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable,
+		deviceRouteSourceAddress net.IP, routeProtocol int, removeExternalRoutes bool) routeTable,
 ) *vxlanManager {
-	noEncapProtocol := 80
-	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
-		noEncapProtocol = dpConfig.DeviceRouteProtocol
-	}
+
 	return &vxlanManager{
 		ipsetsDataplane: ipsetsDataplane,
 		ipSetMetadata: ipsets.IPSetMetadata{
@@ -127,20 +138,22 @@ func newVXLANManagerWithShims(
 			SetID:   rules.IPSetIDAllVXLANSourceNets,
 			Type:    ipsets.IPSetTypeHashNet,
 		},
-		hostname:           dpConfig.Hostname,
-		routeTable:         rt,
-		routesByDest:       map[string]*proto.RouteUpdate{},
-		vtepsByNode:        map[string]*proto.VXLANTunnelEndpointUpdate{},
-		vxlanDevice:        deviceName,
-		vxlanID:            dpConfig.RulesConfig.VXLANVNI,
-		vxlanPort:          dpConfig.RulesConfig.VXLANPort,
-		externalNodeCIDRs:  dpConfig.ExternalNodesCidrs,
-		routesDirty:        true,
-		vtepsDirty:         true,
-		dpConfig:           dpConfig,
-		nlHandle:           nlHandle,
-		noEncapProtocol:    noEncapProtocol,
-		noEncapRTConstruct: noEncapRTConstruct,
+		hostname:            dpConfig.Hostname,
+		routeTable:          rt,
+		blackholeRouteTable: brt,
+		routesByDest:        map[string]*proto.RouteUpdate{},
+		localIPAMBlocks:     map[string]*proto.RouteUpdate{},
+		vtepsByNode:         map[string]*proto.VXLANTunnelEndpointUpdate{},
+		vxlanDevice:         deviceName,
+		vxlanID:             dpConfig.RulesConfig.VXLANVNI,
+		vxlanPort:           dpConfig.RulesConfig.VXLANPort,
+		externalNodeCIDRs:   dpConfig.ExternalNodesCidrs,
+		routesDirty:         true,
+		vtepsDirty:          true,
+		dpConfig:            dpConfig,
+		nlHandle:            nlHandle,
+		noEncapProtocol:     dpConfig.RouteProtocol,
+		noEncapRTConstruct:  noEncapRTConstruct,
 	}
 }
 
@@ -155,6 +168,18 @@ func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
 			m.routesByDest[msg.Dst] = msg
 			m.routesDirty = true
 		}
+
+		// Process IPAM blocks that aren't associated to a single or /32 local workload
+		if msg.Type == proto.RouteType_LOCAL_WORKLOAD && msg.IpPoolType == proto.IPPoolType_VXLAN && !msg.LocalWorkload {
+			logrus.WithField("msg", msg).Info("VXLAN data plane received route update for IPAM block")
+			m.localIPAMBlocks[msg.Dst] = msg
+			m.routesDirty = true
+		} else if _, ok := m.localIPAMBlocks[msg.Dst]; ok {
+			logrus.WithField("msg", msg).Info("VXLAN data plane IPAM block changed to something else")
+			delete(m.localIPAMBlocks, msg.Dst)
+			m.routesDirty = true
+		}
+
 	case *proto.RouteRemove:
 		m.deleteRoute(msg.Dst)
 	case *proto.VXLANTunnelEndpointUpdate:
@@ -218,7 +243,7 @@ func (m *vxlanManager) setNoEncapRouteTable(rt routeTable) {
 }
 
 func (m *vxlanManager) GetRouteTableSyncers() []routeTableSyncer {
-	rts := []routeTableSyncer{m.routeTable}
+	rts := []routeTableSyncer{m.routeTable, m.blackholeRouteTable}
 
 	noEncapRouteTable := m.getNoEncapRouteTable()
 	if noEncapRouteTable != nil {
@@ -226,6 +251,24 @@ func (m *vxlanManager) GetRouteTableSyncers() []routeTableSyncer {
 	}
 
 	return rts
+}
+
+func (m *vxlanManager) blackholeRoutes() []routetable.Target {
+	var rtt []routetable.Target
+	for dst := range m.localIPAMBlocks {
+		cidr, err := ip.CIDRFromString(dst)
+		if err != nil {
+			logrus.WithError(err).Debug(
+				"Error processing IPAM block CIDR: ", dst,
+			)
+			continue
+		}
+		rtt = append(rtt, routetable.Target{
+			Type: routetable.TargetTypeBlackhole,
+			CIDR: cidr,
+		})
+	}
+	return rtt
 }
 
 func (m *vxlanManager) CompleteDeferredWork() error {
@@ -313,6 +356,8 @@ func (m *vxlanManager) CompleteDeferredWork() error {
 
 		logrus.WithField("vxlanroutes", vxlanRoutes).Debug("VXLAN manager sending VXLAN L3 updates")
 		m.routeTable.SetRoutes(m.vxlanDevice, vxlanRoutes)
+
+		m.blackholeRouteTable.SetRoutes(routetable.InterfaceNone, m.blackholeRoutes())
 
 		noEncapRouteTable := m.getNoEncapRouteTable()
 		// only set the noEncapRouteTable table if it's nil, as you will lose the routes that are being managed already
