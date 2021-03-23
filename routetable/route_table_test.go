@@ -368,7 +368,7 @@ var _ = Describe("RouteTable", func() {
 		})
 
 		Describe("With a device route protocol set", func() {
-			deviceRouteProtocol := 10
+			routeProtocol := 10
 			// Modify the route table to have the device route source address set
 			BeforeEach(func() {
 				rt = NewWithShims(
@@ -381,7 +381,7 @@ var _ = Describe("RouteTable", func() {
 					dataplane,
 					t,
 					nil,
-					deviceRouteProtocol,
+					routeProtocol,
 					true,
 					0,
 					logutils.NewSummarizer("test"),
@@ -405,7 +405,7 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: addLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.6/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  deviceRouteProtocol,
+					Protocol:  routeProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 			})
@@ -422,14 +422,14 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: addLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.6/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  deviceRouteProtocol,
+					Protocol:  routeProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 				Expect(dataplane.RouteKeyToRoute["254-6-10.0.0.7/32"]).To(Equal(netlink.Route{
 					LinkIndex: addLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.7/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  deviceRouteProtocol,
+					Protocol:  routeProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 			})
@@ -455,14 +455,14 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: addLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.6/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  deviceRouteProtocol,
+					Protocol:  routeProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 				Expect(dataplane.RouteKeyToRoute["254-6-10.0.0.7/32"]).To(Equal(netlink.Route{
 					LinkIndex: addLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.7/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  deviceRouteProtocol,
+					Protocol:  routeProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}))
 			})
@@ -473,7 +473,7 @@ var _ = Describe("RouteTable", func() {
 					LinkIndex: noopLink.LinkAttrs.Index,
 					Dst:       mustParseCIDR("10.0.0.4/32"),
 					Type:      syscall.RTN_UNICAST,
-					Protocol:  deviceRouteProtocol,
+					Protocol:  routeProtocol,
 					Scope:     netlink.SCOPE_LINK,
 				}
 				rt.SetRoutes(noopLink.LinkAttrs.Name, []Target{
@@ -501,7 +501,7 @@ var _ = Describe("RouteTable", func() {
 				dataplane.AddMockRoute(&updateRoute)
 
 				fixedRoute := updateRoute
-				fixedRoute.Protocol = deviceRouteProtocol
+				fixedRoute.Protocol = routeProtocol
 
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
@@ -525,7 +525,7 @@ var _ = Describe("RouteTable", func() {
 				dataplane.AddMockRoute(&updateRoute)
 
 				fixedRoute := updateRoute
-				fixedRoute.Protocol = deviceRouteProtocol
+				fixedRoute.Protocol = routeProtocol
 
 				err := rt.Apply()
 				Expect(err).ToNot(HaveOccurred())
