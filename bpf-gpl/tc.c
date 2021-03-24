@@ -254,7 +254,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	/* We are possibly past (D)NAT, but that is ok, we need to let the IP
 	 * stack do the RPF check on the source, dest is not important.
 	 */
-	if (ct_result_rpf_failed(ctx.state->ct_result.rc)) {
+	if (ct_result_rpf_needed(ctx.state->ct_result.rc)) {
 		fwd_fib_set(&ctx.fwd, false);
 	}
 
@@ -292,11 +292,10 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 
 	/* Unlike from WEP where we can do RPF by comparing to calico routing
 	 * info, we must rely in Linux to do it for us when receiving packets
-	 * from outside of the host. We enforce RPF failed on every new flow.
-	 * This will make it to skip fib in calico_tc_skb_accepted()
+	 * from outside of the host. Mark every new flow as needing RPF.
 	 */
 	if (CALI_F_FROM_HEP) {
-		ct_result_set_flag(ctx.state->ct_result.rc, CALI_CT_RPF_FAILED);
+		ct_result_set_flag(ctx.state->ct_result.rc, CALI_CT_RPF_NEEDED);
 	}
 
 	/* No conntrack entry, check if we should do NAT */
@@ -559,7 +558,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 	} else {
 		if (state->flags & CALI_ST_SKIP_FIB) {
 			fib = false;
-		} else if (CALI_F_TO_HOST && !ct_result_rpf_failed(state->ct_result.rc)) {
+		} else if (CALI_F_TO_HOST && !ct_result_rpf_needed(state->ct_result.rc)) {
 			// Non-SNAT case, allow FIB lookup only if RPF check passed.
 			// Note: tried to pass in the calculated value from calico_tc but
 			// hit verifier issues so recalculate it here.
