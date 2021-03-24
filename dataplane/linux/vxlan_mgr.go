@@ -85,6 +85,10 @@ type vxlanManager struct {
 		deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable
 }
 
+const (
+	defaultVXLANProto = 80
+)
+
 func newVXLANManager(
 	ipsetsDataplane ipsetsDataplane,
 	rt routeTable,
@@ -94,7 +98,7 @@ func newVXLANManager(
 ) *vxlanManager {
 	nlHandle, _ := netlink.NewHandle()
 
-	blackHoleProto := 202
+	blackHoleProto := defaultVXLANProto
 	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
 		blackHoleProto = dpConfig.DeviceRouteProtocol
 	}
@@ -135,7 +139,7 @@ func newVXLANManagerWithShims(
 	noEncapRTConstruct func(interfacePrefixes []string, ipVersion uint8, vxlan bool, netlinkTimeout time.Duration,
 		deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable,
 ) *vxlanManager {
-	noEncapProtocol := 80
+	noEncapProtocol := defaultVXLANProto
 	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
 		noEncapProtocol = dpConfig.DeviceRouteProtocol
 	}

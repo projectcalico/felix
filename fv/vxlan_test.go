@@ -150,9 +150,9 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					}
 
 					nodes := []string{
-						"blackhole 10.65.0.0/26 proto 202",
-						"blackhole 10.65.1.0/26 proto 202",
-						"blackhole 10.65.2.0/26 proto 202",
+						"blackhole 10.65.0.0/26 proto 80",
+						"blackhole 10.65.1.0/26 proto 80",
+						"blackhole 10.65.2.0/26 proto 80",
 					}
 
 					for n, result := range nodes {
