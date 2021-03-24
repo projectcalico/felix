@@ -369,6 +369,7 @@ var _ = Describe("RouteTable", func() {
 
 		Describe("With a device route protocol set", func() {
 			deviceRouteProtocol := 10
+			routeProtocol := 203
 			// Modify the route table to have the device route source address set
 			BeforeEach(func() {
 				rt = NewWithShims(
@@ -382,6 +383,7 @@ var _ = Describe("RouteTable", func() {
 					t,
 					nil,
 					deviceRouteProtocol,
+					routeProtocol,
 					true,
 					0,
 					logutils.NewSummarizer("test"),
