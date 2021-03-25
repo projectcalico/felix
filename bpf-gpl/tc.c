@@ -788,6 +788,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 				case BPF_FIB_LKUP_RET_FRAG_NEEDED:  /* fragmentation required to fwd; still a good route */
 					break;
 				default:
+					CALI_DEBUG("Unexpected FIB failure: %d\n", rc);
 					goto deny;
 				}
 			}
