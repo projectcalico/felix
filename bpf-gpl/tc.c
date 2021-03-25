@@ -738,38 +738,6 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 				goto deny;
 			}
 			goto allow;
-		} else if (CALI_F_FROM_HEP) {
-			// Packet arrived from a HEP and we're about to NAT it.  We can't rely on the kernel's
-			// RPF check to do the right thing here in the presence of source based routing because
-			// the kernel would do the RPF check based on the post-NAT dest IP and that may give the
-			// wrong result.  Do our own RPF check.
-			CALI_DEBUG("About to NAT packet, doing our own RPF check.\n");
-			struct bpf_fib_lookup fib_params = {
-				.family = 2, /* AF_INET */
-				.tot_len = bpf_ntohs(ctx->ip_header->tot_len),
-				.ifindex = ctx->skb->ingress_ifindex,
-				.l4_protocol = state->ip_proto,
-				.sport = bpf_htons(state->dport), /* src/dst swapped for RPF */
-				.dport = bpf_htons(state->sport),
-			};
-			fib_params.ipv4_src = state->ip_dst; /* src/dst swapped for RPF */
-			fib_params.ipv4_dst = state->ip_src;
-			int rc = bpf_fib_lookup(
-				ctx->skb,
-				&fib_params,
-				sizeof(fib_params),
-				BPF_FIB_LOOKUP_OUTPUT
-			);
-			switch (rc) {
-			case BPF_FIB_LKUP_RET_SUCCESS:      /* lookup successful */
-			case BPF_FIB_LKUP_RET_NO_NEIGH:     /* no neighbor entry for nh; still a good route */
-			case BPF_FIB_LKUP_RET_FRAG_NEEDED:  /* fragmentation required to fwd; still a good route */
-				CALI_DEBUG("RPF succeeded (%d)\n", rc);
-				break;
-			default:
-				CALI_DEBUG("RPF failed (%d)\n", rc);
-				goto deny;
-			}
 		}
 
 		ct_ctx_nat.orig_dst = state->ip_dst;
@@ -789,6 +757,40 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 			}
 			state->post_nat_ip_dst = state->ct_result.nat_ip;
 			state->post_nat_dport = state->ct_result.nat_port;
+
+			if (CALI_F_FROM_HEP) {
+				// Note: adding logging in this conditional causes the verifier to exceed its
+				// state limit.
+
+				// Packet arrived from a HEP and we're about to NAT it.  We can't rely on the kernel's
+				// RPF check to do the right thing here in the presence of source based routing because
+				// the kernel would do the RPF check based on the post-NAT dest IP and that may give the
+				// wrong result.  Do our own RPF check.
+				struct bpf_fib_lookup fib_params = {
+					.family = 2, /* AF_INET */
+					.tot_len = bpf_ntohs(ctx->ip_header->tot_len),
+					.ifindex = ctx->skb->ingress_ifindex,
+					.l4_protocol = state->ip_proto,
+					.sport = bpf_htons(ct_ctx_nat.orig_dport), /* src/dst swapped for RPF */
+					.dport = bpf_htons(state->sport),
+				};
+				fib_params.ipv4_src = ct_ctx_nat.orig_dst; /* src/dst swapped for RPF */
+				fib_params.ipv4_dst = state->ip_src;
+				int rc = bpf_fib_lookup(
+					ctx->skb,
+					&fib_params,
+					sizeof(fib_params),
+					BPF_FIB_LOOKUP_OUTPUT
+				);
+				switch (rc) {
+				case BPF_FIB_LKUP_RET_SUCCESS:      /* lookup successful */
+				case BPF_FIB_LKUP_RET_NO_NEIGH:     /* no neighbor entry for nh; still a good route */
+				case BPF_FIB_LKUP_RET_FRAG_NEEDED:  /* fragmentation required to fwd; still a good route */
+					break;
+				default:
+					goto deny;
+				}
+			}
 		}
 
 		CALI_DEBUG("CT: DNAT to %x:%d\n",
