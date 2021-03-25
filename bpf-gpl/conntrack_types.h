@@ -155,7 +155,7 @@ enum calico_ct_result_type {
 };
 
 #define CALI_CT_RELATED		(1 << 8)
-#define CALI_CT_RPF_FAILED	(1 << 9)
+#define CALI_CT_RPF_NEEDED	(1 << 9)
 #define CALI_CT_TUN_SRC_CHANGED	(1 << 10)
 
 #define ct_result_rc(rc)		((rc) & 0xff)
@@ -164,7 +164,7 @@ enum calico_ct_result_type {
 #define ct_result_set_flag(val, flags)	((val) |= (flags))
 
 #define ct_result_is_related(rc)	((rc) & CALI_CT_RELATED)
-#define ct_result_rpf_failed(rc)	((rc) & CALI_CT_RPF_FAILED)
+#define ct_result_rpf_needed(rc)	((rc) & CALI_CT_RPF_NEEDED)
 #define ct_result_tun_src_changed(rc)	((rc) & CALI_CT_TUN_SRC_CHANGED)
 
 struct calico_ct_result {

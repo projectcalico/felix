@@ -254,7 +254,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	/* We are possibly past (D)NAT, but that is ok, we need to let the IP
 	 * stack do the RPF check on the source, dest is not important.
 	 */
-	if (ct_result_rpf_failed(ctx.state->ct_result.rc)) {
+	if (ct_result_rpf_needed(ctx.state->ct_result.rc)) {
 		fwd_fib_set(&ctx.fwd, false);
 	}
 
@@ -292,11 +292,10 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 
 	/* Unlike from WEP where we can do RPF by comparing to calico routing
 	 * info, we must rely in Linux to do it for us when receiving packets
-	 * from outside of the host. We enforce RPF failed on every new flow.
-	 * This will make it to skip fib in calico_tc_skb_accepted()
+	 * from outside of the host. Mark every new flow as needing RPF.
 	 */
 	if (CALI_F_FROM_HEP) {
-		ct_result_set_flag(ctx.state->ct_result.rc, CALI_CT_RPF_FAILED);
+		ct_result_set_flag(ctx.state->ct_result.rc, CALI_CT_RPF_NEEDED);
 	}
 
 	/* No conntrack entry, check if we should do NAT */
@@ -559,7 +558,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 	} else {
 		if (state->flags & CALI_ST_SKIP_FIB) {
 			fib = false;
-		} else if (CALI_F_TO_HOST && !ct_result_rpf_failed(state->ct_result.rc)) {
+		} else if (CALI_F_TO_HOST && !ct_result_rpf_needed(state->ct_result.rc)) {
 			// Non-SNAT case, allow FIB lookup only if RPF check passed.
 			// Note: tried to pass in the calculated value from calico_tc but
 			// hit verifier issues so recalculate it here.
@@ -726,6 +725,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 		// If we get here, we've passed policy.
 
 		if (nat_dest == NULL) {
+			// We're not NATing this packet, create a normal conntrack entry.
 			if (conntrack_create(ctx, &ct_ctx_nat, CT_CREATE_NORMAL)) {
 				CALI_DEBUG("Creating normal conntrack failed\n");
 
@@ -757,6 +757,40 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 			}
 			state->post_nat_ip_dst = state->ct_result.nat_ip;
 			state->post_nat_dport = state->ct_result.nat_port;
+
+			if (CALI_F_FROM_HEP) {
+				// Note: adding logging in this conditional causes the verifier to exceed its
+				// state limit.
+
+				// Packet arrived from a HEP and we're about to NAT it.  We can't rely on the kernel's
+				// RPF check to do the right thing here in the presence of source based routing because
+				// the kernel would do the RPF check based on the post-NAT dest IP and that may give the
+				// wrong result.  Do our own RPF check.
+				struct bpf_fib_lookup fib_params = {
+					.family = 2, /* AF_INET */
+					.tot_len = bpf_ntohs(ctx->ip_header->tot_len),
+					.ifindex = ctx->skb->ingress_ifindex,
+					.l4_protocol = state->ip_proto,
+					.sport = bpf_htons(ct_ctx_nat.orig_dport), /* src/dst swapped for RPF */
+					.dport = bpf_htons(state->sport),
+				};
+				fib_params.ipv4_src = ct_ctx_nat.orig_dst; /* src/dst swapped for RPF */
+				fib_params.ipv4_dst = state->ip_src;
+				int rc = bpf_fib_lookup(
+					ctx->skb,
+					&fib_params,
+					sizeof(fib_params),
+					BPF_FIB_LOOKUP_OUTPUT
+				);
+				switch (rc) {
+				case BPF_FIB_LKUP_RET_SUCCESS:      /* lookup successful */
+				case BPF_FIB_LKUP_RET_NO_NEIGH:     /* no neighbor entry for nh; still a good route */
+				case BPF_FIB_LKUP_RET_FRAG_NEEDED:  /* fragmentation required to fwd; still a good route */
+					break;
+				default:
+					goto deny;
+				}
+			}
 		}
 
 		CALI_DEBUG("CT: DNAT to %x:%d\n",
