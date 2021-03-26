@@ -838,6 +838,8 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 					/* We forward the packet straight to the workload. */
 					state->ct_result.ifindex_fwd = rt->if_index;
 					rc = CALI_RES_REDIR_IFINDEX;
+					ct_ctx_nat.flags |= CALI_CT_FLAG_DIRECT_FWD;
+					CALI_DEBUG("CT_NEW marked with CT_FLAG_DIRECT_FWD\n");
 				}
 
 				encap_needed = !cali_rt_is_local(rt);
@@ -865,6 +867,31 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 				state->ip_dst = state->ct_result.tun_ip;
 			} else {
 				encap_needed = false;
+				if (ctx->state->ct_result.flags & CALI_CT_FLAG_DIRECT_FWD) {
+					CALI_DEBUG("CT_ESTABLISHED_DNAT is CT_FLAG_DIRECT_FWD\n");
+					if (state->ct_result.ifindex_fwd != CT_INVALID_IFINDEX) {
+						rc = CALI_RES_REDIR_IFINDEX;
+					} else {
+						/* We may not have seen packet in opposite direction
+						 * yet, for example in UDP case, get it from the
+						 * route.
+						 */
+						struct cali_rt * rt;
+
+						rt = cali_rt_lookup(state->post_nat_ip_dst);
+
+						if (!rt) {
+							reason = CALI_REASON_RT_UNKNOWN;
+							goto deny;
+						}
+						if (cali_rt_is_local(rt) && cali_rt_is_workload(rt)) {
+							state->ct_result.ifindex_fwd = rt->if_index;
+							rc = CALI_RES_REDIR_IFINDEX;
+						} else {
+							CALI_DEBUG("CALI_CT_FLAG_DIRECT_FWD but not local\n");
+						}
+					}
+				}
 			}
 		}
 		if (encap_needed) {
@@ -949,6 +976,11 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 	case CALI_CT_ESTABLISHED_SNAT:
 		CALI_DEBUG("CT: SNAT from %x:%d\n",
 				bpf_ntohl(state->ct_result.nat_ip), state->ct_result.nat_port);
+
+		if (!CALI_F_DSR && ctx->state->ct_result.flags & CALI_CT_FLAG_DIRECT_FWD) {
+			CALI_DEBUG("ESTABLISHED_SNAT is CT_FLAG_DIRECT_FWD\n");
+			rc = CALI_RES_REDIR_IFINDEX;
+		}
 
 		if (dnat_return_should_encap() && state->ct_result.tun_ip) {
 			if (CALI_F_DSR) {
@@ -1110,9 +1142,14 @@ nat_encap:
 
 	CALI_DEBUG("vxlan return %d ifindex_fwd %d\n",
 			dnat_return_should_encap(), state->ct_result.ifindex_fwd);
+
+	/* We need to do this explicitly here since we do not do the RPF checks on the forwarded
+	 * node, so we do not mark it with CALI_CT_FLAG_DIRECT_FWD.
+	 */
 	if (dnat_return_should_encap() && state->ct_result.ifindex_fwd != CT_INVALID_IFINDEX) {
 		rc = CALI_RES_REDIR_IFINDEX;
 	}
+
 
 allow:
 	{
