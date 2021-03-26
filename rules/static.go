@@ -40,7 +40,7 @@ func (r *DefaultRuleRenderer) StaticFilterInputChains(ipVersion uint8) []*Chain 
 	result = append(result,
 		r.filterInputChain(ipVersion),
 		r.filterWorkloadToHostChain(ipVersion),
-		r.failsafeInChain("filter"),
+		r.failsafeInChain("filter", ipVersion),
 	)
 	if r.KubeIPVSSupportEnabled {
 		result = append(result, r.StaticFilterInputForwardCheckChain(ipVersion))
@@ -397,17 +397,24 @@ func (r *DefaultRuleRenderer) filterWorkloadToHostChain(ipVersion uint8) *Chain 
 	}
 }
 
-func (r *DefaultRuleRenderer) failsafeInChain(table string) *Chain {
+func (r *DefaultRuleRenderer) failsafeInChain(table string, ipVersion uint8) *Chain {
 	rules := []Rule{}
 
 	for _, protoPort := range r.Config.FailsafeInboundHostPorts {
-		rules = append(rules, Rule{
+		rule := Rule{
 			Match: Match().
 				Protocol(protoPort.Protocol).
-				DestPorts(protoPort.Port).
-				SourceNet(protoPort.Net),
+				DestPorts(protoPort.Port),
 			Action: AcceptAction{},
-		})
+		}
+		// Add a network for IPv4 failsafes
+		if ipVersion == 4 {
+			rule.Match = Match().
+				Protocol(protoPort.Protocol).
+				DestPorts(protoPort.Port).
+				SourceNet(protoPort.Net)
+		}
+		rules = append(rules, rule)
 	}
 
 	if table == "raw" {
@@ -432,17 +439,24 @@ func (r *DefaultRuleRenderer) failsafeInChain(table string) *Chain {
 	}
 }
 
-func (r *DefaultRuleRenderer) failsafeOutChain(table string) *Chain {
+func (r *DefaultRuleRenderer) failsafeOutChain(table string, ipVersion uint8) *Chain {
 	rules := []Rule{}
 
 	for _, protoPort := range r.Config.FailsafeOutboundHostPorts {
-		rules = append(rules, Rule{
+		dstRule := Rule{
 			Match: Match().
 				Protocol(protoPort.Protocol).
-				DestPorts(protoPort.Port).
-				DestNet(protoPort.Net),
+				DestPorts(protoPort.Port),
 			Action: AcceptAction{},
-		})
+		}
+		// Add a network for IPv4 failsafes
+		if ipVersion == 4 {
+			dstRule.Match = Match().
+				Protocol(protoPort.Protocol).
+				DestPorts(protoPort.Port).
+				DestNet(protoPort.Net)
+		}
+		rules = append(rules, dstRule)
 	}
 
 	if table == "raw" {
@@ -451,13 +465,20 @@ func (r *DefaultRuleRenderer) failsafeOutChain(table string) *Chain {
 		// would get untracked.  If we ACCEPT here then the traffic falls through to the filter
 		// table, where it'll only be accepted if there's a conntrack entry.
 		for _, protoPort := range r.Config.FailsafeInboundHostPorts {
-			rules = append(rules, Rule{
+			srcRule := Rule{
 				Match: Match().
 					Protocol(protoPort.Protocol).
-					SourcePorts(protoPort.Port).
-					SourceNet(protoPort.Net),
+					SourcePorts(protoPort.Port),
 				Action: AcceptAction{},
-			})
+			}
+			// Add a network for IPv4 failsafes
+			if ipVersion == 4 {
+				srcRule.Match = Match().
+					Protocol(protoPort.Protocol).
+					SourcePorts(protoPort.Port).
+					SourceNet(protoPort.Net)
+			}
+			rules = append(rules, srcRule)
 		}
 	}
 
@@ -553,7 +574,7 @@ func (r *DefaultRuleRenderer) StaticFilterOutputChains(ipVersion uint8) []*Chain
 	result := []*Chain{}
 	result = append(result,
 		r.filterOutputChain(ipVersion),
-		r.failsafeOutChain("filter"),
+		r.failsafeOutChain("filter", ipVersion),
 	)
 
 	if r.KubeIPVSSupportEnabled {
@@ -784,8 +805,8 @@ func (r *DefaultRuleRenderer) StaticMangleTableChains(ipVersion uint8) []*Chain 
 	var chains []*Chain
 
 	chains = append(chains,
-		r.failsafeInChain("mangle"),
-		r.failsafeOutChain("mangle"),
+		r.failsafeInChain("mangle", ipVersion),
+		r.failsafeOutChain("mangle", ipVersion),
 		r.StaticManglePreroutingChain(ipVersion),
 		r.StaticManglePostroutingChain(ipVersion),
 	)
@@ -919,8 +940,8 @@ func (r *DefaultRuleRenderer) StaticManglePostroutingChain(ipVersion uint8) *Cha
 
 func (r *DefaultRuleRenderer) StaticRawTableChains(ipVersion uint8) []*Chain {
 	return []*Chain{
-		r.failsafeInChain("raw"),
-		r.failsafeOutChain("raw"),
+		r.failsafeInChain("raw", ipVersion),
+		r.failsafeOutChain("raw", ipVersion),
 		r.StaticRawPreroutingChain(ipVersion),
 		r.StaticRawOutputChain(),
 	}
