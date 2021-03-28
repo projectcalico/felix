@@ -403,7 +403,7 @@ func TestNATNodePort(t *testing.T) {
 	// change the routing - it is a local workload now!
 	err = rtMap.Update(
 		routes.NewKey(ip.CIDRFromIPNet(&node2wCIDR).(ip.V4CIDR)).AsBytes(),
-		routes.NewValue(routes.FlagsLocalWorkload).AsBytes(),
+		routes.NewValueWithIfIndex(routes.FlagsLocalWorkload, 1).AsBytes(),
 	)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -433,6 +433,13 @@ func TestNATNodePort(t *testing.T) {
 
 	arpMapN2 := saveARPMap(arpMap)
 	Expect(arpMapN2).To(HaveLen(0))
+
+	// Set ARP entry for redirection to workload
+	err = arpMap.Update(
+		arp.NewKey(natIP, 1).AsBytes(),
+		arp.NewValue([]byte{1, 2, 3, 4, 5, 6}, []byte{9, 8, 7, 6, 5, 4}).AsBytes(),
+	)
+	Expect(err).NotTo(HaveOccurred())
 
 	t.Log("Arriving at node 2")
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
@@ -481,7 +488,7 @@ func TestNATNodePort(t *testing.T) {
 	dumpARPMap(arpMap)
 
 	arpMapN2 = saveARPMap(arpMap)
-	Expect(arpMapN2).To(HaveLen(1))
+	Expect(arpMapN2).To(HaveLen(2))
 	arpKey := arp.NewKey(node1ip, 1 /* ifindex is always 1 in UT */)
 	Expect(arpMapN2).To(HaveKey(arpKey))
 	macDst := encapedPkt[0:6]
@@ -902,10 +909,17 @@ func TestNATNodePortNoFWD(t *testing.T) {
 	// backend it is a local workload
 	err = rtMap.Update(
 		routes.NewKey(ip.CIDRFromIPNet(&wCIDR).(ip.V4CIDR)).AsBytes(),
-		routes.NewValue(routes.FlagsLocalWorkload).AsBytes(),
+		routes.NewValueWithIfIndex(routes.FlagsLocalWorkload, 1).AsBytes(),
 	)
 	Expect(err).NotTo(HaveOccurred())
 	dumpRTMap(rtMap)
+
+	// Set ARP entry for redirection to workload
+	err = arpMap.Update(
+		arp.NewKey(natIP, 1).AsBytes(),
+		arp.NewValue([]byte{1, 2, 3, 4, 5, 6}, []byte{9, 8, 7, 6, 5, 4}).AsBytes(),
+	)
+	Expect(err).NotTo(HaveOccurred())
 
 	// Arriving at node
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
@@ -931,11 +945,11 @@ func TestNATNodePortNoFWD(t *testing.T) {
 	})
 
 	arpMapN1 := saveARPMap(arpMap)
-	Expect(arpMapN1).To(HaveLen(1))
+	Expect(arpMapN1).To(HaveLen(2))
 	arpKey := arp.NewKey(ipv4.SrcIP, 1 /* ifindex is always 1 in UT */)
 	Expect(arpMapN1).To(HaveKey(arpKey))
-	macDst := recvPkt[0:6]
-	macSrc := recvPkt[6:12]
+	macDst := pktBytes[0:6]
+	macSrc := pktBytes[6:12]
 	Expect(arpMapN1[arpKey]).To(Equal(arp.NewValue(macDst, macSrc)))
 
 	dumpCTMap(ctMap)
@@ -969,7 +983,10 @@ func TestNATNodePortNoFWD(t *testing.T) {
 		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
 		fmt.Printf("pktR = %+v\n", pktR)
 
-		Expect(res.dataOut).To(Equal(respPkt))
+		Expect(res.dataOut[12:]).To(Equal(respPkt[12:]))
+		eth := append([]byte{}, pktBytes[6:12]...)
+		eth = append(eth, pktBytes[:6]...)
+		Expect(res.dataOut[:12]).To(Equal(eth))
 	})
 
 	skbMark = tc.MarkSeen // CALI_SKB_MARK_SEEN

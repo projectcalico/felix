@@ -535,6 +535,7 @@ static CALI_BPF_INLINE bool fib_rfp_check(struct cali_tc_ctx *ctx)
 
 	fib_params.ipv4_src = state->pre_nat_ip_dst; /* src/dst swapped for RPF */
 	fib_params.ipv4_dst = state->ip_src;
+	CALI_DEBUG("fib_rfp_check src 0x%x\n", bpf_ntohl(fib_params.ipv4_src));
 	int rc = bpf_fib_lookup(
 			ctx->skb,
 			&fib_params,
