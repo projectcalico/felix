@@ -70,9 +70,32 @@ static CALI_BPF_INLINE int forward_or_drop(struct cali_tc_ctx *ctx)
 		CALI_DEBUG("Redirect to the same interface (%d) failed.\n", ctx->skb->ifindex);
 		goto deny;
 	} else if (rc == CALI_RES_REDIR_IFINDEX) {
-		struct arp_value *arpv;
+		/* Revalidate the access to the packet */
+		if (skb_refresh_validate_ptrs(ctx, UDP_SIZE)) {
+			ctx->fwd.reason = CALI_REASON_SHORT;
+			CALI_DEBUG("Too short\n");
+			goto deny;
+		}
+
+		if (CALI_F_FROM_HEP && ctx->state->tun_ip == 0) {
+			/* We received a paket from HEP, we marked it for direct forward,
+			 * we need to record ARP for the return path.
+			 */
+
+			/* XXX if only verifier would allow us.
+			 * arp_record_reverse(ctx);
+			 */
+			struct arp_key arpk = {
+				.ip = state->ip_src,
+				.ifindex = ctx->skb->ifindex,
+			};
+
+			cali_v4_arp_update_elem(&arpk, ctx->eth, 0);
+		}
+
 		__u32 iface = state->ct_result.ifindex_fwd;
 
+		struct arp_value *arpv;
 		struct arp_key arpk = {
 			.ip = state->ip_dst,
 			.ifindex = iface,
@@ -83,13 +106,6 @@ static CALI_BPF_INLINE int forward_or_drop(struct cali_tc_ctx *ctx)
 			CALI_DEBUG("ARP lookup failed for %x dev %d\n",
 					bpf_ntohl(state->ip_dst), iface);
 			goto skip_redir_ifindex;
-		}
-
-		/* Revalidate the access to the packet */
-		if (skb_refresh_validate_ptrs(ctx, UDP_SIZE)) {
-			ctx->fwd.reason = CALI_REASON_SHORT;
-			CALI_DEBUG("Too short\n");
-			goto deny;
 		}
 
 		/* Patch in the MAC addresses that should be set on the next hop. */
