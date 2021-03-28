@@ -111,5 +111,5 @@ fi
 args+=("-DCALI_COMPILE_FLAGS=${flags}")
 args+=("-DCALI_ENTRYPOINT_NAME=calico_${from_or_to}_${ep_type}_ep")
 
-echo "Flags: ${args[*]}" 1>&2
+echo "Flags for ${filename}: ${args[*]}" 1>&2
 echo "${args[*]}"
