@@ -27,7 +27,7 @@
 #include <linux/in.h>
 #include <linux/udp.h>
 #include "bpf.h"
-#include "arp.h"
+#include "arp_types.h"
 #include "conntrack_types.h"
 #include "nat_types.h"
 #include "reasons.h"

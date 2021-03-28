@@ -817,7 +817,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 				CALI_DEBUG("rt found for 0x%x local %d\n",
 						bpf_ntohl(state->post_nat_ip_dst), !!cali_rt_is_local(rt));
 
-				if (cali_rt_is_workload(rt) && state->tun_ip == 0) {
+				if (cali_rt_is_workload(rt)) {
 					/* Packet arrived from a HEP for a workload and we're
 					 * about to NAT it.  We can't rely on the kernel's RPF check
 					 * to do the right thing here in the presence of source
@@ -825,21 +825,18 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 					 * based on the post-NAT dest IP and that may give the wrong
 					 * result.  Do our own RPF check.
 					 *
-					 * FIB the packet is forwarded to another node, we will trust
+					 * If the packet is forwarded to another node, we will trust
 					 * the RPF check done here.
 					 */
-					if (!fib_rfp_check(ctx)) {
+					if (state->tun_ip == 0) {
+						if (!fib_rfp_check(ctx)) {
 #ifndef UNITTEST
-						goto deny;
+							goto deny;
 #else
-					/* FIB does not work in unittests */
+							/* FIB does not work in unittests */
 #endif
+						}
 					}
-					/* We forward the packet straight to the workload. */
-					state->ct_result.ifindex_fwd = rt->if_index;
-					rc = CALI_RES_REDIR_IFINDEX;
-					ct_ctx_nat.flags |= CALI_CT_FLAG_DIRECT_FWD;
-					CALI_DEBUG("CT_NEW marked with CT_FLAG_DIRECT_FWD\n");
 				}
 
 				encap_needed = !cali_rt_is_local(rt);
@@ -854,6 +851,15 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 					nat_type = CT_CREATE_NAT_FWD;
 					ct_ctx_nat.tun_ip = rt->next_hop;
 					state->ip_dst = rt->next_hop;
+				} else if (cali_rt_is_workload(rt)) {
+					/* We forward the packet straight to the workload. */
+					state->ct_result.ifindex_fwd = rt->if_index;
+					rc = CALI_RES_REDIR_IFINDEX;
+					ct_ctx_nat.flags |= CALI_CT_FLAG_DIRECT_FWD;
+					CALI_DEBUG("CT_NEW marked with CT_FLAG_DIRECT_FWD\n");
+					/* XXX if only verifier would allow us.
+					 * arp_record_reverse(ctx);
+					 */
 				}
 			}
 
@@ -977,7 +983,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 		CALI_DEBUG("CT: SNAT from %x:%d\n",
 				bpf_ntohl(state->ct_result.nat_ip), state->ct_result.nat_port);
 
-		if (!CALI_F_DSR && ctx->state->ct_result.flags & CALI_CT_FLAG_DIRECT_FWD) {
+		if (CALI_F_FROM_WEP && !CALI_F_DSR && ctx->state->ct_result.flags & CALI_CT_FLAG_DIRECT_FWD) {
 			CALI_DEBUG("ESTABLISHED_SNAT is CT_FLAG_DIRECT_FWD\n");
 			rc = CALI_RES_REDIR_IFINDEX;
 		}
@@ -1052,6 +1058,12 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 		seen_mark = CALI_SKB_MARK_BYPASS;
 		// fall through
 	case CALI_CT_ESTABLISHED:
+		/* Seen by nodeport without forward */
+		if (CALI_F_FROM_WEP && ctx->state->ct_result.flags & CALI_CT_FLAG_DIRECT_FWD) {
+			CALI_DEBUG("ESTABLISHED is CT_FLAG_DIRECT_FWD\n");
+			rc = CALI_RES_REDIR_IFINDEX;
+		}
+
 		goto allow;
 	default:
 		if (CALI_F_FROM_HEP) {
@@ -1142,14 +1154,6 @@ nat_encap:
 
 	CALI_DEBUG("vxlan return %d ifindex_fwd %d\n",
 			dnat_return_should_encap(), state->ct_result.ifindex_fwd);
-
-	/* We need to do this explicitly here since we do not do the RPF checks on the forwarded
-	 * node, so we do not mark it with CALI_CT_FLAG_DIRECT_FWD.
-	 */
-	if (dnat_return_should_encap() && state->ct_result.ifindex_fwd != CT_INVALID_IFINDEX) {
-		rc = CALI_RES_REDIR_IFINDEX;
-	}
-
 
 allow:
 	{
