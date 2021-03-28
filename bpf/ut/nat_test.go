@@ -849,6 +849,8 @@ func TestNATNodePortNoFWD(t *testing.T) {
 	bpfIfaceName = "NPlo"
 	defer func() { bpfIfaceName = "" }()
 
+	resetMap(arpMap)
+
 	_, ipv4, l4, payload, pktBytes, err := testPacketUDPDefaultNP(node1ip)
 	Expect(err).NotTo(HaveOccurred())
 	udp := l4.(*layers.UDP)
@@ -927,6 +929,14 @@ func TestNATNodePortNoFWD(t *testing.T) {
 
 		recvPkt = res.dataOut
 	})
+
+	arpMapN1 := saveARPMap(arpMap)
+	Expect(arpMapN1).To(HaveLen(1))
+	arpKey := arp.NewKey(ipv4.SrcIP, 1 /* ifindex is always 1 in UT */)
+	Expect(arpMapN1).To(HaveKey(arpKey))
+	macDst := recvPkt[0:6]
+	macSrc := recvPkt[6:12]
+	Expect(arpMapN1[arpKey]).To(Equal(arp.NewValue(macDst, macSrc)))
 
 	dumpCTMap(ctMap)
 
