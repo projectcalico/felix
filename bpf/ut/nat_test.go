@@ -298,6 +298,7 @@ func TestNATNodePort(t *testing.T) {
 	skbMark = 0
 
 	// Arriving at node 1 - non-routable -> denied
+	t.Log("Arriving at node 1 - non-routable -> denied")
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
@@ -330,6 +331,7 @@ func TestNATNodePort(t *testing.T) {
 	vni := uint32(0)
 
 	// Arriving at node 1
+	t.Log("Arriving at node 1")
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
@@ -373,6 +375,7 @@ func TestNATNodePort(t *testing.T) {
 
 	skbMark = tc.MarkSeenBypassForwardSourceFixup // CALI_SKB_MARK_BYPASS_FWD_SRC_FIXUP
 	// Leaving node 1
+	t.Log("Leaving node 1")
 	runBpfTest(t, "calico_to_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(encapedPkt)
 		Expect(err).NotTo(HaveOccurred())
@@ -400,7 +403,7 @@ func TestNATNodePort(t *testing.T) {
 	// change the routing - it is a local workload now!
 	err = rtMap.Update(
 		routes.NewKey(ip.CIDRFromIPNet(&node2wCIDR).(ip.V4CIDR)).AsBytes(),
-		routes.NewValue(routes.FlagsLocalWorkload).AsBytes(),
+		routes.NewValueWithIfIndex(routes.FlagsLocalWorkload, 1).AsBytes(),
 	)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -431,10 +434,18 @@ func TestNATNodePort(t *testing.T) {
 	arpMapN2 := saveARPMap(arpMap)
 	Expect(arpMapN2).To(HaveLen(0))
 
+	// Set ARP entry for redirection to workload
+	err = arpMap.Update(
+		arp.NewKey(natIP, 1).AsBytes(),
+		arp.NewValue([]byte{1, 2, 3, 4, 5, 6}, []byte{9, 8, 7, 6, 5, 4}).AsBytes(),
+	)
+	Expect(err).NotTo(HaveOccurred())
+
+	t.Log("Arriving at node 2")
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(encapedPkt)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Retval).To(Equal(resTC_ACT_UNSPEC))
+		Expect(res.Retval).To(Equal(resTC_ACT_REDIRECT))
 
 		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
 		fmt.Printf("pktR = %+v\n", pktR)
@@ -465,7 +476,7 @@ func TestNATNodePort(t *testing.T) {
 		ctr = ct[ctKey]
 		Expect(ctr.Type()).To(Equal(conntrack.TypeNATReverse))
 
-		// Whitlisted source side
+		// Whitelisted source side
 		Expect(ctr.Data().A2B.Whitelisted).To(BeTrue())
 		// Dest not whitelisted yet
 		Expect(ctr.Data().B2A.Whitelisted).NotTo(BeTrue())
@@ -477,7 +488,7 @@ func TestNATNodePort(t *testing.T) {
 	dumpARPMap(arpMap)
 
 	arpMapN2 = saveARPMap(arpMap)
-	Expect(arpMapN2).To(HaveLen(1))
+	Expect(arpMapN2).To(HaveLen(2))
 	arpKey := arp.NewKey(node1ip, 1 /* ifindex is always 1 in UT */)
 	Expect(arpMapN2).To(HaveKey(arpKey))
 	macDst := encapedPkt[0:6]
@@ -485,6 +496,7 @@ func TestNATNodePort(t *testing.T) {
 	Expect(arpMapN2[arpKey]).To(Equal(arp.NewValue(macDst, macSrc)))
 
 	// try a spoofed tunnel packet, should be dropped and have no effect
+	t.Log("Spoofed tunnel packet should be dropped")
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		// modify the only known good src IP, we do not care about csums at this point
 		encapedPkt[26] = 234
@@ -498,6 +510,7 @@ func TestNATNodePort(t *testing.T) {
 	skbMark = tc.MarkSeenBypassSkipRPF // CALI_SKB_MARK_SKIP_RPF
 
 	// Arriving at workload at node 2
+	t.Log("Arriving at workload on node 2")
 	runBpfTest(t, "calico_to_workload_ep", rulesDefaultAllow, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(recvPkt)
 		Expect(err).NotTo(HaveOccurred())
@@ -533,6 +546,7 @@ func TestNATNodePort(t *testing.T) {
 	skbMark = 0
 
 	// Response leaving workload at node 2
+	t.Log("Leaving workload on node 2")
 	runBpfTest(t, "calico_from_workload_ep", rulesDefaultAllow, func(bpfrun bpfProgRunFn) {
 		respPkt := udpResposeRaw(recvPkt)
 		// Change the MAC addresses so that we can observe that the right
@@ -573,6 +587,7 @@ func TestNATNodePort(t *testing.T) {
 	hostIP = node2ip
 
 	// Response leaving node 2
+	t.Log("Leaving node 2")
 	runBpfTest(t, "calico_to_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(encapedPkt)
 		Expect(err).NotTo(HaveOccurred())
@@ -608,6 +623,7 @@ func TestNATNodePort(t *testing.T) {
 	// Response arriving at node 1
 	bpfIfaceName = "NP-1"
 
+	t.Log("Response arriving at node 1")
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(encapedPkt)
 		Expect(err).NotTo(HaveOccurred())
@@ -637,7 +653,8 @@ func TestNATNodePort(t *testing.T) {
 
 	dumpCTMap(ctMap)
 
-	// try a spoofed tunnel packet returnign back, should be dropped and have no effect
+	// try a spoofed tunnel packet returning back, should be dropped and have no effect
+	t.Log("Spoofed packet should be dropped")
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		// modify the only known good src IP, we do not care about csums at this point
 		encapedPkt[26] = 235
@@ -649,6 +666,7 @@ func TestNATNodePort(t *testing.T) {
 	skbMark = tc.MarkSeenBypassForward // CALI_SKB_MARK_BYPASS_FWD
 
 	// Response leaving to original source
+	t.Log("Response to original source")
 	runBpfTest(t, "calico_to_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(recvPkt)
 		Expect(err).NotTo(HaveOccurred())
@@ -680,6 +698,7 @@ func TestNATNodePort(t *testing.T) {
 	dumpCTMap(ctMap)
 
 	// Another pkt arriving at node 1 - uses existing CT entries
+	t.Log("Another packet at node 1, uses existing CT entry")
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
@@ -700,10 +719,12 @@ func TestNATNodePort(t *testing.T) {
 	/*
 	 * TEST that unknown VNI is passed through
 	 */
+	t.Log("Unknown VNI should be passed through")
 	testUnrelatedVXLAN(t, node2ip, vni)
 
 	// TEST host-networked backend
 	{
+		t.Log("Host-networked backend")
 		resetCTMap(ctMap)
 
 		var recvPkt []byte
@@ -742,6 +763,7 @@ func TestNATNodePort(t *testing.T) {
 		// Arriving at node 2
 		bpfIfaceName = "NP-2"
 
+		t.Log("Arriving at node 2")
 		runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
 			res, err := bpfrun(encapedPktArrivesAtNode2)
 			Expect(err).NotTo(HaveOccurred())
@@ -789,6 +811,7 @@ func TestNATNodePort(t *testing.T) {
 		skbMark = 0
 
 		// Response leaving workload at node 2
+		t.Log("Leaving node 2")
 		runBpfTest(t, "calico_to_host_ep", nil, func(bpfrun bpfProgRunFn) {
 			respPkt := udpResposeRaw(recvPkt)
 
@@ -832,6 +855,8 @@ func TestNATNodePortNoFWD(t *testing.T) {
 
 	bpfIfaceName = "NPlo"
 	defer func() { bpfIfaceName = "" }()
+
+	resetMap(arpMap)
 
 	_, ipv4, l4, payload, pktBytes, err := testPacketUDPDefaultNP(node1ip)
 	Expect(err).NotTo(HaveOccurred())
@@ -884,16 +909,23 @@ func TestNATNodePortNoFWD(t *testing.T) {
 	// backend it is a local workload
 	err = rtMap.Update(
 		routes.NewKey(ip.CIDRFromIPNet(&wCIDR).(ip.V4CIDR)).AsBytes(),
-		routes.NewValue(routes.FlagsLocalWorkload).AsBytes(),
+		routes.NewValueWithIfIndex(routes.FlagsLocalWorkload, 1).AsBytes(),
 	)
 	Expect(err).NotTo(HaveOccurred())
 	dumpRTMap(rtMap)
+
+	// Set ARP entry for redirection to workload
+	err = arpMap.Update(
+		arp.NewKey(natIP, 1).AsBytes(),
+		arp.NewValue([]byte{1, 2, 3, 4, 5, 6}, []byte{9, 8, 7, 6, 5, 4}).AsBytes(),
+	)
+	Expect(err).NotTo(HaveOccurred())
 
 	// Arriving at node
 	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Retval).To(Equal(resTC_ACT_UNSPEC))
+		Expect(res.Retval).To(Equal(resTC_ACT_REDIRECT))
 
 		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
 		fmt.Printf("pktR = %+v\n", pktR)
@@ -911,6 +943,14 @@ func TestNATNodePortNoFWD(t *testing.T) {
 
 		recvPkt = res.dataOut
 	})
+
+	arpMapN1 := saveARPMap(arpMap)
+	Expect(arpMapN1).To(HaveLen(2))
+	arpKey := arp.NewKey(ipv4.SrcIP, 1 /* ifindex is always 1 in UT */)
+	Expect(arpMapN1).To(HaveKey(arpKey))
+	macDst := pktBytes[0:6]
+	macSrc := pktBytes[6:12]
+	Expect(arpMapN1[arpKey]).To(Equal(arp.NewValue(macDst, macSrc)))
 
 	dumpCTMap(ctMap)
 
@@ -938,12 +978,15 @@ func TestNATNodePortNoFWD(t *testing.T) {
 		respPkt = udpResposeRaw(recvPkt)
 		res, err := bpfrun(respPkt)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Retval).To(Equal(resTC_ACT_UNSPEC))
+		Expect(res.Retval).To(Equal(resTC_ACT_REDIRECT))
 
 		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
 		fmt.Printf("pktR = %+v\n", pktR)
 
-		Expect(res.dataOut).To(Equal(respPkt))
+		Expect(res.dataOut[12:]).To(Equal(respPkt[12:]))
+		eth := append([]byte{}, pktBytes[6:12]...)
+		eth = append(eth, pktBytes[:6]...)
+		Expect(res.dataOut[:12]).To(Equal(eth))
 	})
 
 	skbMark = tc.MarkSeen // CALI_SKB_MARK_SEEN

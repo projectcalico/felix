@@ -27,6 +27,7 @@
 #include "skb.h"
 #include "routes.h"
 #include "nat_types.h"
+#include "arp.h"
 
 #ifndef CALI_VXLAN_VNI
 #define CALI_VXLAN_VNI 0xca11c0
@@ -395,15 +396,7 @@ static CALI_BPF_INLINE int vxlan_attempt_decap(struct cali_tc_ctx *ctx) {
 		goto deny;
 	}
 
-	ctx->arpk.ip = ctx->ip_header->saddr;
-	ctx->arpk.ifindex = ctx->skb->ifindex;
-
-	/* We update the map straight with the packet data, eth header is
-	 * dst:src but the value is src:dst so it flips it automatically
-	 * when we use it on xmit.
-	 */
-	cali_v4_arp_update_elem(&ctx->arpk, ctx->eth, 0);
-	CALI_DEBUG("ARP update for ifindex %d ip %x\n", ctx->arpk.ifindex, bpf_ntohl(ctx->arpk.ip));
+	arp_record_reverse(ctx);
 
 	ctx->state->tun_ip = ctx->ip_header->saddr;
 	CALI_DEBUG("vxlan decap\n");

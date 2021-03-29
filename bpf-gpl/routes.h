@@ -51,9 +51,11 @@ struct cali_rt {
 		// Interface index for local workload routes.
 		__u32 if_index;
 	};
+	// Source and dest MACs, only filled in for local workloads.
+	char src_mac[6], dst_mac[6];
 };
 
-CALI_MAP_V1(cali_v4_routes,
+CALI_MAP(cali_v4_routes, 2,
 		BPF_MAP_TYPE_LPM_TRIE,
 		union cali_rt_lpm_key, struct cali_rt,
 		1024*1024, BPF_F_NO_PREALLOC, MAP_PIN_GLOBAL)
