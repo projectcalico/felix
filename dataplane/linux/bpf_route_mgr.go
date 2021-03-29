@@ -56,8 +56,8 @@ type bpfRouteManager struct {
 	localIfaceToCIDRs map[string]set.Set
 	// cidrToWEPIDs maps from (/32) CIDR to the set of local proto.WorkloadEndpointIDs that have that CIDR.
 	cidrToWEPIDs map[ip.V4CIDR]set.Set
-	// wepIDToWorklaod contains all the local workloads.
-	wepIDToWorklaod map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint
+	// wepIDToWorkload contains all the local workloads.
+	wepIDToWorkload map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint
 	// ifaceNameToIdx maps local interface name to interface ID.
 	ifaceNameToIdx map[string]int
 	// ifaceNameToWEPIDs maps local interface name to the set of local proto.WorkloadEndpointIDs that have that name.
@@ -108,7 +108,7 @@ func newBPFRouteManager(myNodename string, externalCIDRs []string, mc *bpf.MapCo
 		cidrToLocalIfaces: map[ip.V4CIDR]set.Set{},
 		localIfaceToCIDRs: map[string]set.Set{},
 		cidrToWEPIDs:      map[ip.V4CIDR]set.Set{},
-		wepIDToWorklaod:   map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint{},
+		wepIDToWorkload:   map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint{},
 		ifaceNameToIdx:    map[string]int{},
 		ifaceNameToWEPIDs: map[string]set.Set{},
 		externalNodeCIDRs: extCIDRs,
@@ -264,7 +264,7 @@ func (m *bpfRouteManager) calculateRoute(cidr ip.V4CIDR) *routes.Value {
 				wepScore := 0
 				wepID := item.(proto.WorkloadEndpointID)
 				// Route is a local workload look up its name and interface details.
-				wep := m.wepIDToWorklaod[wepID]
+				wep := m.wepIDToWorkload[wepID]
 				ifaceName := wep.Name
 				ifaceIdx, ok := m.ifaceNameToIdx[ifaceName]
 				if ok {
@@ -426,7 +426,7 @@ func (m *bpfRouteManager) onIfaceIdxChanged(name string) {
 	}
 	wepIDs.Iter(func(item interface{}) error {
 		wepID := item.(proto.WorkloadEndpointID)
-		wep := m.wepIDToWorklaod[wepID]
+		wep := m.wepIDToWorkload[wepID]
 		cidrs := getV4WorkloadCIDRs(wep)
 		m.markCIDRsDirty(cidrs...)
 		return nil
@@ -552,7 +552,7 @@ func (m *bpfRouteManager) onWorkloadEndpointUpdate(update *proto.WorkloadEndpoin
 }
 
 func (m *bpfRouteManager) addWEP(update *proto.WorkloadEndpointUpdate) {
-	m.wepIDToWorklaod[*update.Id] = update.Endpoint
+	m.wepIDToWorkload[*update.Id] = update.Endpoint
 	newCIDRs := getV4WorkloadCIDRs(update.Endpoint)
 	for _, cidr := range newCIDRs {
 		wepIDs := m.cidrToWEPIDs[cidr]
@@ -576,11 +576,11 @@ func (m *bpfRouteManager) onWorkloadEndpointRemove(update *proto.WorkloadEndpoin
 }
 
 func (m *bpfRouteManager) removeWEP(id *proto.WorkloadEndpointID) {
-	oldWEP := m.wepIDToWorklaod[*id]
+	oldWEP := m.wepIDToWorkload[*id]
 	if oldWEP == nil {
 		return
 	}
-	delete(m.wepIDToWorklaod, *id)
+	delete(m.wepIDToWorkload, *id)
 	oldCIDRs := getV4WorkloadCIDRs(oldWEP)
 	for _, cidr := range oldCIDRs {
 		m.cidrToWEPIDs[cidr].Discard(*id)
