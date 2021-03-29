@@ -19,6 +19,7 @@ import (
 
 	. "github.com/projectcalico/felix/iptables"
 	"github.com/projectcalico/felix/proto"
+	cnet "github.com/projectcalico/libcalico-go/lib/net"
 )
 
 func (r *DefaultRuleRenderer) StaticFilterTableChains(ipVersion uint8) (chains []*Chain) {
@@ -407,12 +408,19 @@ func (r *DefaultRuleRenderer) failsafeInChain(table string, ipVersion uint8) *Ch
 				DestPorts(protoPort.Port),
 			Action: AcceptAction{},
 		}
-		// Add a network for IPv4 failsafes
-		if ipVersion == 4 {
-			rule.Match = Match().
-				Protocol(protoPort.Protocol).
-				DestPorts(protoPort.Port).
-				SourceNet(protoPort.Net)
+
+		if protoPort.Net != "" {
+			ip, _, err := cnet.ParseCIDROrIP(protoPort.Net)
+			if err != nil {
+				log.WithError(err).Error("Failed to parse CIDR in inbound failsafe rule. Skipping failsafe rule")
+				continue
+			}
+			if int(ipVersion) == ip.Version() {
+				rule.Match = Match().
+					Protocol(protoPort.Protocol).
+					DestPorts(protoPort.Port).
+					SourceNet(protoPort.Net)
+			}
 		}
 		rules = append(rules, rule)
 	}
@@ -429,12 +437,19 @@ func (r *DefaultRuleRenderer) failsafeInChain(table string, ipVersion uint8) *Ch
 					SourcePorts(protoPort.Port),
 				Action: AcceptAction{},
 			}
-			// Add a network for IPv4 failsafes
-			if ipVersion == 4 {
-				rule.Match = Match().
-					Protocol(protoPort.Protocol).
-					SourcePorts(protoPort.Port).
-					SourceNet(protoPort.Net)
+
+			if protoPort.Net != "" {
+				ip, _, err := cnet.ParseCIDROrIP(protoPort.Net)
+				if err != nil {
+					log.WithError(err).Error("Failed to parse CIDR in inbound failsafe rule. Skipping failsafe rule")
+					continue
+				}
+				if int(ipVersion) == ip.Version() {
+					rule.Match = Match().
+						Protocol(protoPort.Protocol).
+						SourcePorts(protoPort.Port).
+						SourceNet(protoPort.Net)
+				}
 			}
 			rules = append(rules, rule)
 		}
@@ -456,12 +471,19 @@ func (r *DefaultRuleRenderer) failsafeOutChain(table string, ipVersion uint8) *C
 				DestPorts(protoPort.Port),
 			Action: AcceptAction{},
 		}
-		// Add a network for IPv4 failsafes
-		if ipVersion == 4 {
-			rule.Match = Match().
-				Protocol(protoPort.Protocol).
-				DestPorts(protoPort.Port).
-				DestNet(protoPort.Net)
+
+		if protoPort.Net != "" {
+			ip, _, err := cnet.ParseCIDROrIP(protoPort.Net)
+			if err != nil {
+				log.WithError(err).Error("Failed to parse CIDR in outbound failsafe rule. Skipping failsafe rule")
+				continue
+			}
+			if int(ipVersion) == ip.Version() {
+				rule.Match = Match().
+					Protocol(protoPort.Protocol).
+					DestPorts(protoPort.Port).
+					DestNet(protoPort.Net)
+			}
 		}
 		rules = append(rules, rule)
 	}
@@ -478,12 +500,19 @@ func (r *DefaultRuleRenderer) failsafeOutChain(table string, ipVersion uint8) *C
 					SourcePorts(protoPort.Port),
 				Action: AcceptAction{},
 			}
-			// Add a network for IPv4 failsafes
-			if ipVersion == 4 {
-				rule.Match = Match().
-					Protocol(protoPort.Protocol).
-					SourcePorts(protoPort.Port).
-					SourceNet(protoPort.Net)
+
+			if protoPort.Net != "" {
+				ip, _, err := cnet.ParseCIDROrIP(protoPort.Net)
+				if err != nil {
+					log.WithError(err).Error("Failed to parse CIDR in outbound failsafe rule. Skipping failsafe rule")
+					continue
+				}
+				if int(ipVersion) == ip.Version() {
+					rule.Match = Match().
+						Protocol(protoPort.Protocol).
+						SourcePorts(protoPort.Port).
+						SourceNet(protoPort.Net)
+				}
 			}
 			rules = append(rules, rule)
 		}
