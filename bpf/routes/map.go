@@ -109,7 +109,7 @@ func (v Value) SrcMAC() net.HardwareAddr {
 
 func (v Value) DestMAC() net.HardwareAddr {
 	var addr [6]byte
-	copy(addr[:], v[14:120])
+	copy(addr[:], v[14:20])
 	return addr[:]
 }
 
