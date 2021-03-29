@@ -121,6 +121,10 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					}
 					for _, felix := range felixes {
 						felix.Stop()
+
+						// see if blackhole routes go away with felix
+						o, _ := felix.ExecOutput("ip", "r", "s", "type", "blackhole")
+						Expect(o).To(Equal(""))
 					}
 
 					if CurrentGinkgoTestDescription().Failed {
@@ -141,6 +145,26 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					cc.ExpectSome(w[0], w[1])
 					cc.ExpectSome(w[1], w[0])
 					cc.CheckConnectivity()
+				})
+
+				It("should have some blackhole routes installed", func() {
+					if routeSource == "WorkloadIPs" {
+						Skip("not applicable for workload ips")
+						return
+					}
+
+					nodes := []string{
+						"blackhole 10.65.0.0/26 proto 80",
+						"blackhole 10.65.1.0/26 proto 80",
+						"blackhole 10.65.2.0/26 proto 80",
+					}
+
+					for n, result := range nodes {
+						Eventually(func() string {
+							o, _ := felixes[n].ExecOutput("ip", "r", "s", "type", "blackhole")
+							return o
+						}, "20s", "100ms").Should(ContainSubstring(result))
+					}
 				})
 
 				It("should have host to workload connectivity", func() {
