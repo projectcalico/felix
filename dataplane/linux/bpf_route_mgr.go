@@ -20,17 +20,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/projectcalico/felix/ifacemonitor"
-
-	"github.com/projectcalico/felix/bpf/routes"
-	"github.com/projectcalico/felix/proto"
-
-	log "github.com/sirupsen/logrus"
-
 	"github.com/projectcalico/libcalico-go/lib/set"
+	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
 
+	"github.com/projectcalico/felix/arp"
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/routes"
+	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
+	"github.com/projectcalico/felix/proto"
 )
 
 type bpfRouteManager struct {
@@ -56,8 +55,8 @@ type bpfRouteManager struct {
 	localIfaceToCIDRs map[string]set.Set
 	// cidrToWEPIDs maps from (/32) CIDR to the set of local proto.WorkloadEndpointIDs that have that CIDR.
 	cidrToWEPIDs map[ip.V4CIDR]set.Set
-	// wepIDToWorklaod contains all the local workloads.
-	wepIDToWorklaod map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint
+	// wepIDToWorkload contains all the local workloads.
+	wepIDToWorkload map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint
 	// ifaceNameToIdx maps local interface name to interface ID.
 	ifaceNameToIdx map[string]int
 	// ifaceNameToWEPIDs maps local interface name to the set of local proto.WorkloadEndpointIDs that have that name.
@@ -108,7 +107,7 @@ func newBPFRouteManager(myNodename string, externalCIDRs []string, mc *bpf.MapCo
 		cidrToLocalIfaces: map[ip.V4CIDR]set.Set{},
 		localIfaceToCIDRs: map[string]set.Set{},
 		cidrToWEPIDs:      map[ip.V4CIDR]set.Set{},
-		wepIDToWorklaod:   map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint{},
+		wepIDToWorkload:   map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint{},
 		ifaceNameToIdx:    map[string]int{},
 		ifaceNameToWEPIDs: map[string]set.Set{},
 		externalNodeCIDRs: extCIDRs,
@@ -255,6 +254,8 @@ func (m *bpfRouteManager) calculateRoute(cidr ip.V4CIDR) *routes.Value {
 		if wepIDs, ok := m.cidrToWEPIDs[cidr]; ok {
 			bestWepScore := -1
 			var bestWepID proto.WorkloadEndpointID
+			var bestIfaceName string
+			var bestIfaceIdx int
 			if wepIDs.Len() > 1 {
 				log.WithField("cidr", cidr).Warn(
 					"Multiple local workloads with same IP but BPF dataplane only supports single route. " +
@@ -264,21 +265,40 @@ func (m *bpfRouteManager) calculateRoute(cidr ip.V4CIDR) *routes.Value {
 				wepScore := 0
 				wepID := item.(proto.WorkloadEndpointID)
 				// Route is a local workload look up its name and interface details.
-				wep := m.wepIDToWorklaod[wepID]
+				wep := m.wepIDToWorkload[wepID]
 				ifaceName := wep.Name
 				ifaceIdx, ok := m.ifaceNameToIdx[ifaceName]
 				if ok {
 					wepScore++
 				}
 				if wepScore > bestWepScore || wepScore == bestWepScore && wepID.String() > bestWepID.String() {
-					flags |= routes.FlagsLocalWorkload
-					routeVal := routes.NewValueWithIfIndex(flags, ifaceIdx)
-					route = &routeVal
+					bestIfaceIdx = ifaceIdx
 					bestWepID = wepID
 					bestWepScore = wepScore
+					bestIfaceName = ifaceName
 				}
 				return nil
 			})
+			flags |= routes.FlagsLocalWorkload
+
+			destMAC, err := arp.Ping(cidr.ToIPNet().IP, bestIfaceName)
+			if err != nil {
+				log.WithError(err).Warn("Failed to get peer MAC for local workload")
+				routeVal := routes.NewValueWithIfIndex(flags, bestIfaceIdx)
+				route = &routeVal
+			} else {
+				log.WithField("mac", destMAC).Warn("Got peer MAC for local workload")
+
+				link, err := netlink.LinkByIndex(bestIfaceIdx)
+				if err != nil {
+					log.WithError(err).Warn("Failed to get host MAC for local workload")
+					routeVal := routes.NewValueWithIfIndex(flags, bestIfaceIdx)
+					route = &routeVal
+				} else {
+					routeVal := routes.NewValueWithIfIndexMACs(flags, bestIfaceIdx, link.Attrs().HardwareAddr, destMAC)
+					route = &routeVal
+				}
+			}
 		}
 	case proto.RouteType_REMOTE_WORKLOAD:
 		flags |= routes.FlagsRemoteWorkload
@@ -426,7 +446,7 @@ func (m *bpfRouteManager) onIfaceIdxChanged(name string) {
 	}
 	wepIDs.Iter(func(item interface{}) error {
 		wepID := item.(proto.WorkloadEndpointID)
-		wep := m.wepIDToWorklaod[wepID]
+		wep := m.wepIDToWorkload[wepID]
 		cidrs := getV4WorkloadCIDRs(wep)
 		m.markCIDRsDirty(cidrs...)
 		return nil
@@ -552,7 +572,7 @@ func (m *bpfRouteManager) onWorkloadEndpointUpdate(update *proto.WorkloadEndpoin
 }
 
 func (m *bpfRouteManager) addWEP(update *proto.WorkloadEndpointUpdate) {
-	m.wepIDToWorklaod[*update.Id] = update.Endpoint
+	m.wepIDToWorkload[*update.Id] = update.Endpoint
 	newCIDRs := getV4WorkloadCIDRs(update.Endpoint)
 	for _, cidr := range newCIDRs {
 		wepIDs := m.cidrToWEPIDs[cidr]
@@ -576,11 +596,11 @@ func (m *bpfRouteManager) onWorkloadEndpointRemove(update *proto.WorkloadEndpoin
 }
 
 func (m *bpfRouteManager) removeWEP(id *proto.WorkloadEndpointID) {
-	oldWEP := m.wepIDToWorklaod[*id]
+	oldWEP := m.wepIDToWorkload[*id]
 	if oldWEP == nil {
 		return
 	}
-	delete(m.wepIDToWorklaod, *id)
+	delete(m.wepIDToWorkload, *id)
 	oldCIDRs := getV4WorkloadCIDRs(oldWEP)
 	for _, cidr := range oldCIDRs {
 		m.cidrToWEPIDs[cidr].Discard(*id)

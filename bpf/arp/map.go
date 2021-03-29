@@ -68,6 +68,10 @@ func (k Key) String() string {
 	return fmt.Sprintf("ip %s ifindex %d", k.IP(), k.IfIndex())
 }
 
+func (k Key) AsBytes() []byte {
+	return k[:]
+}
+
 const ValueSize = 12
 
 type Value [ValueSize]byte
@@ -91,6 +95,10 @@ func (v Value) DstMAC() net.HardwareAddr {
 
 func (v Value) String() string {
 	return fmt.Sprintf("src: %s dst %s", v.SrcMAC(), v.DstMAC())
+}
+
+func (v Value) AsBytes() []byte {
+	return v[:]
 }
 
 type MapMem map[Key]Value
