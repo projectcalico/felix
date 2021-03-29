@@ -20,17 +20,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/projectcalico/felix/ifacemonitor"
-
-	"github.com/projectcalico/felix/bpf/routes"
-	"github.com/projectcalico/felix/proto"
-
-	log "github.com/sirupsen/logrus"
-
 	"github.com/projectcalico/libcalico-go/lib/set"
+	log "github.com/sirupsen/logrus"
+	"github.com/vishvananda/netlink"
 
+	"github.com/projectcalico/felix/arp"
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/routes"
+	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
+	"github.com/projectcalico/felix/proto"
 )
 
 type bpfRouteManager struct {
@@ -255,6 +254,8 @@ func (m *bpfRouteManager) calculateRoute(cidr ip.V4CIDR) *routes.Value {
 		if wepIDs, ok := m.cidrToWEPIDs[cidr]; ok {
 			bestWepScore := -1
 			var bestWepID proto.WorkloadEndpointID
+			var bestIfaceName string
+			var bestIfaceIdx int
 			if wepIDs.Len() > 1 {
 				log.WithField("cidr", cidr).Warn(
 					"Multiple local workloads with same IP but BPF dataplane only supports single route. " +
@@ -271,14 +272,33 @@ func (m *bpfRouteManager) calculateRoute(cidr ip.V4CIDR) *routes.Value {
 					wepScore++
 				}
 				if wepScore > bestWepScore || wepScore == bestWepScore && wepID.String() > bestWepID.String() {
-					flags |= routes.FlagsLocalWorkload
-					routeVal := routes.NewValueWithIfIndex(flags, ifaceIdx)
-					route = &routeVal
+					bestIfaceIdx = ifaceIdx
 					bestWepID = wepID
 					bestWepScore = wepScore
+					bestIfaceName = ifaceName
 				}
 				return nil
 			})
+			flags |= routes.FlagsLocalWorkload
+
+			destMAC, err := arp.Ping(cidr.ToIPNet().IP, bestIfaceName)
+			if err != nil {
+				log.WithError(err).Warn("Failed to get peer MAC for local workload")
+				routeVal := routes.NewValueWithIfIndex(flags, bestIfaceIdx)
+				route = &routeVal
+			} else {
+				log.WithField("mac", destMAC).Warn("Got peer MAC for local workload")
+
+				link, err := netlink.LinkByIndex(bestIfaceIdx)
+				if err != nil {
+					log.WithError(err).Warn("Failed to get host MAC for local workload")
+					routeVal := routes.NewValueWithIfIndex(flags, bestIfaceIdx)
+					route = &routeVal
+				} else {
+					routeVal := routes.NewValueWithIfIndexMACs(flags, bestIfaceIdx, link.Attrs().HardwareAddr, destMAC)
+					route = &routeVal
+				}
+			}
 		}
 	case proto.RouteType_REMOTE_WORKLOAD:
 		flags |= routes.FlagsRemoteWorkload
