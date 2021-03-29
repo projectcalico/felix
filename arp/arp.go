@@ -41,10 +41,14 @@ func Ping(addr net.IP, iface string) (net.HardwareAddr, error) {
 		return nil, fmt.Errorf("failed to run arpping: %w", err)
 	}
 
+	return parseArpingOutput(out)
+}
+
+func parseArpingOutput(out []byte) (net.HardwareAddr, error) {
 	// Expecting output like this:
 	//
 	// ARPING 192.168.4.1 from 192.168.4.117 veth1234
-	// Unicast reply from 192.168.4.1 [50:C7:BF:F5:38:17]  6.609ms
+	// Unicast reply from 192.168.4.1 [50:C7:B1:F5:38:17]  6.609ms
 	// Sent 1 probes (1 broadcast(s))
 	// Received 1 response(s)
 	submatches := parsingRegexp.FindSubmatch(out)
