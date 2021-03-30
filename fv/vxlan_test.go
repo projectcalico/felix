@@ -24,6 +24,7 @@ import (
 
 	"github.com/projectcalico/felix/fv/connectivity"
 	"github.com/projectcalico/felix/fv/utils"
+	"github.com/sirupsen/logrus"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -46,17 +47,18 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 			routeSource := routeSource
 			Describe(fmt.Sprintf("VXLAN mode set to %s, routeSource %s", vxlanMode, routeSource), func() {
 				var (
-					infra   infrastructure.DatastoreInfra
-					felixes []*infrastructure.Felix
-					client  client.Interface
-					w       [3]*workload.Workload
-					hostW   [3]*workload.Workload
-					cc      *connectivity.Checker
+					infra           infrastructure.DatastoreInfra
+					felixes         []*infrastructure.Felix
+					client          client.Interface
+					w               [3]*workload.Workload
+					hostW           [3]*workload.Workload
+					cc              *connectivity.Checker
+					topologyOptions infrastructure.TopologyOptions
 				)
 
 				BeforeEach(func() {
 					infra = getInfra()
-					topologyOptions := infrastructure.DefaultTopologyOptions()
+					topologyOptions = infrastructure.DefaultTopologyOptions()
 					topologyOptions.VXLANMode = vxlanMode
 					topologyOptions.IPIPEnabled = false
 					topologyOptions.ExtraEnvVars["FELIX_ROUTESOURCE"] = routeSource
@@ -65,7 +67,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					// Install a default profile that allows all ingress and egress, in the absence of any Policy.
 					infra.AddDefaultAllow()
 
-					// Wait until the vxlan device appears.
+					// Wait until the vxlan deShouldvice appears.
 					Eventually(func() error {
 						for i, f := range felixes {
 							out, err := f.ExecOutput("ip", "link")
@@ -121,6 +123,10 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					}
 					for _, felix := range felixes {
 						felix.Stop()
+
+						// see if blackhole routes go away with felix
+						o, _ := felix.ExecOutput("ip", "r", "s", "type", "blackhole")
+						Expect(o).To(Equal(""))
 					}
 
 					if CurrentGinkgoTestDescription().Failed {
@@ -141,6 +147,85 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					cc.ExpectSome(w[0], w[1])
 					cc.ExpectSome(w[1], w[0])
 					cc.CheckConnectivity()
+				})
+
+				It("should have some blackhole routes installed", func() {
+					if routeSource == "WorkloadIPs" {
+						Skip("not applicable for workload ips")
+						return
+					}
+
+					nodes := []string{
+						"blackhole 10.65.0.0/26 proto 80",
+						"blackhole 10.65.1.0/26 proto 80",
+						"blackhole 10.65.2.0/26 proto 80",
+					}
+
+					for n, result := range nodes {
+						Eventually(func() string {
+							o, _ := felixes[n].ExecOutput("ip", "r", "s", "type", "blackhole")
+							return o
+						}, "10s", "100ms").Should(ContainSubstring(result))
+						wName := fmt.Sprintf("w%d", n)
+
+						err := client.IPAM().ReleaseByHandle(context.TODO(), wName)
+						Expect(err).NotTo(HaveOccurred())
+
+						err = client.IPAM().ReleaseHostAffinities(context.TODO(), felixes[n].Hostname, true)
+						Expect(err).NotTo(HaveOccurred())
+
+						Eventually(func() string {
+							o, _ := felixes[n].ExecOutput("ip", "r", "s", "type", "blackhole")
+							return o
+						}, "10s", "100ms").Should(BeEmpty())
+					}
+				})
+
+				It("should handle misconfiguration", func() {
+					if routeSource == "WorkloadIPs" {
+						Skip("not applicable for workload ips")
+						return
+					}
+
+					var err error
+					ctx := context.TODO()
+
+					_, err = infrastructure.DeleteDefaultIPPool(ctx, client)
+					Expect(err).NotTo(HaveOccurred())
+
+					list, err := client.IPPools().List(ctx, options.ListOptions{})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(list.Items).To(HaveLen(0))
+
+					logrus.Info("=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0=0")
+					<-time.After(10 * time.Second)
+					logrus.Info("=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1=1")
+
+					for _, felix := range felixes {
+						Eventually(func() string {
+							o, _ := felix.ExecOutput("ip", "r", "s", "type", "blackhole")
+							return o
+						}, "10s", "100ms").Should(BeEmpty())
+					}
+
+					_, err = infrastructure.CreateDefaultIPPoolFromOpts(ctx, client, topologyOptions)
+					Expect(err).NotTo(HaveOccurred())
+					logrus.Info("=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5=5")
+					<-time.After(20 * time.Second)
+					logrus.Info("=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7=7")
+
+					nodes := []string{
+						"blackhole 10.65.0.0/26 proto 80",
+						"blackhole 10.65.1.0/26 proto 80",
+						"blackhole 10.65.2.0/26 proto 80",
+					}
+
+					for n, result := range nodes {
+						Eventually(func() string {
+							o, _ := felixes[n].ExecOutput("ip", "r", "s", "type", "blackhole")
+							return o
+						}, "10s", "100ms").Should(ContainSubstring(result))
+					}
 				})
 
 				It("should have host to workload connectivity", func() {
