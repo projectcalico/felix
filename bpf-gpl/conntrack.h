@@ -615,6 +615,7 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct cali_t
 		}
 
 		result.tun_ip = v->tun_ip;
+		result.flags = v->flags;
 		CALI_CT_DEBUG("tun_ip:%x\n", bpf_ntohl(v->tun_ip));
 
 		if (ct_ctx->proto == IPPROTO_ICMP || (related && proto_orig == IPPROTO_ICMP)) {
@@ -781,7 +782,7 @@ static CALI_BPF_INLINE struct calico_ct_result calico_ct_v4_lookup(struct cali_t
 				CALI_CT_DEBUG("Disabling bypass to allow kernel RPF.\n");
 				ct_result_set_rc(result.rc, CALI_CT_ESTABLISHED);
 			}
-			ct_result_set_flag(result.rc, CALI_CT_RPF_FAILED);
+			ct_result_set_flag(result.rc, CALI_CT_RPF_NEEDED);
 		} else if (src_to_dst->ifindex != CT_INVALID_IFINDEX) {
 			/* if the devices do not match, we got here without bypassing the
 			 * host IP stack and RPF check allowed it, so update our records.

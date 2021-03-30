@@ -1,4 +1,4 @@
-// Copyright (c) 2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package routes
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 
@@ -82,7 +83,7 @@ const (
 //     __u32 ifIndex;
 //   };
 // };
-const ValueSize = 8
+const ValueSize = 20
 
 type Value [ValueSize]byte
 
@@ -98,6 +99,18 @@ func (v Value) NextHop() ip.Addr {
 
 func (v Value) IfaceIndex() uint32 {
 	return binary.LittleEndian.Uint32(v[4:8])
+}
+
+func (v Value) SrcMAC() net.HardwareAddr {
+	var addr [6]byte
+	copy(addr[:], v[8:14])
+	return addr[:]
+}
+
+func (v Value) DestMAC() net.HardwareAddr {
+	var addr [6]byte
+	copy(addr[:], v[14:20])
+	return addr[:]
 }
 
 func (v Value) AsBytes() []byte {
@@ -177,6 +190,15 @@ func NewValueWithIfIndex(flags Flags, ifIndex int) Value {
 	return v
 }
 
+func NewValueWithIfIndexMACs(flags Flags, ifIndex int, srcMac, dstMac net.HardwareAddr) Value {
+	var v Value
+	binary.LittleEndian.PutUint32(v[:4], uint32(flags))
+	binary.LittleEndian.PutUint32(v[4:8], uint32(ifIndex))
+	copy(v[8:14], srcMac[:])
+	copy(v[14:20], dstMac[:])
+	return v
+}
+
 var MapParameters = bpf.MapParameters{
 	Filename:   "/sys/fs/bpf/tc/globals/cali_v4_routes",
 	Type:       "lpm_trie",
@@ -185,6 +207,7 @@ var MapParameters = bpf.MapParameters{
 	MaxEntries: 1024 * 1024,
 	Name:       "cali_v4_routes",
 	Flags:      unix.BPF_F_NO_PREALLOC,
+	Version:    2,
 }
 
 func Map(mc *bpf.MapContext) bpf.Map {
