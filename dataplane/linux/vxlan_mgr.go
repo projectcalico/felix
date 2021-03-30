@@ -183,11 +183,11 @@ func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
 
 		// Process IPAM blocks that aren't associated to a single or /32 local workload
 		if msg.Type == proto.RouteType_LOCAL_WORKLOAD && msg.IpPoolType == proto.IPPoolType_VXLAN && !msg.LocalWorkload {
-			logrus.WithField("msg", msg).Info("VXLAN data plane received route update for IPAM block")
+			logrus.WithField("msg", msg).Debug("VXLAN data plane received route update for IPAM block")
 			m.localIPAMBlocks[msg.Dst] = msg
 			m.routesDirty = true
 		} else if _, ok := m.localIPAMBlocks[msg.Dst]; ok {
-			logrus.WithField("msg", msg).Info("VXLAN data plane IPAM block changed to something else")
+			logrus.WithField("msg", msg).Debug("VXLAN data plane IPAM block changed to something else")
 			delete(m.localIPAMBlocks, msg.Dst)
 			m.routesDirty = true
 		}
@@ -220,6 +220,11 @@ func (m *vxlanManager) deleteRoute(dst string) {
 	if exists {
 		// In case the route changes type to one we no longer care about...
 		delete(m.routesByDest, dst)
+		m.routesDirty = true
+	}
+
+	if _, exists := m.localIPAMBlocks[dst]; exists {
+		delete(m.localIPAMBlocks, dst)
 		m.routesDirty = true
 	}
 }
