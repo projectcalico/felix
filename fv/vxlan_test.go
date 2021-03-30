@@ -163,7 +163,19 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 						Eventually(func() string {
 							o, _ := felixes[n].ExecOutput("ip", "r", "s", "type", "blackhole")
 							return o
-						}, "20s", "100ms").Should(ContainSubstring(result))
+						}, "10s", "100ms").Should(ContainSubstring(result))
+						wName := fmt.Sprintf("w%d", n)
+
+						err := client.IPAM().ReleaseByHandle(context.TODO(), wName)
+						Expect(err).NotTo(HaveOccurred())
+
+						err = client.IPAM().ReleaseHostAffinities(context.TODO(), felixes[n].Hostname, true)
+						Expect(err).NotTo(HaveOccurred())
+
+						Eventually(func() string {
+							o, _ := felixes[n].ExecOutput("ip", "r", "s", "type", "blackhole")
+							return o
+						}, "10s", "100ms").Should(BeEmpty())
 					}
 				})
 
