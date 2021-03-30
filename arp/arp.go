@@ -31,9 +31,13 @@ func Ping(addr net.IP, iface string) (net.HardwareAddr, error) {
 		args = append(args, "-I", iface)
 	}
 	args = append(args,
-		"-f",      // Stop on first reply.
+		"-f", // Stop on first reply.
+		"-c", "1",
+		/* -i not supporetd by the installed version
 		"-c", "5", // Maximum of 5 pings.
 		"-i", "1", // 1 second interval.
+		*/
+		addr.String(),
 	)
 	cmd := exec.Command("arping", args...)
 	out, err := cmd.Output()

@@ -26,6 +26,7 @@ import (
 
 	"github.com/projectcalico/felix/arp"
 	"github.com/projectcalico/felix/bpf"
+	arpmap "github.com/projectcalico/felix/bpf/arp"
 	"github.com/projectcalico/felix/bpf/routes"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
@@ -36,6 +37,7 @@ type bpfRouteManager struct {
 	myNodename      string
 	resyncScheduled bool
 	routeMap        bpf.Map
+	arpMap          bpf.Map
 
 	// These fields contain our cache of the input data, indexed for efficient updates
 	// and lookups:
@@ -115,6 +117,7 @@ func newBPFRouteManager(myNodename string, externalCIDRs []string, mc *bpf.MapCo
 
 		desiredRoutes: map[routes.Key]routes.Value{},
 		routeMap:      routes.Map(mc),
+		arpMap:        arpmap.Map(mc),
 
 		dirtyRoutes:     set.New(),
 		resyncScheduled: true,
@@ -177,6 +180,10 @@ func (m *bpfRouteManager) ensureDataplaneInitialised() {
 	err := m.routeMap.EnsureExists()
 	if err != nil {
 		log.WithError(err).Panic("Failed to create route map")
+	}
+	err = m.arpMap.EnsureExists()
+	if err != nil {
+		log.WithError(err).Panic("Failed to create arp map")
 	}
 }
 
@@ -297,6 +304,11 @@ func (m *bpfRouteManager) calculateRoute(cidr ip.V4CIDR) *routes.Value {
 				} else {
 					routeVal := routes.NewValueWithIfIndexMACs(flags, bestIfaceIdx, link.Attrs().HardwareAddr, destMAC)
 					route = &routeVal
+
+					arpk := arpmap.NewKey(cidr.ToIPNet().IP, uint32(bestIfaceIdx))
+					arpv := arpmap.NewValue(link.Attrs().HardwareAddr, destMAC)
+					m.arpMap.Update(arpk.AsBytes(), arpv.AsBytes())
+					log.WithFields(log.Fields{"key": arpk, "val": arpv}).Info("ARP local workload")
 				}
 			}
 		}
