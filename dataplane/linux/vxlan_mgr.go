@@ -218,12 +218,14 @@ func (m *vxlanManager) OnUpdate(protoBufMsg interface{}) {
 func (m *vxlanManager) deleteRoute(dst string) {
 	_, exists := m.routesByDest[dst]
 	if exists {
+		logrus.Info("deleting route dst ", dst)
 		// In case the route changes type to one we no longer care about...
 		delete(m.routesByDest, dst)
 		m.routesDirty = true
 	}
 
 	if _, exists := m.localIPAMBlocks[dst]; exists {
+		logrus.Info("deleting local ipam dst ", dst)
 		delete(m.localIPAMBlocks, dst)
 		m.routesDirty = true
 	}
@@ -285,6 +287,7 @@ func (m *vxlanManager) blackholeRoutes() []routetable.Target {
 			CIDR: cidr,
 		})
 	}
+	logrus.Info("calculated blackholes ", rtt)
 	return rtt
 }
 
