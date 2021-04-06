@@ -15,12 +15,11 @@
 package intdataplane
 
 import (
+	"github.com/projectcalico/felix/ifacemonitor"
 	"net"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/projectcalico/felix/ifacemonitor"
 
 	"github.com/projectcalico/felix/bpf/routes"
 	"github.com/projectcalico/felix/proto"
@@ -137,6 +136,8 @@ func (m *bpfRouteManager) OnUpdate(msg interface{}) {
 	case *proto.RouteRemove:
 		m.onRouteRemove(msg)
 
+	case *proto.HostMetadataUpdate:
+		m.onHostMetadataUpdate(msg)
 	// Updates for local workload endpoints only.  We use these to create local workload routes.
 	case *proto.WorkloadEndpointUpdate:
 		m.onWorkloadEndpointUpdate(msg)
@@ -573,6 +574,20 @@ func (m *bpfRouteManager) addWEP(update *proto.WorkloadEndpointUpdate) {
 
 func (m *bpfRouteManager) onWorkloadEndpointRemove(update *proto.WorkloadEndpointRemove) {
 	m.removeWEP(update.Id)
+}
+
+func (m *bpfRouteManager) onHostMetadataUpdate(msg *proto.HostMetadataUpdate) {
+	log.WithField("hostname", msg.Hostname).Debug("Host update/create")
+	if msg.Hostname != m.myNodename {
+		cidr := ip.MustParseCIDROrIP(msg.Ipv4Addr)
+		v4CIDR, ok := cidr.(ip.V4CIDR)
+		if !ok {
+			// FIXME IPv6
+			return
+		}
+		m.externalNodeCIDRs.Add(v4CIDR)
+		m.dirtyCIDRs.Add(v4CIDR)
+	}
 }
 
 func (m *bpfRouteManager) removeWEP(id *proto.WorkloadEndpointID) {
