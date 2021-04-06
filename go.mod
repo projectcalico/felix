@@ -4,24 +4,22 @@ go 1.15
 
 require (
 	github.com/Microsoft/hcsshim v0.8.10-0.20200715222032-5eafd1556990
-	github.com/aws/aws-sdk-go v1.35.7
+	github.com/aws/aws-sdk-go v1.35.24
 	github.com/containernetworking/plugins v0.8.2
 	github.com/davecgh/go-spew v1.1.1
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	github.com/go-ini/ini v1.44.0
-	github.com/gogo/protobuf v1.3.1
+	github.com/gogo/protobuf v1.3.2
 	github.com/golang-collections/collections v0.0.0-20130729185459-604e922904d3
-	github.com/golang/protobuf v1.4.2
+	github.com/golang/protobuf v1.4.3
 	github.com/google/gopacket v1.1.17
 	github.com/google/netstack v0.0.0-20191123085552-55fcc16cd0eb
 	github.com/ishidawataru/sctp v0.0.0-20191218070446-00ab2ac2db07
 	github.com/kardianos/osext v0.0.0-20190222173326-2bc1f35cddc0
 	github.com/kelseyhightower/envconfig v0.0.0-20180517194557-dd1402a4d99d
-	github.com/kr/text v0.2.0 // indirect
 	github.com/libp2p/go-reuseport v0.0.1
 	github.com/mipearson/rfw v0.0.0-20170619235010-6f0a6f3266ba
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e // indirect
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
@@ -30,18 +28,15 @@ require (
 	github.com/projectcalico/typha v0.7.3-0.20210401040343-426ff799d7d7
 	github.com/prometheus/client_golang v1.7.1
 	github.com/satori/go.uuid v1.2.0
-	github.com/sirupsen/logrus v1.6.0
-	github.com/spf13/cobra v1.0.0
-	github.com/spf13/viper v1.6.1
-	github.com/stretchr/testify v1.5.1 // indirect
+	github.com/sirupsen/logrus v1.7.0
+	github.com/spf13/cobra v1.1.1
+	github.com/spf13/viper v1.7.0
 	github.com/vishvananda/netlink v1.1.0
 	golang.org/x/net v0.0.0-20210224082022-3d97a244fca7
 	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
-	golang.org/x/sys v0.0.0-20201119102817-f84b799fce68
+	golang.org/x/sys v0.0.0-20210225134936-a50acf3fe073
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20200324154536-ceff61240acf
-	google.golang.org/grpc v1.27.0
-	gopkg.in/check.v1 v1.0.0-20200227125254-8fa46927fb4f // indirect
-	honnef.co/go/tools v0.0.1-2020.1.3 // indirect
+	google.golang.org/grpc v1.27.1
 	k8s.io/api v0.21.0-rc.0
 	k8s.io/apimachinery v0.21.0-rc.0
 	k8s.io/client-go v0.21.0-rc.0
