@@ -344,18 +344,6 @@ func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 				CIDR: ip.CIDRFromCalicoNet(*caliNodeCIDR).(ip.V4CIDR),
 			}
 
-		} else if len(node.Spec.Addresses) > 0 {
-			ipv4, caliNodeCIDR, err := cnet.ParseCIDROrIP(node.Spec.Addresses[0].Address)
-			if err != nil {
-				logrus.WithError(err).Panic("Failed to parse already-validated IP address")
-			}
-			nodeInfo = &l3rrNodeInfo{
-				Addr: ip.FromCalicoIP(*ipv4).(ip.V4Addr),
-				CIDR: ip.CIDRFromCalicoNet(*caliNodeCIDR).(ip.V4CIDR),
-			}
-
-		}
-		if nodeInfo != nil {
 			if node.Spec.Wireguard != nil && node.Spec.Wireguard.InterfaceIPv4Address != "" {
 				nodeInfo.WireguardAddr = ip.FromString(node.Spec.Wireguard.InterfaceIPv4Address)
 			}
@@ -378,6 +366,7 @@ func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 			}
 		}
 	}
+
 	c.onNodeUpdate(nodeName, nodeInfo)
 
 	return
