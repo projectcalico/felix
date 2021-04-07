@@ -130,6 +130,7 @@ type bpfEndpointManager struct {
 	vxlanMTU           int
 	vxlanPort          uint16
 	dsrEnabled         bool
+	bpfToHostMark      int
 
 	ipSetMap bpf.Map
 	stateMap bpf.Map
@@ -169,6 +170,7 @@ func newBPFEndpointManager(
 	vxlanMTU int,
 	vxlanPort uint16,
 	dsrEnabled bool,
+	bpfToHostMark int,
 	ipSetMap bpf.Map,
 	stateMap bpf.Map,
 	iptablesRuleRenderer bpfAllowChainRenderer,
@@ -198,6 +200,7 @@ func newBPFEndpointManager(
 		vxlanMTU:            vxlanMTU,
 		vxlanPort:           vxlanPort,
 		dsrEnabled:          dsrEnabled,
+		bpfToHostMark:       bpfToHostMark,
 		ipSetMap:            ipSetMap,
 		stateMap:            stateMap,
 		ruleRenderer:        iptablesRuleRenderer,
@@ -749,6 +752,7 @@ func (m *bpfEndpointManager) attachWorkloadProgram(ifaceName string, endpoint *p
 	//   when we cannot encap the packet - non-GSO & too close to veth MTU
 	ap.TunnelMTU = uint16(m.vxlanMTU - 50)
 	ap.IntfIP = calicoRouterIP
+	ap.ToHostMark = uint32(m.bpfToHostMark)
 
 	jumpMapFD, err := m.dp.ensureProgramAttached(&ap, polDirection)
 	if err != nil {
@@ -826,6 +830,7 @@ func (m *bpfEndpointManager) attachDataIfaceProgram(ifaceName string, ep *proto.
 	ap := m.calculateTCAttachPoint(polDirection, ifaceName)
 	ap.HostIP = m.hostIP
 	ap.TunnelMTU = uint16(m.vxlanMTU)
+	ap.ToHostMark = uint32(m.bpfToHostMark)
 	ip, err := m.getInterfaceIP(ifaceName)
 	if err != nil {
 		log.Debugf("Error getting IP for interface %+v: %+v", ifaceName, err)
