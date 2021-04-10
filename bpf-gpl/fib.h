@@ -204,13 +204,14 @@ skip_fib:
 		/* Packet is towards host namespace, mark it so that downstream
 		 * programs know that they're not the first to see the packet.
 		 */
+		ctx->fwd.mark |=  CALI_SKB_MARK_SEEN | TO_HOST_MARK;
 		CALI_DEBUG("Traffic is towards host namespace, marking with %x.\n", ctx->fwd.mark);
 		/* FIXME: this ignores the mask that we should be using.
 		 * However, if we mask off the bits, then clang spots that it
 		 * can do a 16-bit store instead of a 32-bit load/modify/store,
 		 * which trips up the validator.
 		 */
-		ctx->skb->mark = ctx->fwd.mark | CALI_SKB_MARK_SEEN; /* make sure that each pkt has SEEN mark */
+		ctx->skb->mark = ctx->fwd.mark; /* make sure that each pkt has SEEN mark */
 	}
 
 	if (CALI_LOG_LEVEL >= CALI_LOG_LEVEL_INFO) {

@@ -52,6 +52,7 @@ type AttachPoint struct {
 	DSR        bool
 	TunnelMTU  uint16
 	VXLANPort  uint16
+	ToHostMark uint32
 }
 
 var tcLock sync.RWMutex
@@ -202,6 +203,7 @@ func (ap AttachPoint) patchBinary(logCtx *log.Entry, ifile, ofile string) error 
 		vxlanPort = 4789
 	}
 	b.PatchVXLANPort(vxlanPort)
+	b.PatchToHostMark(uint32(ap.ToHostMark))
 
 	err = b.PatchIntfAddr(ap.IntfIP)
 	if err != nil {
