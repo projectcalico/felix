@@ -95,7 +95,7 @@ func StartDataplaneDriver(configParams *config.Config,
 		// avoid allocating the others to minimize the number of bits in use.
 
 		// The accept bit is a long-lived bit used to communicate between chains.
-		var markAccept, markPass, markScratch0, markScratch1, markWireguard, markEndpointNonCaliEndpoint uint32
+		var markAccept, markPass, markScratch0, markScratch1, markEndpointNonCaliEndpoint uint32
 		markAccept, _ = markBitsManager.NextSingleBitMark()
 		if !configParams.BPFEnabled {
 			// The pass bit is used to communicate from a policy chain up to the endpoint chain.
@@ -107,10 +107,20 @@ func StartDataplaneDriver(configParams *config.Config,
 		if !configParams.BPFEnabled {
 			markScratch1, _ = markBitsManager.NextSingleBitMark()
 		}
-		if configParams.WireguardEnabled {
+
+		wireguardEnabled := configParams.WireguardEnabled
+		var markDoNotRouteViaWireguard, markNonCaliWorkloadIface uint32
+		if wireguardEnabled {
 			log.Info("Wireguard enabled, allocating a mark bit")
-			markWireguard, _ = markBitsManager.NextSingleBitMark()
-			if markWireguard == 0 {
+			markDoNotRouteViaWireguard, _ = markBitsManager.NextSingleBitMark()
+			if markDoNotRouteViaWireguard == 0 {
+				log.WithFields(log.Fields{
+					"Name":     "felix-iptables",
+					"MarkMask": allowedMarkBits,
+				}).Panic("Failed to allocate a mark bit for wireguard, not enough mark bits available.")
+			}
+			markNonCaliWorkloadIface, _ = markBitsManager.NextSingleBitMark()
+			if markNonCaliWorkloadIface == 0 {
 				log.WithFields(log.Fields{
 					"Name":     "felix-iptables",
 					"MarkMask": allowedMarkBits,
@@ -153,14 +163,21 @@ func StartDataplaneDriver(configParams *config.Config,
 
 		// Always allocate the wireguard table index (even when not enabled). This ensures we can tidy up entries
 		// if wireguard is disabled after being previously enabled.
-		var wireguardEnabled bool
-		var wireguardTableIndex int
+		var wireguardWorkloadTableIndex int
+		var wireguardNodeTableIndex int
 		if idx, err := routeTableIndexAllocator.GrabIndex(); err == nil {
 			log.Debugf("Assigned wireguard table index: %d", idx)
-			wireguardEnabled = configParams.WireguardEnabled
-			wireguardTableIndex = idx
+			wireguardWorkloadTableIndex = idx
 		} else {
 			log.WithError(err).Warning("Unable to assign table index for wireguard")
+			wireguardEnabled = false
+		}
+		if idx, err := routeTableIndexAllocator.GrabIndex(); err == nil {
+			log.Debugf("Assigned wireguard table index: %d", idx)
+			wireguardNodeTableIndex = idx
+		} else {
+			log.WithError(err).Warning("Unable to assign table index for wireguard")
+			wireguardEnabled = false
 		}
 
 		// If wireguard is enabled, update the failsafe ports to include the wireguard port.
@@ -259,8 +276,10 @@ func StartDataplaneDriver(configParams *config.Config,
 				AllowVXLANPacketsFromWorkloads: configParams.AllowVXLANPacketsFromWorkloads,
 				AllowIPIPPacketsFromWorkloads:  configParams.AllowIPIPPacketsFromWorkloads,
 
-				WireguardEnabled:       configParams.WireguardEnabled,
-				WireguardInterfaceName: configParams.WireguardInterfaceName,
+				WireguardEnabled:                    configParams.WireguardEnabled,
+				WireguardInterfaceName:              configParams.WireguardInterfaceName,
+				WireguardMarkDoNotRouteViaWireguard: int(markDoNotRouteViaWireguard),
+				WireguardMarkNonCaliWorkloadIface:   int(markNonCaliWorkloadIface),
 
 				IptablesLogPrefix:         configParams.LogPrefix,
 				EndpointToHostAction:      configParams.DefaultEndpointToHostAction,
@@ -279,13 +298,15 @@ func StartDataplaneDriver(configParams *config.Config,
 				ServiceLoopPrevention:              configParams.ServiceLoopPrevention,
 			},
 			Wireguard: wireguard.Config{
-				Enabled:             wireguardEnabled,
-				ListeningPort:       configParams.WireguardListeningPort,
-				FirewallMark:        int(markWireguard),
-				RoutingRulePriority: configParams.WireguardRoutingRulePriority,
-				RoutingTableIndex:   wireguardTableIndex,
-				InterfaceName:       configParams.WireguardInterfaceName,
-				MTU:                 configParams.WireguardMTU,
+				Enabled:                    wireguardEnabled,
+				ListeningPort:              configParams.WireguardListeningPort,
+				MarkDoNotRouteViaWireguard: int(markDoNotRouteViaWireguard),
+				MarkNonCaliWorkloadIface:   int(markNonCaliWorkloadIface),
+				RoutingRulePriority:        configParams.WireguardRoutingRulePriority,
+				WorkloadRoutingTableIndex:  wireguardWorkloadTableIndex,
+				NodeRoutingTableIndex:      wireguardNodeTableIndex,
+				InterfaceName:              configParams.WireguardInterfaceName,
+				MTU:                        configParams.WireguardMTU,
 			},
 			IPIPMTU:                        configParams.IpInIpMtu,
 			VXLANMTU:                       configParams.VXLANMTU,

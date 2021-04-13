@@ -1236,8 +1236,9 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 
 		// For anything we approved for forward, permit accept_local as it is
 		// traffic encapped for NodePort, ICMP replies etc. - stuff we trust.
+		// Also use the nf marks for performing the routing check.
 		rpfRules = append(rpfRules, iptables.Rule{
-			Match:  iptables.Match().MarkMatchesWithMask(tc.MarkSeenBypassForward, tc.MarksMask).RPFCheckPassed(true),
+			Match:  iptables.Match().MarkMatchesWithMask(tc.MarkSeenBypassForward, tc.MarksMask).RPFCheckPassed(true, true),
 			Action: iptables.ReturnAction{},
 		})
 
@@ -1311,6 +1312,9 @@ func (d *InternalDataplane) setUpIptablesNormal() {
 		}})
 		t.InsertOrAppendRules("POSTROUTING", []iptables.Rule{{
 			Action: iptables.JumpAction{Target: rules.ChainManglePostrouting},
+		}})
+		t.InsertOrAppendRules("OUTPUT", []iptables.Rule{{
+			Action: iptables.JumpAction{Target: rules.ChainMangleOutput},
 		}})
 	}
 	if d.xdpState != nil {

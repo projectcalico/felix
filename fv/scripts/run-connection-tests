@@ -1,0 +1,237 @@
+#!/bin/bash
+
+KEY_NODE=kubernetes.io/hostname
+LABEL_NODE0=<name of node 0>
+LABEL_NODE1=<name of node 1>
+
+export CLUSTER_PORT=80
+export CLUSTER_PORT_HOSTN=81
+export NODE_PORT=30556
+export NODE_PORT_HOSTN=30557
+export NGINX_PORT=80
+
+# Create nginx deployments on node 1
+kubectl apply -f - <<EOF
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: server-1
+spec:
+  selector:
+    matchLabels:
+      app: server-1
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: server-1
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+      nodeSelector:
+        $KEY_NODE: $LABEL_NODE1
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-1
+spec:
+  type: NodePort
+  selector:
+    app: server-1
+  ports:
+    - protocol: TCP
+      port: $CLUSTER_PORT
+      targetPort: 80
+      nodePort: $NODE_PORT
+EOF
+
+kubectl apply -f - <<EOF
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: server-host-1
+spec:
+  selector:
+    matchLabels:
+      app: server-host-1
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: server-host-1
+    spec:
+      hostNetwork: true
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+      nodeSelector:
+        $KEY_NODE: $LABEL_NODE1
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-host-1
+spec:
+  type: NodePort
+  selector:
+    app: server-host-1
+  ports:
+    - protocol: TCP
+      port: $CLUSTER_PORT_HOSTN
+      targetPort: 80
+      nodePort: $NODE_PORT_HOSTN
+
+EOF
+
+# Create client deployments on node 0 and node 1
+kubectl apply -f - <<EOF
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: client-0
+spec:
+  selector:
+    matchLabels:
+      app: client-0
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: client-0
+    spec:
+      containers:
+      - name: curl
+        image: radial/busyboxplus:curl
+        command: ["/bin/sh", "-ec", "while :; do echo '.'; sleep 5 ; done"]
+      nodeSelector:
+        $KEY_NODE: $LABEL_NODE0
+
+---
+
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: client-1
+spec:
+  selector:
+    matchLabels:
+      app: client-1
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: client-1
+    spec:
+      containers:
+      - name: curl
+        image: radial/busyboxplus:curl
+        command: ["/bin/sh", "-ec", "while :; do echo '.'; sleep 5 ; done"]
+      nodeSelector:
+        $KEY_NODE: $LABEL_NODE1
+
+---
+
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: client-host-0
+spec:
+  selector:
+    matchLabels:
+      app: client-host-0
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: client-host-0
+    spec:
+      hostNetwork: true
+      containers:
+      - name: curl
+        image: radial/busyboxplus:curl
+        command: ["/bin/sh", "-ec", "while :; do echo '.'; sleep 5 ; done"]
+      nodeSelector:
+        $KEY_NODE: $LABEL_NODE0
+
+---
+
+apiVersion: apps/v1 # for versions before 1.9.0 use apps/v1beta2
+kind: Deployment
+metadata:
+  name: client-host-1
+spec:
+  selector:
+    matchLabels:
+      app: client-host-1
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: client-host-1
+    spec:
+      hostNetwork: true
+      containers:
+      - name: curl
+        image: radial/busyboxplus:curl
+        command: ["/bin/sh", "-ec", "while :; do echo '.'; sleep 5 ; done"]
+      nodeSelector:
+        $KEY_NODE: $LABEL_NODE1
+
+EOF
+
+export POD_IP_SERVER_1=$(kubectl get pod -l app=server-1 -o jsonpath="{.items[0].status.podIP}")
+export POD_IP_SERVER_HOST_1=$(kubectl get pod -l app=server-host-1 -o jsonpath="{.items[0].status.podIP}")
+
+export POD_CLIENT_0=$(kubectl get pod -l app=client-0 -o jsonpath="{.items[0].metadata.name}")
+export POD_CLIENT_1=$(kubectl get pod -l app=client-1 -o jsonpath="{.items[0].metadata.name}")
+export POD_CLIENT_HOST_0=$(kubectl get pod -l app=client-host-0 -o jsonpath="{.items[0].metadata.name}")
+export POD_CLIENT_HOST_1=$(kubectl get pod -l app=client-host-1 -o jsonpath="{.items[0].metadata.name}")
+
+export NODE_0=$(kubectl get node -l $KEY_NODE=$LABEL_NODE0 -o jsonpath="{.items[0].status.addresses[0].address}")
+export NODE_1=$(kubectl get node -l $KEY_NODE=$LABEL_NODE1 -o jsonpath="{.items[0].status.addresses[0].address}")
+
+echo $NODE_0
+echo $NODE_1
+echo $POD_IP_SERVER_1
+echo $POD_IP_SERVER_HOST_1
+echo $POD_CLIENT_0
+echo $POD_CLIENT_1
+echo $POD_CLIENT_HOST_0
+echo $POD_CLIENT_HOST_1
+
+export CLUSTER_1_IP=$(kubectl get service server-1 -o jsonpath="{.spec.clusterIP}")
+export CLUSTER_HOST_1_IP=$(kubectl get service server-host-1 -o jsonpath="{.spec.clusterIP}")
+
+echo $CLUSTER_1_IP
+echo $CLUSTER_HOST_1_IP
+
+CURL="curl -m 1 -s -o /dev/null -w %{http_code}"
+
+for CLIENT in "POD_CLIENT_0" "POD_CLIENT_1" "POD_CLIENT_HOST_0" "POD_CLIENT_HOST_1"
+do
+  for SERVERPORT in "POD_IP_SERVER_1 NGINX_PORT" "POD_IP_SERVER_HOST_1 NGINX_PORT" "CLUSTER_1_IP CLUSTER_PORT" "CLUSTER_HOST_1_IP CLUSTER_PORT_HOSTN" "NODE_0 NODE_PORT" "NODE_0 NODE_PORT_HOSTN" "NODE_1 NODE_PORT" "NODE_1 NODE_PORT_HOSTN"
+  do
+    SERVERPORTLIST=($SERVERPORT)
+    SERVER=${SERVERPORTLIST[0]}
+    PORT=${SERVERPORTLIST[1]}
+    echo
+    echo $CLIENT" -> "$SERVER:$PORT
+    CLIENT_VAL=`printenv $CLIENT`
+    SERVER_VAL=`printenv $SERVER`
+    PORT_VAL=`printenv $PORT`
+    echo kubectl exec $CLIENT_VAL -- $CURL $SERVER_VAL:$PORT_VAL
+    kubectl exec $CLIENT_VAL -- $CURL $SERVER_VAL:$PORT_VAL
+    echo
+  done
+done
+
