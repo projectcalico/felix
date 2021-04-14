@@ -1266,7 +1266,7 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 		}})
 	}
 
-	if d.config.BPFExtToServiceConnmark != 0 {
+	if d.config.BPFExtToServiceConnmark != 0 && !d.config.BPFNodePortDSREnabled {
 		mark := uint32(d.config.BPFExtToServiceConnmark)
 		for _, t := range d.iptablesMangleTables {
 			t.InsertOrAppendRules("PREROUTING", []iptables.Rule{{

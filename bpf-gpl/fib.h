@@ -205,7 +205,11 @@ skip_fib:
 		 * programs know that they're not the first to see the packet.
 		 */
 		ctx->fwd.mark |=  CALI_SKB_MARK_SEEN;
-		if (ctx->state->ct_result.flags & CALI_CT_FLAG_EXT_LOCAL) {
+		/* Mark the packet with EXT_TO_SVC_MARK if going to host, but
+		 * not if returning from a pod and DSR is enabled. That should
+		 * follow the standar routing.
+		 */
+		if (!(CALI_F_FROM_WEP && CALI_F_DSR) && ctx->state->ct_result.flags & CALI_CT_FLAG_EXT_LOCAL) {
 			CALI_DEBUG("To host marked with FLAG_EXT_LOCAL\n");
 			ctx->fwd.mark |= EXT_TO_SVC_MARK;
 		}
