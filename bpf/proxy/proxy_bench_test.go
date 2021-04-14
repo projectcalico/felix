@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,9 @@ import (
 
 	. "github.com/onsi/gomega"
 
+	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/nat"
+
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -41,10 +44,13 @@ func benchmarkProxyUpdates(b *testing.B, svcN, epsN int) {
 		eps := makeEps(svcN, epsN)
 		k8s := fake.NewSimpleClientset(append(svcs, eps...)...)
 
+		feCache := bpf.NewCachingMap(nat.FrontendMapParameters, &mock.DummyMap{})
+		beCache := bpf.NewCachingMap(nat.BackendMapParameters, &mock.DummyMap{})
+
 		syncer, err := proxy.NewSyncer(
 			[]net.IP{net.IPv4(1, 1, 1, 1)},
-			&mock.DummyMap{},
-			&mock.DummyMap{},
+			feCache,
+			beCache,
 			&mock.DummyMap{},
 			proxy.NewRTCache(),
 		)
