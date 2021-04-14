@@ -98,7 +98,7 @@ struct bpf_map_def_extended {
 #define CALI_F_WG_INGRESS    (CALI_F_INGRESS && CALI_F_WIREGUARD)
 
 #define CALI_F_CGROUP	(((CALI_COMPILE_FLAGS) & CALI_CGROUP) != 0)
-#define CALI_F_DSR	(CALI_COMPILE_FLAGS & CALI_TC_DSR)
+#define CALI_F_DSR	((CALI_COMPILE_FLAGS & CALI_TC_DSR) != 0)
 
 #define CALI_RES_REDIR_BACK	108 /* packet should be sent back the same iface */
 #define CALI_RES_REDIR_IFINDEX	109 /* packet should be sent straight to
@@ -221,11 +221,13 @@ CALI_CONFIGURABLE_DEFINE(host_ip, 0x54534f48) /* be 0x54534f48 = ASCII(HOST) */
 CALI_CONFIGURABLE_DEFINE(tunnel_mtu, 0x55544d54) /* be 0x55544d54 = ASCII(TMTU) */
 CALI_CONFIGURABLE_DEFINE(vxlan_port, 0x52505856) /* be 0x52505856 = ASCII(VXPR) */
 CALI_CONFIGURABLE_DEFINE(intf_ip, 0x46544e49) /*be 0x46544e49 = ASCII(INTF) */
+CALI_CONFIGURABLE_DEFINE(ext_to_svc_mark, 0x4b52414d) /*be 0x4b52414d = ASCII(MARK) */
 
 #define HOST_IP		CALI_CONFIGURABLE(host_ip)
 #define TUNNEL_MTU 	CALI_CONFIGURABLE(tunnel_mtu)
 #define VXLAN_PORT 	CALI_CONFIGURABLE(vxlan_port)
 #define INTF_IP		CALI_CONFIGURABLE(intf_ip)
+#define EXT_TO_SVC_MARK	CALI_CONFIGURABLE(ext_to_svc_mark)
 
 #define MAP_PIN_GLOBAL	2
 
