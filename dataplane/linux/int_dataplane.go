@@ -1648,6 +1648,12 @@ func (d *InternalDataplane) configureKernel() {
 		mpwg := newModProbe(moduleWireguard, newRealCmd)
 		out, err = mpwg.Exec()
 		log.WithError(err).WithField("output", out).Infof("attempted to modprobe %s", moduleWireguard)
+
+		log.Info("Enabling src valid mark for WireGuard")
+		err = writeProcSys("/proc/sys/net/ipv4/conf/all/src_valid_mark", "1")
+		if err != nil {
+			log.WithError(err).Error("Failed to set src valid mark for WireGuard")
+		}
 	}
 }
 
