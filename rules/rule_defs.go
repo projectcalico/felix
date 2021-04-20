@@ -281,6 +281,8 @@ type Config struct {
 
 	WireguardEnabled       bool
 	WireguardInterfaceName string
+	WireguardIptablesMark  uint32
+	WireguardListeningPort int
 
 	IptablesLogPrefix         string
 	EndpointToHostAction      string
