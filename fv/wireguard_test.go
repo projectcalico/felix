@@ -49,6 +49,7 @@ const (
 	wireguardMTUDefault                 = 1420
 	wireguardRoutingRulePriorityDefault = "99"
 	wireguardListeningPortDefault       = 51820
+	defaultWorkloadPort                 = "8055"
 
 	fakeWireguardPubKey = "jlkVyQYooZYzI2wFfNhSZez5eWh44yfq1wKVjLvSXgY="
 )
@@ -910,7 +911,24 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			felixes[i].TriggerDelayedStart()
 		}
 
-		cc = &connectivity.Checker{} // TODO: uncommeent
+		tcpdumps = nil
+		for _, felix := range felixes {
+			tcpdump := felix.AttachTCPDump("eth0")
+
+			tunnelPacketsFelix0toFelix1Pattern := fmt.Sprintf("IP %s\\.%d > %s\\.%d: UDP", felixes[0].IP, wireguardListeningPortDefault, felixes[1].IP, wireguardListeningPortDefault)
+			tcpdump.AddMatcher("numTunnelPacketsFelix0toFelix1", regexp.MustCompile(tunnelPacketsFelix0toFelix1Pattern))
+			tunnelPacketsFelix1toFelix0Pattern := fmt.Sprintf("IP %s\\.%d > %s\\.%d: UDP", felixes[1].IP, wireguardListeningPortDefault, felixes[0].IP, wireguardListeningPortDefault)
+			tcpdump.AddMatcher("numTunnelPacketsFelix1toFelix0", regexp.MustCompile(tunnelPacketsFelix1toFelix0Pattern))
+			nonTunnelPacketsFelix0toFelix1Pattern := fmt.Sprintf("IP %s\\.%s > %s\\.%s: TCP", felixes[0].IP, defaultWorkloadPort, felixes[1].IP, defaultWorkloadPort)
+			tcpdump.AddMatcher("numNonTunnelPacketsFelix0toFelix1", regexp.MustCompile(nonTunnelPacketsFelix0toFelix1Pattern))
+			nonTunnelPacketsFelix1toFelix0Pattern := fmt.Sprintf("IP %s\\.%s > %s\\.%s: TCP", felixes[1].IP, defaultWorkloadPort, felixes[0].IP, defaultWorkloadPort)
+			tcpdump.AddMatcher("numNonTunnelPacketsFelix1toFelix0", regexp.MustCompile(nonTunnelPacketsFelix1toFelix0Pattern))
+
+			tcpdump.Start()
+			tcpdumps = append(tcpdumps, tcpdump)
+		}
+
+		cc = &connectivity.Checker{}
 	})
 
 	AfterEach(func() {
@@ -921,6 +939,8 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				felix.Exec("ip", "route", "show", "table", "all")
 				felix.Exec("ip", "route", "show", "cached")
 				felix.Exec("wg")
+				felix.Exec("iptables-save", "-t", "raw")
+				felix.Exec("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
 			}
 		}
 
@@ -973,9 +993,27 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		// Note to future Seth: also removed throw tests here for borrowed ips
 
-		cc.ExpectNone(wls[0], wls[1])
-		cc.ExpectNone(wls[1], wls[0])
+		cc.ExpectSome(wls[0], wls[1])
+		cc.ExpectSome(wls[1], wls[0])
 		cc.CheckConnectivity()
+
+		By("verifying packets between felix-0 and felix-1 is encrypted")
+		for i := range []int{0, 1} {
+			Eventually(func() int {
+				return tcpdumps[i].MatchCount("numTunnelPacketsFelix0toFelix1")
+			}, "10s", "100ms").Should(BeNumerically(">", 0))
+			Eventually(func() int {
+				return tcpdumps[i].MatchCount("numTunnelPacketsFelix1toFelix0")
+			}, "10s", "100ms").Should(BeNumerically(">", 0))
+			Eventually(func() int {
+				return tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")
+			}, "10s", "100ms").Should(BeNumerically("==", 0))
+			Eventually(func() int {
+				return tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")
+			}, "10s", "100ms").Should(BeNumerically("==", 0))
+		}
+
+		//cc.ResetExpectations()
 	})
 
 })
@@ -1078,7 +1116,7 @@ func createWorkloadWithAssignedIP(
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	wl := workload.Run(felix, wlName, "default", wlIP, "8055", "tcp")
+	wl := workload.Run(felix, wlName, "default", wlIP, defaultWorkloadPort, "tcp")
 	wl.ConfigureInInfra(*infra)
 
 	return wl

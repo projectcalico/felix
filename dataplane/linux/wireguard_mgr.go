@@ -67,9 +67,8 @@ func (m *wireguardManager) OnUpdate(protoBufMsg interface{}) {
 		}
 		switch msg.Type {
 		case proto.RouteType_REMOTE_HOST:
-			log.WithFields(log.Fields{
-				"msg": msg,
-			}).Debug("RouteUpdate remote host or something")
+			log.Debug("RouteUpdate is a remote host update")
+			m.wireguardRouteTable.RouteUpdate(msg.DstNodeName, cidr)
 		case proto.RouteType_LOCAL_WORKLOAD, proto.RouteType_REMOTE_WORKLOAD:
 			// CIDR is for a workload.
 			log.Debug("RouteUpdate is a workload update")
