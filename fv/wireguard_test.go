@@ -993,7 +993,12 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		By("Checking the proc/sys src valid mark entries")
-		// TODO: read proc/sys
+		for _, felix := range felixes {
+			Eventually(func() string {
+				s, _ := felix.ExecCombinedOutput("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
+				return s
+			}, "10s", "100ms").Should(ContainSubstring("1"))
+		}
 
 		// Note to future Seth: also removed throw tests here for borrowed ips
 
