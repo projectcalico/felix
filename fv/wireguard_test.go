@@ -962,9 +962,10 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		infra.Stop()
 	})
 
-	It("from cork", func() {
+	It("should pass basic connectivity scenarios", func() {
 		// Check that felix-0, felix-1 is ready
 		// 1. by checking, Wireguard interface exist.
+		By("Checking the wireguard links")
 		Eventually(func() error {
 			for i := range []int{0, 1} {
 				out, err := felixes[i].ExecOutput("ip", "link")
@@ -990,6 +991,9 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				return getWireguardRouteEntry(felixes[i])
 			}, "10s", "100ms").Should(ContainSubstring("dev wireguard.cali scope link"))
 		}
+
+		By("Checking the proc/sys src valid mark entries")
+		// TODO: read proc/sys
 
 		// Note to future Seth: also removed throw tests here for borrowed ips
 
