@@ -16,7 +16,9 @@ package wireguard
 
 import (
 	"errors"
+	"io"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -43,6 +45,11 @@ const (
 	// For wireguard client connections we back off retries and only try to actually connect once every
 	// <wireguardClientRetryInterval> requests.
 	wireguardClientRetryInterval = 10
+
+	wireguardType       = "wireguard"
+	ipVersion           = 4
+	ipPrefixLen         = 32
+	allSrcValidMarkPath = "/proc/sys/net/ipv4/conf/all/src_valid_mark"
 )
 
 var (
@@ -53,12 +60,6 @@ var (
 	errWrongInterfaceType = errors.New("incorrect interface type for wireguard")
 
 	zeroKey = wgtypes.Key{}
-)
-
-const (
-	wireguardType = "wireguard"
-	ipVersion     = 4
-	ipPrefixLen   = 32
 )
 
 type noOpConnTrack struct{}
@@ -1343,6 +1344,14 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 // ensureLink checks that the wireguard link is configured correctly. Returns true if the link is oper up.
 func (w *Wireguard) ensureLink(netlinkClient netlinkshim.Interface) (bool, error) {
 	logCxt := log.WithField("ifaceName", w.config.InterfaceName)
+
+	if w.config.RouteSource == "WorkloadIPs" {
+		log.Info("Enabling src valid mark for WireGuard")
+		if err := compareAndSetSysctl(allSrcValidMarkPath, "1"); err != nil {
+			return false, err
+		}
+	}
+
 	link, err := netlinkClient.LinkByName(w.config.InterfaceName)
 	if netlinkshim.IsNotExist(err) {
 		// Create the wireguard device.
@@ -1678,4 +1687,58 @@ func getOnlyItemInSet(s set.Set) interface{} {
 		return set.StopIteration
 	})
 	return i
+}
+
+// compareAndSetSysctl reads the current value of the sysctl setting, and sets it to a new value iff the value to be
+// set is different.
+func compareAndSetSysctl(path, value string) error {
+	mark, err := readProcSys(path)
+	if err != nil {
+		log.WithError(err).WithField("path", path).Error(
+			"Failed to read sysctl setting")
+		return err
+	}
+	if mark == value {
+		// value is already set, so nothing to do
+		return nil
+	}
+	if err := writeProcSys(path, value); err != nil {
+		log.WithError(err).WithFields(log.Fields{"path": path, "value": value}).Error(
+			"Failed to write sysctl setting")
+		return err
+	}
+	return nil
+}
+
+// writeProcSys writes the value to the given sysctl path
+func writeProcSys(path, value string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	n, err := f.Write([]byte(value))
+	if err == nil && n < len(value) {
+		err = io.ErrShortWrite
+	}
+	if err1 := f.Close(); err == nil {
+		err = err1
+	}
+	return err
+}
+
+// readProcSys reads the value from the given sysctl path
+func readProcSys(path string) (string, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return "", err
+	}
+	value := make([]byte, 1)
+	n, err := f.Read(value)
+	if err == nil && n > len(value) {
+		err = io.ErrShortBuffer
+	}
+	if err1 := f.Close(); err == nil {
+		err = err1
+	}
+	return string(value), err
 }

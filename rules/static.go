@@ -993,8 +993,7 @@ func (r *DefaultRuleRenderer) StaticRawPreroutingChain(ipVersion uint8) *Chain {
 	)
 
 	// Set a mark on the packet if it has come from the WireGuard tunnel to ensure the RPF check allows it
-	// TODO: Mike - need to also check if route src is WorkloadIPs here??
-	if ipVersion == 4 && r.WireguardEnabled && len(r.WireguardInterfaceName) > 0 {
+	if ipVersion == 4 && r.WireguardEnabled && len(r.WireguardInterfaceName) > 0 && r.RouteSource == "WorkloadIPs" {
 		rules = append(rules, Rule{
 			Match: Match().Protocol("udp").
 				DestPorts(uint16(r.WireguardListeningPort)).
