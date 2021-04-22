@@ -999,7 +999,7 @@ func (r *DefaultRuleRenderer) StaticRawPreroutingChain(ipVersion uint8) *Chain {
 		"r.WireguardEnabled": r.WireguardEnabled,
 		"r.WireguardInterfaceName": r.WireguardInterfaceName,
 		"r.RouteSource": r.RouteSource,
-	}).Debug("MIKE: May be about to Wireguard iptables rule?")
+	}).Info("MIKE: May be about to Wireguard iptables rule?")
 	if ipVersion == 4 && r.WireguardEnabled && len(r.WireguardInterfaceName) > 0 && r.RouteSource == "WorkloadIPs" {
 		log.Debug("Adding Wireguard iptables rule")
 		rules = append(rules, Rule{
