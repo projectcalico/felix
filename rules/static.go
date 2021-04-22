@@ -992,6 +992,24 @@ func (r *DefaultRuleRenderer) StaticRawPreroutingChain(ipVersion uint8) *Chain {
 		Rule{Action: ClearMarkAction{Mark: r.allCalicoMarkBits()}},
 	)
 
+	// Set a mark on the packet if it has come from the WireGuard tunnel to ensure the RPF check allows it
+	// TODO: Mike - remove the following debug line!
+	log.WithFields(log.Fields{
+		"ipVersion": ipVersion,
+		"r.WireguardEnabled": r.WireguardEnabled,
+		"r.WireguardInterfaceName": r.WireguardInterfaceName,
+		"r.RouteSource": r.RouteSource,
+	}).Info("MIKE: May be about to Wireguard iptables rule?")
+	if ipVersion == 4 && r.WireguardEnabled && len(r.WireguardInterfaceName) > 0 && r.RouteSource == "WorkloadIPs" {
+		log.Debug("Adding Wireguard iptables rule")
+		rules = append(rules, Rule{
+			Match: Match().Protocol("udp").
+				DestPorts(uint16(r.WireguardListeningPort)).
+				NotSrcAddrType(AddrTypeLocal, false),
+			Action: SetMarkAction{Mark: r.WireguardIptablesMark},
+		})
+	}
+
 	// Set a mark on the packet if it's from a workload interface.
 	markFromWorkload := r.IptablesMarkScratch0
 	for _, ifacePrefix := range r.WorkloadIfacePrefixes {
