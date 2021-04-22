@@ -186,6 +186,8 @@ type Config struct {
 	// Populated with the smallest host MTU based on auto-detection.
 	hostMTU         int
 	MTUIfacePattern *regexp.Regexp
+
+	RouteSource string
 }
 
 type UpdateBatchResolver interface {
@@ -744,7 +746,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			return nil
 		},
 		dp.loopSummarizer)
-	dp.wireguardManager = newWireguardManager(cryptoRouteTableWireguard)
+	dp.wireguardManager = newWireguardManager(cryptoRouteTableWireguard, config)
 	dp.RegisterManager(dp.wireguardManager) // IPv4-only
 
 	dp.RegisterManager(newServiceLoopManager(filterTableV4, ruleRenderer, 4))
