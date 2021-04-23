@@ -835,7 +835,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 			By("verifying packets between felix-0 and felix-2 are not encrypted")
 			for _, f := range []int{0, 2} {
 				Eventually(func() int {
-					return tcpdumps[f].MatchCount("numInireGuard should not be used for host to workload connections when WireGuard disabled on either nodeWorkloadPackets")
+					return tcpdumps[f].MatchCount("numInWorkloadPackets")
 				}, "10s", "100ms").Should(BeNumerically(">", 0))
 				Eventually(func() int {
 					return tcpdumps[f].MatchCount("numOutWorkloadPackets")
