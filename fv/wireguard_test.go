@@ -885,7 +885,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		client  clientv3.Interface
 
 		wls      [nodeCount]*workload.Workload // simulated host workloads
-		cc       *connectivity.Checker         // TODO uncomment
+		cc       *connectivity.Checker
 		tcpdumps []*tcpdump.TCPDump
 	)
 
@@ -904,8 +904,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		for i := range wls {
 			wls[i] = createWorkloadWithAssignedIP(&infra, &client, fmt.Sprintf("10.65.%d.2", i), fmt.Sprintf("wl%d", i), felixes[i])
 		}
-
-		// Note to future Seth: Removed borrowed workloads setup here because that's really just for CalicoIPAM it seems..
 
 		for i := range felixes {
 			felixes[i].TriggerDelayedStart()
@@ -986,11 +984,18 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+")))
 		}
 		// 3. by checking, Wireguard route table exist.
-		for i := range []int{0, 1} {
-			Eventually(func() string {
-				return getWireguardRouteEntry(felixes[i])
-			}, "10s", "100ms").Should(ContainSubstring("dev wireguard.cali scope link"))
-		}
+		Eventually(func() []string {
+			return strings.Split(getWireguardRouteEntry(felixes[0]), "\n")
+		}, "10s", "100ms").Should(ContainElements(
+			ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", felixes[1].IP)),
+			ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", wls[1].IP)),
+		))
+		Eventually(func() []string {
+			return strings.Split(getWireguardRouteEntry(felixes[1]), "\n")
+		}, "10s", "100ms").Should(ContainElements(
+			ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", felixes[0].IP)),
+			ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", wls[0].IP)),
+		))
 
 		By("Checking the proc/sys src valid mark entries")
 		for _, felix := range felixes {
@@ -999,8 +1004,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				return s
 			}, "10s", "100ms").Should(ContainSubstring("1"))
 		}
-
-		// Note to future Seth: also removed throw tests here for borrowed ips
 
 		cc.ExpectSome(wls[0], wls[1])
 		cc.ExpectSome(wls[1], wls[0])
@@ -1042,8 +1045,6 @@ func wireguardTopologyOptions(routeSource string) infrastructure.TopologyOptions
 	topologyOptions.WireguardEnabled = true
 	// RouteSource
 	topologyOptions.ExtraEnvVars["FELIX_ROUTESOURCE"] = routeSource
-
-	topologyOptions.FelixLogSeverity = "debug"
 
 	// Enable Wireguard.
 	felixConfig := api.NewFelixConfiguration()
