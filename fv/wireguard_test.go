@@ -1043,6 +1043,8 @@ func wireguardTopologyOptions(routeSource string) infrastructure.TopologyOptions
 	// RouteSource
 	topologyOptions.ExtraEnvVars["FELIX_ROUTESOURCE"] = routeSource
 
+	topologyOptions.FelixLogSeverity = "debug"
+
 	// Enable Wireguard.
 	felixConfig := api.NewFelixConfiguration()
 	felixConfig.SetName("default")
