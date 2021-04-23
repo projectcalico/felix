@@ -49,6 +49,7 @@ const (
 	wireguardMTUDefault                 = 1420
 	wireguardRoutingRulePriorityDefault = "99"
 	wireguardListeningPortDefault       = 51820
+	defaultWorkloadPort                 = "8055"
 
 	fakeWireguardPubKey = "jlkVyQYooZYzI2wFfNhSZez5eWh44yfq1wKVjLvSXgY="
 )
@@ -73,7 +74,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 		}
 
 		infra = getInfra()
-		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions(), infra)
+		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions("CalicoIPAM"), infra)
 
 		// To allow all ingress and egress, in absence of any Policy.
 		infra.AddDefaultAllow()
@@ -594,7 +595,7 @@ var _ = infrastructure.DatastoreDescribe("WireGuard-Unsupported", []apiconfig.Da
 		const nodeCount = 1
 
 		infra = getInfra()
-		felixes, _ = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions(), infra)
+		felixes, _ = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions("CalicoIPAM"), infra)
 
 		// Install a default profile that allows all ingress and egress, in the absence of any Policy.
 		infra.AddDefaultAllow()
@@ -653,7 +654,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 		}
 
 		infra = getInfra()
-		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions(), infra)
+		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions("CalicoIPAM"), infra)
 
 		// To allow all ingress and egress, in absence of any Policy.
 		infra.AddDefaultAllow()
@@ -875,9 +876,160 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 	})
 })
 
+var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node cluster with WorkloadIPs", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+	const nodeCount = 3
+
+	var (
+		infra   infrastructure.DatastoreInfra
+		felixes []*infrastructure.Felix
+		client  clientv3.Interface
+
+		wls      [nodeCount]*workload.Workload // simulated host workloads
+		cc       *connectivity.Checker         // TODO uncomment
+		tcpdumps []*tcpdump.TCPDump
+	)
+
+	BeforeEach(func() {
+		// Run these tests only when the Host has Wireguard kernel module available.
+		if os.Getenv("FELIX_FV_WIREGUARD_AVAILABLE") != "true" {
+			Skip("Skipping Wireguard supported tests.")
+		}
+
+		infra = getInfra()
+		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions("WorkloadIPs"), infra)
+
+		// To allow all ingress and egress, in absence of any Policy.
+		infra.AddDefaultAllow()
+
+		for i := range wls {
+			wls[i] = createWorkloadWithAssignedIP(&infra, &client, fmt.Sprintf("10.65.%d.2", i), fmt.Sprintf("wl%d", i), felixes[i])
+		}
+
+		// Note to future Seth: Removed borrowed workloads setup here because that's really just for CalicoIPAM it seems..
+
+		for i := range felixes {
+			felixes[i].TriggerDelayedStart()
+		}
+
+		tcpdumps = nil
+		for _, felix := range felixes {
+			tcpdump := felix.AttachTCPDump("eth0")
+
+			tunnelPacketsFelix0toFelix1Pattern := fmt.Sprintf("IP %s\\.%d > %s\\.%d: UDP", felixes[0].IP, wireguardListeningPortDefault, felixes[1].IP, wireguardListeningPortDefault)
+			tcpdump.AddMatcher("numTunnelPacketsFelix0toFelix1", regexp.MustCompile(tunnelPacketsFelix0toFelix1Pattern))
+			tunnelPacketsFelix1toFelix0Pattern := fmt.Sprintf("IP %s\\.%d > %s\\.%d: UDP", felixes[1].IP, wireguardListeningPortDefault, felixes[0].IP, wireguardListeningPortDefault)
+			tcpdump.AddMatcher("numTunnelPacketsFelix1toFelix0", regexp.MustCompile(tunnelPacketsFelix1toFelix0Pattern))
+			nonTunnelPacketsFelix0toFelix1Pattern := fmt.Sprintf("IP %s\\.%s > %s\\.%s: TCP", felixes[0].IP, defaultWorkloadPort, felixes[1].IP, defaultWorkloadPort)
+			tcpdump.AddMatcher("numNonTunnelPacketsFelix0toFelix1", regexp.MustCompile(nonTunnelPacketsFelix0toFelix1Pattern))
+			nonTunnelPacketsFelix1toFelix0Pattern := fmt.Sprintf("IP %s\\.%s > %s\\.%s: TCP", felixes[1].IP, defaultWorkloadPort, felixes[0].IP, defaultWorkloadPort)
+			tcpdump.AddMatcher("numNonTunnelPacketsFelix1toFelix0", regexp.MustCompile(nonTunnelPacketsFelix1toFelix0Pattern))
+
+			tcpdump.Start()
+			tcpdumps = append(tcpdumps, tcpdump)
+		}
+
+		cc = &connectivity.Checker{}
+	})
+
+	AfterEach(func() {
+		if CurrentGinkgoTestDescription().Failed {
+			for _, felix := range felixes {
+				felix.Exec("ip", "addr")
+				felix.Exec("ip", "rule", "list")
+				felix.Exec("ip", "route", "show", "table", "all")
+				felix.Exec("ip", "route", "show", "cached")
+				felix.Exec("wg")
+				felix.Exec("iptables-save", "-t", "raw")
+				felix.Exec("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
+			}
+		}
+
+		for _, wl := range wls {
+			wl.Stop()
+		}
+
+		for _, tcpdump := range tcpdumps {
+			tcpdump.Stop()
+		}
+
+		for _, felix := range felixes {
+			felix.Stop()
+		}
+
+		if CurrentGinkgoTestDescription().Failed {
+			infra.DumpErrorData()
+		}
+		infra.Stop()
+	})
+
+	It("should pass basic connectivity scenarios", func() {
+		// Check that felix-0, felix-1 is ready
+		// 1. by checking, Wireguard interface exist.
+		By("Checking the wireguard links")
+		Eventually(func() error {
+			for i := range []int{0, 1} {
+				out, err := felixes[i].ExecOutput("ip", "link")
+				if err != nil {
+					return err
+				}
+				if strings.Contains(out, wireguardInterfaceNameDefault) {
+					continue
+				}
+				return fmt.Errorf("felix-%d has no wireguard device", i)
+			}
+			return nil
+		}, "10s", "100ms").ShouldNot(HaveOccurred())
+		// 2. by checking, Wireguard rule exist.
+		for i := range []int{0, 1} {
+			Eventually(func() string {
+				return getWireguardRoutingRule(felixes[i])
+			}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+")))
+		}
+		// 3. by checking, Wireguard route table exist.
+		for i := range []int{0, 1} {
+			Eventually(func() string {
+				return getWireguardRouteEntry(felixes[i])
+			}, "10s", "100ms").Should(ContainSubstring("dev wireguard.cali scope link"))
+		}
+
+		By("Checking the proc/sys src valid mark entries")
+		for _, felix := range felixes {
+			Eventually(func() string {
+				s, _ := felix.ExecCombinedOutput("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
+				return s
+			}, "10s", "100ms").Should(ContainSubstring("1"))
+		}
+
+		// Note to future Seth: also removed throw tests here for borrowed ips
+
+		cc.ExpectSome(wls[0], wls[1])
+		cc.ExpectSome(wls[1], wls[0])
+		cc.CheckConnectivity()
+
+		By("verifying packets between felix-0 and felix-1 is encrypted")
+		for i := range []int{0, 1} {
+			Eventually(func() int {
+				return tcpdumps[i].MatchCount("numTunnelPacketsFelix0toFelix1")
+			}, "10s", "100ms").Should(BeNumerically(">", 0))
+			Eventually(func() int {
+				return tcpdumps[i].MatchCount("numTunnelPacketsFelix1toFelix0")
+			}, "10s", "100ms").Should(BeNumerically(">", 0))
+			Eventually(func() int {
+				return tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")
+			}, "10s", "100ms").Should(BeNumerically("==", 0))
+			Eventually(func() int {
+				return tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")
+			}, "10s", "100ms").Should(BeNumerically("==", 0))
+		}
+
+		//cc.ResetExpectations()
+	})
+
+})
+
 // Setup cluster topology options.
 // mainly, enable Wireguard with delayed start option.
-func wireguardTopologyOptions() infrastructure.TopologyOptions {
+func wireguardTopologyOptions(routeSource string) infrastructure.TopologyOptions {
 	topologyOptions := infrastructure.DefaultTopologyOptions()
 
 	// Waiting for calico-node to be ready.
@@ -888,6 +1040,10 @@ func wireguardTopologyOptions() infrastructure.TopologyOptions {
 	topologyOptions.IPIPRoutesEnabled = false
 	// Indicate wireguard is enabled
 	topologyOptions.WireguardEnabled = true
+	// RouteSource
+	topologyOptions.ExtraEnvVars["FELIX_ROUTESOURCE"] = routeSource
+
+	topologyOptions.FelixLogSeverity = "debug"
 
 	// Enable Wireguard.
 	felixConfig := api.NewFelixConfiguration()
@@ -971,7 +1127,7 @@ func createWorkloadWithAssignedIP(
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	wl := workload.Run(felix, wlName, "default", wlIP, "8055", "tcp")
+	wl := workload.Run(felix, wlName, "default", wlIP, defaultWorkloadPort, "tcp")
 	wl.ConfigureInInfra(*infra)
 
 	return wl
