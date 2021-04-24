@@ -1256,11 +1256,9 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 		}}
 		t.UpdateChains(rpfChain)
 
+		// Set a mark on the packet if it has come from the WireGuard tunnel to ensure the RPF check respects it
 		var rawRules []iptables.Rule
-		// Set a mark on the packet if it has come from the WireGuard tunnel to ensure the RPF check allows it
-		if t.IPVersion == 4 && rulesConfig.WireguardEnabled && len(rulesConfig.WireguardInterfaceName) > 0 &&
-			rulesConfig.RouteSource == "WorkloadIPs" {
-			log.Debug("Adding Wireguard iptables rule")
+		if t.IPVersion == 4 && rulesConfig.WireguardEnabled && len(rulesConfig.WireguardInterfaceName) > 0 && rulesConfig.RouteSource == "WorkloadIPs" {
 			rawRules = append(rawRules, iptables.Rule{
 				Match: iptables.Match().Protocol("udp").
 					DestPorts(uint16(rulesConfig.WireguardListeningPort)).
@@ -1274,7 +1272,7 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 		})
 
 		rawChains := []*iptables.Chain{{
-			Name: rules.ChainRawPrerouting,
+			Name:  rules.ChainRawPrerouting,
 			Rules: rawRules,
 		}}
 		t.UpdateChains(rawChains)
