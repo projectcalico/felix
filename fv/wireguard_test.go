@@ -937,7 +937,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				felix.Exec("ip", "route", "show", "table", "all")
 				felix.Exec("ip", "route", "show", "cached")
 				felix.Exec("wg")
-				felix.Exec("iptables-save")
+				felix.Exec("iptables-save", "-t", "raw")
 				felix.Exec("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
 			}
 		}
@@ -1007,7 +1007,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		cc.ExpectSome(wls[0], wls[1])
 		cc.ExpectSome(wls[1], wls[0])
-		cc.CheckConnectivity()
+		cc.CheckConnectivityWithTimeout(30 * time.Second)
 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
 		for i := range []int{0, 1} {
