@@ -910,6 +910,14 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			felixes[i].TriggerDelayedStart()
 		}
 
+		for i := range felixes {
+			// Check felix wireguards are ready.
+			Eventually(func() string {
+				out, _ := felixes[i].ExecOutput("ip", "link", "show", wireguardInterfaceNameDefault)
+				return out
+			}, "10s", "100ms").Should(Not(BeEmpty()))
+		}
+
 		tcpdumps = nil
 		for _, felix := range felixes {
 			tcpdump := felix.AttachTCPDump("eth0")
@@ -1027,21 +1035,17 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
 		for i := range []int{0, 1} {
-			Eventually(func() int {
-				return tcpdumps[i].MatchCount("numTunnelPacketsFelix0toFelix1")
-			}, "10s", "100ms").Should(BeNumerically(">", 0))
-			Eventually(func() int {
-				return tcpdumps[i].MatchCount("numTunnelPacketsFelix1toFelix0")
-			}, "10s", "100ms").Should(BeNumerically(">", 0))
-			Eventually(func() int {
-				return tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")
-			}, "10s", "100ms").Should(BeNumerically("==", 0))
-			Eventually(func() int {
-				return tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")
-			}, "10s", "100ms").Should(BeNumerically("==", 0))
+			Eventually(tcpdumps[i].MatchCountFn("numTunnelPacketsFelix0toFelix1"), "10s", "100ms").
+				Should(BeNumerically(">", 0))
+			Eventually(tcpdumps[i].MatchCountFn("numTunnelPacketsFelix1toFelix0"), "10s", "100ms").
+				Should(BeNumerically(">", 0))
+
+			Eventually(tcpdumps[i].MatchCountFn("numNonTunnelPacketsFelix0toFelix1"), "10s", "100ms").
+				Should(BeNumerically("==", 0))
+			Eventually(tcpdumps[i].MatchCountFn("numNonTunnelPacketsFelix1toFelix0"), "10s", "100ms").
+				Should(BeNumerically("==", 0))
 		}
 	})
-
 })
 
 // Setup cluster topology options.
