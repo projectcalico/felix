@@ -19,11 +19,12 @@ package fv_test
 import (
 	"context"
 	"fmt"
-	"github.com/onsi/gomega/types"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/onsi/gomega/types"
 
 	log "github.com/sirupsen/logrus"
 
@@ -878,14 +879,17 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 })
 
 var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node cluster with WorkloadIPs", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
-	const nodeCount = 3
+	const nodeCount, wlPerNode = 3, 2
 
 	var (
 		infra   infrastructure.DatastoreInfra
 		felixes []*infrastructure.Felix
 		client  clientv3.Interface
 
-		wls      [nodeCount]*workload.Workload // simulated host workloads
+		// simulated host workloads
+		wls       [nodeCount]*workload.Workload
+		wlsByHost [nodeCount][wlPerNode]*workload.Workload
+
 		cc       *connectivity.Checker
 		tcpdumps []*tcpdump.TCPDump
 	)
@@ -904,6 +908,17 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		for i := range wls {
 			wls[i] = createWorkloadWithAssignedIP(&infra, &client, fmt.Sprintf("10.65.%d.2", i), fmt.Sprintf("wl%d", i), felixes[i])
+		}
+
+		for felixIdx, felixWls := range wlsByHost {
+			for i := range felixWls {
+				wlsByHost[felixIdx][i] = createWorkloadWithAssignedIP(
+					&infra, &client,
+					fmt.Sprintf("10.65.%d.%d", felixIdx, 3+i),
+					fmt.Sprintf("wl-f%d-%d", felixIdx, i),
+					felixes[felixIdx],
+				)
+			}
 		}
 
 		for i := range felixes {
@@ -955,6 +970,12 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			wl.Stop()
 		}
 
+		for felixIdx, felixWls := range wlsByHost {
+			for i := range felixWls {
+				wlsByHost[felixIdx][i].Stop()
+			}
+		}
+
 		for _, tcpdump := range tcpdumps {
 			tcpdump.Stop()
 		}
@@ -997,9 +1018,9 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			var matchers []types.GomegaMatcher
 			for j, _ := range felixes {
 				if i != j {
-                  matchers  = append(matchers,
-                  	ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", felixes[j].IP)),
-                  	ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", wls[j].IP)))
+					matchers = append(matchers,
+						ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", felixes[j].IP)),
+						ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", wls[j].IP)))
 				}
 			}
 			Eventually(func() []string {
@@ -1045,8 +1066,49 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			Eventually(tcpdumps[i].MatchCountFn("numNonTunnelPacketsFelix1toFelix0"), "10s", "100ms").
 				Should(BeNumerically("==", 0))
 		}
+
+		By("checking same node pod-to-pod connectivity")
+		for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
+			Eventually((&wlCheck{
+				cc:   cc,
+				from: wlsByHost[felixIdx][0],
+				to:   wlsByHost[felixIdx][1],
+			}).connect, "10s", "100ms").ShouldNot(HaveOccurred())
+		}
+
+		By("checking different node pod-to-pod connectivity")
+		for _, tc := range []struct {
+			fromFelix, toFelix int
+		}{
+			{0, 1},
+			{1, 0},
+			{0, 2},
+			{2, 0},
+			{1, 2},
+			{2, 1},
+		} {
+			Eventually((&wlCheck{
+				cc:   cc,
+				from: wlsByHost[tc.fromFelix][0],
+				to:   wlsByHost[tc.toFelix][1],
+			}).connect, "10s", "100ms").ShouldNot(HaveOccurred())
+		}
+
 	})
 })
+
+type wlCheck struct {
+	cc       *connectivity.Checker
+	from, to *workload.Workload
+}
+
+func (w *wlCheck) connect() error {
+	w.cc.ResetExpectations()
+	w.cc.ExpectSome(w.from, w.to)
+	w.cc.ExpectSome(w.to, w.from)
+	w.cc.CheckConnectivity()
+	return nil
+}
 
 // Setup cluster topology options.
 // mainly, enable Wireguard with delayed start option.
