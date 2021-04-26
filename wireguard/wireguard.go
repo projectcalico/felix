@@ -16,7 +16,6 @@ package wireguard
 
 import (
 	"errors"
-	"io"
 	"net"
 	"os"
 	"sync"
@@ -1347,7 +1346,7 @@ func (w *Wireguard) ensureLink(netlinkClient netlinkshim.Interface) (bool, error
 
 	if w.config.RouteSource == "WorkloadIPs" {
 		log.Info("Enabling src valid mark for WireGuard")
-		if err := compareAndSetSysctl(allSrcValidMarkPath, "1"); err != nil {
+		if err := writeProcSys(allSrcValidMarkPath, "1"); err != nil {
 			return false, err
 		}
 	}
@@ -1689,56 +1688,17 @@ func getOnlyItemInSet(s set.Set) interface{} {
 	return i
 }
 
-// compareAndSetSysctl reads the current value of the sysctl setting, and sets it to a new value iff the value to be
-// set is different.
-func compareAndSetSysctl(path, value string) error {
-	mark, err := readProcSys(path)
-	if err != nil {
-		log.WithError(err).WithField("path", path).Error(
-			"Failed to read sysctl setting")
-		return err
-	}
-	if mark == value {
-		// value is already set, so nothing to do
-		return nil
-	}
-	if err := writeProcSys(path, value); err != nil {
-		log.WithError(err).WithFields(log.Fields{"path": path, "value": value}).Error(
-			"Failed to write sysctl setting")
-		return err
-	}
-	return nil
-}
-
 // writeProcSys writes the value to the given sysctl path
 func writeProcSys(path, value string) error {
 	f, err := os.OpenFile(path, os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}
-	n, err := f.Write([]byte(value))
-	if err == nil && n < len(value) {
-		err = io.ErrShortWrite
+	if _, err = f.Write([]byte(value)); err != nil {
+		return err
 	}
-	if err1 := f.Close(); err == nil {
-		err = err1
+	if err = f.Close(); err != nil {
+		return err
 	}
-	return err
-}
-
-// readProcSys reads the value from the given sysctl path
-func readProcSys(path string) (string, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY, 0)
-	if err != nil {
-		return "", err
-	}
-	value := make([]byte, 1)
-	n, err := f.Read(value)
-	if err == nil && n > len(value) {
-		err = io.ErrShortBuffer
-	}
-	if err1 := f.Close(); err == nil {
-		err = err1
-	}
-	return string(value), err
+	return nil
 }
