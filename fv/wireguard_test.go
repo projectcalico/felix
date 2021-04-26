@@ -19,6 +19,7 @@ package fv_test
 import (
 	"context"
 	"fmt"
+	"github.com/onsi/gomega/types"
 	"os"
 	"regexp"
 	"strings"
@@ -961,41 +962,42 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 	})
 
 	It("should pass basic connectivity scenarios", func() {
-		// Check that felix-0, felix-1 is ready
-		// 1. by checking, Wireguard interface exist.
-		By("Checking the wireguard links")
+		By("Checking the interface exists")
 		Eventually(func() error {
-			for i := range []int{0, 1} {
-				out, err := felixes[i].ExecOutput("ip", "link")
+			for _, felix := range felixes {
+				out, err := felix.ExecOutput("ip", "link")
 				if err != nil {
 					return err
 				}
 				if strings.Contains(out, wireguardInterfaceNameDefault) {
 					continue
 				}
-				return fmt.Errorf("felix-%d has no wireguard device", i)
+				return fmt.Errorf("felix %v has no wireguard device", felix.Name)
 			}
 			return nil
 		}, "10s", "100ms").ShouldNot(HaveOccurred())
-		// 2. by checking, Wireguard rule exist.
-		for i := range []int{0, 1} {
+
+		By("Checking the ip rule exists")
+		for _, felix := range felixes {
 			Eventually(func() string {
-				return getWireguardRoutingRule(felixes[i])
+				return getWireguardRoutingRule(felix)
 			}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+")))
 		}
-		// 3. by checking, Wireguard route table exist.
-		Eventually(func() []string {
-			return strings.Split(getWireguardRouteEntry(felixes[0]), "\n")
-		}, "10s", "100ms").Should(ContainElements(
-			ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", felixes[1].IP)),
-			ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", wls[1].IP)),
-		))
-		Eventually(func() []string {
-			return strings.Split(getWireguardRouteEntry(felixes[1]), "\n")
-		}, "10s", "100ms").Should(ContainElements(
-			ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", felixes[0].IP)),
-			ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", wls[0].IP)),
-		))
+
+		By("Checking the routing table entries exist")
+		for i, felix := range felixes {
+			var matchers []types.GomegaMatcher
+			for j, _ := range felixes {
+				if i != j {
+                  matchers  = append(matchers,
+                  	ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", felixes[j].IP)),
+                  	ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", wls[j].IP)))
+				}
+			}
+			Eventually(func() []string {
+				return strings.Split(getWireguardRouteEntry(felix), "\n")
+			}, "10s", "100ms").Should(ContainElements(matchers))
+		}
 
 		By("Checking the proc/sys src valid mark entries")
 		for _, felix := range felixes {
@@ -1003,6 +1005,20 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				s, _ := felix.ExecCombinedOutput("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
 				return s
 			}, "10s", "100ms").Should(ContainSubstring("1"))
+		}
+
+		By("Checking wireguard allowed ips")
+		for i, felix := range felixes {
+			var matchers []types.GomegaMatcher
+			for j, _ := range felixes {
+				if i != j {
+					matchers = append(matchers, And(ContainSubstring(felixes[j].IP), ContainSubstring(wls[j].IP)))
+				}
+			}
+			Eventually(func() []string {
+				s, _ := felix.ExecCombinedOutput("wg", "show", "wireguard.cali", "allowed-ips")
+				return strings.Split(s, "\n")
+			}, "10s", "100ms").Should(ContainElements(matchers))
 		}
 
 		cc.ExpectSome(wls[0], wls[1])
