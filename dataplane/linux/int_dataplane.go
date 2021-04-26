@@ -1257,7 +1257,7 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 		t.UpdateChains(rpfChain)
 
 		var rawRules []iptables.Rule
-		// Set a mark on the packet if it has come from the WireGuard tunnel to ensure the RPF check allows it
+		// Set a mark on encapsulated packets coming from WireGuard to ensure the RPF check allows it
 		if t.IPVersion == 4 && rulesConfig.WireguardEnabled && len(rulesConfig.WireguardInterfaceName) > 0 &&
 			rulesConfig.RouteSource == "WorkloadIPs" {
 			log.Debug("Adding Wireguard iptables rule")
