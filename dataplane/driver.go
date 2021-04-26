@@ -21,8 +21,11 @@ import (
 	"net"
 	"os/exec"
 	"runtime/debug"
+	"time"
 
 	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/clock"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/projectcalico/felix/aws"
@@ -357,21 +360,19 @@ func StartDataplaneDriver(configParams *config.Config,
 
 		// Set source-destination-check on AWS EC2 instance.
 		if configParams.AWSSrcDstCheck != string(apiv3.AWSSrcDstCheckOptionDoNothing) {
-			const healthName = "aws-source-destination-check"
-			healthAggregator.RegisterReporter(healthName, &health.HealthReport{Live: true, Ready: true}, 0)
+			var (
+				initBackoff   = 30 * time.Second
+				maxBackoff    = 8 * time.Minute
+				resetDuration = time.Hour
+				backoffFactor = 2.0
+				jitter        = 0.1
+				clock         = &clock.RealClock{}
+			)
 
-			go func(check, healthName string, healthAgg *health.HealthAggregator) {
-				log.Infof("Setting AWS EC2 source-destination-check to %s", check)
-				err := aws.UpdateSrcDstCheck(check)
-				if err != nil {
-					log.WithField("src-dst-check", check).Errorf("Failed to set source-destination-check: %v", err)
-					// set not-ready.
-					healthAggregator.Report(healthName, &health.HealthReport{Live: true, Ready: false})
-					return
-				}
-				// set ready.
-				healthAggregator.Report(healthName, &health.HealthReport{Live: true, Ready: true})
-			}(configParams.AWSSrcDstCheck, healthName, healthAggregator)
+			backoffMgr := wait.NewExponentialBackoffManager(initBackoff, maxBackoff, resetDuration, backoffFactor, jitter, clock)
+			defer backoffMgr.Backoff().Stop()
+
+			go awsEc2UpdateSrcDstCheck(configParams.AWSSrcDstCheck, healthAggregator, aws.UpdateSrcDstCheck, backoffMgr)
 		}
 
 		return intDP, nil
@@ -385,4 +386,28 @@ func StartDataplaneDriver(configParams *config.Config,
 
 func SupportsBPF() error {
 	return bpf.SupportsBPFDataplane()
+}
+
+type checkFunc func(option string) error
+
+func awsEc2UpdateSrcDstCheck(check string, healthAgg *health.HealthAggregator, fun checkFunc, backoffMgr wait.BackoffManager) {
+	log.Infof("Setting AWS EC2 source-destination-check to %s", check)
+
+	const healthName = "aws-source-destination-check"
+	healthAgg.RegisterReporter(healthName, &health.HealthReport{Live: true, Ready: true}, 0)
+
+	// set not-ready.
+	healthAgg.Report(healthName, &health.HealthReport{Live: true, Ready: false})
+
+	for {
+		if err := fun(check); err != nil {
+			log.WithField("src-dst-check", check).Warnf("Failed to set source-destination-check: %v", err)
+		} else {
+			// set ready.
+			healthAgg.Report(healthName, &health.HealthReport{Live: true, Ready: true})
+			return
+		}
+
+		<-backoffMgr.Backoff().C()
+	}
 }
