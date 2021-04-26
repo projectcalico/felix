@@ -1023,7 +1023,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		cc.ExpectSome(wls[0], wls[1])
 		cc.ExpectSome(wls[1], wls[0])
-		cc.CheckConnectivityWithTimeout(30 * time.Second)
+		cc.CheckConnectivity()
 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
 		for i := range []int{0, 1} {
@@ -1040,8 +1040,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				return tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")
 			}, "10s", "100ms").Should(BeNumerically("==", 0))
 		}
-
-		//cc.ResetExpectations()
 	})
 
 })
