@@ -1072,21 +1072,21 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			}, "10s", "100ms").Should(ContainElements(matchers))
 		}
 
-		By("Ensuring felix nodes can connect to each other")
-		for i := range felixes {
-			for j := range felixes {
-				if i != j {
-					Eventually(func() bool {
-						return felixes[i].CanConnectTo(felixes[j].IP, defaultWorkloadPort, "tcp").HasConnectivity()
-					}, "10s", "100ms").Should(BeTrue())
-				}
-			}
-		}
+		//By("Ensuring felix nodes can connect to each other")
+		//for i := range felixes {
+		//	for j := range felixes {
+		//		if i != j {
+		//			Eventually(func() bool {
+		//				return felixes[i].CanConnectTo(felixes[j].IP, defaultWorkloadPort, "tcp").HasConnectivity()
+		//			}, "10s", "100ms").Should(BeTrue())
+		//		}
+		//	}
+		//}
 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
 		cc.ExpectSome(wlsByHost[0][0], wlsByHost[1][0])
 		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][0])
-		cc.CheckConnectivity()
+		cc.CheckConnectivityWithTimeout(30 * time.Second)
 		for i := range []int{0, 1} {
 			Eventually(tcpdumps[i].MatchCountFn("numTunnelPacketsFelix0toFelix1"), "10s", "100ms").
 				Should(BeNumerically(">", 0))
@@ -1099,35 +1099,35 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				Should(BeNumerically("==", 0))
 		}
 
-		By("checking same node pod-to-pod connectivity")
-		cc.ResetExpectations()
-		for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
-			cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
-		}
-		cc.CheckConnectivity()
-
-		By("checking different node pod-to-pod connectivity")
-		cc.ResetExpectations()
-		for i, _ := range wlsByHost {
-			for j, _ := range wlsByHost {
-				cc.ExpectSome(wlsByHost[i][0], wlsByHost[j][1])
-			}
-		}
-		cc.CheckConnectivity()
-
-		By("checking host-networked pod to regular pod connectivity")
-		cc.ResetExpectations()
-		for _, wl := range hostNetworkedWls {
-			for j, _ := range wlsByHost {
-				cc.ExpectSome(wl, wlsByHost[j][1])
-			}
-		}
-		cc.CheckConnectivity()
-
-		By("checking external node to pod connectivity")
-		cc.ResetExpectations()
-		cc.ExpectSome(externalClient, wlsByHost[0][0])
-		cc.CheckConnectivity()
+		//By("checking same node pod-to-pod connectivity")
+		//cc.ResetExpectations()
+		//for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
+		//	cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
+		//}
+		//cc.CheckConnectivity()
+		//
+		//By("checking different node pod-to-pod connectivity")
+		//cc.ResetExpectations()
+		//for i, _ := range wlsByHost {
+		//	for j, _ := range wlsByHost {
+		//		cc.ExpectSome(wlsByHost[i][0], wlsByHost[j][1])
+		//	}
+		//}
+		//cc.CheckConnectivity()
+		//
+		//By("checking host-networked pod to regular pod connectivity")
+		//cc.ResetExpectations()
+		//for _, wl := range hostNetworkedWls {
+		//	for j, _ := range wlsByHost {
+		//		cc.ExpectSome(wl, wlsByHost[j][1])
+		//	}
+		//}
+		//cc.CheckConnectivity()
+		//
+		//By("checking external node to pod connectivity")
+		//cc.ResetExpectations()
+		//cc.ExpectSome(externalClient, wlsByHost[0][0])
+		//cc.CheckConnectivity()
 	})
 })
 
@@ -1157,7 +1157,7 @@ func wireguardTopologyOptions(routeSource string, ipipEnabled bool) infrastructu
 
 	// Debugging.
 	//topologyOptions.ExtraEnvVars["FELIX_DebugUseShortPollIntervals"] = "true"
-	topologyOptions.FelixLogSeverity = "debug"
+	//topologyOptions.FelixLogSeverity = "debug"
 
 	return topologyOptions
 }
