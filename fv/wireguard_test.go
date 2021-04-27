@@ -962,6 +962,8 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		cc = &connectivity.Checker{}
+
+		<- time.After(30 * time.Second)
 	})
 
 	AfterEach(func() {
@@ -1145,7 +1147,7 @@ func wireguardTopologyOptions(routeSource string, ipipEnabled bool) infrastructu
 
 	// Debugging.
 	//topologyOptions.ExtraEnvVars["FELIX_DebugUseShortPollIntervals"] = "true"
-	//topologyOptions.FelixLogSeverity = "debug"
+	topologyOptions.FelixLogSeverity = "debug"
 
 	return topologyOptions
 }
