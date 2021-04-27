@@ -921,7 +921,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		for i, _ := range hostNetworkedWls {
-			hostNetworkedWls[i] = createHostNetworkedWorkload(fmt.Sprintf("wl-f%d-hn-0", i),	felixes[i])
+			hostNetworkedWls[i] = createHostNetworkedWorkload(fmt.Sprintf("wl-f%d-hn-0", i), felixes[i])
 		}
 
 		externalClient = containers.Run("external-client",
@@ -963,7 +963,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		cc = &connectivity.Checker{}
 
-		<- time.After(30 * time.Second)
+		<-time.After(30 * time.Second)
 	})
 
 	AfterEach(func() {
@@ -975,6 +975,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				felix.Exec("ip", "route", "show", "cached")
 				felix.Exec("wg")
 				felix.Exec("iptables-save", "-t", "raw")
+				felix.Exec("iptables", "-L", "-vx")
 				felix.Exec("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
 			}
 		}
