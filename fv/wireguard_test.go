@@ -1069,11 +1069,9 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		By("checking same node pod-to-pod connectivity")
 		for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
-			Eventually((&wlCheck{
-				cc:   cc,
-				from: wlsByHost[felixIdx][0],
-				to:   wlsByHost[felixIdx][1],
-			}).connect, "10s", "100ms").ShouldNot(HaveOccurred())
+			cc.ResetExpectations()
+			cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
+			cc.CheckConnectivity()
 		}
 
 		By("checking different node pod-to-pod connectivity")
@@ -1087,28 +1085,13 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			{1, 2},
 			{2, 1},
 		} {
-			Eventually((&wlCheck{
-				cc:   cc,
-				from: wlsByHost[tc.fromFelix][0],
-				to:   wlsByHost[tc.toFelix][1],
-			}).connect, "10s", "100ms").ShouldNot(HaveOccurred())
+			cc.ResetExpectations()
+			cc.ExpectSome(wlsByHost[tc.fromFelix][0], wlsByHost[tc.toFelix][1])
+			cc.CheckConnectivity()
 		}
 
 	})
 })
-
-type wlCheck struct {
-	cc       *connectivity.Checker
-	from, to *workload.Workload
-}
-
-func (w *wlCheck) connect() error {
-	w.cc.ResetExpectations()
-	w.cc.ExpectSome(w.from, w.to)
-	w.cc.ExpectSome(w.to, w.from)
-	w.cc.CheckConnectivity()
-	return nil
-}
 
 // Setup cluster topology options.
 // mainly, enable Wireguard with delayed start option.
