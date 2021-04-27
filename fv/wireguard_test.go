@@ -24,16 +24,19 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/util/intstr"
+
 	"github.com/onsi/gomega/types"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	log "github.com/sirupsen/logrus"
+	v1 "k8s.io/api/core/v1"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
 	"github.com/projectcalico/felix/fv/connectivity"
+	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/infrastructure"
 	"github.com/projectcalico/felix/fv/tcpdump"
 	"github.com/projectcalico/felix/fv/utils"
@@ -52,8 +55,7 @@ const (
 	wireguardRoutingRulePriorityDefault = "99"
 	wireguardListeningPortDefault       = 51820
 	defaultWorkloadPort                 = "8055"
-
-	fakeWireguardPubKey = "jlkVyQYooZYzI2wFfNhSZez5eWh44yfq1wKVjLvSXgY="
+	fakeWireguardPubKey                 = "jlkVyQYooZYzI2wFfNhSZez5eWh44yfq1wKVjLvSXgY="
 )
 
 var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
@@ -732,7 +734,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 		for i := range []int{0, 1} {
 			Eventually(func() string {
 				return getWireguardRouteEntry(felixes[i])
-			}, "10s", "100ms").Should(ContainSubstring("dev wireguard.cali scope link"))
+			}, "10s", "100ms").Should(ContainSubstring(fmt.Sprintf("dev %s scope link", wireguardInterfaceNameDefault)))
 		}
 
 		By("verifying WireGuard route table should show 'throw' entry on felix 0 and 1")
@@ -760,7 +762,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 			}, "10s", "100ms").Should(BeEmpty())
 			Eventually(func() string {
 				return getWireguardRouteEntry(felixes[2])
-			}, "10s", "100ms").ShouldNot(ContainSubstring("dev wireguard.cali scope link"))
+			}, "10s", "100ms").ShouldNot(ContainSubstring(fmt.Sprintf("dev %s scope link", wireguardInterfaceNameDefault)))
 
 			// Check felix-0, felix-1 is ready for tests.
 			Eventually(func() error {
@@ -786,7 +788,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 				// Check the route entry exists.
 				Eventually(func() string {
 					return getWireguardRouteEntry(felixes[i])
-				}, "10s", "100ms").Should(ContainSubstring("dev wireguard.cali scope link"))
+				}, "10s", "100ms").Should(ContainSubstring(fmt.Sprintf("dev %s scope link", wireguardInterfaceNameDefault)))
 			}
 
 			tcpdumps = nil
@@ -887,8 +889,9 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		client  clientv3.Interface
 
 		// simulated host workloads
-		wls       [nodeCount]*workload.Workload
-		wlsByHost [nodeCount][wlPerNode]*workload.Workload
+		wlsByHost        [nodeCount][wlPerNode]*workload.Workload
+		hostNetworkedWls [nodeCount]*workload.Workload
+		externalClient   *containers.Container
 
 		cc       *connectivity.Checker
 		tcpdumps []*tcpdump.TCPDump
@@ -906,20 +909,28 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		// To allow all ingress and egress, in absence of any Policy.
 		infra.AddDefaultAllow()
 
-		for i := range wls {
-			wls[i] = createWorkloadWithAssignedIP(&infra, &client, fmt.Sprintf("10.65.%d.2", i), fmt.Sprintf("wl%d", i), felixes[i])
-		}
-
 		for felixIdx, felixWls := range wlsByHost {
-			for i := range felixWls {
-				wlsByHost[felixIdx][i] = createWorkloadWithAssignedIP(
+			for wlIdx := range felixWls {
+				wlsByHost[felixIdx][wlIdx] = createWorkloadWithAssignedIP(
 					&infra, &client,
-					fmt.Sprintf("10.65.%d.%d", felixIdx, 3+i),
-					fmt.Sprintf("wl-f%d-%d", felixIdx, i),
+					fmt.Sprintf("10.65.%d.%d", felixIdx, 2+wlIdx),
+					fmt.Sprintf("wl-f%d-%d", felixIdx, wlIdx),
 					felixes[felixIdx],
 				)
 			}
 		}
+
+		for i, _ := range hostNetworkedWls {
+			hostNetworkedWls[i] = createHostNetworkedWorkload(fmt.Sprintf("wl-f%d-hn-0", i),	felixes[i])
+		}
+
+		externalClient = containers.Run("external-client",
+			containers.RunOpts{AutoRemove: true},
+			"--privileged", // So that we can add routes inside the container.
+			utils.Config.BusyboxImage,
+			"/bin/sh", "-c", "sleep 1000")
+		externalClient.EnsureBinary("test-connection")
+		externalClient.Exec("ip", "route", "add", wlsByHost[0][0].IP, "via", felixes[0].IP)
 
 		for i := range felixes {
 			felixes[i].TriggerDelayedStart()
@@ -966,15 +977,13 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			}
 		}
 
-		for _, wl := range wls {
-			wl.Stop()
-		}
-
 		for felixIdx, felixWls := range wlsByHost {
 			for i := range felixWls {
 				wlsByHost[felixIdx][i].Stop()
 			}
 		}
+
+		externalClient.Stop()
 
 		for _, tcpdump := range tcpdumps {
 			tcpdump.Stop()
@@ -1014,17 +1023,22 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		By("Checking the routing table entries exist")
-		for i, felix := range felixes {
+		for i, _ := range wlsByHost {
 			var matchers []types.GomegaMatcher
-			for j, _ := range felixes {
+			for j, wls := range wlsByHost {
 				if i != j {
-					matchers = append(matchers,
-						ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", felixes[j].IP)),
-						ContainSubstring(fmt.Sprintf("%s dev wireguard.cali scope link", wls[j].IP)))
+					// check for routes to other felix nodes
+					matchers = append(matchers, ContainSubstring(
+						fmt.Sprintf("%s dev %s scope link", felixes[j].IP, wireguardInterfaceNameDefault)))
+					// check for routes to pods on other felix nodes
+					for _, wl := range wls {
+						matchers = append(matchers, ContainSubstring(
+							fmt.Sprintf("%s dev %s scope link", wl.IP, wireguardInterfaceNameDefault)))
+					}
 				}
 			}
 			Eventually(func() []string {
-				return strings.Split(getWireguardRouteEntry(felix), "\n")
+				return strings.Split(getWireguardRouteEntry(felixes[i]), "\n")
 			}, "10s", "100ms").Should(ContainElements(matchers))
 		}
 
@@ -1037,24 +1051,30 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		By("Checking wireguard allowed ips")
-		for i, felix := range felixes {
+		for i, _ := range wlsByHost {
 			var matchers []types.GomegaMatcher
-			for j, _ := range felixes {
+			for j, wls := range wlsByHost {
 				if i != j {
-					matchers = append(matchers, And(ContainSubstring(felixes[j].IP), ContainSubstring(wls[j].IP)))
+					var allowedIPMatchers []types.GomegaMatcher
+					// check for allowed IP entry for other felix nodes
+					allowedIPMatchers = append(allowedIPMatchers, ContainSubstring(felixes[j].IP))
+					// check for routes to pods on other felix nodes
+					for _, wl := range wls {
+						allowedIPMatchers = append(allowedIPMatchers, ContainSubstring(wl.IP))
+					}
+					matchers = append(matchers, And(allowedIPMatchers...))
 				}
 			}
 			Eventually(func() []string {
-				s, _ := felix.ExecCombinedOutput("wg", "show", "wireguard.cali", "allowed-ips")
+				s, _ := felixes[i].ExecCombinedOutput("wg", "show", wireguardInterfaceNameDefault, "allowed-ips")
 				return strings.Split(s, "\n")
 			}, "10s", "100ms").Should(ContainElements(matchers))
 		}
 
-		cc.ExpectSome(wls[0], wls[1])
-		cc.ExpectSome(wls[1], wls[0])
-		cc.CheckConnectivity()
-
 		By("verifying packets between felix-0 and felix-1 is encrypted")
+		cc.ExpectSome(wlsByHost[0][0], wlsByHost[1][0])
+		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][0])
+		cc.CheckConnectivity()
 		for i := range []int{0, 1} {
 			Eventually(tcpdumps[i].MatchCountFn("numTunnelPacketsFelix0toFelix1"), "10s", "100ms").
 				Should(BeNumerically(">", 0))
@@ -1068,28 +1088,34 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		By("checking same node pod-to-pod connectivity")
+		cc.ResetExpectations()
 		for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
-			cc.ResetExpectations()
 			cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
-			cc.CheckConnectivity()
 		}
+		cc.CheckConnectivity()
 
 		By("checking different node pod-to-pod connectivity")
-		for _, tc := range []struct {
-			fromFelix, toFelix int
-		}{
-			{0, 1},
-			{1, 0},
-			{0, 2},
-			{2, 0},
-			{1, 2},
-			{2, 1},
-		} {
-			cc.ResetExpectations()
-			cc.ExpectSome(wlsByHost[tc.fromFelix][0], wlsByHost[tc.toFelix][1])
-			cc.CheckConnectivity()
+		cc.ResetExpectations()
+		for i, _ := range wlsByHost {
+			for j, _ := range wlsByHost {
+				cc.ExpectSome(wlsByHost[i][0], wlsByHost[j][1])
+			}
 		}
+		cc.CheckConnectivity()
 
+		By("checking host-networked pod to regular pod connectivity")
+		cc.ResetExpectations()
+		for _, wl := range hostNetworkedWls {
+			for j, _ := range wlsByHost {
+				cc.ExpectSome(wl, wlsByHost[j][1])
+			}
+		}
+		cc.CheckConnectivity()
+
+		By("checking external node to pod connectivity")
+		cc.ResetExpectations()
+		cc.ExpectSome(externalClient, wlsByHost[0][0])
+		cc.CheckConnectivity()
 	})
 })
 
@@ -1196,4 +1222,42 @@ func createWorkloadWithAssignedIP(
 	wl.ConfigureInInfra(*infra)
 
 	return wl
+}
+
+func createHostNetworkedWorkload(wlName string, felix *infrastructure.Felix) *workload.Workload {
+	return workload.Run(felix, wlName, "default", felix.IP, defaultWorkloadPort, "tcp")
+}
+
+func k8sServiceWireguard(name, clusterIP string, w *workload.Workload, port,
+	tgtPort int, nodePort int32, protocol string) *v1.Service {
+	k8sProto := v1.ProtocolTCP
+	if protocol == "udp" {
+		k8sProto = v1.ProtocolUDP
+	}
+
+	svcType := v1.ServiceTypeClusterIP
+	if nodePort != 0 {
+		svcType = v1.ServiceTypeNodePort
+	}
+
+	return &v1.Service{
+		TypeMeta:   typeMetaV1("Service"),
+		ObjectMeta: objectMetaV1(name),
+		Spec: v1.ServiceSpec{
+			ClusterIP: clusterIP,
+			Type:      svcType,
+			Selector: map[string]string{
+				"name": w.Name,
+			},
+			Ports: []v1.ServicePort{
+				{
+					Protocol:   k8sProto,
+					Port:       int32(port),
+					NodePort:   nodePort,
+					Name:       fmt.Sprintf("port-%d", tgtPort),
+					TargetPort: intstr.FromInt(tgtPort),
+				},
+			},
+		},
+	}
 }
