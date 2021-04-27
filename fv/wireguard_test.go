@@ -962,8 +962,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		cc = &connectivity.Checker{}
-
-		<-time.After(30 * time.Second)
 	})
 
 	AfterEach(func() {
@@ -1072,6 +1070,17 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				s, _ := felixes[i].ExecCombinedOutput("wg", "show", wireguardInterfaceNameDefault, "allowed-ips")
 				return strings.Split(s, "\n")
 			}, "10s", "100ms").Should(ContainElements(matchers))
+		}
+
+		By("Ensuring felix nodes can connect to each other")
+		for i := range felixes {
+			for j := range felixes {
+				if i != j {
+					Eventually(func() bool {
+						return felixes[i].CanConnectTo(felixes[j].IP, defaultWorkloadPort, "tcp").HasConnectivity()
+					}, "10s", "100ms").Should(BeTrue())
+				}
+			}
 		}
 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
