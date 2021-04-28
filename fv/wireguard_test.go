@@ -909,7 +909,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		// To allow all ingress and egress, in absence of any Policy.
 		infra.AddDefaultAllow()
 
-		// initialise pods
 		for felixIdx, felixWls := range wlsByHost {
 			for wlIdx := range felixWls {
 				wlsByHost[felixIdx][wlIdx] = createWorkloadWithAssignedIP(
@@ -921,12 +920,10 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			}
 		}
 
-		// initialise host-networked pods
 		for i, _ := range hostNetworkedWls {
 			hostNetworkedWls[i] = createHostNetworkedWorkload(fmt.Sprintf("wl-f%d-hn-0", i), felixes[i])
 		}
 
-		// initialise external client
 		externalClient = containers.Run("external-client",
 			containers.RunOpts{AutoRemove: true},
 			"--privileged", // So that we can add routes inside the container.
@@ -939,8 +936,8 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			felixes[i].TriggerDelayedStart()
 		}
 
-		// Check felix Wireguard links are ready.
 		for i := range felixes {
+			// Check felix wireguards are ready.
 			Eventually(func() string {
 				out, _ := felixes[i].ExecOutput("ip", "link", "show", wireguardInterfaceNameDefault)
 				return out
@@ -1075,48 +1072,62 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			}, "10s", "100ms").Should(ContainElements(matchers))
 		}
 
+		//By("Ensuring felix nodes can connect to each other")
+		//for i := range felixes {
+		//	for j := range felixes {
+		//		if i != j {
+		//			Eventually(func() bool {
+		//				return felixes[i].CanConnectTo(felixes[j].IP, defaultWorkloadPort, "tcp").HasConnectivity()
+		//			}, "10s", "100ms").Should(BeTrue())
+		//		}
+		//	}
+		//}
+
 		By("verifying packets between felix-0 and felix-1 is encrypted")
 		cc.ExpectSome(wlsByHost[0][0], wlsByHost[1][0])
 		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][0])
 		cc.CheckConnectivityWithTimeout(30 * time.Second)
 		for i := range []int{0, 1} {
-			numNonTunnelPacketsFelix0toFelix1Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")
-			numNonTunnelPacketsFelix1toFelix0Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")
 			Eventually(tcpdumps[i].MatchCountFn("numTunnelPacketsFelix0toFelix1"), "10s", "100ms").
 				Should(BeNumerically(">", 0))
 			Eventually(tcpdumps[i].MatchCountFn("numTunnelPacketsFelix1toFelix0"), "10s", "100ms").
 				Should(BeNumerically(">", 0))
 
-			Expect(tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")).
-				Should(BeNumerically("==", numNonTunnelPacketsFelix0toFelix1Before))
-			Expect(tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")).
-				Should(BeNumerically("==", numNonTunnelPacketsFelix1toFelix0Before))
+			Eventually(tcpdumps[i].MatchCountFn("numNonTunnelPacketsFelix0toFelix1"), "10s", "100ms").
+				Should(BeNumerically("==", 0))
+			Eventually(tcpdumps[i].MatchCountFn("numNonTunnelPacketsFelix1toFelix0"), "10s", "100ms").
+				Should(BeNumerically("==", 0))
 		}
-		cc.ResetExpectations()
 
 		By("checking same node pod-to-pod connectivity")
+		cc.ResetExpectations()
 		for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
 			cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
 		}
+		cc.CheckConnectivity()
 
 		By("checking different node pod-to-pod connectivity")
+		cc.ResetExpectations()
 		for i, _ := range wlsByHost {
 			for j, _ := range wlsByHost {
 				cc.ExpectSome(wlsByHost[i][0], wlsByHost[j][1])
 			}
 		}
+		cc.CheckConnectivity()
 
 		By("checking host-networked pod to regular pod connectivity")
+		cc.ResetExpectations()
 		for _, wl := range hostNetworkedWls {
 			for j, _ := range wlsByHost {
 				cc.ExpectSome(wl, wlsByHost[j][1])
 			}
 		}
+		cc.CheckConnectivity()
 
 		By("checking external node to pod connectivity")
+		cc.ResetExpectations()
 		cc.ExpectSome(externalClient, wlsByHost[0][0])
-
-		cc.CheckConnectivityWithTimeout(30 * time.Second)
+		cc.CheckConnectivity()
 	})
 })
 
