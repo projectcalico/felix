@@ -1099,35 +1099,35 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				Should(BeNumerically("==", 0))
 		}
 
-		//By("checking same node pod-to-pod connectivity")
-		//cc.ResetExpectations()
-		//for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
-		//	cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
-		//}
-		//cc.CheckConnectivity()
-		//
-		//By("checking different node pod-to-pod connectivity")
-		//cc.ResetExpectations()
-		//for i, _ := range wlsByHost {
-		//	for j, _ := range wlsByHost {
-		//		cc.ExpectSome(wlsByHost[i][0], wlsByHost[j][1])
-		//	}
-		//}
-		//cc.CheckConnectivity()
-		//
-		//By("checking host-networked pod to regular pod connectivity")
-		//cc.ResetExpectations()
-		//for _, wl := range hostNetworkedWls {
-		//	for j, _ := range wlsByHost {
-		//		cc.ExpectSome(wl, wlsByHost[j][1])
-		//	}
-		//}
-		//cc.CheckConnectivity()
-		//
-		//By("checking external node to pod connectivity")
-		//cc.ResetExpectations()
-		//cc.ExpectSome(externalClient, wlsByHost[0][0])
-		//cc.CheckConnectivity()
+		By("checking same node pod-to-pod connectivity")
+		cc.ResetExpectations()
+		for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
+			cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
+		}
+		cc.CheckConnectivity()
+
+		By("checking different node pod-to-pod connectivity")
+		cc.ResetExpectations()
+		for i, _ := range wlsByHost {
+			for j, _ := range wlsByHost {
+				cc.ExpectSome(wlsByHost[i][0], wlsByHost[j][1])
+			}
+		}
+		cc.CheckConnectivity()
+
+		By("checking host-networked pod to regular pod connectivity")
+		cc.ResetExpectations()
+		for _, wl := range hostNetworkedWls {
+			for j, _ := range wlsByHost {
+				cc.ExpectSome(wl, wlsByHost[j][1])
+			}
+		}
+		cc.CheckConnectivity()
+
+		By("checking external node to pod connectivity")
+		cc.ResetExpectations()
+		cc.ExpectSome(externalClient, wlsByHost[0][0])
+		cc.CheckConnectivity()
 	})
 })
 
