@@ -881,7 +881,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 })
 
 var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node cluster with WorkloadIPs", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
-	const nodeCount, wlPerNode = 3, 2
+	const nodeCount, wlPerNode = 3, 1
 
 	var (
 		infra   infrastructure.DatastoreInfra
@@ -1095,22 +1095,22 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		cc.ResetExpectations()
 
-		By("checking same node pod-to-pod connectivity")
-		for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
-			cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
-		}
+		//By("checking same node pod-to-pod connectivity")
+		//for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
+		//	cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
+		//}
 
 		By("checking different node pod-to-pod connectivity")
 		for i, _ := range wlsByHost {
 			for j, _ := range wlsByHost {
-				cc.ExpectSome(wlsByHost[i][0], wlsByHost[j][1])
+				cc.ExpectSome(wlsByHost[i][0], wlsByHost[j][0])
 			}
 		}
 
 		By("checking host-networked pod to regular pod connectivity")
 		for _, wl := range hostNetworkedWls {
 			for j, _ := range wlsByHost {
-				cc.ExpectSome(wl, wlsByHost[j][1])
+				cc.ExpectSome(wl, wlsByHost[j][0])
 			}
 		}
 
