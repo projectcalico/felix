@@ -130,7 +130,6 @@ clean:
 	       dist \
 	       build \
 	       fv/fv.test \
-	       $(GENERATED_FILES) \
 	       go/docs/calc.pdf \
 	       release-notes-* \
 	       fv/infrastructure/crds/ \
