@@ -78,13 +78,20 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 		}
 
 		infra = getInfra()
-		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions("CalicoIPAM", true), infra)
+		topologyOptions := wireguardTopologyOptions("CalicoIPAM", true)
+		felixes, client = infrastructure.StartNNodeTopology(nodeCount, topologyOptions, infra)
 
 		// To allow all ingress and egress, in absence of any Policy.
 		infra.AddDefaultAllow()
 
 		for i := range wls {
-			wls[i] = createWorkloadWithAssignedIP(&infra, &client, fmt.Sprintf("10.65.%d.2", i), fmt.Sprintf("wl%d", i), felixes[i])
+			wls[i] = createWorkloadWithAssignedIP(
+				&infra,
+				&topologyOptions,
+				&client,
+				fmt.Sprintf("10.65.%d.2", i),
+				fmt.Sprintf("wl%d", i),
+				felixes[i])
 
 			// Prepare route entry.
 			routeEntries[i] = fmt.Sprintf("10.65.%d.0/26 dev %s scope link", i, wireguardInterfaceNameDefault)
@@ -658,19 +665,38 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 		}
 
 		infra = getInfra()
-		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions("CalicoIPAM", true), infra)
+		topologyOptions := wireguardTopologyOptions("CalicoIPAM", true)
+		felixes, client = infrastructure.StartNNodeTopology(nodeCount, topologyOptions, infra)
 
 		// To allow all ingress and egress, in absence of any Policy.
 		infra.AddDefaultAllow()
 
 		for i := range wls {
-			wls[i] = createWorkloadWithAssignedIP(&infra, &client, fmt.Sprintf("10.65.%d.2", i), fmt.Sprintf("wl%d", i), felixes[i])
+			wls[i] = createWorkloadWithAssignedIP(
+				&infra,
+				&topologyOptions,
+				&client,
+				fmt.Sprintf("10.65.%d.2", i),
+				fmt.Sprintf("wl%d", i),
+				felixes[i])
 		}
 
 		// Create 'borrowed' workloads e.g. create workload on felix-0 with IP
 		// borrowed from IPAM block from felix-1.
-		_ = createWorkloadWithAssignedIP(&infra, &client, "10.65.0.4", "borrowed-0", felixes[1])
-		_ = createWorkloadWithAssignedIP(&infra, &client, "10.65.1.4", "borrowed-1", felixes[0])
+		_ = createWorkloadWithAssignedIP(
+			&infra,
+			&topologyOptions,
+			&client,
+			"10.65.0.4",
+			"borrowed-0",
+			felixes[1])
+		_ = createWorkloadWithAssignedIP(
+			&infra,
+			&topologyOptions,
+			&client,
+			"10.65.1.4",
+			"borrowed-1",
+			felixes[0])
 
 		for i := range felixes {
 			felixes[i].TriggerDelayedStart()
@@ -881,7 +907,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 })
 
 var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node cluster with WorkloadIPs", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
-	const nodeCount, wlPerNode = 3, 1
+	const nodeCount, wlPerNode = 3, 2
 
 	var (
 		infra   infrastructure.DatastoreInfra
@@ -904,7 +930,8 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		infra = getInfra()
-		felixes, client = infrastructure.StartNNodeTopology(nodeCount, wireguardTopologyOptions("WorkloadIPs", false), infra)
+		topologyOptions := wireguardTopologyOptions("WorkloadIPs", false)
+		felixes, client = infrastructure.StartNNodeTopology(nodeCount, topologyOptions, infra)
 
 		// To allow all ingress and egress, in absence of any Policy.
 		infra.AddDefaultAllow()
@@ -913,11 +940,12 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		for felixIdx, felixWls := range wlsByHost {
 			for wlIdx := range felixWls {
 				wlsByHost[felixIdx][wlIdx] = createWorkloadWithAssignedIP(
-					&infra, &client,
+					&infra,
+					&topologyOptions,
+					&client,
 					fmt.Sprintf("10.65.%d.%d", felixIdx, 2+wlIdx),
 					fmt.Sprintf("wl-f%d-%d", felixIdx, wlIdx),
-					felixes[felixIdx],
-				)
+					felixes[felixIdx])
 			}
 		}
 
@@ -1076,8 +1104,8 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
-		cc.ExpectSome(wlsByHost[0][0], wlsByHost[1][0])
-		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][0])
+		cc.ExpectSome(wlsByHost[0][1], wlsByHost[1][0])
+		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][1])
 		cc.CheckConnectivityWithTimeout(30 * time.Second)
 		for i := range []int{0, 1} {
 			numNonTunnelPacketsFelix0toFelix1Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")
@@ -1095,10 +1123,10 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		cc.ResetExpectations()
 
-		//By("checking same node pod-to-pod connectivity")
-		//for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
-		//	cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
-		//}
+		By("checking same node pod-to-pod connectivity")
+		for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
+			cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
+		}
 
 		By("checking different node pod-to-pod connectivity")
 		for i, _ := range wlsByHost {
@@ -1135,6 +1163,9 @@ func wireguardTopologyOptions(routeSource string, ipipEnabled bool) infrastructu
 	// Indicate wireguard is enabled
 	topologyOptions.WireguardEnabled = true
 	// RouteSource
+	if routeSource == "WorkloadIPs" {
+		topologyOptions.UseIPPools = false
+	}
 	topologyOptions.ExtraEnvVars["FELIX_ROUTESOURCE"] = routeSource
 	topologyOptions.IPIPEnabled = ipipEnabled
 
@@ -1206,22 +1237,25 @@ func disableWireguardForFelix(client clientv3.Interface, felixName string) {
 
 func createWorkloadWithAssignedIP(
 	infra *infrastructure.DatastoreInfra,
+	infraOpts *infrastructure.TopologyOptions,
 	client *clientv3.Interface,
 	wlIP, wlName string,
 	felix *infrastructure.Felix) *workload.Workload {
 
-	err := (*client).IPAM().AssignIP(utils.Ctx, ipam.AssignIPArgs{
-		IP:       net.MustParseIP(wlIP),
-		HandleID: &wlName,
-		Attrs: map[string]string{
-			ipam.AttributeNode: felix.Hostname,
-		},
-		Hostname: felix.Hostname,
-	})
-	Expect(err).NotTo(HaveOccurred())
-
 	wl := workload.Run(felix, wlName, "default", wlIP, defaultWorkloadPort, "tcp")
 	wl.ConfigureInInfra(*infra)
+
+	if infraOpts.UseIPPools {
+		err := (*client).IPAM().AssignIP(utils.Ctx, ipam.AssignIPArgs{
+			IP:       net.MustParseIP(wlIP),
+			HandleID: &wlName,
+			Attrs: map[string]string{
+				ipam.AttributeNode: felix.Hostname,
+			},
+			Hostname: felix.Hostname,
+		})
+		Expect(err).NotTo(HaveOccurred())
+	}
 
 	return wl
 }
