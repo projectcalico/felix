@@ -1078,7 +1078,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
 		cc.ExpectSome(wlsByHost[0][0], wlsByHost[1][0])
 		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][0])
-		cc.CheckConnectivityWithTimeout(60 * time.Second)
+		cc.CheckConnectivityWithTimeout(30 * time.Second)
 		for i := range []int{0, 1} {
 			numNonTunnelPacketsFelix0toFelix1Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")
 			numNonTunnelPacketsFelix1toFelix0Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")
@@ -1117,7 +1117,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		By("checking external node to pod connectivity")
 		cc.ExpectSome(externalClient, wlsByHost[0][0])
 
-		cc.CheckConnectivityWithTimeout(60 * time.Second)
+		cc.CheckConnectivityWithTimeout(30 * time.Second)
 	})
 })
 
