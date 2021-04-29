@@ -16,9 +16,9 @@ package dataplane
 
 import (
 	"errors"
+	"time"
 
 	"k8s.io/apimachinery/pkg/util/clock"
-	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/projectcalico/libcalico-go/lib/health"
 
@@ -28,17 +28,25 @@ import (
 
 var _ = Describe("AWS EC2 Set source-destination-check Tests", func() {
 	It("should retry on error and exit the retry loop on success", func() {
-		c := &clock.RealClock{}
-		backoffMgr := wait.NewExponentialBackoffManager(1, 10, 10, 2.0, 0.0, c)
-		defer backoffMgr.Backoff().Stop()
-
+		fc := clock.NewFakeClock(time.Now())
 		healthAgg := health.NewHealthAggregator()
 
-		const totalRetries = 10
+		const totalRetries = 6
 		count := 0
+		// taking jitter into consideration, each fakeClock step should be slightly longer
+		fakeClockSteps := []time.Duration{
+			40 * time.Second,
+			70 * time.Second,
+			3 * time.Minute,
+			5 * time.Minute,
+			9 * time.Minute,
+			9 * time.Minute,
+			9 * time.Minute,
+		}
 		var fun = func(option string) error {
 			Expect(healthAgg.Summary().Ready).To(BeFalse())
 
+			fc.Step(fakeClockSteps[count])
 			count += 1
 			if count > totalRetries {
 				return nil
@@ -46,7 +54,7 @@ var _ = Describe("AWS EC2 Set source-destination-check Tests", func() {
 			return errors.New("Some AWS EC2 errors")
 		}
 
-		awsEc2UpdateSrcDstCheck("Disable", healthAgg, fun, backoffMgr)
+		awsEC2UpdateSrcDstCheck("Disable", healthAgg, fun, fc)
 		Expect(count).To(Equal(1 + totalRetries))
 		Expect(healthAgg.Summary().Ready).To(BeTrue())
 	})

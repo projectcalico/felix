@@ -360,19 +360,8 @@ func StartDataplaneDriver(configParams *config.Config,
 
 		// Set source-destination-check on AWS EC2 instance.
 		if configParams.AWSSrcDstCheck != string(apiv3.AWSSrcDstCheckOptionDoNothing) {
-			var (
-				initBackoff   = 30 * time.Second
-				maxBackoff    = 8 * time.Minute
-				resetDuration = time.Hour
-				backoffFactor = 2.0
-				jitter        = 0.1
-				clock         = &clock.RealClock{}
-			)
-
-			backoffMgr := wait.NewExponentialBackoffManager(initBackoff, maxBackoff, resetDuration, backoffFactor, jitter, clock)
-			defer backoffMgr.Backoff().Stop()
-
-			go awsEc2UpdateSrcDstCheck(configParams.AWSSrcDstCheck, healthAggregator, aws.UpdateSrcDstCheck, backoffMgr)
+			c := &clock.RealClock{}
+			go awsEC2UpdateSrcDstCheck(configParams.AWSSrcDstCheck, healthAggregator, aws.UpdateSrcDstCheck, c)
 		}
 
 		return intDP, nil
@@ -390,8 +379,19 @@ func SupportsBPF() error {
 
 type checkFunc func(option string) error
 
-func awsEc2UpdateSrcDstCheck(check string, healthAgg *health.HealthAggregator, fun checkFunc, backoffMgr wait.BackoffManager) {
+func awsEC2UpdateSrcDstCheck(check string, healthAgg *health.HealthAggregator, fun checkFunc, c clock.Clock) {
 	log.Infof("Setting AWS EC2 source-destination-check to %s", check)
+
+	const (
+		initBackoff   = 30 * time.Second
+		maxBackoff    = 8 * time.Minute
+		resetDuration = time.Hour
+		backoffFactor = 2.0
+		jitter        = 0.1
+	)
+
+	backoffMgr := wait.NewExponentialBackoffManager(initBackoff, maxBackoff, resetDuration, backoffFactor, jitter, c)
+	defer backoffMgr.Backoff().Stop()
 
 	const healthName = "aws-source-destination-check"
 	healthAgg.RegisterReporter(healthName, &health.HealthReport{Live: true, Ready: true}, 0)
