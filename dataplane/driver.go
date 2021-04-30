@@ -21,11 +21,9 @@ import (
 	"net"
 	"os/exec"
 	"runtime/debug"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/clock"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/projectcalico/felix/aws"
@@ -361,7 +359,8 @@ func StartDataplaneDriver(configParams *config.Config,
 		// Set source-destination-check on AWS EC2 instance.
 		if configParams.AWSSrcDstCheck != string(apiv3.AWSSrcDstCheckOptionDoNothing) {
 			c := &clock.RealClock{}
-			go awsEC2UpdateSrcDstCheck(configParams.AWSSrcDstCheck, healthAggregator, aws.UpdateSrcDstCheck, c)
+			updater := aws.NewEC2SrcDstCheckUpdater()
+			go aws.WaitForEC2SrcDstCheckUpdate(configParams.AWSSrcDstCheck, healthAggregator, updater, c)
 		}
 
 		return intDP, nil
@@ -375,39 +374,4 @@ func StartDataplaneDriver(configParams *config.Config,
 
 func SupportsBPF() error {
 	return bpf.SupportsBPFDataplane()
-}
-
-type checkFunc func(option string) error
-
-func awsEC2UpdateSrcDstCheck(check string, healthAgg *health.HealthAggregator, fun checkFunc, c clock.Clock) {
-	log.Infof("Setting AWS EC2 source-destination-check to %s", check)
-
-	const (
-		initBackoff   = 30 * time.Second
-		maxBackoff    = 8 * time.Minute
-		resetDuration = time.Hour
-		backoffFactor = 2.0
-		jitter        = 0.1
-	)
-
-	backoffMgr := wait.NewExponentialBackoffManager(initBackoff, maxBackoff, resetDuration, backoffFactor, jitter, c)
-	defer backoffMgr.Backoff().Stop()
-
-	const healthName = "aws-source-destination-check"
-	healthAgg.RegisterReporter(healthName, &health.HealthReport{Live: true, Ready: true}, 0)
-
-	// set not-ready.
-	healthAgg.Report(healthName, &health.HealthReport{Live: true, Ready: false})
-
-	for {
-		if err := fun(check); err != nil {
-			log.WithField("src-dst-check", check).Warnf("Failed to set source-destination-check: %v", err)
-		} else {
-			// set ready.
-			healthAgg.Report(healthName, &health.HealthReport{Live: true, Ready: true})
-			return
-		}
-
-		<-backoffMgr.Backoff().C()
-	}
 }
