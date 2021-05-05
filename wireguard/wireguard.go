@@ -16,8 +16,9 @@ package wireguard
 
 import (
 	"errors"
+	"fmt"
 	"net"
-	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -48,7 +49,7 @@ const (
 	wireguardType       = "wireguard"
 	ipVersion           = 4
 	ipPrefixLen         = 32
-	allSrcValidMarkPath = "/proc/sys/net/ipv4/conf/all/src_valid_mark"
+	allSrcValidMarkPath = "net.ipv4.conf.all.src_valid_mark"
 )
 
 var (
@@ -1346,7 +1347,7 @@ func (w *Wireguard) ensureLink(netlinkClient netlinkshim.Interface) (bool, error
 
 	if w.config.RouteSource == "WorkloadIPs" {
 		log.Info("Enabling src valid mark for WireGuard")
-		if err := writeProcSys(allSrcValidMarkPath, "1"); err != nil {
+		if err := setSysctlValue(allSrcValidMarkPath, "1"); err != nil {
 			return false, err
 		}
 	}
@@ -1688,17 +1689,11 @@ func getOnlyItemInSet(s set.Set) interface{} {
 	return i
 }
 
-// writeProcSys writes the value to the given sysctl path
-func writeProcSys(path, value string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+// setSysctlValue sets the value to the given sysctl setting
+func setSysctlValue(path, value string) error {
+	output, err := exec.Command("sysctl", "-w", fmt.Sprintf("%s=%s", path, value)).CombinedOutput()
 	if err != nil {
-		return err
-	}
-	if _, err = f.Write([]byte(value)); err != nil {
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
+		return fmt.Errorf("failed to set sysctl value (%s=%s): %s\n%s", path, value, err, output)
 	}
 	return nil
 }
