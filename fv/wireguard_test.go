@@ -996,9 +996,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 	})
 
 	AfterEach(func() {
-		// sleep to debug tests
-		time.Sleep(8 * time.Hour)
-
 		if CurrentGinkgoTestDescription().Failed {
 			for _, felix := range felixes {
 				felix.Exec("ip", "addr")
@@ -1012,26 +1009,28 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			}
 		}
 
-		for felixIdx, felixWls := range wlsByHost {
-			for i := range felixWls {
-				wlsByHost[felixIdx][i].Stop()
+		if !CurrentGinkgoTestDescription().Failed {
+			for felixIdx, felixWls := range wlsByHost {
+				for i := range felixWls {
+					wlsByHost[felixIdx][i].Stop()
+				}
 			}
-		}
 
-		externalClient.Stop()
+			externalClient.Stop()
 
-		for _, tcpdump := range tcpdumps {
-			tcpdump.Stop()
-		}
+			for _, tcpdump := range tcpdumps {
+				tcpdump.Stop()
+			}
 
-		for _, felix := range felixes {
-			felix.Stop()
-		}
+			for _, felix := range felixes {
+				felix.Stop()
+			}
 
-		if CurrentGinkgoTestDescription().Failed {
-			infra.DumpErrorData()
+			if CurrentGinkgoTestDescription().Failed {
+				infra.DumpErrorData()
+			}
+			infra.Stop()
 		}
-		infra.Stop()
 	})
 
 	It("should pass basic connectivity scenarios", func() {
