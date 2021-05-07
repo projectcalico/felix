@@ -686,10 +686,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 				wl.Stop()
 			}
 
-			for _, tcpdump := range tcpdumps {
-				tcpdump.Stop()
-			}
-
 			for _, felix := range felixes {
 				felix.Stop()
 			}
