@@ -680,21 +680,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 				felix.Exec("wg")
 			}
 		}
-
-		if !CurrentGinkgoTestDescription().Failed {
-			for _, wl := range wls {
-				wl.Stop()
-			}
-
-			for _, felix := range felixes {
-				felix.Stop()
-			}
-
-			if CurrentGinkgoTestDescription().Failed {
-				infra.DumpErrorData()
-			}
-			infra.Stop()
-		}
 	})
 
 	It("basic connectivity check", func() {
