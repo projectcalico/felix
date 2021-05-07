@@ -92,9 +92,6 @@ const (
 //	})
 //
 //	AfterEach(func() {
-//		// TODO: Just for debugging - REMOVE!!
-//		time.Sleep(1 * time.Hour)
-//
 //		if CurrentGinkgoTestDescription().Failed {
 //			for _, felix := range felixes {
 //				felix.Exec("ip", "addr")
@@ -105,20 +102,20 @@ const (
 //			}
 //		}
 //
-//		for _, wl := range wls {
-//			wl.Stop()
-//		}
-//		for _, tcpdump := range tcpdumps {
-//			tcpdump.Stop()
-//		}
-//		for _, felix := range felixes {
-//			felix.Stop()
-//		}
-//
-//		if CurrentGinkgoTestDescription().Failed {
-//			infra.DumpErrorData()
-//		}
-//		infra.Stop()
+//		//for _, wl := range wls {
+//		//	wl.Stop()
+//		//}
+//		//for _, tcpdump := range tcpdumps {
+//		//	tcpdump.Stop()
+//		//}
+//		//for _, felix := range felixes {
+//		//	felix.Stop()
+//		//}
+//		//
+//		//if CurrentGinkgoTestDescription().Failed {
+//		//	infra.DumpErrorData()
+//		//}
+//		//infra.Stop()
 //	})
 //
 //	Context("with Wireguard enabled", func() {
@@ -576,7 +573,7 @@ const (
 //		})
 //	})
 //})
-//
+
 //var _ = infrastructure.DatastoreDescribe("WireGuard-Unsupported", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
 //	var (
 //		infra   infrastructure.DatastoreInfra
@@ -702,43 +699,43 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 		//infra.Stop()
 	})
 
-	It("Workload with borrowed IP should be 'handled' on felix 0 and 1", func() {
-		// Check that felix-0, felix-1 is ready
-		// 1. by checking, Wireguard interface exist.
-		Eventually(func() error {
-			for i := range []int{0, 1} {
-				out, err := felixes[i].ExecOutput("ip", "link")
-				if err != nil {
-					return err
-				}
-				if strings.Contains(out, wireguardInterfaceNameDefault) {
-					continue
-				}
-				return fmt.Errorf("felix-%d has no wireguard device", i)
-			}
-			return nil
-		}, "10s", "100ms").ShouldNot(HaveOccurred())
-		// 2. by checking, Wireguard rule exist.
-		for i := range []int{0, 1} {
-			Eventually(func() string {
-				return getWireguardRoutingRule(felixes[i])
-			}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+")))
-		}
-		// 3. by checking, Wireguard route table exist.
-		for i := range []int{0, 1} {
-			Eventually(func() string {
-				return getWireguardRouteEntry(felixes[i])
-			}, "10s", "100ms").Should(ContainSubstring("dev wireguard.cali scope link"))
-		}
-
-		By("verifying WireGuard route table should show 'throw' entry on felix 0 and 1")
-		Eventually(func() string {
-			return getWireguardRouteEntry(felixes[0])
-		}, "10s", "100ms").Should(ContainSubstring("throw 10.65.1.4"))
-		Eventually(func() string {
-			return getWireguardRouteEntry(felixes[1])
-		}, "10s", "100ms").Should(ContainSubstring("throw 10.65.0.4"))
-	})
+	//It("Workload with borrowed IP should be 'handled' on felix 0 and 1", func() {
+	//	// Check that felix-0, felix-1 is ready
+	//	// 1. by checking, Wireguard interface exist.
+	//	Eventually(func() error {
+	//		for i := range []int{0, 1} {
+	//			out, err := felixes[i].ExecOutput("ip", "link")
+	//			if err != nil {
+	//				return err
+	//			}
+	//			if strings.Contains(out, wireguardInterfaceNameDefault) {
+	//				continue
+	//			}
+	//			return fmt.Errorf("felix-%d has no wireguard device", i)
+	//		}
+	//		return nil
+	//	}, "10s", "100ms").ShouldNot(HaveOccurred())
+	//	// 2. by checking, Wireguard rule exist.
+	//	for i := range []int{0, 1} {
+	//		Eventually(func() string {
+	//			return getWireguardRoutingRule(felixes[i])
+	//		}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+")))
+	//	}
+	//	// 3. by checking, Wireguard route table exist.
+	//	for i := range []int{0, 1} {
+	//		Eventually(func() string {
+	//			return getWireguardRouteEntry(felixes[i])
+	//		}, "10s", "100ms").Should(ContainSubstring("dev wireguard.cali scope link"))
+	//	}
+	//
+	//	By("verifying WireGuard route table should show 'throw' entry on felix 0 and 1")
+	//	Eventually(func() string {
+	//		return getWireguardRouteEntry(felixes[0])
+	//	}, "10s", "100ms").Should(ContainSubstring("throw 10.65.1.4"))
+	//	Eventually(func() string {
+	//		return getWireguardRouteEntry(felixes[1])
+	//	}, "10s", "100ms").Should(ContainSubstring("throw 10.65.0.4"))
+	//})
 
 	Context("with Wireguard disabled in node-3", func() {
 		BeforeEach(func() {
@@ -824,55 +821,301 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 				}, "10s", "100ms").Should(BeNumerically(">", 0))
 			}
 
-			cc.ResetExpectations()
-
-			cc.ExpectSome(wls[2], wls[0])
-			cc.ExpectSome(wls[0], wls[2])
-			cc.CheckConnectivity()
-
-			By("verifying packets between felix-0 and felix-2 are not encrypted")
-			for _, f := range []int{0, 2} {
-				Eventually(func() int {
-					return tcpdumps[f].MatchCount("numInWorkloadPackets")
-				}, "10s", "100ms").Should(BeNumerically(">", 0))
-				Eventually(func() int {
-					return tcpdumps[f].MatchCount("numOutWorkloadPackets")
-				}, "10s", "100ms").Should(BeNumerically(">", 0))
-			}
+			//cc.ResetExpectations()
+			//
+			//cc.ExpectSome(wls[2], wls[0])
+			//cc.ExpectSome(wls[0], wls[2])
+			//cc.CheckConnectivity()
+			//
+			//By("verifying packets between felix-0 and felix-2 are not encrypted")
+			//for _, f := range []int{0, 2} {
+			//	Eventually(func() int {
+			//		return tcpdumps[f].MatchCount("numInWorkloadPackets")
+			//	}, "10s", "100ms").Should(BeNumerically(">", 0))
+			//	Eventually(func() int {
+			//		return tcpdumps[f].MatchCount("numOutWorkloadPackets")
+			//	}, "10s", "100ms").Should(BeNumerically(">", 0))
+			//}
 		})
 
-		It("WireGuard should be used for host to workload connections on WireGuard enabled nodes", func() {
-			cc.ExpectSome(felixes[0], wls[1])
-			cc.CheckConnectivity()
+		//It("WireGuard should be used for host to workload connections on WireGuard enabled nodes", func() {
+		//	cc.ExpectSome(felixes[0], wls[1])
+		//	cc.CheckConnectivity()
+		//
+		//	By("verifying packets between felix-0 and felix-1 is encrypted")
+		//	for _, i := range []int{0, 1} {
+		//		Eventually(func() int {
+		//			return tcpdumps[i].MatchCount("numTunnelPackets01")
+		//		}, "10s", "100ms").Should(BeNumerically(">", 0))
+		//		Eventually(func() int {
+		//			return tcpdumps[i].MatchCount("numTunnelPackets10")
+		//		}, "10s", "100ms").Should(BeNumerically(">", 0))
+		//	}
+		//})
 
-			By("verifying packets between felix-0 and felix-1 is encrypted")
-			for _, i := range []int{0, 1} {
-				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numTunnelPackets01")
-				}, "10s", "100ms").Should(BeNumerically(">", 0))
-				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numTunnelPackets10")
-				}, "10s", "100ms").Should(BeNumerically(">", 0))
-			}
-		})
-
-		It("WireGuard should not be used for host to workload connections when WireGuard disabled on either node", func() {
-			cc.ExpectSome(felixes[0], wls[2])
-			cc.ExpectSome(felixes[2], wls[0])
-			cc.CheckConnectivity()
-
-			By("verifying packets between felix-0 and felix-2 are not encrypted")
-			for _, i := range []int{0, 2} {
-				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numTunnelPackets02")
-				}, "10s", "100ms").Should(BeNumerically("==", 0))
-				Eventually(func() int {
-					return tcpdumps[i].MatchCount("numTunnelPackets20")
-				}, "10s", "100ms").Should(BeNumerically("==", 0))
-			}
-		})
+		//It("WireGuard should not be used for host to workload connections when WireGuard disabled on either node", func() {
+		//	cc.ExpectSome(felixes[0], wls[2])
+		//	cc.ExpectSome(felixes[2], wls[0])
+		//	cc.CheckConnectivity()
+		//
+		//	By("verifying packets between felix-0 and felix-2 are not encrypted")
+		//	for _, i := range []int{0, 2} {
+		//		Eventually(func() int {
+		//			return tcpdumps[i].MatchCount("numTunnelPackets02")
+		//		}, "10s", "100ms").Should(BeNumerically("==", 0))
+		//		Eventually(func() int {
+		//			return tcpdumps[i].MatchCount("numTunnelPackets20")
+		//		}, "10s", "100ms").Should(BeNumerically("==", 0))
+		//	}
+		//})
 	})
 })
+
+//var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node cluster with WorkloadIPs", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+//	const nodeCount, wlPerNode = 3, 2
+//
+//	var (
+//		infra   infrastructure.DatastoreInfra
+//		felixes []*infrastructure.Felix
+//		client  clientv3.Interface
+//
+//		// simulated host workloads
+//		wlsByHost        [nodeCount][wlPerNode]*workload.Workload
+//		hostNetworkedWls [nodeCount]*workload.Workload
+//		externalClient   *containers.Container
+//
+//		cc       *connectivity.Checker
+//		tcpdumps []*tcpdump.TCPDump
+//	)
+//
+//	BeforeEach(func() {
+//		// Run these tests only when the Host has Wireguard kernel module available.
+//		if os.Getenv("FELIX_FV_WIREGUARD_AVAILABLE") != "true" {
+//			Skip("Skipping Wireguard supported tests.")
+//		}
+//
+//		infra = getInfra()
+//		topologyOptions := wireguardTopologyOptions("WorkloadIPs", false)
+//		felixes, client = infrastructure.StartNNodeTopology(nodeCount, topologyOptions, infra)
+//
+//		// To allow all ingress and egress, in absence of any Policy.
+//		infra.AddDefaultAllow()
+//
+//		// initialise pods
+//		for felixIdx, felixWls := range wlsByHost {
+//			for wlIdx := range felixWls {
+//				wlsByHost[felixIdx][wlIdx] = createWorkloadWithAssignedIP(
+//					&infra,
+//					&topologyOptions,
+//					&client,
+//					fmt.Sprintf("10.65.%d.%d", felixIdx, 2+wlIdx),
+//					fmt.Sprintf("wl-f%d-%d", felixIdx, wlIdx),
+//					felixes[felixIdx])
+//			}
+//		}
+//
+//		// initialise host-networked pods
+//		for i, _ := range hostNetworkedWls {
+//			hostNetworkedWls[i] = createHostNetworkedWorkload(fmt.Sprintf("wl-f%d-hn-0", i), felixes[i])
+//		}
+//
+//		// initialise external client
+//		externalClient = containers.Run("external-client",
+//			containers.RunOpts{AutoRemove: true},
+//			"--privileged", // So that we can add routes inside the container.
+//			utils.Config.BusyboxImage,
+//			"/bin/sh", "-c", "sleep 1000")
+//		externalClient.EnsureBinary("test-connection")
+//		externalClient.Exec("ip", "route", "add", wlsByHost[0][0].IP, "via", felixes[0].IP)
+//
+//		for i := range felixes {
+//			felixes[i].TriggerDelayedStart()
+//		}
+//
+//		// Check felix Wireguard links are ready.
+//		for i := range felixes {
+//			Eventually(func() string {
+//				out, _ := felixes[i].ExecOutput("ip", "link", "show", wireguardInterfaceNameDefault)
+//				return out
+//			}, "10s", "100ms").Should(Not(BeEmpty()))
+//		}
+//
+//		tcpdumps = nil
+//		for _, felix := range felixes {
+//			tcpdump := felix.AttachTCPDump("eth0")
+//
+//			tunnelPacketsFelix0toFelix1Pattern := fmt.Sprintf("IP %s\\.%d > %s\\.%d: UDP", felixes[0].IP, wireguardListeningPortDefault, felixes[1].IP, wireguardListeningPortDefault)
+//			tcpdump.AddMatcher("numTunnelPacketsFelix0toFelix1", regexp.MustCompile(tunnelPacketsFelix0toFelix1Pattern))
+//			tunnelPacketsFelix1toFelix0Pattern := fmt.Sprintf("IP %s\\.%d > %s\\.%d: UDP", felixes[1].IP, wireguardListeningPortDefault, felixes[0].IP, wireguardListeningPortDefault)
+//			tcpdump.AddMatcher("numTunnelPacketsFelix1toFelix0", regexp.MustCompile(tunnelPacketsFelix1toFelix0Pattern))
+//			nonTunnelPacketsFelix0toFelix1Pattern := fmt.Sprintf("IP %s\\.%s > %s\\.%s: TCP", felixes[0].IP, defaultWorkloadPort, felixes[1].IP, defaultWorkloadPort)
+//			tcpdump.AddMatcher("numNonTunnelPacketsFelix0toFelix1", regexp.MustCompile(nonTunnelPacketsFelix0toFelix1Pattern))
+//			nonTunnelPacketsFelix1toFelix0Pattern := fmt.Sprintf("IP %s\\.%s > %s\\.%s: TCP", felixes[1].IP, defaultWorkloadPort, felixes[0].IP, defaultWorkloadPort)
+//			tcpdump.AddMatcher("numNonTunnelPacketsFelix1toFelix0", regexp.MustCompile(nonTunnelPacketsFelix1toFelix0Pattern))
+//
+//			tcpdump.Start()
+//			tcpdumps = append(tcpdumps, tcpdump)
+//		}
+//
+//		cc = &connectivity.Checker{}
+//	})
+//
+//	AfterEach(func() {
+//		// sleep to debug tests
+//		time.Sleep(8 * time.Hour)
+//
+//		if CurrentGinkgoTestDescription().Failed {
+//			for _, felix := range felixes {
+//				felix.Exec("ip", "addr")
+//				felix.Exec("ip", "rule", "list")
+//				felix.Exec("ip", "route", "show", "table", "all")
+//				felix.Exec("ip", "route", "show", "cached")
+//				felix.Exec("wg")
+//				felix.Exec("iptables-save", "-t", "raw")
+//				felix.Exec("iptables", "-L", "-vx")
+//				felix.Exec("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
+//			}
+//		}
+//
+//		for felixIdx, felixWls := range wlsByHost {
+//			for i := range felixWls {
+//				wlsByHost[felixIdx][i].Stop()
+//			}
+//		}
+//
+//		externalClient.Stop()
+//
+//		for _, tcpdump := range tcpdumps {
+//			tcpdump.Stop()
+//		}
+//
+//		for _, felix := range felixes {
+//			felix.Stop()
+//		}
+//
+//		if CurrentGinkgoTestDescription().Failed {
+//			infra.DumpErrorData()
+//		}
+//		infra.Stop()
+//	})
+//
+//	It("should pass basic connectivity scenarios", func() {
+//		By("Checking the interface exists")
+//		Eventually(func() error {
+//			for _, felix := range felixes {
+//				out, err := felix.ExecOutput("ip", "link")
+//				if err != nil {
+//					return err
+//				}
+//				if strings.Contains(out, wireguardInterfaceNameDefault) {
+//					continue
+//				}
+//				return fmt.Errorf("felix %v has no wireguard device", felix.Name)
+//			}
+//			return nil
+//		}, "10s", "100ms").ShouldNot(HaveOccurred())
+//
+//		By("Checking the ip rule exists")
+//		for _, felix := range felixes {
+//			Eventually(func() string {
+//				return getWireguardRoutingRule(felix)
+//			}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+")))
+//		}
+//
+//		By("Checking the routing table entries exist")
+//		for i, _ := range wlsByHost {
+//			var matchers []types.GomegaMatcher
+//			for j, wls := range wlsByHost {
+//				if i != j {
+//					// check for routes to other felix nodes
+//					matchers = append(matchers, ContainSubstring(
+//						fmt.Sprintf("%s dev %s scope link", felixes[j].IP, wireguardInterfaceNameDefault)))
+//					// check for routes to pods on other felix nodes
+//					for _, wl := range wls {
+//						matchers = append(matchers, ContainSubstring(
+//							fmt.Sprintf("%s dev %s scope link", wl.IP, wireguardInterfaceNameDefault)))
+//					}
+//				}
+//			}
+//			Eventually(func() []string {
+//				return strings.Split(getWireguardRouteEntry(felixes[i]), "\n")
+//			}, "10s", "100ms").Should(ContainElements(matchers))
+//		}
+//
+//		By("Checking the proc/sys src valid mark entries")
+//		for _, felix := range felixes {
+//			Eventually(func() string {
+//				s, _ := felix.ExecCombinedOutput("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
+//				return s
+//			}, "10s", "100ms").Should(ContainSubstring("1"))
+//		}
+//
+//		By("Checking wireguard allowed ips")
+//		for i, _ := range wlsByHost {
+//			var matchers []types.GomegaMatcher
+//			for j, wls := range wlsByHost {
+//				if i != j {
+//					var allowedIPMatchers []types.GomegaMatcher
+//					// check for allowed IP entry for other felix nodes
+//					allowedIPMatchers = append(allowedIPMatchers, ContainSubstring(felixes[j].IP))
+//					// check for routes to pods on other felix nodes
+//					for _, wl := range wls {
+//						allowedIPMatchers = append(allowedIPMatchers, ContainSubstring(wl.IP))
+//					}
+//					matchers = append(matchers, And(allowedIPMatchers...))
+//				}
+//			}
+//			Eventually(func() []string {
+//				s, _ := felixes[i].ExecCombinedOutput("wg", "show", wireguardInterfaceNameDefault, "allowed-ips")
+//				return strings.Split(s, "\n")
+//			}, "10s", "100ms").Should(ContainElements(matchers))
+//		}
+//
+//		By("verifying packets between felix-0 and felix-1 is encrypted")
+//		cc.ExpectSome(wlsByHost[0][1], wlsByHost[1][0])
+//		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][1])
+//		cc.CheckConnectivityWithTimeout(5 * time.Second)
+//		for i := range []int{0, 1} {
+//			numNonTunnelPacketsFelix0toFelix1Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")
+//			numNonTunnelPacketsFelix1toFelix0Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")
+//			Eventually(tcpdumps[i].MatchCountFn("numTunnelPacketsFelix0toFelix1"), "10s", "100ms").
+//				Should(BeNumerically(">", 0))
+//			Eventually(tcpdumps[i].MatchCountFn("numTunnelPacketsFelix1toFelix0"), "10s", "100ms").
+//				Should(BeNumerically(">", 0))
+//
+//			Expect(tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")).
+//				Should(BeNumerically("==", numNonTunnelPacketsFelix0toFelix1Before))
+//			Expect(tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")).
+//				Should(BeNumerically("==", numNonTunnelPacketsFelix1toFelix0Before))
+//		}
+//
+//		cc.ResetExpectations()
+//
+//		By("checking same node pod-to-pod connectivity")
+//		for felixIdx := 0; felixIdx < nodeCount; felixIdx++ {
+//			cc.ExpectSome(wlsByHost[felixIdx][0], wlsByHost[felixIdx][1])
+//		}
+//
+//		By("checking different node pod-to-pod connectivity")
+//		for i, _ := range wlsByHost {
+//			for j, _ := range wlsByHost {
+//				cc.ExpectSome(wlsByHost[i][0], wlsByHost[j][0])
+//			}
+//		}
+//
+//		By("checking host-networked pod to regular pod connectivity")
+//		for _, wl := range hostNetworkedWls {
+//			for j, _ := range wlsByHost {
+//				cc.ExpectSome(wl, wlsByHost[j][0])
+//			}
+//		}
+//
+//		By("checking external node to pod connectivity")
+//		cc.ExpectSome(externalClient, wlsByHost[0][0])
+//
+//		cc.CheckConnectivityWithTimeout(5 * time.Second)
+//	})
+//})
 
 // Setup cluster topology options.
 // mainly, enable Wireguard with delayed start option.
