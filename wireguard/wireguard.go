@@ -16,8 +16,8 @@ package wireguard
 
 import (
 	"errors"
+	"io/ioutil"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -1690,15 +1690,14 @@ func getOnlyItemInSet(s set.Set) interface{} {
 
 // writeProcSys writes the value to the given sysctl path
 func writeProcSys(path, value string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	b, err := ioutil.ReadFile(path)
 	if err != nil {
-		return err
+		return nil
 	}
-	if _, err = f.Write([]byte(value)); err != nil {
-		return err
+
+	if string(b[0]) == value {
+		return nil
 	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	return nil
+
+	return ioutil.WriteFile(path, []byte(value), 0)
 }
