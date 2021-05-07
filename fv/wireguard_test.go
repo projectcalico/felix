@@ -629,7 +629,7 @@ const (
 //	})
 //})
 
-var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node cluster", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node cluster", []apiconfig.DatastoreType{apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
 	const nodeCount = 3
 
 	var (
