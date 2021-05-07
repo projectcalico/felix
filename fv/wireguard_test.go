@@ -19,6 +19,7 @@ package fv_test
 import (
 	"context"
 	"fmt"
+	"k8s.io/kubernetes/test/e2e/framework/ginkgowrapper"
 	"os"
 	"regexp"
 	"strings"
@@ -680,28 +681,31 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 			}
 		}
 
-		//for _, wl := range wls {
-		//	wl.Stop()
-		//}
-		//
-		//for _, tcpdump := range tcpdumps {
-		//	tcpdump.Stop()
-		//}
-		//
-		//for _, felix := range felixes {
-		//	felix.Stop()
-		//}
-		//
-		//if CurrentGinkgoTestDescription().Failed {
-		//	infra.DumpErrorData()
-		//}
-		//infra.Stop()
+		if !CurrentGinkgoTestDescription().Failed {
+			for _, wl := range wls {
+				wl.Stop()
+			}
+
+			for _, tcpdump := range tcpdumps {
+				tcpdump.Stop()
+			}
+
+			for _, felix := range felixes {
+				felix.Stop()
+			}
+
+			if CurrentGinkgoTestDescription().Failed {
+				infra.DumpErrorData()
+			}
+			infra.Stop()
+		}
 	})
 
 	It("basic connectivity check", func() {
 		cc.ExpectSome(wls[0], wls[1])
 		cc.ExpectSome(wls[1], wls[0])
 		cc.CheckConnectivity()
+		ginkgowrapper.Fail("KABOOM")
 	})
 
 	//It("Workload with borrowed IP should be 'handled' on felix 0 and 1", func() {
