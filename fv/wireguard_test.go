@@ -29,7 +29,6 @@ import (
 
 	"github.com/projectcalico/felix/fv/connectivity"
 	"github.com/projectcalico/felix/fv/infrastructure"
-	"github.com/projectcalico/felix/fv/tcpdump"
 	"github.com/projectcalico/felix/fv/utils"
 	"github.com/projectcalico/felix/fv/workload"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
@@ -639,7 +638,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 
 		wls      [nodeCount]*workload.Workload // simulated host workloads
 		cc       *connectivity.Checker
-		tcpdumps []*tcpdump.TCPDump
+		//tcpdumps []*tcpdump.TCPDump
 	)
 
 	BeforeEach(func() {
