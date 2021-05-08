@@ -473,7 +473,7 @@ var _ = Describe("Static", func() {
 						Expect(findChain(rr.StaticRawTableChains(ipVersion), "cali-failsafe-out")).To(Equal(expRawFailsafeOut))
 					})
 					It("should return only the expected raw chains", func() {
-						Expect(len(rr.StaticRawTableChains(ipVersion))).To(Equal(4))
+						Expect(len(rr.StaticRawTableChains(ipVersion))).To(Equal(5))
 					})
 				})
 			}
@@ -1385,8 +1385,8 @@ var _ = Describe("Static", func() {
 				Rules: []Rule{
 					{Match: nil,
 						Action: ClearMarkAction{Mark: 0xf0}},
-					{Match: Match().InInterface("eth0"),
-						Action: SetMarkAction{Mark: 0x100000}},
+					{Match: nil,
+						Action: JumpAction{Target: "cali-wireguard-incoming-mark"}},
 					{Match: Match().InInterface("cali+"),
 						Action: SetMarkAction{Mark: 0x40}},
 					{Match: Match().MarkMatchesWithMask(0x40, 0x40).RPFCheckFailed(false),
@@ -1395,6 +1395,19 @@ var _ = Describe("Static", func() {
 						Action: JumpAction{Target: "cali-from-host-endpoint"}},
 					{Match: Match().MarkMatchesWithMask(0x10, 0x10),
 						Action: AcceptAction{}},
+				},
+			}))
+			Expect(findChain(rr.StaticRawTableChains(ipVersion), "cali-wireguard-incoming-mark")).To(Equal(&Chain{
+				Name: "cali-wireguard-incoming-mark",
+				Rules: []Rule{
+					{Match: Match().NotSrcAddrType(AddrTypeLocal, false),
+						Action: ReturnAction{}},
+					{Match: Match().InInterface("lo"),
+						Action: ReturnAction{}},
+					{Match: Match().InInterface("wireguard.cali"),
+						Action: ReturnAction{}},
+					{Match: nil,
+						Action: SetMarkAction{Mark: 0x100000}},
 				},
 			}))
 		})
