@@ -1385,9 +1385,7 @@ var _ = Describe("Static", func() {
 				Rules: []Rule{
 					{Match: nil,
 						Action: ClearMarkAction{Mark: 0xf0}},
-					{Match: Match().Protocol("udp").
-						DestPorts(51820).
-						NotSrcAddrType(AddrTypeLocal, false),
+					{Match: Match().InInterface("eth0"),
 						Action: SetMarkAction{Mark: 0x100000}},
 					{Match: Match().InInterface("cali+"),
 						Action: SetMarkAction{Mark: 0x40}},
