@@ -996,9 +996,7 @@ func (r *DefaultRuleRenderer) StaticRawPreroutingChain(ipVersion uint8) *Chain {
 	if ipVersion == 4 && r.WireguardEnabled && len(r.WireguardInterfaceName) > 0 && r.RouteSource == "WorkloadIPs" {
 		log.Debug("Adding Wireguard iptables rule")
 		rules = append(rules, Rule{
-			Match: Match().Protocol("udp").
-				DestPorts(uint16(r.WireguardListeningPort)).
-				NotSrcAddrType(AddrTypeLocal, false),
+			Match: Match().InInterface("eth0"),
 			Action: SetMarkAction{Mark: r.WireguardIptablesMark},
 		})
 	}
