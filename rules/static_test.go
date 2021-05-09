@@ -1404,6 +1404,8 @@ var _ = Describe("Static", func() {
 						Action: ReturnAction{}},
 					{Match: Match().InInterface("lo"),
 						Action: ReturnAction{}},
+					{Match: Match().InInterface("cali+"),
+						Action: ReturnAction{}},
 					{Match: Match().InInterface("wireguard.cali"),
 						Action: ReturnAction{}},
 					{Match: nil,
