@@ -1094,6 +1094,8 @@ func (r *DefaultRuleRenderer) StaticRawWireguardIncomingMarkChain() *Chain {
 				Action: ReturnAction{}},
 			{Match: Match().InInterface("lo"),
 				Action: ReturnAction{}},
+			{Match: Match().InInterface("cali+"),
+				Action: ReturnAction{}},
 			{Match: Match().InInterface(r.WireguardInterfaceName),
 				Action: ReturnAction{}},
 			{Action: SetMarkAction{Mark: r.WireguardIptablesMark}},
