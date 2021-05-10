@@ -1263,11 +1263,23 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 			rulesConfig.RouteSource == "WorkloadIPs" {
 			log.Debug("Adding Wireguard iptables rule")
 			rawRules = append(rawRules, iptables.Rule{
-				Match: iptables.Match().Protocol("udp").
-					DestPorts(uint16(rulesConfig.WireguardListeningPort)).
-					NotSrcAddrType(iptables.AddrTypeLocal, false),
-				Action: iptables.SetMarkAction{Mark: rulesConfig.WireguardIptablesMark},
+				Match:  nil,
+				Action: iptables.JumpAction{Target: rules.ChainSetWireguardIncomingMark},
 			})
+
+			setWireguardIncomingMarkChain := &iptables.Chain{
+				Name: rules.ChainSetWireguardIncomingMark,
+				Rules: []iptables.Rule{
+					{Match: iptables.Match().InInterface("lo"),
+						Action: iptables.ReturnAction{}},
+					{Match: iptables.Match().InInterface("cali+"),
+						Action: iptables.ReturnAction{}},
+					{Match: iptables.Match().InInterface(rulesConfig.WireguardInterfaceName),
+						Action: iptables.ReturnAction{}},
+					{Action: iptables.SetMarkAction{Mark: rulesConfig.WireguardIptablesMark}},
+				},
+			}
+			t.UpdateChain(setWireguardIncomingMarkChain)
 		}
 
 		rawRules = append(rawRules, iptables.Rule{
