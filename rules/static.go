@@ -15,6 +15,7 @@
 package rules
 
 import (
+	"fmt"
 	log "github.com/sirupsen/logrus"
 
 	. "github.com/projectcalico/felix/iptables"
@@ -1087,17 +1088,29 @@ func (r *DefaultRuleRenderer) allCalicoMarkBits() uint32 {
 }
 
 func (r *DefaultRuleRenderer) StaticRawWireguardIncomingMarkChain() *Chain {
-	return &Chain{
-		Name: ChainSetWireguardIncomingMark,
-		Rules: []Rule{
-			{Match: Match().InInterface("lo"),
-				Action: ReturnAction{}},
-			{Match: Match().InInterface("cali+"),
-				Action: ReturnAction{}},
-			{Match: Match().InInterface(r.WireguardInterfaceName),
-				Action: ReturnAction{}},
-			{Action: SetMarkAction{Mark: r.WireguardIptablesMark}},
+	rules := []Rule{
+		{
+			Match:  Match().InInterface("lo"),
+			Action: ReturnAction{},
 		},
+		{
+			Match:  Match().InInterface(r.WireguardInterfaceName),
+			Action: ReturnAction{},
+		},
+	}
+
+	for _, ifacePrefix := range r.WorkloadIfacePrefixes {
+		rules = append(rules, Rule{
+			Match:  Match().InInterface(fmt.Sprintf("%s+", ifacePrefix)),
+			Action: ReturnAction{},
+		})
+	}
+
+	rules = append(rules, Rule{Match: nil, Action: SetMarkAction{Mark: r.WireguardIptablesMark}})
+
+	return &Chain{
+		Name:  ChainSetWireguardIncomingMark,
+		Rules: rules,
 	}
 }
 

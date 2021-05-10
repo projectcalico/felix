@@ -1402,9 +1402,9 @@ var _ = Describe("Static", func() {
 				Rules: []Rule{
 					{Match: Match().InInterface("lo"),
 						Action: ReturnAction{}},
-					{Match: Match().InInterface("cali+"),
-						Action: ReturnAction{}},
 					{Match: Match().InInterface("wireguard.cali"),
+						Action: ReturnAction{}},
+					{Match: Match().InInterface("cali+"),
 						Action: ReturnAction{}},
 					{Match: nil,
 						Action: SetMarkAction{Mark: 0x100000}},
