@@ -1090,8 +1090,6 @@ func (r *DefaultRuleRenderer) StaticRawWireguardIncomingMarkChain() *Chain {
 	return &Chain{
 		Name: ChainSetWireguardIncomingMark,
 		Rules: []Rule{
-			{Match: Match().NotSrcAddrType(AddrTypeLocal, false),
-				Action: ReturnAction{}},
 			{Match: Match().InInterface("lo"),
 				Action: ReturnAction{}},
 			{Match: Match().InInterface("cali+"),
