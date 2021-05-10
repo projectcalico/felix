@@ -1266,17 +1266,29 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 				Action: iptables.JumpAction{Target: rules.ChainSetWireguardIncomingMark},
 			})
 
+			wgRules := []iptables.Rule{
+				{
+					Match:  iptables.Match().InInterface("lo"),
+					Action: iptables.ReturnAction{}},
+				{
+					Match:  iptables.Match().InInterface(rulesConfig.WireguardInterfaceName),
+					Action: iptables.ReturnAction{}},
+			}
+
+			for _, ifacePrefix := range rulesConfig.WorkloadIfacePrefixes {
+				wgRules = append(wgRules, iptables.Rule{
+					Match:  iptables.Match().InInterface(fmt.Sprintf("%s+", ifacePrefix)),
+					Action: iptables.ReturnAction{}})
+			}
+
+			wgRules = append(wgRules, iptables.Rule{
+				Match:  nil,
+				Action: iptables.SetMarkAction{Mark: rulesConfig.WireguardIptablesMark},
+			})
+
 			setWireguardIncomingMarkChain := &iptables.Chain{
-				Name: rules.ChainSetWireguardIncomingMark,
-				Rules: []iptables.Rule{
-					{Match: iptables.Match().InInterface("lo"),
-						Action: iptables.ReturnAction{}},
-					{Match: iptables.Match().InInterface("cali+"),
-						Action: iptables.ReturnAction{}},
-					{Match: iptables.Match().InInterface(rulesConfig.WireguardInterfaceName),
-						Action: iptables.ReturnAction{}},
-					{Action: iptables.SetMarkAction{Mark: rulesConfig.WireguardIptablesMark}},
-				},
+				Name:  rules.ChainSetWireguardIncomingMark,
+				Rules: wgRules,
 			}
 			t.UpdateChain(setWireguardIncomingMarkChain)
 		}
