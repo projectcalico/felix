@@ -1400,8 +1400,6 @@ var _ = Describe("Static", func() {
 			Expect(findChain(rr.StaticRawTableChains(ipVersion), "cali-wireguard-incoming-mark")).To(Equal(&Chain{
 				Name: "cali-wireguard-incoming-mark",
 				Rules: []Rule{
-					{Match: Match().NotSrcAddrType(AddrTypeLocal, false),
-						Action: ReturnAction{}},
 					{Match: Match().InInterface("lo"),
 						Action: ReturnAction{}},
 					{Match: Match().InInterface("cali+"),
