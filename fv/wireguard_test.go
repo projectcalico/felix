@@ -1075,6 +1075,14 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			}, "10s", "100ms").Should(ContainElements(matchers))
 		}
 
+		By("Checking the iptables raw chain cali-wireguard-incoming-mark exists")
+		for _, felix := range felixes {
+			Eventually(func() string {
+				s, _ := felix.ExecCombinedOutput("iptables", "-L", "cali-wireguard-incoming-mark", "-t", "raw")
+				return s
+			}, "10s", "100ms").Should(ContainSubstring("Chain cali-wireguard-incoming-mark"))
+		}
+
 		By("Checking the proc/sys src valid mark entries")
 		for _, felix := range felixes {
 			Eventually(func() string {
