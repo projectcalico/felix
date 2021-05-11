@@ -1003,7 +1003,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				felix.Exec("ip", "route", "show", "table", "all")
 				felix.Exec("ip", "route", "show", "cached")
 				felix.Exec("wg")
-				felix.Exec("iptables-save", "-t", "raw")
+				felix.Exec("iptables-save", "-c", "-t", "raw")
 				felix.Exec("iptables", "-L", "-vx")
 				felix.Exec("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
 			}
