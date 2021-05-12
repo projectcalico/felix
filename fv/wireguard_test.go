@@ -19,8 +19,10 @@ package fv_test
 import (
 	"context"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,7 +31,6 @@ import (
 	"github.com/onsi/gomega/types"
 
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 
 	. "github.com/onsi/ginkgo"
@@ -511,18 +512,9 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 				return readPolicy(policy.Name, api.Allow)
 			}, "5s", "100ms").ShouldNot(HaveOccurred())
 
-			cc.OnFail = func(msg string) {
-				log.WithField("msg", msg).Info("Connectivity Failed after 30seconds")
-				log.Info("Checking connectivity using ping between wls0 and wls1")
-
-				err, errstr := wls[0].SendPacketsTo(wls[1].IP, 5, 100)
-				log.Infof("wls0 to wls1: err=%v, errstr=%s", err, errstr)
-				err, errstr = wls[1].SendPacketsTo(wls[0].IP, 5, 100)
-				log.Infof("wls1 to wls0: err=%v, errstr=%s", err, errstr)
-			}
 			cc.ExpectSome(wls[0], wls[1])
 			cc.ExpectSome(wls[1], wls[0])
-			cc.CheckConnectivityWithTimeout(30 * time.Second)
+			cc.CheckConnectivity()
 
 			By("verifying tunnelled packet count is non-zero")
 			for i := range felixes {
@@ -993,6 +985,32 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		cc = &connectivity.Checker{}
+
+		// Check felix Wireguards have handshaked.
+		for i, felix := range felixes {
+			start := time.Now()
+			var matchers []types.GomegaMatcher
+			Eventually(func() []int {
+				for j, _ := range felixes {
+					if i != j {
+						felix.Exec("ping", "-c", "1", "-W", "1", "-s", "1", felixes[j].IP)
+						matchers = append(matchers, BeNumerically(">", 0))
+					}
+				}
+				var handshakes []int
+				out, _ := felix.ExecOutput("wg", "show", wireguardInterfaceNameDefault, "latest-handshakes")
+				peers := strings.Split(out, "\n")
+				for _, peer := range peers {
+					parts := strings.Split(peer, "\t")
+					if len(parts) == 2 {
+						h, _ := strconv.Atoi(parts[1])
+						handshakes = append(handshakes, h)
+					}
+				}
+				return handshakes
+			}, "30s", "100ms").Should(ContainElements(matchers))
+			log.Infof("WIREGUARD HANDSHAKE for Felix %d took %s", i, time.Since(start))
+		}
 	})
 
 	AfterEach(func() {
@@ -1003,7 +1021,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				felix.Exec("ip", "route", "show", "table", "all")
 				felix.Exec("ip", "route", "show", "cached")
 				felix.Exec("wg")
-				felix.Exec("iptables-save", "-t", "raw")
+				felix.Exec("iptables-save", "-c", "-t", "raw")
 				felix.Exec("iptables", "-L", "-vx")
 				felix.Exec("cat", "/proc/sys/net/ipv4/conf/all/src_valid_mark")
 			}
@@ -1074,6 +1092,14 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			}, "10s", "100ms").Should(ContainElements(matchers))
 		}
 
+		By("Checking the iptables raw chain cali-wireguard-incoming-mark exists")
+		for _, felix := range felixes {
+			Eventually(func() string {
+				s, _ := felix.ExecCombinedOutput("iptables", "-L", "cali-wireguard-incoming-mark", "-t", "raw")
+				return s
+			}, "10s", "100ms").Should(ContainSubstring("Chain cali-wireguard-incoming-mark"))
+		}
+
 		By("Checking the proc/sys src valid mark entries")
 		for _, felix := range felixes {
 			Eventually(func() string {
@@ -1106,7 +1132,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
 		cc.ExpectSome(wlsByHost[0][1], wlsByHost[1][0])
 		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][1])
-		cc.CheckConnectivityWithTimeout(30 * time.Second)
+		cc.CheckConnectivity()
 		for i := range []int{0, 1} {
 			numNonTunnelPacketsFelix0toFelix1Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")
 			numNonTunnelPacketsFelix1toFelix0Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")
@@ -1145,7 +1171,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		By("checking external node to pod connectivity")
 		cc.ExpectSome(externalClient, wlsByHost[0][0])
 
-		cc.CheckConnectivityWithTimeout(30 * time.Second)
+		cc.CheckConnectivity()
 	})
 })
 
