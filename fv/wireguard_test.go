@@ -994,7 +994,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			Eventually(func() []int {
 				for j, _ := range felixes {
 					if i != j {
-						felix.Exec("ping", "-c", "1", "-W", "1", "-s", "1", felixes[j].IP)
+						felix.ExecMayFail("ping", "-c", "1", "-W", "1", "-s", "1", felixes[j].IP)
 						matchers = append(matchers, BeNumerically(">", 0))
 					}
 				}
