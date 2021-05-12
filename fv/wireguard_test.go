@@ -19,8 +19,10 @@ package fv_test
 import (
 	"context"
 	"fmt"
+	log "github.com/sirupsen/logrus"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -983,6 +985,32 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		cc = &connectivity.Checker{}
+
+		// Check felix Wireguards have handshaked.
+		for i, felix := range felixes {
+			start := time.Now()
+			var matchers []types.GomegaMatcher
+			Eventually(func() []int {
+				for j, _ := range felixes {
+					if i != j {
+						felix.Exec("ping", "-c", "1", "-W", "1", "-s", "1", felixes[j].IP)
+						matchers = append(matchers, BeNumerically(">", 0))
+					}
+				}
+				var handshakes []int
+				out, _ := felix.ExecOutput("wg", "show", wireguardInterfaceNameDefault, "latest-handshakes")
+				peers := strings.Split(out, "\n")
+				for _, peer := range peers {
+					parts := strings.Split(peer, "\t")
+					if len(parts) == 2 {
+						h, _ := strconv.Atoi(parts[1])
+						handshakes = append(handshakes, h)
+					}
+				}
+				return handshakes
+			}, "30s", "100ms").Should(ContainElements(matchers))
+			log.Infof("WIREGUARD HANDSHAKE for Felix %d took %s", i, time.Since(start))
+		}
 	})
 
 	AfterEach(func() {
