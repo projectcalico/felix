@@ -29,7 +29,6 @@ import (
 	"github.com/onsi/gomega/types"
 
 	"github.com/projectcalico/libcalico-go/lib/numorstring"
-	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 
 	. "github.com/onsi/ginkgo"
@@ -511,18 +510,9 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 				return readPolicy(policy.Name, api.Allow)
 			}, "5s", "100ms").ShouldNot(HaveOccurred())
 
-			cc.OnFail = func(msg string) {
-				log.WithField("msg", msg).Info("Connectivity Failed after 30seconds")
-				log.Info("Checking connectivity using ping between wls0 and wls1")
-
-				err, errstr := wls[0].SendPacketsTo(wls[1].IP, 5, 100)
-				log.Infof("wls0 to wls1: err=%v, errstr=%s", err, errstr)
-				err, errstr = wls[1].SendPacketsTo(wls[0].IP, 5, 100)
-				log.Infof("wls1 to wls0: err=%v, errstr=%s", err, errstr)
-			}
 			cc.ExpectSome(wls[0], wls[1])
 			cc.ExpectSome(wls[1], wls[0])
-			cc.CheckConnectivityWithTimeout(30 * time.Second)
+			cc.CheckConnectivity()
 
 			By("verifying tunnelled packet count is non-zero")
 			for i := range felixes {
@@ -1114,7 +1104,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
 		cc.ExpectSome(wlsByHost[0][1], wlsByHost[1][0])
 		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][1])
-		cc.CheckConnectivityWithTimeout(30 * time.Second)
+		cc.CheckConnectivity()
 		for i := range []int{0, 1} {
 			numNonTunnelPacketsFelix0toFelix1Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix0toFelix1")
 			numNonTunnelPacketsFelix1toFelix0Before := tcpdumps[i].MatchCount("numNonTunnelPacketsFelix1toFelix0")
@@ -1153,7 +1143,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		By("checking external node to pod connectivity")
 		cc.ExpectSome(externalClient, wlsByHost[0][0])
 
-		cc.CheckConnectivityWithTimeout(30 * time.Second)
+		cc.CheckConnectivity()
 	})
 })
 
