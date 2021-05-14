@@ -1130,10 +1130,8 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		}
 
 		By("verifying packets between felix-0 and felix-1 is encrypted")
-		for i := 0; i < 100; i++ {
-			cc.ExpectSome(wlsByHost[0][1], wlsByHost[1][0])
-			cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][1])
-		}
+		cc.ExpectSome(wlsByHost[0][1], wlsByHost[1][0])
+		cc.ExpectSome(wlsByHost[1][0], wlsByHost[0][1])
 		cc.CheckConnectivityWithTimeout(101 * time.Millisecond)
 
 		for i := range []int{0, 1} {
