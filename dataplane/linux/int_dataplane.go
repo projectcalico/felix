@@ -445,7 +445,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			config,
 			dp.loopSummarizer,
 		)
-		go vxlanManager.KeepVXLANDeviceInSync(config.VXLANMTU, 10*time.Second)
+		go vxlanManager.KeepVXLANDeviceInSync(config.VXLANMTU, iptablesFeatures.ChecksumOffloadBroken, 10*time.Second)
 		dp.RegisterManager(vxlanManager)
 	} else {
 		cleanUpVXLANDevice()
@@ -1274,7 +1274,7 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 		})
 
 		rawChains := []*iptables.Chain{{
-			Name: rules.ChainRawPrerouting,
+			Name:  rules.ChainRawPrerouting,
 			Rules: rawRules,
 		}}
 		t.UpdateChains(rawChains)
