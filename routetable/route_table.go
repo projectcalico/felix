@@ -745,7 +745,7 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 		LinkIndex: linkIndex,
 		Dst:       &ipNet,
 		Type:      target.RouteType(),
-		Protocol:  r.deviceRouteProtocol,
+		Protocol:  netlink.RouteProtocol(r.deviceRouteProtocol),
 		Scope:     target.RouteScope(),
 		Table:     r.tableIndex,
 	}
@@ -835,7 +835,7 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 		}
 		logCxt := logCxt.WithField("dest", dest)
 		// Check if we should remove routes not added by us
-		if !r.removeExternalRoutes && route.Protocol != r.deviceRouteProtocol {
+		if !r.removeExternalRoutes && route.Protocol != netlink.RouteProtocol(r.deviceRouteProtocol) {
 			logCxt.Debug("Syncing routes: not removing route as it is not marked as Felix route")
 			continue
 		}
@@ -850,7 +850,7 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 			if !r.deviceRouteSourceAddress.Equal(route.Src) {
 				routeProblems = append(routeProblems, "incorrect source address")
 			}
-			if r.deviceRouteProtocol != route.Protocol {
+			if netlink.RouteProtocol(r.deviceRouteProtocol) != route.Protocol {
 				routeProblems = append(routeProblems, "incorrect protocol")
 			}
 			if expectedTargetFound && expectedTarget.RouteType() != route.Type {
