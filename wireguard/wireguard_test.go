@@ -639,7 +639,7 @@ var _ = Describe("Enable wireguard", func() {
 								LinkIndex: link.LinkAttrs.Index,
 								Dst:       &ipnet_1,
 								Type:      syscall.RTN_UNICAST,
-								Protocol:  FelixRouteProtocol,
+								Protocol:  netlink.RouteProtocol(FelixRouteProtocol),
 								Scope:     netlink.SCOPE_LINK,
 								Table:     tableIndex,
 							}))
@@ -647,7 +647,7 @@ var _ = Describe("Enable wireguard", func() {
 								LinkIndex: link.LinkAttrs.Index,
 								Dst:       &ipnet_2,
 								Type:      syscall.RTN_UNICAST,
-								Protocol:  FelixRouteProtocol,
+								Protocol:  netlink.RouteProtocol(FelixRouteProtocol),
 								Scope:     netlink.SCOPE_LINK,
 								Table:     tableIndex,
 							}))
@@ -655,14 +655,14 @@ var _ = Describe("Enable wireguard", func() {
 								LinkIndex: link.LinkAttrs.Index,
 								Dst:       &ipnet_3,
 								Type:      syscall.RTN_UNICAST,
-								Protocol:  FelixRouteProtocol,
+								Protocol:  netlink.RouteProtocol(FelixRouteProtocol),
 								Scope:     netlink.SCOPE_LINK,
 								Table:     tableIndex,
 							}))
 							Expect(rtDataplane.RouteKeyToRoute[routekey_4_throw]).To(Equal(netlink.Route{
 								Dst:      &ipnet_4,
 								Type:     syscall.RTN_THROW,
-								Protocol: FelixRouteProtocol,
+								Protocol: netlink.RouteProtocol(FelixRouteProtocol),
 								Scope:    netlink.SCOPE_UNIVERSE,
 								Table:    tableIndex,
 							}))
@@ -786,7 +786,7 @@ var _ = Describe("Enable wireguard", func() {
 								Expect(rtDataplane.RouteKeyToRoute[routekey_3_throw]).To(Equal(netlink.Route{
 									Dst:      &ipnet_3,
 									Type:     syscall.RTN_THROW,
-									Protocol: FelixRouteProtocol,
+									Protocol: netlink.RouteProtocol(FelixRouteProtocol),
 									Scope:    netlink.SCOPE_UNIVERSE,
 									Table:    tableIndex,
 								}))
@@ -843,7 +843,7 @@ var _ = Describe("Enable wireguard", func() {
 									LinkIndex: link.LinkAttrs.Index,
 									Dst:       &ipnet_4,
 									Type:      syscall.RTN_UNICAST,
-									Protocol:  FelixRouteProtocol,
+									Protocol:  netlink.RouteProtocol(FelixRouteProtocol),
 									Scope:     netlink.SCOPE_LINK,
 									Table:     tableIndex,
 								}))
