@@ -248,6 +248,9 @@ func (r *RouteRules) Apply() error {
 			// Table index of the rule is managed by us.
 			// Be careful, do not use &nlRule below as it remain same value through iterations.
 			dataplaneRule := FromNetlinkRule(&nlRule)
+
+			r.logCxt.Debugf("MS - Rule from netlink is [%v]", dataplaneRule)
+			
 			if activeRule := r.getActiveRule(dataplaneRule, r.matchForUpdate); activeRule != nil {
 				// rule exists both in activeRules and dataplaneRules.
 				toAdd.Discard(activeRule)
