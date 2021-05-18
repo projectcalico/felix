@@ -250,11 +250,11 @@ func (r *RouteRules) Apply() error {
 			// Be careful, do not use &nlRule below as it remain same value through iterations.
 			dataplaneRule := FromNetlinkRule(&nlRule)
 
-			ruleJson, err := json.Marshal(dataplaneRule)
+			ruleJson, err := json.Marshal(nlRule)
 			if err != nil {
 				r.logCxt.Error("Can't convert dataplaneRule to json")
 			}
-			r.logCxt.Debugf("MS - Rule from netlink is: %s", string(ruleJson))
+			r.logCxt.Debugf("MS - Rule from netlink is: %v+", string(ruleJson))
 			
 			if activeRule := r.getActiveRule(dataplaneRule, r.matchForUpdate); activeRule != nil {
 				// rule exists both in activeRules and dataplaneRules.
