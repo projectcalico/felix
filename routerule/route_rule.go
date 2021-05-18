@@ -15,6 +15,7 @@
 package routerule
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -249,7 +250,11 @@ func (r *RouteRules) Apply() error {
 			// Be careful, do not use &nlRule below as it remain same value through iterations.
 			dataplaneRule := FromNetlinkRule(&nlRule)
 
-			r.logCxt.Debugf("MS - Rule from netlink is [%v]", dataplaneRule)
+			ruleJson, err := json.Marshal(dataplaneRule)
+			if err != nil {
+				r.logCxt.Error("Can't convert dataplaneRule to json")
+			}
+			r.logCxt.Debugf("MS - Rule from netlink is: %s", string(ruleJson))
 			
 			if activeRule := r.getActiveRule(dataplaneRule, r.matchForUpdate); activeRule != nil {
 				// rule exists both in activeRules and dataplaneRules.
