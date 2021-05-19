@@ -157,7 +157,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 			for _, felix := range felixes {
 				Eventually(func() string {
 					return getWireguardRoutingRule(felix)
-				}, "5s", "100ms").Should(MatchRegexp("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+"))
+				}, "5s", "100ms").Should(MatchRegexp("\\d+:\\s+not from all fwmark 0x\\d+/0x\\d+ lookup \\d+"))
 			}
 		})
 
@@ -354,7 +354,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 				// Check the rule exists.
 				Eventually(func() string {
 					return getWireguardRoutingRule(felix)
-				}, "10s", "100ms").Should(MatchRegexp("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+"))
+				}, "10s", "100ms").Should(MatchRegexp("\\d+:\\s+not from all fwmark 0x\\d+/0x\\d+ lookup \\d+"))
 			}
 
 			for i, felix := range felixes {
@@ -747,7 +747,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 		for i := range []int{0, 1} {
 			Eventually(func() string {
 				return getWireguardRoutingRule(felixes[i])
-			}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+")))
+			}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+not from all fwmark 0x\\d+/0x\\d+ lookup \\d+")))
 		}
 		// 3. by checking, Wireguard route table exist.
 		for i := range []int{0, 1} {
@@ -801,7 +801,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 				// Check the rule exists.
 				Eventually(func() string {
 					return getWireguardRoutingRule(felixes[i])
-				}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+")))
+				}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+not from all fwmark 0x\\d+/0x\\d+ lookup \\d+")))
 			}
 			for i := range []int{0, 1} {
 				// Check the route entry exists.
@@ -1070,7 +1070,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 		for _, felix := range felixes {
 			Eventually(func() string {
 				return getWireguardRoutingRule(felix)
-			}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+from all fwmark 0/0x\\d+ lookup \\d+")))
+			}, "10s", "100ms").Should(MatchRegexp(fmt.Sprintf("\\d+:\\s+not from all fwmark 0x\\d+/0x\\d+ lookup \\d+")))
 		}
 
 		By("Checking the routing table entries exist")
