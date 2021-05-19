@@ -242,16 +242,17 @@ func (r *RouteRules) Apply() error {
 	// Set the Family onto the rules, the netlink lib does not populate this field.
 	for _, nlRule := range nlRules {
 		nlRule.Family = r.netlinkFamily
+		r.logCxt.Debugf("MS - setting family of %d on netlink rule with Priority: %d", r.netlinkFamily, nlRule.Priority)
 	}
 
 	for _, rule := range nlRules {
 		ruleJson, _ := json.Marshal(rule)
-		r.logCxt.Debug("MS - Netlink rules : ", string(ruleJson))
+		r.logCxt.Debugf("MS - Netlink rules : %s", string(ruleJson))
 	}
 	r.activeRules.Iter(func(item interface{}) error {
 		rule := item.(*Rule)
 		ruleJson, _ := json.Marshal(rule.nlRule)
-		r.logCxt.Debug("MS - Active rules  : ", string(ruleJson))
+		r.logCxt.Debugf("MS - Active rules  : %s", string(ruleJson))
 		return nil
 	})
 
