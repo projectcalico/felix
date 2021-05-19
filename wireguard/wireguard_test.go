@@ -180,7 +180,8 @@ var _ = Describe("Enable wireguard", func() {
 		rule.Family = netlink.FAMILY_V4
 		rule.Priority = rulePriority
 		rule.Table = tableIndex
-		rule.Mark = 0
+		rule.Invert = true
+		rule.Mark = firewallMark
 		rule.Mask = firewallMark
 	})
 
