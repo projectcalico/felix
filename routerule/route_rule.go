@@ -240,8 +240,8 @@ func (r *RouteRules) Apply() error {
 	}
 
 	// Set the Family onto the rules, the netlink lib does not populate this field.
-	for _, nlRule := range nlRules {
-		nlRule.Family = r.netlinkFamily
+	for i, nlRule := range nlRules {
+		nlRules[i].Family = r.netlinkFamily
 		r.logCxt.Debugf("MS - setting family of %d on netlink rule with Priority: %d", r.netlinkFamily, nlRule.Priority)
 	}
 
