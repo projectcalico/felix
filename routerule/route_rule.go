@@ -250,7 +250,7 @@ func (r *RouteRules) Apply() error {
 	}
 	r.activeRules.Iter(func(item interface{}) error {
 		rule := item.(*Rule)
-		ruleJson, _ := json.Marshal(rule)
+		ruleJson, _ := json.Marshal(rule.nlRule)
 		r.logCxt.Debug("MS - Active rules  : ", string(ruleJson))
 		return nil
 	})
