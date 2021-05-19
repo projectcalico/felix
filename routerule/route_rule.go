@@ -15,6 +15,7 @@
 package routerule
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -242,6 +243,17 @@ func (r *RouteRules) Apply() error {
 	for _, nlRule := range nlRules {
 		nlRule.Family = r.netlinkFamily
 	}
+
+	for _, rule := range nlRules {
+		ruleJson, _ := json.Marshal(rule)
+		r.logCxt.Debug("MS - Netlink rules : ", string(ruleJson))
+	}
+	r.activeRules.Iter(func(item interface{}) error {
+		rule := item.(*Rule)
+		ruleJson, _ := json.Marshal(rule)
+		r.logCxt.Debug("MS - Active rules  : ", string(ruleJson))
+		return nil
+	})
 
 	// Work out two sets, rules to add and rules to remove.
 	toAdd := r.activeRules.Copy()
