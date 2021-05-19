@@ -238,14 +238,17 @@ func (r *RouteRules) Apply() error {
 		return ListFailed
 	}
 
+	// Set the Family onto the rules, the netlink lib does not populate this field.
+	for _, nlRule := range nlRules {
+		nlRule.Family = r.netlinkFamily
+	}
+
 	// Work out two sets, rules to add and rules to remove.
 	toAdd := r.activeRules.Copy()
 	toRemove := set.New()
 	for _, nlRule := range nlRules {
 		// Give each loop a fresh copy of nlRule since we would need to use pointer later.
 		nlRule := nlRule
-		// Set the Family onto the rule, so it can be matched below.
-		nlRule.Family = r.netlinkFamily
 		if r.tableIndexSet.Contains(nlRule.Table) {
 			// Table index of the rule is managed by us.
 			// Be careful, do not use &nlRule below as it remain same value through iterations.
