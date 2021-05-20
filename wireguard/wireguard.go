@@ -1498,7 +1498,7 @@ func (w *Wireguard) ensureLinkAddressV4(netlinkClient netlinkshim.Interface) err
 func (w *Wireguard) addRouteRule() {
 	w.routerule.SetRule(routerule.NewRule(ipVersion, w.config.RoutingRulePriority).
 		GoToTable(w.config.RoutingTableIndex).
-		MatchFWMarkWithMask(0, uint32(w.config.FirewallMark)))
+		Not().MatchFWMarkWithMask(uint32(w.config.FirewallMark), uint32(w.config.FirewallMark)))
 }
 
 // ensureDisabled ensures all calico-installed wireguard configuration is removed.
