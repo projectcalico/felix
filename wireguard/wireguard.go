@@ -1496,6 +1496,9 @@ func (w *Wireguard) ensureLinkAddressV4(netlinkClient netlinkshim.Interface) err
 
 // addRouteRule adds a routing rule to use the wireguard table.
 func (w *Wireguard) addRouteRule() {
+	// The netlink library has a bug where it returns -1 for the mark on a rule instead of 0.
+	// To work around this issue, the rule below was re-written to no longer use a mark of 0x0,
+	// instead matching the NOT of the actual wireguard mark.
 	w.routerule.SetRule(routerule.NewRule(ipVersion, w.config.RoutingRulePriority).
 		GoToTable(w.config.RoutingTableIndex).
 		Not().MatchFWMarkWithMask(uint32(w.config.FirewallMark), uint32(w.config.FirewallMark)))
