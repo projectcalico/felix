@@ -27,7 +27,7 @@ require (
 	github.com/projectcalico/pod2daemon v0.0.0-20210421215417-6a02764eed37
 	github.com/projectcalico/typha v0.7.3-0.20210518155147-75c42c949f88
 	github.com/prometheus/client_golang v1.7.1
-	github.com/satori/go.uuid v1.2.0
+	github.com/satori/go.uuid v1.2.1-0.20181028125025-b2ce2384e17b // Using master for CVE-2021-3538 fix.
 	github.com/sirupsen/logrus v1.7.0
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/viper v1.7.0
