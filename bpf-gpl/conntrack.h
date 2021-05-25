@@ -51,7 +51,8 @@ static CALI_BPF_INLINE void dump_ct_key(struct calico_ct_key *k)
 	CALI_VERB("CT-ALL   key B=%x:%d size=%d\n", bpf_ntohl(k->addr_b), k->port_b, (int)sizeof(struct calico_ct_key));
 }
 
-static CALI_BPF_INLINE int calico_ct_v4_create_tracking(struct ct_create_ctx *ct_ctx,
+static CALI_BPF_INLINE int calico_ct_v4_create_tracking(struct cali_tc_ctx *tc_ctx,
+							struct ct_create_ctx *ct_ctx,
 							struct calico_ct_key *k)
 {
 	__be32 ip_src = ct_ctx->src;
@@ -72,8 +73,8 @@ static CALI_BPF_INLINE int calico_ct_v4_create_tracking(struct ct_create_ctx *ct
 		syn = ct_ctx->tcp->syn;
 	}
 
-	CALI_DEBUG("CT-ALL packet mark is: 0x%x\n", ct_ctx->skb->mark);
-	if (skb_seen(ct_ctx->skb)) {
+	CALI_DEBUG("CT-ALL packet mark is: 0x%x\n", tc_ctx->skb->mark);
+	if (skb_seen(tc_ctx->skb)) {
 		/* Packet already marked as being from another workload, which will
 		 * have created a conntrack entry.  Look that one up instead of
 		 * creating one.
@@ -170,7 +171,7 @@ create:
 	src_to_dst->syn_seen = syn;
 	src_to_dst->opener = 1;
 	if (CALI_F_TO_HOST) {
-		src_to_dst->ifindex = skb_ingress_ifindex(ct_ctx->skb);
+		src_to_dst->ifindex = skb_ingress_ifindex(tc_ctx->skb);
 	} else {
 		src_to_dst->ifindex = CT_INVALID_IFINDEX;
 	}
@@ -805,10 +806,7 @@ static CALI_BPF_INLINE int conntrack_create(struct cali_tc_ctx *ctx, struct ct_c
 	struct calico_ct_key k;
 	int err;
 
-	// Workaround for verifier; make sure verifier sees the skb on all code paths.
-	ct_ctx->skb = ctx->skb;
-
-	err = calico_ct_v4_create_tracking(ct_ctx, &k);
+	err = calico_ct_v4_create_tracking(ctx, ct_ctx, &k);
 	if (err) {
 		return err;
 	}

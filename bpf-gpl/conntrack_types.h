@@ -107,7 +107,6 @@ struct ct_lookup_ctx {
 };
 
 struct ct_create_ctx {
-	struct __sk_buff *skb;
 	__u8 proto;
 	__be32 src;
 	__be32 orig_dst;
