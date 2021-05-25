@@ -16,10 +16,6 @@ auto_cancel:
     when: "branch != 'master'"
 
 promotions:
-- name: Cleanup
-  pipeline_file: cleanup.yml
-  auto_promote:
-    when: "result = 'stopped'"
 # Run the pin update process in case there were a backlog of pin update requests
 - name: Update Pins
   pipeline_file: update_pins.yml
@@ -94,37 +90,46 @@ blocks:
         - ./.semaphore/collect-artifacts
         - ./.semaphore/publish-artifacts
 - name: BPF UT/FV tests on new kernel
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu2004
   dependencies: []
   task:
     prologue:
       commands:
+      # Semaphore mounts a copy-on-write FS as /var/lib/docker in order to provide a pre-loaded cache of
+      # some images. However, the cache is not useful to us and the copy-on-write FS is a big problem given
+      # how much we churn docker containers during the build.  Disable it.
+      - sudo systemctl stop docker
+      - sudo umount /var/lib/docker && sudo killall qemu-nbd || true
+      - sudo systemctl start docker
+      # Free up space on the build machine.
+      - sudo rm -rf ~/.kiex ~/.phpbrew ~/.rbenv ~/.nvm ~/.kerl
       - checkout
-      - export GOOGLE_APPLICATION_CREDENTIALS=$HOME/secrets/secret.google-service-account-key.json
-      - export SHORT_WORKFLOW_ID=$(echo ${SEMAPHORE_WORKFLOW_ID} | sha256sum | cut -c -8)
-      - export ZONE=europe-west3-c
-      - export VM_NAME=sem-${SEMAPHORE_PROJECT_NAME}-${SHORT_WORKFLOW_ID}-${SEMAPHORE_JOB_INDEX:-ut}
-      - echo VM_NAME=${VM_NAME}
-      - export REPO_NAME=$(basename $(pwd))
-      - mkdir artifacts
-      - ./.semaphore/create-test-vm ${VM_NAME}
+      - cache restore go-pkg-cache
+      - cache restore go-mod-cache
+      - 'cache restore bin-${SEMAPHORE_GIT_SHA}'
+      - 'cache restore felix-image-${SEMAPHORE_GIT_SHA}'
+      - docker load -i /tmp/calico-felix.tar
+      - rm /tmp/calico-felix.tar
+      - touch bin/*
+      # Pre-loading the IPIP module prevents a flake where the first felix to use IPIP loads the module and
+      # routing in that first felix container chooses different source IPs than the tests are expecting.
+      - sudo modprobe ipip
     jobs:
     - name: UT and Wireguard non-BPF FV on newer kernel
       commands:
-      - ./.semaphore/on-test-vm make --directory=${REPO_NAME} ut-bpf
-      - ./.semaphore/on-test-vm make --directory=${REPO_NAME} check-wireguard
+      - make ut-bpf
+      - make check-wireguard
     - name: FV on newer kernel
       commands:
-      - ./.semaphore/on-test-vm make --directory=${REPO_NAME} fv-bpf GINKGO_FOCUS=BPF-SAFE FV_NUM_BATCHES=${SEMAPHORE_JOB_COUNT} FV_BATCHES_TO_RUN="${SEMAPHORE_JOB_INDEX}"
+      - make fv-bpf GINKGO_FOCUS=BPF-SAFE FV_NUM_BATCHES=${SEMAPHORE_JOB_COUNT} FV_BATCHES_TO_RUN="${SEMAPHORE_JOB_INDEX}"
       parallelism: 8
     epilogue:
       always:
         commands:
-        - ./.semaphore/on-test-vm ${REPO_NAME}/.semaphore/collect-artifacts
-        - gcloud --quiet compute scp "--zone=${ZONE}" "ubuntu@${VM_NAME}:${REPO_NAME}/artifacts" ./ --recurse
+        - ./.semaphore/collect-artifacts
         - ./.semaphore/publish-artifacts
-        - gcloud --quiet compute instances delete ${VM_NAME} --zone=${ZONE}
-    secrets:
-    - name: google-service-account-for-gce
 - name: Static checks
   dependencies: []
   task:
