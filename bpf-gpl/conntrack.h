@@ -52,7 +52,7 @@ static CALI_BPF_INLINE void dump_ct_key(struct calico_ct_key *k)
 }
 
 static CALI_BPF_INLINE int calico_ct_v4_create_tracking(struct cali_tc_ctx *tc_ctx,
-							struct ct_create_ctx *ct_ctx,
+							const struct ct_create_ctx *ct_ctx,
 							struct calico_ct_key *k)
 {
 	__be32 ip_src = ct_ctx->src;
@@ -208,7 +208,7 @@ out:
 	return err;
 }
 
-static CALI_BPF_INLINE int calico_ct_v4_create_nat_fwd(struct ct_create_ctx *ct_ctx,
+static CALI_BPF_INLINE int calico_ct_v4_create_nat_fwd(const struct ct_create_ctx *ct_ctx,
 						       struct calico_ct_key *rk)
 {
 	__u8 ip_proto = ct_ctx->proto;
@@ -801,7 +801,7 @@ out_invalid:
 }
 
 /* creates connection tracking for tracked protocols */
-static CALI_BPF_INLINE int conntrack_create(struct cali_tc_ctx *ctx, struct ct_create_ctx *ct_ctx)
+static CALI_BPF_INLINE int conntrack_create(struct cali_tc_ctx *ctx, const struct ct_create_ctx *ct_ctx)
 {
 	struct calico_ct_key k;
 	int err;
