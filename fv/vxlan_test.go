@@ -78,7 +78,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					// Install a default profile that allows all ingress and egress, in the absence of any Policy.
 					infra.AddDefaultAllow()
 
-					// Wait until the vxlan deShouldvice appears.
+					// Wait until the vxlan device appears.
 					Eventually(func() error {
 						for i, f := range felixes {
 							out, err := f.ExecOutput("ip", "link")
