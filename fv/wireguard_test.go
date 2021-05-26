@@ -19,12 +19,13 @@ package fv_test
 import (
 	"context"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	"k8s.io/apimachinery/pkg/util/intstr"
 
