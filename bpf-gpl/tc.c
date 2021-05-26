@@ -702,7 +702,6 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 			goto deny;
 		}
 
-		ct_ctx_nat.skb = skb;
 		ct_ctx_nat.proto = state->ip_proto;
 		ct_ctx_nat.src = state->ip_src;
 		ct_ctx_nat.sport = state->sport;
