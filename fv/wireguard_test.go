@@ -25,8 +25,6 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/onsi/gomega/types"
@@ -900,7 +898,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 	})
 })
 
-var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node cluster with WorkloadIPs", []apiconfig.DatastoreType{ /* apiconfig.EtcdV3, */ apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node cluster with WorkloadIPs", []apiconfig.DatastoreType{ apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
 	const nodeCount, wlPerNode = 3, 2
 
 	var (
@@ -990,7 +988,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		// Check felix Wireguards have handshaked.
 		for i, felix := range felixes {
-			start := time.Now()
 			var matchers []types.GomegaMatcher
 			Eventually(func() []int {
 				for j, _ := range felixes {
@@ -1011,7 +1008,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 				}
 				return handshakes
 			}, "30s", "100ms").Should(ContainElements(matchers))
-			log.Infof("WIREGUARD HANDSHAKE for Felix %d took %s", i, time.Since(start))
 		}
 	})
 
