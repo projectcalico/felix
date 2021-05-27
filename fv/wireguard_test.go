@@ -52,7 +52,7 @@ import (
 
 const (
 	wireguardInterfaceNameDefault       = "wireguard.cali"
-	wireguardMTUDefault                 = 1440
+	wireguardMTUDefault                 = 1440 // Wireguard needs an overhead of 60 bytes for IPV4.
 	wireguardRoutingRulePriorityDefault = "99"
 	wireguardListeningPortDefault       = 51820
 	defaultWorkloadPort                 = "8055"
@@ -898,7 +898,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3 node 
 	})
 })
 
-var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node cluster with WorkloadIPs", []apiconfig.DatastoreType{ apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node cluster with WorkloadIPs", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
 	const nodeCount, wlPerNode = 3, 2
 
 	var (
@@ -986,16 +986,24 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		cc = &connectivity.Checker{}
 
-		// Check felix Wireguards have handshaked.
+		// Ping other felix nodes from each node to trigger Wireguard handshakes.
+		for i, felix := range felixes {
+			for j, _ := range felixes {
+				if i != j {
+					felix.ExecMayFail("ping", "-c", "1", "-W", "1", "-s", "1", felixes[j].IP)
+				}
+			}
+		}
+
+		// Check felix nodes have performed Wireguard handshakes.
 		for i, felix := range felixes {
 			var matchers []types.GomegaMatcher
-			Eventually(func() []int {
-				for j, _ := range felixes {
-					if i != j {
-						felix.ExecMayFail("ping", "-c", "1", "-W", "1", "-s", "1", felixes[j].IP)
-						matchers = append(matchers, BeNumerically(">", 0))
-					}
+			for j, _ := range felixes {
+				if i != j {
+					matchers = append(matchers, BeNumerically(">", 0))
 				}
+			}
+			Eventually(func() []int {
 				var handshakes []int
 				out, _ := felix.ExecOutput("wg", "show", wireguardInterfaceNameDefault, "latest-handshakes")
 				peers := strings.Split(out, "\n")
