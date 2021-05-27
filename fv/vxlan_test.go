@@ -134,10 +134,6 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ VXLAN topology before addin
 					}
 					for _, felix := range felixes {
 						felix.Stop()
-
-						// see if blackhole routes go away with felix
-						o, _ := felix.ExecOutput("ip", "r", "s", "type", "blackhole")
-						Expect(o).To(Equal(""))
 					}
 
 					if CurrentGinkgoTestDescription().Failed {
