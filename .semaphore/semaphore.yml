@@ -118,6 +118,7 @@ blocks:
       # Pre-loading the IPIP module prevents a flake where the first felix to use IPIP loads the module and
       # routing in that first felix container chooses different source IPs than the tests are expecting.
       - sudo modprobe ipip
+      - sudo swapoff -a && sudo fallocate -l 2G /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
     jobs:
     - name: UT and Wireguard non-BPF FV on newer kernel
       commands:
