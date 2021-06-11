@@ -17,14 +17,13 @@
 package dataplane
 
 import (
+	log "github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/util/clock"
+	"k8s.io/client-go/kubernetes"
 	"math/bits"
 	"net"
 	"os/exec"
 	"runtime/debug"
-
-	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/util/clock"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/projectcalico/felix/aws"
 	"github.com/projectcalico/felix/bpf"
@@ -353,6 +352,8 @@ func StartDataplaneDriver(configParams *config.Config,
 			FeatureDetectOverrides: configParams.FeatureDetectOverride,
 
 			RouteSource: configParams.RouteSource,
+
+			KubernetesProvider: configParams.KubernetesProvider(),
 		}
 
 		if configParams.BPFExternalServiceMode == "dsr" {
