@@ -349,9 +349,10 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		if config.KubernetesProvider == ProviderAKS && config.RouteSource == "WorkloadIPs" {
 			log.Debug("Defaulting Wireguard MTU based on host and AKS with WorkloadIPs")
 			config.Wireguard.MTU = hostMTU - aksMTUOverhead - wireguardMTUOverhead
+		} else {
+			log.Debug("Defaulting Wireguard MTU based on host")
+			config.Wireguard.MTU = hostMTU - wireguardMTUOverhead
 		}
-		log.Debug("Defaulting Wireguard MTU based on host")
-		config.Wireguard.MTU = hostMTU - wireguardMTUOverhead
 	}
 	podMTU := determinePodMTU(config)
 	if err := writeMTUFile(podMTU); err != nil {
