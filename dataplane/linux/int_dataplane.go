@@ -324,6 +324,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	hostMTU, err := findHostMTU(config.MTUIfacePattern)
 	if err != nil {
 		log.WithError(err).Fatal("Unable to detect host MTU, shutting down")
+		return nil
 	}
 	// We found the host's MTU. Default any MTU configurations that have not been set.
 	// We default the values even if the encap is not enabled, in order to match behavior
