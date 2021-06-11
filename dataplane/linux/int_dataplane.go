@@ -340,13 +340,13 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		config.VXLANMTU = hostMTU - vxlanMTUOverhead
 	}
 	if config.Wireguard.MTU == 0 {
-		// The default MTU on Azure is 1500, but the underlying network stack will fragment packets at 1400 bytes, see
-		// https://docs.microsoft.com/en-us/azure/virtual-network/virtual-network-tcpip-performance-tuning#azure-and-vm-mtu
-		// for details.
-		// Additionally, Wireguard sets the DF bit on its packets, and so if the MTU is set too high large packets will
-		// be dropped.
-		// Therefore it is necessary to allow for the difference between the MTU of the host and the underlying network.
 		if config.KubernetesProvider == ProviderAKS && config.RouteSource == "WorkloadIPs" {
+			// The default MTU on Azure is 1500, but the underlying network stack will fragment packets at 1400 bytes, see
+			// https://docs.microsoft.com/en-us/azure/virtual-network/virtual-network-tcpip-performance-tuning#azure-and-vm-mtu
+			// for details.
+			// Additionally, Wireguard sets the DF bit on its packets, and so if the MTU is set too high large packets will
+			// be dropped.
+			// Therefore it is necessary to allow for the difference between the MTU of the host and the underlying network.
 			log.Debug("Defaulting Wireguard MTU based on host and AKS with WorkloadIPs")
 			config.Wireguard.MTU = hostMTU - aksMTUOverhead - wireguardMTUOverhead
 		} else {
