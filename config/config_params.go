@@ -101,6 +101,18 @@ func (source Source) Local() bool {
 	}
 }
 
+// Provider represents a particular provider or flavor of Kubernetes.
+type Provider string
+
+const (
+	ProviderNone      Provider = ""
+	ProviderEKS       Provider = "EKS"
+	ProviderGKE       Provider = "GKE"
+	ProviderAKS       Provider = "AKS"
+	ProviderOpenShift Provider = "OpenShift"
+	ProviderDockerEE  Provider = "DockerEnterprise"
+)
+
 // Config contains the best, parsed config values loaded from the various sources.
 // We use tags to control the parsing and validation.
 type Config struct {
@@ -395,6 +407,27 @@ func (config *Config) OpenstackActive() bool {
 	}
 	log.Debug("No evidence this is an OpenStack deployment; disabling OpenStack special-cases")
 	return false
+}
+
+func (config *Config) KubernetesProvider() Provider {
+	parts := strings.Split(config.ClusterType, ",")
+	if len(parts) < 3 {
+		log.WithField("clusterType", config.ClusterType).Debug(
+			"failed to parse clusterType, defaulting to none")
+		return ProviderNone
+	}
+
+	p := Provider(parts[2])
+	switch p {
+	case ProviderAKS, ProviderEKS, ProviderGKE, ProviderDockerEE, ProviderOpenShift:
+		log.WithFields(log.Fields{"clusterType": config.ClusterType, "provider": p}).Debug(
+			"detected a known kubernetes provider")
+		return p
+	default:
+		log.WithField("clusterType", config.ClusterType).Debug(
+			"failed to detect a known kubernetes provider, defaulting to none")
+		return ProviderNone
+	}
 }
 
 func (config *Config) resolve() (changed bool, err error) {
