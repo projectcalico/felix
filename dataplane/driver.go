@@ -384,6 +384,8 @@ func StartDataplaneDriver(configParams *config.Config,
 func kubernetesProvider(clusterType string) intdataplane.Provider {
 	parts := strings.Split(clusterType, ",")
 	if len(parts) < 3 {
+		log.WithField("clusterType", clusterType).Debug(
+			"failed to parse clusterType, defaulting to none")
 		return intdataplane.ProviderNone
 	}
 
@@ -394,8 +396,12 @@ func kubernetesProvider(clusterType string) intdataplane.Provider {
 		intdataplane.ProviderGKE,
 		intdataplane.ProviderDockerEE,
 		intdataplane.ProviderOpenShift:
+		log.WithFields(log.Fields{"clusterType": clusterType, "provider": p}).Debug(
+			"detected a known kubernetes provider")
 		return p
 	default:
+		log.WithField("clusterType", clusterType).Debug(
+			"failed to detect a known kubernetes provider, defaulting to none")
 		return intdataplane.ProviderNone
 	}
 }
