@@ -102,16 +102,54 @@ func (source Source) Local() bool {
 }
 
 // Provider represents a particular provider or flavor of Kubernetes.
-type Provider string
+type Provider uint8
 
 const (
-	ProviderNone      Provider = ""
-	ProviderEKS       Provider = "EKS"
-	ProviderGKE       Provider = "GKE"
-	ProviderAKS       Provider = "AKS"
-	ProviderOpenShift Provider = "OpenShift"
-	ProviderDockerEE  Provider = "DockerEnterprise"
+	ProviderNone Provider = iota + 1
+	ProviderEKS
+	ProviderGKE
+	ProviderAKS
+	ProviderOpenShift
+	ProviderDockerEE
 )
+
+func (p Provider) String() string {
+	switch p {
+	case ProviderNone:
+		return ""
+	case ProviderEKS:
+		return "EKS"
+	case ProviderGKE:
+		return "GKE"
+	case ProviderAKS:
+		return "AKS"
+	case ProviderOpenShift:
+		return "OpenShift"
+	case ProviderDockerEE:
+		return "DockerEnterprise"
+	default:
+		return fmt.Sprintf("<unknown-provider(%v)>", uint8(p))
+	}
+}
+
+func newProvider(s string) (Provider, error) {
+	switch strings.ToLower(s) {
+	case strings.ToLower(ProviderNone.String()):
+		return ProviderNone, nil
+	case strings.ToLower(ProviderEKS.String()):
+		return ProviderEKS, nil
+	case strings.ToLower(ProviderGKE.String()):
+		return ProviderGKE, nil
+	case strings.ToLower(ProviderAKS.String()):
+		return ProviderAKS, nil
+	case strings.ToLower(ProviderOpenShift.String()):
+		return ProviderOpenShift, nil
+	case strings.ToLower(ProviderDockerEE.String()):
+		return ProviderDockerEE, nil
+	default:
+		return 0, fmt.Errorf("unknown provider %s", s)
+	}
+}
 
 // Config contains the best, parsed config values loaded from the various sources.
 // We use tags to control the parsing and validation.
@@ -409,25 +447,22 @@ func (config *Config) OpenstackActive() bool {
 	return false
 }
 
+// KubernetesProvider attempts to parse the kubernetes provider, e.g. AKS out of the ClusterType.
+// The ClusterType is a string which contains a set of comma-separated values in no particular order.
 func (config *Config) KubernetesProvider() Provider {
-	parts := strings.Split(config.ClusterType, ",")
-	if len(parts) < 3 {
-		log.WithField("clusterType", config.ClusterType).Debug(
-			"failed to parse clusterType, defaulting to none")
-		return ProviderNone
+	settings := strings.Split(config.ClusterType, ",")
+	for _, s := range settings {
+		p, err := newProvider(s)
+		if err == nil {
+			log.WithFields(log.Fields{"clusterType": config.ClusterType, "provider": p}).Debug(
+				"detected a known kubernetes provider")
+			return p
+		}
 	}
 
-	p := Provider(parts[2])
-	switch p {
-	case ProviderAKS, ProviderEKS, ProviderGKE, ProviderDockerEE, ProviderOpenShift:
-		log.WithFields(log.Fields{"clusterType": config.ClusterType, "provider": p}).Debug(
-			"detected a known kubernetes provider")
-		return p
-	default:
-		log.WithField("clusterType", config.ClusterType).Debug(
-			"failed to detect a known kubernetes provider, defaulting to none")
-		return ProviderNone
-	}
+	log.WithField("clusterType", config.ClusterType).Debug(
+		"failed to detect a known kubernetes provider, defaulting to none")
+	return ProviderNone
 }
 
 func (config *Config) resolve() (changed bool, err error) {
