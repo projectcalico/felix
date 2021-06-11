@@ -21,6 +21,7 @@ import (
 	"net"
 	"os/exec"
 	"runtime/debug"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/clock"
@@ -353,6 +354,8 @@ func StartDataplaneDriver(configParams *config.Config,
 			FeatureDetectOverrides: configParams.FeatureDetectOverride,
 
 			RouteSource: configParams.RouteSource,
+
+			KubernetesProvider: kubernetesProvider(configParams.ClusterType),
 		}
 
 		if configParams.BPFExternalServiceMode == "dsr" {
@@ -375,6 +378,31 @@ func StartDataplaneDriver(configParams *config.Config,
 			"Using external dataplane driver.")
 
 		return extdataplane.StartExtDataplaneDriver(configParams.DataplaneDriver)
+	}
+}
+
+func kubernetesProvider(clusterType string) intdataplane.Provider {
+	parts := strings.Split(clusterType, ",")
+	if len(parts) < 3 {
+		log.WithField("clusterType", clusterType).Debug(
+			"failed to parse clusterType, defaulting to none")
+		return intdataplane.ProviderNone
+	}
+
+	p := intdataplane.Provider(parts[2])
+	switch p {
+	case intdataplane.ProviderAKS,
+		intdataplane.ProviderEKS,
+		intdataplane.ProviderGKE,
+		intdataplane.ProviderDockerEE,
+		intdataplane.ProviderOpenShift:
+		log.WithFields(log.Fields{"clusterType": clusterType, "provider": p}).Debug(
+			"detected a known kubernetes provider")
+		return p
+	default:
+		log.WithField("clusterType", clusterType).Debug(
+			"failed to detect a known kubernetes provider, defaulting to none")
+		return intdataplane.ProviderNone
 	}
 }
 
