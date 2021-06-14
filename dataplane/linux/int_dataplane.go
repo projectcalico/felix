@@ -295,7 +295,7 @@ const (
 	ipipMTUOverhead      = 20
 	vxlanMTUOverhead     = 50
 	wireguardMTUOverhead = 60
-	aksMTUOverhead       = 1000
+	aksMTUOverhead       = 100
 )
 
 func NewIntDataplaneDriver(c Config) *InternalDataplane {
@@ -314,34 +314,7 @@ func NewIntDataplaneDriver(c Config) *InternalDataplane {
 		log.WithError(err).Fatal("Unable to detect host MTU, shutting down")
 		return nil
 	}
-	// We found the host's MTU. Default any MTU configurations that have not been set.
-	// We default the values even if the encap is not enabled, in order to match behavior
-	// from earlier versions of Calico. However, they MTU will only be considered for allocation
-	// to pod interfaces if the encap is enabled.
-	c.hostMTU = hostMTU
-	if c.IPIPMTU == 0 {
-		log.Debug("Defaulting IPIP MTU based on host")
-		c.IPIPMTU = hostMTU - ipipMTUOverhead
-	}
-	if c.VXLANMTU == 0 {
-		log.Debug("Defaulting VXLAN MTU based on host")
-		c.VXLANMTU = hostMTU - vxlanMTUOverhead
-	}
-	if c.Wireguard.MTU == 0 {
-		if c.KubernetesProvider == config.ProviderAKS && c.RouteSource == "WorkloadIPs" {
-			// The default MTU on Azure is 1500, but the underlying network stack will fragment packets at 1400 bytes, see
-			// https://docs.microsoft.com/en-us/azure/virtual-network/virtual-network-tcpip-performance-tuning#azure-and-vm-mtu
-			// for details.
-			// Additionally, Wireguard sets the DF bit on its packets, and so if the MTU is set too high large packets will
-			// be dropped.
-			// Therefore it is necessary to allow for the difference between the MTU of the host and the underlying network.
-			log.Debug("Defaulting Wireguard MTU based on host and AKS with WorkloadIPs")
-			c.Wireguard.MTU = hostMTU - aksMTUOverhead - wireguardMTUOverhead
-		} else {
-			log.Debug("Defaulting Wireguard MTU based on host")
-			c.Wireguard.MTU = hostMTU - wireguardMTUOverhead
-		}
-	}
+	ConfigureDefaultMTUs(hostMTU, &c)
 	podMTU := determinePodMTU(c)
 	if err := writeMTUFile(podMTU); err != nil {
 		log.WithError(err).Error("Failed to write MTU file, pod MTU may not be properly set")
@@ -952,6 +925,36 @@ func determinePodMTU(config Config) int {
 	}
 	log.WithField("mtu", mtu).Info("Determined pod MTU")
 	return mtu
+}
+
+// ConfigureDefaultMTUs defaults any MTU configurations that have not been set.
+// We default the values even if the encap is not enabled, in order to match behavior from earlier versions of Calico.
+// However, they MTU will only be considered for allocation to pod interfaces if the encap is enabled.
+func ConfigureDefaultMTUs(hostMTU int, c *Config) {
+	c.hostMTU = hostMTU
+	if c.IPIPMTU == 0 {
+		log.Debug("Defaulting IPIP MTU based on host")
+		c.IPIPMTU = hostMTU - ipipMTUOverhead
+	}
+	if c.VXLANMTU == 0 {
+		log.Debug("Defaulting VXLAN MTU based on host")
+		c.VXLANMTU = hostMTU - vxlanMTUOverhead
+	}
+	if c.Wireguard.MTU == 0 {
+		if c.KubernetesProvider == config.ProviderAKS && c.RouteSource == "WorkloadIPs" {
+			// The default MTU on Azure is 1500, but the underlying network stack will fragment packets at 1400 bytes,
+			// see https://docs.microsoft.com/en-us/azure/virtual-network/virtual-network-tcpip-performance-tuning#azure-and-vm-mtu
+			// for details.
+			// Additionally, Wireguard sets the DF bit on its packets, and so if the MTU is set too high large packets
+			// will be dropped. Therefore it is necessary to allow for the difference between the MTU of the host and
+			// the underlying network.
+			log.Debug("Defaulting Wireguard MTU based on host and AKS with WorkloadIPs")
+			c.Wireguard.MTU = hostMTU - aksMTUOverhead - wireguardMTUOverhead
+		} else {
+			log.Debug("Defaulting Wireguard MTU based on host")
+			c.Wireguard.MTU = hostMTU - wireguardMTUOverhead
+		}
+	}
 }
 
 func cleanUpVXLANDevice() {
