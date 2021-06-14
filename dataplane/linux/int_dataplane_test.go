@@ -121,4 +121,17 @@ var _ = Describe("Constructor test", func() {
 			Expect(dpConfig.Wireguard.MTU).To(Equal(1340))
 		})
 	})
+
+	Context("with Wireguard on non-managed provider", func() {
+
+		BeforeEach(func() {
+			kubernetesProvider = config.ProviderNone
+			routeSource = "CalicoIPAM"
+		})
+
+		It("should set the correct MTU", func() {
+			intdataplane.ConfigureDefaultMTUs(1500, &dpConfig)
+			Expect(dpConfig.Wireguard.MTU).To(Equal(1440))
+		})
+	})
 })
