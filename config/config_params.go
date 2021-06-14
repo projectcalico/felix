@@ -105,7 +105,7 @@ func (source Source) Local() bool {
 type Provider uint8
 
 const (
-	ProviderNone Provider = iota + 1
+	ProviderNone Provider = iota
 	ProviderEKS
 	ProviderGKE
 	ProviderAKS
