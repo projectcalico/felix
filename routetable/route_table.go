@@ -77,6 +77,7 @@ const (
 type TargetType string
 
 const (
+	TargetTypeLocal   TargetType = "local"
 	TargetTypeVXLAN   TargetType = "vxlan"
 	TargetTypeNoEncap TargetType = "noencap"
 
@@ -114,6 +115,8 @@ func (t Target) Equal(t2 Target) bool {
 
 func (t Target) RouteType() int {
 	switch t.Type {
+	case TargetTypeLocal:
+		return syscall.RTN_LOCAL
 	case TargetTypeThrow:
 		return syscall.RTN_THROW
 	case TargetTypeBlackhole:
@@ -127,6 +130,8 @@ func (t Target) RouteType() int {
 
 func (t Target) RouteScope() netlink.Scope {
 	switch t.Type {
+	case TargetTypeLocal:
+		return netlink.SCOPE_HOST
 	case TargetTypeThrow:
 		return netlink.SCOPE_UNIVERSE
 	case TargetTypeBlackhole:

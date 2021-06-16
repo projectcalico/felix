@@ -121,6 +121,10 @@ mainLoop:
 				logrus.WithField("route", routeUpd).Debug("Ignoring route with no link index.")
 				continue
 			}
+			if routeUpd.Dst == nil {
+				logrus.WithField("route", routeUpd).Debug("Ignoring route with no destination")
+				continue
+			}
 
 			idx := routeUpd.LinkIndex
 			oldUpds := updatesByIfaceIdx[idx]
