@@ -40,6 +40,8 @@ import (
 	"math/rand"
 	"net/http"
 
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"

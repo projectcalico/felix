@@ -23,6 +23,8 @@ import (
 
 	"github.com/projectcalico/felix/fv/connectivity"
 
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 	"github.com/sirupsen/logrus"
 
 	"errors"

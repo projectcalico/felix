@@ -19,6 +19,8 @@ package fv_test
 import (
 	"math/rand"
 
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 	"github.com/projectcalico/felix/fv/connectivity"
 	"github.com/projectcalico/felix/fv/containers"
