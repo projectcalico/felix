@@ -1,4 +1,4 @@
-// Copyright (c) 2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import (
 	"github.com/projectcalico/felix/ipsets"
 	. "github.com/projectcalico/felix/iptables"
 	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
 )
 
 var _ = Describe("Static", func() {

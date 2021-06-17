@@ -38,7 +38,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
-	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
+	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 	bapi "github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
@@ -651,7 +651,7 @@ func (kds *K8sDatastoreInfra) RemoveWorkload(ns, name string) error {
 	return err
 }
 
-func (kds *K8sDatastoreInfra) AddWorkload(wep *api.WorkloadEndpoint) (*api.WorkloadEndpoint, error) {
+func (kds *K8sDatastoreInfra) AddWorkload(wep *libapi.WorkloadEndpoint) (*libapi.WorkloadEndpoint, error) {
 	podIP := wep.Spec.IPNetworks[0]
 	if strings.Contains(podIP, "/") {
 		// Our WEP will have a /32 rather than an IP, strip it off.
