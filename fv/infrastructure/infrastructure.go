@@ -17,8 +17,8 @@ package infrastructure
 import (
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/felix/fv/utils"
 	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+	"github.com/projectcalico/felix/fv/utils"
 	libapi "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 )

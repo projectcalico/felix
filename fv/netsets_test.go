@@ -32,9 +32,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/workload"
-	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/net"
 )

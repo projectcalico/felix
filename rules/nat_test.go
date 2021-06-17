@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"net"
 
-	. "github.com/projectcalico/felix/rules"
 	"github.com/projectcalico/api/pkg/lib/numorstring"
+	. "github.com/projectcalico/felix/rules"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

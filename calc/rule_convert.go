@@ -20,9 +20,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/projectcalico/api/pkg/lib/numorstring"
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/libcalico-go/lib/net"
-	"github.com/projectcalico/api/pkg/lib/numorstring"
 )
 
 const (

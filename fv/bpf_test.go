@@ -40,13 +40,13 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
+	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	libapi "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
 	cnet "github.com/projectcalico/libcalico-go/lib/net"
-	"github.com/projectcalico/api/pkg/lib/numorstring"
 	options2 "github.com/projectcalico/libcalico-go/lib/options"
 
 	"github.com/projectcalico/felix/bpf"

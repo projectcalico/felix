@@ -23,11 +23,11 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
+	"github.com/projectcalico/api/pkg/lib/numorstring"
 	"github.com/projectcalico/felix/config"
 	"github.com/projectcalico/felix/ipsets"
 	. "github.com/projectcalico/felix/iptables"
 	"github.com/projectcalico/felix/proto"
-	"github.com/projectcalico/api/pkg/lib/numorstring"
 )
 
 var _ = Describe("Static", func() {
