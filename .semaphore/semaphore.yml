@@ -2,7 +2,7 @@ version: v1.0
 name: Felix
 
 execution_time_limit:
-  hours: 2
+  hours: 4
 
 agent:
   machine:
@@ -40,6 +40,8 @@ global_job_config:
 
 blocks:
 - name: Build
+  execution_time_limit:
+    minutes: 30
   dependencies: []
   task:
     agent:
@@ -61,6 +63,8 @@ blocks:
       - docker save -o /tmp/calico-felix.tar calico/felix:latest-amd64
       - 'cache store felix-image-${SEMAPHORE_GIT_SHA} /tmp/calico-felix.tar'
 - name: FV Tests
+  execution_time_limit:
+    minutes: 120
   dependencies: ["Build"]
   task:
     prologue:
@@ -96,6 +100,8 @@ blocks:
         - ./.semaphore/collect-artifacts
         - ./.semaphore/publish-artifacts
 - name: BPF UT/FV tests on new kernel
+  execution_time_limit:
+    minutes: 120
   dependencies: []
   task:
     prologue:
@@ -128,6 +134,8 @@ blocks:
     secrets:
     - name: google-service-account-for-gce
 - name: Static checks
+  execution_time_limit:
+    minutes: 30
   dependencies: []
   task:
     agent:
@@ -145,6 +153,8 @@ blocks:
       commands:
       - make static-checks
 - name: Multi-arch builds, UT, k8sfv-tests
+  execution_time_limit:
+    minutes: 120
   dependencies: []
   task:
     prologue:
@@ -166,6 +176,8 @@ blocks:
       commands:
         - make k8sfv-test JUST_A_MINUTE=true USE_TYPHA=false
 - name: Trigger pin updates
+  execution_time_limit:
+    minutes: 5
   dependencies: []
   skip:
     when: "(branch != 'master') and (branch !~ '^release-v\d*\.\d*')"
