@@ -24,6 +24,7 @@ require (
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
+	github.com/projectcalico/api v0.0.0-20210615230555-586917f350df
 	github.com/projectcalico/libcalico-go v1.7.2-0.20210615230551-bf16e8eb2116
 	github.com/projectcalico/pod2daemon v0.0.0-20210528184151-6b0d4d6c18cf
 	github.com/projectcalico/typha v0.7.3-0.20210616035630-d11aa170f799
@@ -46,6 +47,7 @@ require (
 
 replace (
 	github.com/Microsoft/hcsshim => github.com/projectcalico/hcsshim v0.8.9-calico
+	github.com/projectcalico/libcalico-go => github.com/song-jiang/libcalico-go v1.6.1-0.20210616135015-6880d0c7bd42
 	github.com/sirupsen/logrus => github.com/projectcalico/logrus v0.0.0-20180701205716-fc9bbf2f5799
 
 	// Need replacements for all the k8s subsidiary projects that are pulled in indirectly because
