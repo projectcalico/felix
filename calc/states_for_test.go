@@ -20,7 +20,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	libapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
+	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	. "github.com/projectcalico/libcalico-go/lib/backend/model"
 
 	"github.com/projectcalico/felix/dataplane/mock"
@@ -1129,8 +1129,8 @@ var vxlanWithBlockRoutes = []proto.RouteUpdate{
 	},
 }
 
-var remoteNodeResKey = ResourceKey{Name: remoteHostname, Kind: libapiv3.KindNode}
-var localNodeResKey = ResourceKey{Name: localHostname, Kind: libapiv3.KindNode}
+var remoteNodeResKey = ResourceKey{Name: remoteHostname, Kind: apiv3.KindNode}
+var localNodeResKey = ResourceKey{Name: localHostname, Kind: apiv3.KindNode}
 
 // As vxlanWithBlock but with a host sharing the same IP.  No route update because we tie-break on host name.
 var vxlanWithBlockDupNodeIP = vxlanWithBlock.withKVUpdates(
@@ -1163,11 +1163,11 @@ var vxlanWithDupNodeIPRemoved = vxlanWithBlockDupNodeIP.withKVUpdates(
 // As vxlanWithBlock but with node resources instead of host IPs.
 var vxlanWithBlockNodeRes = vxlanWithBlock.withKVUpdates(
 	KVPair{Key: remoteHostIPKey, Value: nil},
-	KVPair{Key: remoteNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: remoteNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: localHostname,
 		},
-		Spec: libapiv3.NodeSpec{BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
 			IPv4Address: remoteHostIP.String() + "/24",
 		}}}},
 ).withName("VXLAN with node resource (node resources)")
@@ -1413,18 +1413,18 @@ var vxlanLocalBlockWithBorrowsLocalWEP = vxlanLocalBlockWithBorrows.withKVUpdate
 var vxlanLocalBlockWithBorrowsNodeRes = vxlanLocalBlockWithBorrows.withKVUpdates(
 	KVPair{Key: localHostIPKey, Value: nil},
 	KVPair{Key: remoteHostIPKey, Value: nil},
-	KVPair{Key: remoteNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: remoteNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: remoteHostname,
 		},
-		Spec: libapiv3.NodeSpec{BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
 			IPv4Address: remoteHostIPWithPrefix,
 		}}}},
-	KVPair{Key: localNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: localNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: localHostname,
 		},
-		Spec: libapiv3.NodeSpec{BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
 			IPv4Address: localHostIPWithPrefix,
 		}}}},
 ).withName("VXLAN local with borrows (node resources)")
@@ -1465,18 +1465,18 @@ var vxlanLocalBlockWithBorrowsCrossSubnetNodeRes = vxlanLocalBlockWithBorrowsNod
 // As vxlanLocalBlockWithBorrowsCrossSubnetNodeRes but hosts are in a different pool.
 var vxlanLocalBlockWithBorrowsDifferentSubnetNodeRes = vxlanLocalBlockWithBorrowsNodeRes.withKVUpdates(
 	KVPair{Key: ipPoolKey, Value: &ipPoolWithVXLANCrossSubnet},
-	KVPair{Key: remoteNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: remoteNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: remoteHostname,
 		},
-		Spec: libapiv3.NodeSpec{BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
 			IPv4Address: remoteHostIP.String(), // Omitting the /32 here to check the v3 validator is used for this resource.
 		}}}},
-	KVPair{Key: localNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: localNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: localHostname,
 		},
-		Spec: libapiv3.NodeSpec{BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{BGP: &apiv3.NodeBGPSpec{
 			IPv4Address: localHostIP.String() + "/32",
 		}}}},
 ).withRoutes(
@@ -1683,15 +1683,15 @@ var hostInIPPool = vxlanWithBlock.withKVUpdates(
 
 // we start from vxlan setup as the test framework expects vxlan enabled
 var nodesWithMoreIPs = vxlanWithBlock.withKVUpdates(
-	KVPair{Key: remoteNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: remoteNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: remoteHostname,
 		},
-		Spec: libapiv3.NodeSpec{
-			BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{
+			BGP: &apiv3.NodeBGPSpec{
 				IPv4Address: remoteHostIPWithPrefix,
 			},
-			Addresses: []libapiv3.NodeAddress{
+			Addresses: []apiv3.NodeAddress{
 				{
 					Address: remoteHostIPWithPrefix,
 				},
@@ -1700,15 +1700,15 @@ var nodesWithMoreIPs = vxlanWithBlock.withKVUpdates(
 				},
 			},
 		}}},
-	KVPair{Key: localNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: localNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: localHostname,
 		},
-		Spec: libapiv3.NodeSpec{
-			BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{
+			BGP: &apiv3.NodeBGPSpec{
 				IPv4Address: localHostIPWithPrefix,
 			},
-			Addresses: []libapiv3.NodeAddress{
+			Addresses: []apiv3.NodeAddress{
 				{
 					Address: localHostIPWithPrefix,
 				},
@@ -1742,15 +1742,15 @@ var nodesWithMoreIPsRoutes = append(vxlanWithBlockRoutes[0:len(vxlanWithBlockRou
 )
 
 var nodesWithMoreIPsAndDuplicates = nodesWithMoreIPs.withKVUpdates(
-	KVPair{Key: remoteNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: remoteNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: remoteHostname,
 		},
-		Spec: libapiv3.NodeSpec{
-			BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{
+			BGP: &apiv3.NodeBGPSpec{
 				IPv4Address: remoteHostIPWithPrefix,
 			},
-			Addresses: []libapiv3.NodeAddress{
+			Addresses: []apiv3.NodeAddress{
 				{
 					Address: "1.2.3.4",
 				},
@@ -1773,15 +1773,15 @@ var nodesWithMoreIPsAndDuplicates = nodesWithMoreIPs.withKVUpdates(
 ).withName("routes for nodes with more IPs and duplicates")
 
 var nodesWithDifferentAddressTypes = nodesWithMoreIPs.withKVUpdates(
-	KVPair{Key: localNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: localNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: localHostname,
 		},
-		Spec: libapiv3.NodeSpec{
-			BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{
+			BGP: &apiv3.NodeBGPSpec{
 				IPv4Address: localHostIPWithPrefix,
 			},
-			Addresses: []libapiv3.NodeAddress{
+			Addresses: []apiv3.NodeAddress{
 				{
 					Address: localHostIPWithPrefix,
 				},
@@ -1809,29 +1809,29 @@ var nodesWithMoreIPsRoutesDeletedExtras = append(vxlanWithBlockRoutes[0:len(vxla
 )
 
 var nodesWithMoreIPsDeleted = vxlanWithBlock.withKVUpdates(
-	KVPair{Key: remoteNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: remoteNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: remoteHostname,
 		},
-		Spec: libapiv3.NodeSpec{
-			BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{
+			BGP: &apiv3.NodeBGPSpec{
 				IPv4Address: remoteHostIPWithPrefix,
 			},
-			Addresses: []libapiv3.NodeAddress{
+			Addresses: []apiv3.NodeAddress{
 				{
 					Address: remoteHostIPWithPrefix,
 				},
 			},
 		}}},
-	KVPair{Key: localNodeResKey, Value: &libapiv3.Node{
+	KVPair{Key: localNodeResKey, Value: &apiv3.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: localHostname,
 		},
-		Spec: libapiv3.NodeSpec{
-			BGP: &libapiv3.NodeBGPSpec{
+		Spec: apiv3.NodeSpec{
+			BGP: &apiv3.NodeBGPSpec{
 				IPv4Address: localHostIPWithPrefix,
 			},
-			Addresses: []libapiv3.NodeAddress{
+			Addresses: []apiv3.NodeAddress{
 				{
 					Address: localHostIPWithPrefix,
 				},
@@ -1850,12 +1850,12 @@ func (l StateList) String() string {
 	return "[" + strings.Join(names, ", ") + "]"
 }
 
-// UsesNodeResources returns true if any of the KVs in this state are libapiv3.Node resources.
+// UsesNodeResources returns true if any of the KVs in this state are apiv3.Node resources.
 // Some calculation graph nodes support either the v3 Node or the old model.HostIP object.
 func (l StateList) UsesNodeResources() bool {
 	for _, s := range l {
 		for _, kv := range s.DatastoreState {
-			if resourceKey, ok := kv.Key.(ResourceKey); ok && resourceKey.Kind == libapiv3.KindNode {
+			if resourceKey, ok := kv.Key.(ResourceKey); ok && resourceKey.Kind == apiv3.KindNode {
 				return true
 			}
 		}

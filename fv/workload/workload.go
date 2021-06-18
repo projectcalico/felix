@@ -29,7 +29,7 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	libapi "github.com/projectcalico/libcalico-go/lib/apis/v3"
+	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/backend/k8s/conversion"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/options"
@@ -52,11 +52,11 @@ type Workload struct {
 	outPipe               io.ReadCloser
 	errPipe               io.ReadCloser
 	namespacePath         string
-	WorkloadEndpoint      *libapi.WorkloadEndpoint
+	WorkloadEndpoint      *api.WorkloadEndpoint
 	Protocol              string // "tcp" or "udp"
 	SpoofInterfaceName    string
 	SpoofName             string
-	SpoofWorkloadEndpoint *libapi.WorkloadEndpoint
+	SpoofWorkloadEndpoint *api.WorkloadEndpoint
 	MTU                   int
 }
 
@@ -112,7 +112,7 @@ func New(c *infrastructure.Felix, name, profile, ip, ports, protocol string, mtu
 	// Build unique workload name and struct.
 	workloadIdx++
 
-	wep := libapi.NewWorkloadEndpoint()
+	wep := api.NewWorkloadEndpoint()
 	wep.Labels = map[string]string{"name": n}
 	wep.Spec.Node = c.Hostname
 	wep.Spec.Orchestrator = "felixfv"

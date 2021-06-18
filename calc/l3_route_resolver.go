@@ -21,7 +21,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	libapiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
+	apiv3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/libcalico-go/lib/backend/encap"
 	"github.com/projectcalico/libcalico-go/lib/backend/model"
@@ -315,7 +315,7 @@ func (c *L3RouteResolver) OnBlockUpdate(update api.Update) (_ bool) {
 func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 	// We only care about nodes, not other resources.
 	resourceKey := update.Key.(model.ResourceKey)
-	if resourceKey.Kind != libapiv3.KindNode {
+	if resourceKey.Kind != apiv3.KindNode {
 		return
 	}
 
@@ -331,7 +331,7 @@ func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 	// Update our tracking data structures.
 	var nodeInfo *l3rrNodeInfo
 	if update.Value != nil {
-		node := update.Value.(*libapiv3.Node)
+		node := update.Value.(*apiv3.Node)
 		if node.Spec.BGP != nil && node.Spec.BGP.IPv4Address != "" {
 			bgp := node.Spec.BGP
 			// Use cnet.ParseCIDROrIP so we get the IP and the CIDR.  The parse functions in the ip package
@@ -345,9 +345,9 @@ func (c *L3RouteResolver) OnResourceUpdate(update api.Update) (_ bool) {
 				CIDR: ip.CIDRFromCalicoNet(*caliNodeCIDR).(ip.V4CIDR),
 			}
 		} else {
-			ipv4, caliNodeCIDR := cresources.FindNodeAddress(node, libapiv3.InternalIP)
+			ipv4, caliNodeCIDR := cresources.FindNodeAddress(node, apiv3.InternalIP)
 			if ipv4 == nil {
-				ipv4, caliNodeCIDR = cresources.FindNodeAddress(node, libapiv3.ExternalIP)
+				ipv4, caliNodeCIDR = cresources.FindNodeAddress(node, apiv3.ExternalIP)
 			}
 			if ipv4 != nil && caliNodeCIDR != nil {
 				nodeInfo = &l3rrNodeInfo{
