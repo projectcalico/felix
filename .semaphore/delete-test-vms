@@ -27,11 +27,11 @@ artifacts_dir="$repo_dir/artifacts"
 echo "Collecting artifacts..."
 
 num_fv_batches=${NUM_FV_BATCHES:-8}
-suffixes=(ut $(seq 1 ${num_fv_batches}))
+batches=(ut $(seq 1 ${num_fv_batches}))
 pids=()
 monitor_pids=()
-for vm_suffix in "${suffixes[@]}"; do
-  vm_name="$vm_name_prefix$vm_suffix"
+for batch in "${batches[@]}"; do
+  vm_name="$vm_name_prefix$batch"
   VM_NAME=$vm_name $my_dir/on-test-vm ./.semaphore/on-test-vm ${REPO_NAME}/.semaphore/collect-artifacts
   gcloud --quiet compute instances delete ${vm_name} --zone=${zone}
 done

@@ -15,7 +15,6 @@
 # limitations under the License.
 
 set -e
-set -x
 
 vm_name_prefix=$1
 project=unique-caldron-775
@@ -27,12 +26,13 @@ artifacts_dir="$repo_dir/artifacts"
 echo "Collecting artifacts..."
 
 num_fv_batches=${NUM_FV_BATCHES:-8}
-suffixes=(ut $(seq 1 ${num_fv_batches}))
+batches=(ut $(seq 1 ${num_fv_batches}))
 pids=()
 monitor_pids=()
-for vm_suffix in "${suffixes[@]}"; do
-  vm_name="$vm_name_prefix$vm_suffix"
-  VM_NAME=$vm_name $my_dir/on-test-vm ./.semaphore/on-test-vm ${REPO_NAME}/.semaphore/collect-artifacts
+for batch in "${batches[@]}"; do
+  vm_name="$vm_name_prefix$batch"
+  echo "Collecting artifacts from $vm_name..."
+  VM_NAME=$vm_name $my_dir/on-test-vm ${REPO_NAME}/.semaphore/collect-artifacts || echo "Failed to collect artifacts from ${vm_name}."
   gcloud --quiet compute scp "--zone=${ZONE}" "ubuntu@${vm_name}:${REPO_NAME}/artifacts" ./ --recurse || echo "Failed to SCP from ${vm_name}"
 done
 
