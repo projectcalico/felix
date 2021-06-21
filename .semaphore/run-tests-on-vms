@@ -40,15 +40,15 @@ for batch in "${batches[@]}"; do
     echo "UT PID: $pid"
   else
     echo "Starting FV batch $batch"
-    VM_NAME=$vm_name ./.semaphore/on-test-vm make --directory=${REPO_NAME} fv-bpf GINKGO_FOCUS=BPF-SAFE FV_NUM_BATCHES=8 FV_BATCHES_TO_RUN="$batch" >& "$log_file" &
+    VM_NAME=$vm_name ./.semaphore/on-test-vm make --directory=${REPO_NAME} fv-bpf-typo GINKGO_FOCUS=BPF-SAFE FV_NUM_BATCHES=8 FV_BATCHES_TO_RUN="$batch" >& "$log_file" &
     pid=$!
     pids+=( $pid )
     echo "FV batch PID: $pid"
   fi
 
+  prefix="[batch=${batch} pid=${pid}]"
+  echo "$prefix Monitoring $log_file in background for Failure/Success messages..."
   (
-    prefix="[batch=${batch} pid=${pid}]"
-    echo "$prefix Monitoring $log_file for Failure/Success messages..."
     tail -f $log_file | grep --line-buffered \
       -e "Failure" \
       -e "SUCCESS" \
@@ -61,15 +61,6 @@ for batch in "${batches[@]}"; do
 done
 
 final_result=0
-
-# Let the background threads log out their startup message before we continue...
-sleep 1
-
-# Semaphore seems to have a problem with reading from our script now we have background threads.  Do a periodic
-# echo to move things along...
-( while true; do sleep 60; echo "..."; done; ) &
-flush_pid=$!
-monitor_pids+=( $flush_pid )
 
 echo "Waiting for background test runners to finish..."
 for pid in "${pids[@]}"; do
