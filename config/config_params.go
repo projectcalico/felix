@@ -335,6 +335,9 @@ type Config struct {
 	// Configures MTU auto-detection.
 	MTUIfacePattern *regexp.Regexp `config:"regexp;^((en|wl|ww|sl|ib)[opsx].*|(eth|wlan|wwan).*)"`
 
+	// Provides information on whether Felix should maintain endpoints in the absence of Calico CNI
+	InterfaceConfigurationEnabled bool `config:"bool;true"`
+
 	// State tracking.
 
 	// internalOverrides contains our highest priority config source, generated from internal constraints

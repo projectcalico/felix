@@ -132,9 +132,10 @@ func (c *endpointManagerCallbacks) InvokeRemoveWorkload(old *proto.WorkloadEndpo
 // that fail are left in the pending state so they can be retried later.
 type endpointManager struct {
 	// Config.
-	ipVersion              uint8
-	wlIfacesRegexp         *regexp.Regexp
-	kubeIPVSSupportEnabled bool
+	ipVersion                 uint8
+	wlIfacesRegexp            *regexp.Regexp
+	kubeIPVSSupportEnabled    bool
+	ifaceConfigurationEnabled bool
 
 	// Our dependencies.
 	rawTable     iptablesTable
@@ -221,6 +222,7 @@ func newEndpointManager(
 	bpfEnabled bool,
 	bpfEndpointManager hepListener,
 	callbacks *callbacks,
+	ifaceConfigurationEnabled bool,
 ) *endpointManager {
 	return newEndpointManagerWithShims(
 		rawTable,
@@ -238,6 +240,7 @@ func newEndpointManager(
 		bpfEnabled,
 		bpfEndpointManager,
 		callbacks,
+		ifaceConfigurationEnabled,
 	)
 }
 
@@ -257,16 +260,18 @@ func newEndpointManagerWithShims(
 	bpfEnabled bool,
 	bpfEndpointManager hepListener,
 	callbacks *callbacks,
+	ifaceConfigurationEnabled bool,
 ) *endpointManager {
 	wlIfacesPattern := "^(" + strings.Join(wlInterfacePrefixes, "|") + ").*"
 	wlIfacesRegexp := regexp.MustCompile(wlIfacesPattern)
 
 	return &endpointManager{
-		ipVersion:              ipVersion,
-		wlIfacesRegexp:         wlIfacesRegexp,
-		kubeIPVSSupportEnabled: kubeIPVSSupportEnabled,
-		bpfEnabled:             bpfEnabled,
-		bpfEndpointManager:     bpfEndpointManager,
+		ipVersion:                 ipVersion,
+		wlIfacesRegexp:            wlIfacesRegexp,
+		kubeIPVSSupportEnabled:    kubeIPVSSupportEnabled,
+		ifaceConfigurationEnabled: ifaceConfigurationEnabled,
+		bpfEnabled:                bpfEnabled,
+		bpfEndpointManager:        bpfEndpointManager,
 
 		rawTable:     rawTable,
 		mangleTable:  mangleTable,
@@ -704,20 +709,22 @@ func (m *endpointManager) resolveWorkloadEndpoints() {
 		m.needToCheckEndpointMarkChains = true
 	}
 
-	m.wlIfaceNamesToReconfigure.Iter(func(item interface{}) error {
-		ifaceName := item.(string)
-		err := m.configureInterface(ifaceName)
-		if err != nil {
-			if exists, err := m.interfaceExistsInProcSys(ifaceName); err == nil && !exists {
-				// Suppress log spam if interface has been removed.
-				log.WithError(err).Debug("Failed to configure interface and it seems to be gone")
-			} else {
-				log.WithError(err).Warn("Failed to configure interface, will retry")
+	if m.ifaceConfigurationEnabled {
+		m.wlIfaceNamesToReconfigure.Iter(func(item interface{}) error {
+			ifaceName := item.(string)
+			err := m.configureInterface(ifaceName)
+			if err != nil {
+				if exists, err := m.interfaceExistsInProcSys(ifaceName); err == nil && !exists {
+					// Suppress log spam if interface has been removed.
+					log.WithError(err).Debug("Failed to configure interface and it seems to be gone")
+				} else {
+					log.WithError(err).Warn("Failed to configure interface, will retry")
+				}
+				return nil
 			}
-			return nil
-		}
-		return set.RemoveItem
-	})
+			return set.RemoveItem
+		})
+	}
 }
 
 func wlIdsAscending(id1, id2 *proto.WorkloadEndpointID) bool {
