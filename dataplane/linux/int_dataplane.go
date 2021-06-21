@@ -718,7 +718,8 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		dp.endpointStatusCombiner.OnEndpointStatusUpdate,
 		config.BPFEnabled,
 		bpfEndpointManager,
-		callbacks)
+		callbacks,
+		config.InterfaceConfigurationEnabled)
 	dp.RegisterManager(epManager)
 	dp.endpointsSourceV4 = epManager
 	dp.RegisterManager(newFloatingIPManager(natTableV4, ruleRenderer, 4))
@@ -815,7 +816,8 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			dp.endpointStatusCombiner.OnEndpointStatusUpdate,
 			config.BPFEnabled,
 			nil,
-			callbacks))
+			callbacks,
+			config.InterfaceConfigurationEnabled))
 		dp.RegisterManager(newFloatingIPManager(natTableV6, ruleRenderer, 6))
 		dp.RegisterManager(newMasqManager(ipSetsV6, natTableV6, ruleRenderer, config.MaxIPSetSize, 6))
 		dp.RegisterManager(newServiceLoopManager(filterTableV6, ruleRenderer, 6))
