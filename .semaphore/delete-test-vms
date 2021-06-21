@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+# Copyright (c) 2019 Tigera, Inc. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -e
+set -x
+
+vm_name_prefix=$1
+project=unique-caldron-775
+zone=${ZONE:-europe-west3-c}
+my_dir="$(dirname $0)"
+repo_dir="."
+artifacts_dir="$repo_dir/artifacts"
+
+echo "Collecting artifacts..."
+
+num_fv_batches=${NUM_FV_BATCHES:-8}
+suffixes=(ut $(seq 1 ${num_fv_batches}))
+pids=()
+monitor_pids=()
+for vm_suffix in "${suffixes[@]}"; do
+  vm_name="$vm_name_prefix$vm_suffix"
+  VM_NAME=$vm_name $my_dir/on-test-vm ./.semaphore/on-test-vm ${REPO_NAME}/.semaphore/collect-artifacts
+  gcloud --quiet compute instances delete ${vm_name} --zone=${zone}
+done
+
+
+
+
+
