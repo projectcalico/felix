@@ -42,10 +42,10 @@ const (
 	wireguardLatestHandshakeIntervalFQName   = "wireguard_latest_handshake_seconds"
 	wireguardLatestHandshakeIntervalHelpText = "wireguard interface latest handshake unix timestamp in seconds to a peer"
 
-	wireguardBytesSentFQName   = "wireguard_bytes_sent"
+	wireguardBytesSentFQName   = "wireguard_bytes_sent_total"
 	wireguardBytesSentHelpText = "wireguard interface total outgoing bytes to peer"
 
-	wireguardBytesRcvdFQName   = "wireguard_bytes_rcvd"
+	wireguardBytesRcvdFQName   = "wireguard_bytes_rcvd_total"
 	wireguardBytesRcvdHelpText = "wireguard interface total incoming bytes to peer"
 )
 
@@ -168,14 +168,11 @@ func (collector *Metrics) collectDevicePeerMetrics(devices []*wgtypes.Device, m 
 				labels[k] = v
 			}
 
-			rxd, txd := collector.calculateAndUpdateDeltas(
-				peer.PublicKey, peer.ReceiveBytes,
-				peer.TransmitBytes,
-			)
 			hs := float64(peer.LastHandshakeTime.Unix())
+
 			collector.logCtx.WithFields(logrus.Fields{
-				"rx_delta":     rxd,
-				"tx_delta":     txd,
+				"rx_bytes_total":     peer.ReceiveBytes,
+				"tx_bytes_total":     peer.TransmitBytes,
 				"handshake_ts": hs,
 			}).Debug("collected peer metrics")
 
@@ -184,7 +181,7 @@ func (collector *Metrics) collectDevicePeerMetrics(devices []*wgtypes.Device, m 
 					wireguardBytesRcvdFQName, wireguardBytesRcvdHelpText, nil, labels,
 				),
 				prometheus.CounterValue,
-				rxd,
+				float64(peer.ReceiveBytes),
 			)
 
 			m <- prometheus.MustNewConstMetric(
@@ -192,7 +189,7 @@ func (collector *Metrics) collectDevicePeerMetrics(devices []*wgtypes.Device, m 
 					wireguardBytesSentFQName, wireguardBytesSentHelpText, nil, labels,
 				),
 				prometheus.CounterValue,
-				txd,
+				float64(peer.TransmitBytes),
 			)
 
 			m <- prometheus.MustNewConstMetric(
@@ -205,31 +202,6 @@ func (collector *Metrics) collectDevicePeerMetrics(devices []*wgtypes.Device, m 
 		}
 	}
 
-}
-
-func (collector *Metrics) calculateAndUpdateDeltas(k wgtypes.Key, rx, tx int64) (float64, float64) {
-	var rd, td float64
-
-	rc, tc := collector.peerRx[k], collector.peerTx[k]
-	collector.logCtx.WithFields(logrus.Fields{
-		"current_rx": rc,
-		"updated_rx": rx,
-		"current_tx": tc,
-		"updated_tx": tx,
-	}).Debug("read raw values")
-
-	if delta := rx - rc; rc != 0 && delta > 0 {
-		rd = float64(delta)
-	}
-
-	if delta := tx - tc; tc != 0 && delta > 0 {
-		td = float64(delta)
-	}
-
-	collector.peerRx[k] = rx
-	collector.peerTx[k] = tx
-
-	return rd, td
 }
 
 func (collector *Metrics) defaultLabelValues(publicKey string) prometheus.Labels {
