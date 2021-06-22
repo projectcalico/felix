@@ -164,10 +164,10 @@ var _ = Describe("wireguard metrics", func() {
 		}
 
 		tmpl := template.Must(
-			template.New("").Parse(`# HELP wireguard_bytes_rcvd total incoming bytes from peer
+			template.New("").Parse(`# HELP wireguard_bytes_rcvd wireguard interface total incoming bytes to peer
 # TYPE wireguard_bytes_rcvd counter
 wireguard_bytes_rcvd{hostname="{{.hostname}}",peer_endpoint="{{.endpoint}}",peer_key="{{.peerkey}}",public_key="{{.pubkey}}"} 1024
-# HELP wireguard_bytes_sent wireguard interface total outgoing bytes from peer
+# HELP wireguard_bytes_sent wireguard interface total outgoing bytes to peer
 # TYPE wireguard_bytes_sent counter
 wireguard_bytes_sent{hostname="{{.hostname}}",peer_endpoint="{{.endpoint}}",peer_key="{{.peerkey}}",public_key="{{.pubkey}}"} 1024
 # HELP wireguard_latest_handshake_seconds wireguard interface latest handshake unix timestamp in seconds to a peer

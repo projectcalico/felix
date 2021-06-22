@@ -43,10 +43,10 @@ const (
 	wireguardLatestHandshakeIntervalHelpText = "wireguard interface latest handshake unix timestamp in seconds to a peer"
 
 	wireguardBytesSentFQName   = "wireguard_bytes_sent"
-	wireguardBytesSentHelpText = "wireguard interface total outgoing bytes from peer"
+	wireguardBytesSentHelpText = "wireguard interface total outgoing bytes to peer"
 
 	wireguardBytesRcvdFQName   = "wireguard_bytes_rcvd"
-	wireguardBytesRcvdHelpText = "total incoming bytes from peer"
+	wireguardBytesRcvdHelpText = "wireguard interface total incoming bytes to peer"
 )
 
 func init() {
@@ -103,14 +103,9 @@ func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (ne
 func (collector *Metrics) refreshStats(m chan<- prometheus.Metric) {
 	wgClient, err := collector.newWireguardClient()
 	if err != nil {
+		collector.logCtx.WithError(err).Error("error initializing wireguard client devices")
 		return
 	}
-	collector.collectDeviceMetrics(wgClient, m)
-	collector.collectPeerMetrics(wgClient, m)
-}
-
-func (collector *Metrics) collectDeviceMetrics(wgClient netlinkshim.Wireguard, m chan<- prometheus.Metric) {
-	collector.logCtx.Debug("collecting wg device metrics")
 
 	devices, err := wgClient.Devices()
 	if err != nil {
@@ -121,6 +116,13 @@ func (collector *Metrics) collectDeviceMetrics(wgClient netlinkshim.Wireguard, m
 		"count": len(devices),
 		"dev":   devices,
 	}).Debug("collect device metrics enumerated devices")
+
+	collector.collectDeviceMetrics(devices, m)
+	collector.collectDevicePeerMetrics(devices, m)
+}
+
+func (collector *Metrics) collectDeviceMetrics(devices []*wgtypes.Device, m chan<- prometheus.Metric) {
+	collector.logCtx.Debug("collecting wg device metrics")
 
 	for _, device := range devices {
 		l := collector.defaultLabelValues(device.PublicKey.String())
@@ -142,14 +144,9 @@ func (collector *Metrics) collectDeviceMetrics(wgClient netlinkshim.Wireguard, m
 	}
 }
 
-func (collector *Metrics) collectPeerMetrics(wgClient netlinkshim.Wireguard, m chan<- prometheus.Metric) {
+func (collector *Metrics) collectDevicePeerMetrics(devices []*wgtypes.Device, m chan<- prometheus.Metric) {
 	collector.logCtx.Debug("collecting wg peer(s) metrics")
 
-	devices, err := wgClient.Devices()
-	if err != nil {
-		collector.logCtx.WithError(err).Error("error listing wireguard devices")
-		return
-	}
 	collector.logCtx.WithFields(logrus.Fields{
 		"count": len(devices),
 	}).Debug("enumerated wireguard devices")
@@ -177,8 +174,8 @@ func (collector *Metrics) collectPeerMetrics(wgClient netlinkshim.Wireguard, m c
 			)
 			hs := float64(peer.LastHandshakeTime.Unix())
 			collector.logCtx.WithFields(logrus.Fields{
-				"rx_delta": rxd,
-				"tx_delta": txd,
+				"rx_delta":     rxd,
+				"tx_delta":     txd,
 				"handshake_ts": hs,
 			}).Debug("collected peer metrics")
 
