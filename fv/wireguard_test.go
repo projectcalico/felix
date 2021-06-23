@@ -1186,8 +1186,8 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 			for _, expectedMetric := range []string{
 				"# TYPE wireguard_meta gauge",
 				"# TYPE wireguard_latest_handshake_seconds gauge",
-				"# TYPE wireguard_bytes_rcvd_total counter",
-				"# TYPE wireguard_bytes_sent_total counter",
+				"# TYPE wireguard_bytes_rcvd counter",
+				"# TYPE wireguard_bytes_sent counter",
 			} {
 				Expect(s).To(ContainSubstring(expectedMetric))
 			}
