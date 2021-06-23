@@ -210,6 +210,29 @@ wireguard_meta{hostname="{{.hostname}}",iface="{{.iface}}",listen_port="{{.liste
 		Expect(buf.String()).To(Equal(buf2.String()))
 	})
 
+	It("should not yield metrics if unregistered", func() {
+		By("checking if it's constructable")
+		Expect(wgStats).ToNot(BeNil())
+
+		By("registering it in a prometheus.Registry")
+		registry := prometheus.NewRegistry()
+		registry.MustRegister(wgStats)
+
+		By("unregistering with no issue")
+		ok := registry.Unregister(wgStats)
+		Expect(ok).To(BeTrue())
+
+		By("checking if gathering metrics will not error")
+		wgClient.generatePeerTraffic(512, 512)
+		mfs, err := registry.Gather()
+		Expect(err).ToNot(HaveOccurred())
+
+
+		By("checking if there are no metrics at all since it is unregistered")
+		Expect(mfs).To(HaveLen(0))
+
+	})
+
 	AfterEach(func() {
 		wgClient = nil
 	})
