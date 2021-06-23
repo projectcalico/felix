@@ -1180,7 +1180,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported 3-node 
 
 		By("checking prometheus metrics render")
 		for _, felix := range felixes {
-			s, err := felix.ExecOutput("wget", "localhost:9091/metrics", "-O", "-")
+			s, err := felix.ExecCombinedOutput("wget", "localhost:9091/metrics", "-O", "-")
 			Expect(err).ToNot(HaveOccurred())
 			// quick and dirty comparison to see if metrics we want exist and with correct type
 			for _, expectedMetric := range []string{

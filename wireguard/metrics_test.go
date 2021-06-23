@@ -121,6 +121,7 @@ var _ = Describe("wireguard metrics", func() {
 	var mockPeers []*mockPeerInfo
 	const (
 		hostname = "l0c4lh057"
+		defaultRateLimitInterval = time.Second * 5
 	)
 
 	newWireguardDevicesOnly := func() (netlinkshim.Wireguard, error) {
@@ -138,6 +139,7 @@ var _ = Describe("wireguard metrics", func() {
 		wgStats = wireguard.NewWireguardMetricsWithShims(
 			hostname,
 			newWireguardDevicesOnly,
+			defaultRateLimitInterval,
 		)
 	})
 
@@ -152,14 +154,21 @@ var _ = Describe("wireguard metrics", func() {
 
 		By("producing metrics")
 		wgClient.generatePeerTraffic(512, 512)
-		_, err := registry.Gather()
-		Expect(err).ToNot(HaveOccurred())
-
-		<-time.After(5 * time.Second)
-		ts := wgClient.generatePeerTraffic(1024, 1024)
 		mfs, err := registry.Gather()
 		Expect(err).ToNot(HaveOccurred())
 		Expect(mfs).To(HaveLen(4))
+
+		By("checking if rate-limiting works")
+		mfs2, err := registry.Gather()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(mfs2).To(BeEmpty())
+
+		<-time.After(5 * time.Second)
+		ts := wgClient.generatePeerTraffic(1024, 1024)
+		mfs, err = registry.Gather()
+		Expect(err).ToNot(HaveOccurred())
+		Expect(mfs).To(HaveLen(4))
+
 
 		By("comparing text output")
 		buf := &bytes.Buffer{}
@@ -167,6 +176,8 @@ var _ = Describe("wireguard metrics", func() {
 			_, err := expfmt.MetricFamilyToText(buf, mf)
 			Expect(err).ToNot(HaveOccurred())
 		}
+
+
 
 		data := map[string]interface{}{
 			"pubkey": mockPeers[0].peer.PublicKey.String(),
