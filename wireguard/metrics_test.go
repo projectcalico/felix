@@ -190,12 +190,12 @@ var _ = Describe("wireguard metrics", func() {
 		}
 
 		tmpl := template.Must(
-			template.New("").Parse(`# HELP wireguard_bytes_rcvd_total wireguard interface total incoming bytes to peer
-# TYPE wireguard_bytes_rcvd_total counter
-wireguard_bytes_rcvd_total{hostname="{{.hostname}}",peer_endpoint="{{.endpoint}}",peer_key="{{.peerkey}}",public_key="{{.pubkey}}"} 1536
-# HELP wireguard_bytes_sent_total wireguard interface total outgoing bytes to peer
-# TYPE wireguard_bytes_sent_total counter
-wireguard_bytes_sent_total{hostname="{{.hostname}}",peer_endpoint="{{.endpoint}}",peer_key="{{.peerkey}}",public_key="{{.pubkey}}"} 1536
+			template.New("").Parse(`# HELP wireguard_bytes_rcvd wireguard interface incoming bytes count from peer
+# TYPE wireguard_bytes_rcvd counter
+wireguard_bytes_rcvd{hostname="{{.hostname}}",peer_endpoint="{{.endpoint}}",peer_key="{{.peerkey}}",public_key="{{.pubkey}}"} 1536
+# HELP wireguard_bytes_sent wireguard interface outgoing bytes count to peer
+# TYPE wireguard_bytes_sent counter
+wireguard_bytes_sent{hostname="{{.hostname}}",peer_endpoint="{{.endpoint}}",peer_key="{{.peerkey}}",public_key="{{.pubkey}}"} 1536
 # HELP wireguard_latest_handshake_seconds wireguard interface latest handshake unix timestamp in seconds to a peer
 # TYPE wireguard_latest_handshake_seconds gauge
 wireguard_latest_handshake_seconds{hostname="{{.hostname}}",peer_endpoint="{{.endpoint}}",peer_key="{{.peerkey}}",public_key="{{.pubkey}}"} {{.ts}}
