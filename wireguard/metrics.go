@@ -17,6 +17,7 @@ package wireguard
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/projectcalico/felix/netlinkshim"
 	"github.com/prometheus/client_golang/prometheus"
@@ -47,6 +48,8 @@ const (
 
 	wireguardBytesRcvdFQName   = "wireguard_bytes_rcvd_total"
 	wireguardBytesRcvdHelpText = "wireguard interface total incoming bytes to peer"
+
+	defaultCollectionRatelimit = time.Second * 5
 )
 
 func init() {
@@ -61,6 +64,9 @@ type Metrics struct {
 	logCtx             *logrus.Entry
 
 	peerRx, peerTx map[wgtypes.Key]int64
+
+	lastCollectionTime time.Time
+	rateLimitInterval  time.Duration
 }
 
 func (collector *Metrics) Describe(chan<- *prometheus.Desc) {}
@@ -83,10 +89,10 @@ func NewWireguardMetrics() (*Metrics, error) {
 		logrus.WithError(err).Error("cannot register wireguard metrics stats")
 		return nil, err
 	}
-	return NewWireguardMetricsWithShims(hostname, netlinkshim.NewRealWireguard), nil
+	return NewWireguardMetricsWithShims(hostname, netlinkshim.NewRealWireguard, defaultCollectionRatelimit), nil
 }
 
-func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (netlinkshim.Wireguard, error)) *Metrics {
+func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (netlinkshim.Wireguard, error), rateLimitInterval time.Duration) *Metrics {
 	logrus.WithField("hostname", hostname).Debug("created wireguard collector for host")
 	return &Metrics{
 		hostname:           hostname,
@@ -97,10 +103,20 @@ func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (ne
 
 		peerRx: map[wgtypes.Key]int64{},
 		peerTx: map[wgtypes.Key]int64{},
+
+		rateLimitInterval: rateLimitInterval,
 	}
 }
 
 func (collector *Metrics) refreshStats(m chan<- prometheus.Metric) {
+	if ct := time.Since(collector.lastCollectionTime); ct < collector.rateLimitInterval {
+		collector.logCtx.WithFields(logrus.Fields{
+			"since":              ct.String(),
+			"ratelimit_interval": collector.rateLimitInterval.String(),
+		}).Error("refreshStats disallowed due to rate limit")
+		return
+	}
+
 	wgClient, err := collector.newWireguardClient()
 	if err != nil {
 		collector.logCtx.WithError(err).Error("error initializing wireguard client devices")
@@ -119,6 +135,8 @@ func (collector *Metrics) refreshStats(m chan<- prometheus.Metric) {
 
 	collector.collectDeviceMetrics(devices, m)
 	collector.collectDevicePeerMetrics(devices, m)
+
+	collector.lastCollectionTime = time.Now()
 }
 
 func (collector *Metrics) collectDeviceMetrics(devices []*wgtypes.Device, m chan<- prometheus.Metric) {
@@ -171,9 +189,9 @@ func (collector *Metrics) collectDevicePeerMetrics(devices []*wgtypes.Device, m 
 			hs := float64(peer.LastHandshakeTime.Unix())
 
 			collector.logCtx.WithFields(logrus.Fields{
-				"rx_bytes_total":     peer.ReceiveBytes,
-				"tx_bytes_total":     peer.TransmitBytes,
-				"handshake_ts": hs,
+				"rx_bytes_total": peer.ReceiveBytes,
+				"tx_bytes_total": peer.TransmitBytes,
+				"handshake_ts":   hs,
 			}).Debug("collected peer metrics")
 
 			m <- prometheus.MustNewConstMetric(
