@@ -43,11 +43,11 @@ const (
 	wireguardLatestHandshakeIntervalFQName   = "wireguard_latest_handshake_seconds"
 	wireguardLatestHandshakeIntervalHelpText = "wireguard interface latest handshake unix timestamp in seconds to a peer"
 
-	wireguardBytesSentFQName   = "wireguard_bytes_sent_total"
-	wireguardBytesSentHelpText = "wireguard interface total outgoing bytes to peer"
+	wireguardBytesSentFQName   = "wireguard_bytes_sent"
+	wireguardBytesSentHelpText = "wireguard interface outgoing bytes count to peer"
 
-	wireguardBytesRcvdFQName   = "wireguard_bytes_rcvd_total"
-	wireguardBytesRcvdHelpText = "wireguard interface total incoming bytes to peer"
+	wireguardBytesRcvdFQName   = "wireguard_bytes_rcvd"
+	wireguardBytesRcvdHelpText = "wireguard interface incoming bytes count from peer"
 
 	defaultCollectionRatelimit = time.Second * 5
 )
