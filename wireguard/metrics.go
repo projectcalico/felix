@@ -69,7 +69,44 @@ type Metrics struct {
 	rateLimitInterval  time.Duration
 }
 
-func (collector *Metrics) Describe(chan<- *prometheus.Desc) {}
+func (collector *Metrics) Describe(d chan<- *prometheus.Desc) {
+	for _, dev := range collector.getDevices() {
+		collector.descsByDevice(d, dev)
+	}
+}
+
+func (collector *Metrics) descsByDevice(d chan<- *prometheus.Desc, device *wgtypes.Device){
+	if device == nil {
+		collector.logCtx.Error("BUG: called descsByDevice with nil device")
+		return
+	}
+
+	labels := collector.defaultLabelValues("pub", deviceMetaLabelValues(device))
+	for fqName, help := range map[string]string{
+		wireguardMetaFQName: wireguardMetaHelpText,
+	} {
+		d <- prometheus.NewDesc(fqName, help, nil, labels)
+	}
+	for _, peer := range device.Peers {
+		collector.descByPeer(d, &peer)
+	}
+}
+
+func (collector *Metrics) descByPeer(d chan<- *prometheus.Desc, peer *wgtypes.Peer) {
+	if peer == nil {
+		collector.logCtx.Error("BUG: called descByPeer with nil peer")
+		return
+	}
+
+	labels := collector.defaultLabelValues("pub", peerServiceLabelValues(peer))
+	for fqName, help := range map[string]string{
+		wireguardBytesRcvdFQName: wireguardBytesRcvdHelpText,
+		wireguardBytesSentFQName: wireguardBytesSentHelpText,
+		wireguardLatestHandshakeIntervalFQName: wireguardLatestHandshakeIntervalHelpText,
+	} {
+		d <- prometheus.NewDesc(fqName, help, nil, labels)
+	}
+}
 
 func (collector *Metrics) Collect(m chan<- prometheus.Metric) {
 	collector.refreshStats(m)
@@ -108,6 +145,21 @@ func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (ne
 	}
 }
 
+func (collector *Metrics) getDevices() []*wgtypes.Device {
+	wgClient, err := collector.newWireguardClient()
+	if err != nil {
+		collector.logCtx.WithError(err).Error("error initializing wireguard client devices")
+		return nil
+	}
+
+	devices, err := wgClient.Devices()
+	if err != nil {
+		collector.logCtx.WithError(err).Error("error listing wireguard devices")
+		return nil
+	}
+	return devices
+}
+
 func (collector *Metrics) refreshStats(m chan<- prometheus.Metric) {
 	if ct := time.Since(collector.lastCollectionTime); ct < collector.rateLimitInterval {
 		collector.logCtx.WithFields(logrus.Fields{
@@ -116,18 +168,7 @@ func (collector *Metrics) refreshStats(m chan<- prometheus.Metric) {
 		}).Error("refreshStats disallowed due to rate limit")
 		return
 	}
-
-	wgClient, err := collector.newWireguardClient()
-	if err != nil {
-		collector.logCtx.WithError(err).Error("error initializing wireguard client devices")
-		return
-	}
-
-	devices, err := wgClient.Devices()
-	if err != nil {
-		collector.logCtx.WithError(err).Error("error listing wireguard devices")
-		return
-	}
+	devices := collector.getDevices()
 	collector.logCtx.WithFields(logrus.Fields{
 		"count": len(devices),
 		"dev":   devices,
@@ -143,10 +184,8 @@ func (collector *Metrics) collectDeviceMetrics(devices []*wgtypes.Device, m chan
 	collector.logCtx.Debug("collecting wg device metrics")
 
 	for _, device := range devices {
-		l := collector.defaultLabelValues(device.PublicKey.String())
-		for k, v := range deviceMetaLabelValues(device) {
-			l[k] = v
-		}
+		l := collector.defaultLabelValues(device.PublicKey.String(), deviceMetaLabelValues(device))
+
 		collector.logCtx.WithFields(logrus.Fields{
 			"dev":    device.Name,
 			"labels": l,
@@ -170,7 +209,6 @@ func (collector *Metrics) collectDevicePeerMetrics(devices []*wgtypes.Device, m 
 	}).Debug("enumerated wireguard devices")
 
 	for _, device := range devices {
-		labels := collector.defaultLabelValues(device.PublicKey.String())
 		logCtx := collector.logCtx.WithFields(logrus.Fields{
 			"key":  device.PublicKey,
 			"name": device.Name,
@@ -181,10 +219,7 @@ func (collector *Metrics) collectDevicePeerMetrics(devices []*wgtypes.Device, m 
 				"peer_endpoint": peer.Endpoint,
 			}).Debug("collect peer metrics")
 
-			serviceLabelValues := peerServiceLabelValues(&peer)
-			for k, v := range serviceLabelValues {
-				labels[k] = v
-			}
+			labels := collector.defaultLabelValues(device.PublicKey.String(), peerServiceLabelValues(&peer))
 
 			hs := float64(peer.LastHandshakeTime.Unix())
 
@@ -222,10 +257,14 @@ func (collector *Metrics) collectDevicePeerMetrics(devices []*wgtypes.Device, m 
 
 }
 
-func (collector *Metrics) defaultLabelValues(publicKey string) prometheus.Labels {
+func (collector *Metrics) defaultLabelValues(publicKey string, extend prometheus.Labels) prometheus.Labels {
 	l := prometheus.Labels{labelHostname: collector.hostname}
 	if publicKey != "" {
 		l[labelPublicKey] = publicKey
+	}
+
+	for k, v := range extend {
+		l[k] = v
 	}
 	return l
 }
