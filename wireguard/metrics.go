@@ -49,7 +49,7 @@ const (
 	wireguardBytesRcvdFQName   = "wireguard_bytes_rcvd"
 	wireguardBytesRcvdHelpText = "wireguard interface incoming bytes count from peer"
 
-	defaultCollectionRatelimit = time.Second * 5
+	defaultCollectionRatelimit = time.Second
 )
 
 func init() {
