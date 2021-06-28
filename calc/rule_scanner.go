@@ -93,6 +93,8 @@ type IPSetData struct {
 	// NamedPort contains the name of the named port represented by this IP set or "" for a
 	// selector-only IP set
 	NamedPort string
+	// The service that this IP set represents, in namespace/name format.
+	Service string
 	// cachedUID holds the calculated unique ID of this IP set, or "" if it hasn't been calculated
 	// yet.
 	cachedUID string
@@ -100,12 +102,18 @@ type IPSetData struct {
 
 func (d *IPSetData) UniqueID() string {
 	if d.cachedUID == "" {
-		selID := d.Selector.UniqueID()
-		if d.NamedPortProtocol == labelindex.ProtocolNone {
-			d.cachedUID = selID
+		if d.Service != "" {
+			// Service based IP set.
+			d.cachedUID = hash.MakeUniqueID("s", d.Service)
 		} else {
-			idToHash := selID + "," + d.NamedPortProtocol.String() + "," + d.NamedPort
-			d.cachedUID = hash.MakeUniqueID("n", idToHash)
+			// Selector / named-port based IP set.
+			selID := d.Selector.UniqueID()
+			if d.NamedPortProtocol == labelindex.ProtocolNone {
+				d.cachedUID = selID
+			} else {
+				idToHash := selID + "," + d.NamedPortProtocol.String() + "," + d.NamedPort
+				d.cachedUID = hash.MakeUniqueID("n", idToHash)
+			}
 		}
 	}
 	return d.cachedUID
@@ -301,6 +309,7 @@ type ParsedRule struct {
 	OriginalSrcServiceAccountSelector string
 	OriginalDstServiceAccountNames    []string
 	OriginalDstServiceAccountSelector string
+	OriginalDstServices               []string
 
 	// These fields allow us to pass through the HTTP match criteria from the V3 datamodel. The iptables dataplane
 	// does not implement the match, but other dataplanes such as Dikastes do.
@@ -365,6 +374,15 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		dstSelIPSets = selectorsToIPSets(dstSel)
 	}
 
+	// Include any Service IPSets as well.
+	for _, s := range rule.DstServices {
+		// TODO: Should we use a new slice for these?
+		// TODO: Hardcoded for default namespace. Instead, should use
+		// namesapce from the rule.
+		svc := fmt.Sprintf("%s/%s", "default", s)
+		dstSelIPSets = append(dstSelIPSets, &IPSetData{Service: svc})
+	}
+
 	notSrcSelIPSets := selectorsToIPSets(notSrcSels)
 	notDstSelIPSets := selectorsToIPSets(notDstSels)
 
@@ -414,6 +432,7 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		OriginalSrcServiceAccountSelector: rule.OriginalSrcServiceAccountSelector,
 		OriginalDstServiceAccountNames:    rule.OriginalDstServiceAccountNames,
 		OriginalDstServiceAccountSelector: rule.OriginalDstServiceAccountSelector,
+		OriginalDstServices:               rule.DstServices,
 		HTTPMatch:                         rule.HTTPMatch,
 
 		// Pass through metadata (used by iptables backend)
