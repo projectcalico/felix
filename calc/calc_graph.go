@@ -209,6 +209,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 				"member":  member,
 			}).Debug("Member added to IP set.")
 		}
+		log.Info("CASEY: ON IPSET MEMBER ADDED")
 		callbacks.OnIPSetMemberAdded(ipSetID, member)
 	}
 	serviceIndex.OnMemberRemoved = func(ipSetID string, member labelindex.IPSetMember) {
@@ -218,6 +219,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 				"member":  member,
 			}).Debug("Member removed from IP set.")
 		}
+		log.Info("CASEY: ON IPSET MEMBER REMOVED")
 		callbacks.OnIPSetMemberRemoved(ipSetID, member)
 	}
 
