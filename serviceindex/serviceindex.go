@@ -70,10 +70,10 @@ func (idx *ServiceIndex) OnUpdate(update api.Update) (_ bool) {
 		switch key.Kind {
 		case model.KindKubernetesEndpointSlice:
 			if update.Value != nil {
-				log.Debugf("Updating NamedPortIndex with EndpointSlice %v", key)
+				log.Debugf("Updating ServiceIndex with EndpointSlice %v", key)
 				idx.UpdateEndpointSlice(update.Value.(*discovery.EndpointSlice))
 			} else {
-				log.Debugf("Deleting EndpointSlice %v from NamedPortIndex", key)
+				log.Debugf("Deleting EndpointSlice %v from ServiceIndex", key)
 				idx.DeleteEndpointSlice(key)
 			}
 		}
@@ -89,11 +89,15 @@ func (idx *ServiceIndex) UpdateEndpointSlice(es *discovery.EndpointSlice) {
 	k := fmt.Sprintf("%s/%s", es.Namespace, es.Name)
 	cached := idx.endpointSlices[k]
 	oldIPSetContributions := idx.membersFromEndpointSlice(cached)
+	logc := log.WithFields(log.Fields{"slice": k, "svc": svc})
 
 	if ipSet, ok := idx.activeIPSetsByService[svc]; ok {
+		logc.Info("EndpointSlice belongs to an active service")
+
 		// Service contributing these endpoints is active. We need to determine
 		// if any endpoints have changed, and if so send through membership updates.
 		newIPSetContribution := idx.membersFromEndpointSlice(es)
+		logc.Info("EndpointSlice Update contributed members: %+v", newIPSetContribution)
 		for _, member := range newIPSetContribution {
 			// Incref all the new members.  If any of them go from 0 to 1 reference then we
 			// know that they're new.  We'll temporarily double-count members that were already
@@ -119,6 +123,8 @@ func (idx *ServiceIndex) UpdateEndpointSlice(es *discovery.EndpointSlice) {
 				ipSet.memberToRefCount[oldMember] = newRefCount
 			}
 		}
+	} else {
+		logc.Info("EndpointSlice doesn't belong to an active service, simply cache it.")
 	}
 
 	// Update caches with the slice.
@@ -143,6 +149,7 @@ func (idx *ServiceIndex) DeleteEndpointSlice(key model.ResourceKey) {
 		// contributed by this endpoint slice and decref them. For those which go from 1 to 0,
 		// we should end a membership removal from the data plane.
 		oldContributions := idx.membersFromEndpointSlice(es)
+		log.Info("EndpointSlice Delete contributed members: %+v", oldContributions)
 		for _, oldMember := range oldContributions {
 			newRefCount := ipSet.memberToRefCount[oldMember] - 1
 			if newRefCount == 0 {
@@ -164,7 +171,9 @@ func (idx *ServiceIndex) DeleteEndpointSlice(key model.ResourceKey) {
 
 func serviceName(es *discovery.EndpointSlice) string {
 	svc := es.Labels["kubernetes.io/service-name"]
-	return fmt.Sprintf("%s/%s", es.Namespace, svc)
+	name := fmt.Sprintf("%s/%s", es.Namespace, svc)
+	log.Info("Endpoint slice %s belongs to service %s", es.Name, name)
+	return name
 }
 
 func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) []labelindex.IPSetMember {
@@ -202,11 +211,14 @@ func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) [
 }
 
 func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
+	logc := log.WithFields(log.Fields{"id": id, "service": serviceName})
 	if curr, ok := idx.activeIPSetsByID[id]; !ok {
 		// No existing entry - this is a new IP set.
+		logc.Info("New IP set")
 	} else if curr.ServiceName == serviceName {
 		// Not a new IP set - we're already tracking it as an active service-based
 		// IP set, so nothing to do.
+		logc.Info("Known IP set, nothing to do")
 		return
 	} else {
 		// This branch means that a new service name has generated the same ID as another.
@@ -214,7 +226,7 @@ func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
 		panic(fmt.Sprintf("BUG: Same ID generated for two service names: %s and %s", curr.ServiceName, serviceName))
 	}
 
-	// New active service.
+	// New active service IP set.
 	as := &ipSetData{
 		ID:               id,
 		ServiceName:      serviceName,
@@ -222,11 +234,17 @@ func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
 	}
 	idx.activeIPSetsByID[id] = as
 	idx.activeIPSetsByService[serviceName] = as
+	logc.Infof("Active service IP set")
+
+	for _, es := range idx.endpointSlicesByService[serviceName] {
+		logc.Infof("- Acive service has endpoint slice: %s", es.Name)
+	}
 
 	// We need to scan for possible updates to the IP set membership. Check endpoint slices for this
 	// service to determine endpoints to contribute.
 	for _, eps := range idx.endpointSlicesByService[serviceName] {
 		members := idx.membersFromEndpointSlice(eps)
+		log.Info("New active service IP set, EndpointSlices contributed members: %+v", members)
 		for _, m := range members {
 			refCount := as.memberToRefCount[m]
 			if refCount == 0 {
@@ -244,6 +262,7 @@ func (idx *ServiceIndex) DeleteIPSet(id string) {
 		log.WithField("id", id).Warning("Delete of unknown IP set, ignoring")
 		return
 	}
+	log.Infof("Deleting service IP set: %s: %s", id, as.ServiceName)
 
 	// Emit events for all the removed CIDRs.
 	for member := range as.memberToRefCount {
