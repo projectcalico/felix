@@ -199,6 +199,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 	// below.
 	ruleScanner.RulesUpdateCallbacks = callbacks
 
+	panic("CREATING SERVICE INDEX")
 	serviceIndex := serviceindex.NewServiceIndex()
 	serviceIndex.RegisterWith(allUpdDispatcher)
 	// Send the Service IP set member index's outputs to the dataplane.
@@ -209,6 +210,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 				"member":  member,
 			}).Debug("Member added to IP set.")
 		}
+		log.Info("CASEY: ON IPSET MEMBER ADDED")
 		callbacks.OnIPSetMemberAdded(ipSetID, member)
 	}
 	serviceIndex.OnMemberRemoved = func(ipSetID string, member labelindex.IPSetMember) {
@@ -218,6 +220,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 				"member":  member,
 			}).Debug("Member removed from IP set.")
 		}
+		log.Info("CASEY: ON IPSET MEMBER REMOVED")
 		callbacks.OnIPSetMemberRemoved(ipSetID, member)
 	}
 
