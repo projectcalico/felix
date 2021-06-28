@@ -209,6 +209,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 				"member":  member,
 			}).Debug("Member added to IP set.")
 		}
+		callbacks.OnIPSetMemberAdded(ipSetID, member)
 	}
 	serviceIndex.OnMemberRemoved = func(ipSetID string, member labelindex.IPSetMember) {
 		if log.GetLevel() >= log.DebugLevel {
@@ -217,13 +218,15 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 				"member":  member,
 			}).Debug("Member removed from IP set.")
 		}
+		callbacks.OnIPSetMemberRemoved(ipSetID, member)
 	}
 
 	// The rule scanner only goes as far as figuring out which tags/selectors/named ports are
 	// active. Next we need to figure out which endpoints (and hence which IP addresses/ports) are
 	// in each tag/selector/named port. The IP set member index calculates the set of IPs and named
 	// ports that should be in each IP set.  To do that, it matches the active selectors/tags/named
-	// ports extracted by the rule scanner against all the endpoints.
+	// ports extracted by the rule scanner against all the endpoints. The service index does the same
+	// for service based rules, building IP set contributions from endpoint slices.
 	//
 	//        ...
 	//     Dispatcher (all updates)
@@ -237,7 +240,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 	//       \              |
 	//        \_____        |
 	//              \       |
-	//            IP set member index
+	//            IP set member index / service index
 	//                   |
 	//                   | IP set member added/removed
 	//                   |
