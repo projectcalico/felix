@@ -70,10 +70,10 @@ func (idx *ServiceIndex) OnUpdate(update api.Update) (_ bool) {
 		switch key.Kind {
 		case model.KindKubernetesEndpointSlice:
 			if update.Value != nil {
-				log.Debugf("Updating NamedPortIndex with EndpointSlice %v", key)
+				log.Debugf("Updating ServiceIndex with EndpointSlice %v", key)
 				idx.UpdateEndpointSlice(update.Value.(*discovery.EndpointSlice))
 			} else {
-				log.Debugf("Deleting EndpointSlice %v from NamedPortIndex", key)
+				log.Debugf("Deleting EndpointSlice %v from ServiceIndex", key)
 				idx.DeleteEndpointSlice(key)
 			}
 		}
@@ -94,6 +94,7 @@ func (idx *ServiceIndex) UpdateEndpointSlice(es *discovery.EndpointSlice) {
 		// Service contributing these endpoints is active. We need to determine
 		// if any endpoints have changed, and if so send through membership updates.
 		newIPSetContribution := idx.membersFromEndpointSlice(es)
+		log.Info("EndpointSlice Update contributed members: %+v", newIPSetContribution)
 		for _, member := range newIPSetContribution {
 			// Incref all the new members.  If any of them go from 0 to 1 reference then we
 			// know that they're new.  We'll temporarily double-count members that were already
@@ -143,6 +144,7 @@ func (idx *ServiceIndex) DeleteEndpointSlice(key model.ResourceKey) {
 		// contributed by this endpoint slice and decref them. For those which go from 1 to 0,
 		// we should end a membership removal from the data plane.
 		oldContributions := idx.membersFromEndpointSlice(es)
+		log.Info("EndpointSlice Delete contributed members: %+v", oldContributions)
 		for _, oldMember := range oldContributions {
 			newRefCount := ipSet.memberToRefCount[oldMember] - 1
 			if newRefCount == 0 {
@@ -214,7 +216,7 @@ func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
 		panic(fmt.Sprintf("BUG: Same ID generated for two service names: %s and %s", curr.ServiceName, serviceName))
 	}
 
-	// New active service.
+	// New active service IP set.
 	as := &ipSetData{
 		ID:               id,
 		ServiceName:      serviceName,
@@ -227,6 +229,7 @@ func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
 	// service to determine endpoints to contribute.
 	for _, eps := range idx.endpointSlicesByService[serviceName] {
 		members := idx.membersFromEndpointSlice(eps)
+		log.Info("New active service IP set, EndpointSlices contributed members: %+v", members)
 		for _, m := range members {
 			refCount := as.memberToRefCount[m]
 			if refCount == 0 {
