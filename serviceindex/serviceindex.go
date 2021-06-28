@@ -55,6 +55,7 @@ func NewServiceIndex() *ServiceIndex {
 		OnMemberAdded:   func(ipSetID string, member labelindex.IPSetMember) {},
 		OnMemberRemoved: func(ipSetID string, member labelindex.IPSetMember) {},
 	}
+	log.Info("Creating new service index")
 	return &idx
 }
 
@@ -69,11 +70,12 @@ func (idx *ServiceIndex) OnUpdate(update api.Update) (_ bool) {
 	case model.ResourceKey:
 		switch key.Kind {
 		case model.KindKubernetesEndpointSlice:
+			log.Info("Got an endpointslice update in ServiceIndex")
 			if update.Value != nil {
-				log.Debugf("Updating NamedPortIndex with EndpointSlice %v", key)
+				log.Debugf("Updating ServiceIndex with EndpointSlice %v", key)
 				idx.UpdateEndpointSlice(update.Value.(*discovery.EndpointSlice))
 			} else {
-				log.Debugf("Deleting EndpointSlice %v from NamedPortIndex", key)
+				log.Debugf("Deleting EndpointSlice %v from ServiceIndex", key)
 				idx.DeleteEndpointSlice(key)
 			}
 		}
