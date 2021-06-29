@@ -312,7 +312,8 @@ type ParsedRule struct {
 	OriginalSrcServiceAccountSelector string
 	OriginalDstServiceAccountNames    []string
 	OriginalDstServiceAccountSelector string
-	OriginalDstServices               []string
+	OriginalDstService                string
+	OriginalDstServiceNamespace       string
 
 	// These fields allow us to pass through the HTTP match criteria from the V3 datamodel. The iptables dataplane
 	// does not implement the match, but other dataplanes such as Dikastes do.
@@ -377,12 +378,9 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		dstSelIPSets = selectorsToIPSets(dstSel)
 	}
 
-	// Include any Service IPSets as well.
-	for _, s := range rule.DstServices {
-		// TODO: Should we use a new slice for these?
-		// TODO: Hardcoded for default namespace. Instead, should use
-		// namesapce from the rule.
-		svc := fmt.Sprintf("%s/%s", "default", s)
+	// Include any Service IPSet as well.
+	if rule.DstService != "" {
+		svc := fmt.Sprintf("%s/%s", rule.DstServiceNamespace, rule.DstService)
 		dstSelIPSets = append(dstSelIPSets, &IPSetData{Service: svc})
 	}
 
@@ -435,7 +433,8 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		OriginalSrcServiceAccountSelector: rule.OriginalSrcServiceAccountSelector,
 		OriginalDstServiceAccountNames:    rule.OriginalDstServiceAccountNames,
 		OriginalDstServiceAccountSelector: rule.OriginalDstServiceAccountSelector,
-		OriginalDstServices:               rule.DstServices,
+		OriginalDstService:                rule.DstService,
+		OriginalDstServiceNamespace:       rule.DstServiceNamespace,
 		HTTPMatch:                         rule.HTTPMatch,
 
 		// Pass through metadata (used by iptables backend)

@@ -93,8 +93,10 @@ github.com/blang/semver v3.5.1+incompatible/go.mod h1:kRBLl5iJ+tD4TcOOxsy/0fnweb
 github.com/boltdb/bolt v1.3.1/go.mod h1:clJnj/oiGkjum5o1McbSZDSLxVThjynRyGBgiAx27Ps=
 github.com/buger/jsonparser v0.0.0-20180808090653-f4dd9f5a6b44/go.mod h1:bbYlZJ7hK1yFx9hf58LP0zeX7UjIGs20ufpu3evjr+s=
 github.com/caddyserver/caddy v1.0.3/go.mod h1:G+ouvOY32gENkJC+jhgl62TyhvqEsFaDiZ4uw0RzP1E=
-github.com/caseydavenport/api v0.0.0-20210623183755-7af81870c61d h1:3l3s6N/AUN17ME1O+nsrwP40SXdEvkpinPdErea3zRY=
-github.com/caseydavenport/api v0.0.0-20210623183755-7af81870c61d/go.mod h1:8raLpE2oURN0I33JpEniA3LmAs5uPZ1kGnW/YunYEB0=
+github.com/caseydavenport/api v0.0.0-20210629230831-f732e165d02a h1:Rk/cVmSfrlSfv/UkZd4VAxZyYbLPGFVL7iixRx8/6/I=
+github.com/caseydavenport/api v0.0.0-20210629230831-f732e165d02a/go.mod h1:8raLpE2oURN0I33JpEniA3LmAs5uPZ1kGnW/YunYEB0=
+github.com/caseydavenport/libcalico-go v0.0.0-20210629230741-1b759df5d8cc h1:FObzG8OQi1wBZ1Z2miNKaLCsdZPsTv/bqcf4SaXu5Ew=
+github.com/caseydavenport/libcalico-go v0.0.0-20210629230741-1b759df5d8cc/go.mod h1:pGhzdjR8PZuIheXDkijUIdnjelFXOpTu7XM+ZHLXPLU=
 github.com/cenkalti/backoff v2.1.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/cespare/xxhash v1.1.0 h1:a6HrQnmkObjyL+Gs60czilIUGqrzKutQD6XZog3p+ko=
