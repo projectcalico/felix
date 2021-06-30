@@ -19,6 +19,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 
 	"github.com/projectcalico/felix/dispatcher"
@@ -198,9 +199,21 @@ func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) [
 						// TODO
 						continue
 					}
+
+					// Determine the protocol for the member. Assume TCP
+					// unless the protocol is specified to be something else.
+					proto := labelindex.ProtocolTCP
+					if port.Protocol != nil {
+						switch *port.Protocol {
+						case v1.ProtocolUDP:
+							proto = labelindex.ProtocolUDP
+						case v1.ProtocolSCTP:
+							proto = labelindex.ProtocolSCTP
+						}
+					}
 					members = append(members, labelindex.IPSetMember{
 						CIDR:       cidr,
-						Protocol:   labelindex.ProtocolTCP, // TODO: Fill in with proper protocol.
+						Protocol:   proto,
 						PortNumber: uint16(*port.Port),
 					})
 				}
