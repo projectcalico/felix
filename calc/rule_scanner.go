@@ -286,6 +286,7 @@ type ParsedRule struct {
 	ICMPCode             *int
 	SrcIPSetIDs          []string
 	DstIPSetIDs          []string
+	DstIPPortSetIDs      []string
 
 	NotProtocol             *numorstring.Protocol
 	NotSrcNets              []*net.IPNet
@@ -379,9 +380,10 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 	}
 
 	// Include any Service IPSet as well.
+	var dstIPPortSets []*IPSetData
 	if rule.DstService != "" {
 		svc := fmt.Sprintf("%s/%s", rule.DstServiceNamespace, rule.DstService)
-		dstSelIPSets = append(dstSelIPSets, &IPSetData{Service: svc})
+		dstIPPortSets = append(dstIPPortSets, &IPSetData{Service: svc})
 	}
 
 	notSrcSelIPSets := selectorsToIPSets(notSrcSels)
@@ -403,6 +405,7 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		DstPorts:             dstNumericPorts,
 		DstNamedPortIPSetIDs: ipSetsToUIDs(dstNamedPortIPSets),
 		DstIPSetIDs:          ipSetsToUIDs(dstSelIPSets),
+		DstIPPortSetIDs:      ipSetsToUIDs(dstIPPortSets),
 
 		ICMPType: rule.ICMPType,
 		ICMPCode: rule.ICMPCode,
@@ -447,6 +450,7 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 	allIPSets = append(allIPSets, notDstNamedPortIPSets...)
 	allIPSets = append(allIPSets, srcSelIPSets...)
 	allIPSets = append(allIPSets, dstSelIPSets...)
+	allIPSets = append(allIPSets, dstIPPortSets...)
 	allIPSets = append(allIPSets, notSrcSelIPSets...)
 	allIPSets = append(allIPSets, notDstSelIPSets...)
 
