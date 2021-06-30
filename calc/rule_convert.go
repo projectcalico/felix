@@ -103,6 +103,7 @@ func parsedRuleToProtoRule(in *ParsedRule) *proto.Rule {
 		DstNamedPortIpSetIds: in.DstNamedPortIPSetIDs,
 		SrcIpSetIds:          in.SrcIPSetIDs,
 		DstIpSetIds:          in.DstIPSetIDs,
+		DstIpPortSetIds:      in.DstIPPortSetIDs,
 
 		NotProtocol:             protocolToProtoProtocol(in.NotProtocol),
 		NotSrcNet:               ipNetsToProtoStrings(in.NotSrcNets),
