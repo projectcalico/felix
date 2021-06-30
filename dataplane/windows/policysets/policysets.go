@@ -232,6 +232,7 @@ func getReferencedIpSetIds(inboundRules []*proto.Rule, outboundRules []*proto.Ru
 	for _, rule := range rules {
 		ipSetIds.AddAll(rule.SrcIpSetIds)
 		ipSetIds.AddAll(rule.DstIpSetIds)
+		ipSetIds.AddAll(rule.DstIpPortSetIds)
 	}
 
 	return ipSetIds
@@ -437,6 +438,8 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 			dstAddresses = ipsetAddresses
 		}
 	}
+
+	// TODO: Implement match on IP+port IP sets.
 
 	if len(dstAddresses) > 0 {
 		if isInbound {
