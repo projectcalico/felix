@@ -122,6 +122,8 @@ func parsedRuleToProtoRule(in *ParsedRule) *proto.Rule {
 		OriginalDstNamespaceSelector: in.OriginalDstNamespaceSelector,
 		OriginalNotSrcSelector:       in.OriginalNotSrcSelector,
 		OriginalNotDstSelector:       in.OriginalNotDstSelector,
+		OriginalDstService:           in.OriginalDstService,
+		OriginalDstServiceNamespace:  in.OriginalDstServiceNamespace,
 	}
 
 	if len(in.OriginalSrcServiceAccountNames) > 0 || in.OriginalSrcServiceAccountSelector != "" {
