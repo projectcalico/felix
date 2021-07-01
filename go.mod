@@ -78,3 +78,9 @@ replace (
 	k8s.io/mount-utils => k8s.io/mount-utils v0.21.0-rc.0
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.21.0-rc.0
 )
+
+replace github.com/projectcalico/api => github.com/caseydavenport/api v0.0.0-20210630213110-dfbd3368ef69
+
+replace github.com/projectcalico/typha => github.com/caseydavenport/typha v0.1.4-0.20210701173932-10a524cc8393
+
+replace github.com/projectcalico/libcalico-go => github.com/caseydavenport/libcalico-go v0.0.0-20210630215543-2ff75a457010
