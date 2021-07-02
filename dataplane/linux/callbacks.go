@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,12 +21,6 @@ import (
 )
 
 type callbacks struct {
-	UpdatePolicyV4           *UpdatePolicyDataFuncs
-	RemovePolicyV4           *RemovePolicyDataFuncs
-	AddMembersIPSetV4        *AddMembersIPSetFuncs
-	RemoveMembersIPSetV4     *RemoveMembersIPSetFuncs
-	ReplaceIPSetV4           *ReplaceIPSetFuncs
-	RemoveIPSetV4            *RemoveIPSetFuncs
 	AddInterfaceV4           *AddInterfaceFuncs
 	RemoveInterfaceV4        *RemoveInterfaceFuncs
 	UpdateInterfaceV4        *UpdateInterfaceFuncs
@@ -38,12 +32,6 @@ type callbacks struct {
 
 func newCallbacks() *callbacks {
 	return &callbacks{
-		UpdatePolicyV4:           &UpdatePolicyDataFuncs{},
-		RemovePolicyV4:           &RemovePolicyDataFuncs{},
-		AddMembersIPSetV4:        &AddMembersIPSetFuncs{},
-		RemoveMembersIPSetV4:     &RemoveMembersIPSetFuncs{},
-		ReplaceIPSetV4:           &ReplaceIPSetFuncs{},
-		RemoveIPSetV4:            &RemoveIPSetFuncs{},
 		AddInterfaceV4:           &AddInterfaceFuncs{},
 		RemoveInterfaceV4:        &RemoveInterfaceFuncs{},
 		UpdateInterfaceV4:        &UpdateInterfaceFuncs{},
@@ -63,58 +51,6 @@ func (c *callbacks) Drop(id *CbID) {
 
 type CbID struct {
 	dropper func()
-}
-
-type UpdatePolicyDataFunc func(policyID proto.PolicyID, policy *proto.Policy)
-
-type UpdatePolicyDataFuncs struct {
-	fs UpdatePolicyDataFunc
-}
-
-func (fs *UpdatePolicyDataFuncs) Invoke(policyID proto.PolicyID, policy *proto.Policy) {
-	if fs.fs != nil {
-		fs.fs(policyID, policy)
-	}
-}
-
-func (fs *UpdatePolicyDataFuncs) Append(f UpdatePolicyDataFunc) *CbID {
-	if f == nil {
-		return &CbID{
-			dropper: func() {},
-		}
-	}
-	fs.fs = f
-	return &CbID{
-		dropper: func() {
-			fs.fs = nil
-		},
-	}
-}
-
-type RemovePolicyDataFunc func(policyID proto.PolicyID)
-
-type RemovePolicyDataFuncs struct {
-	fs RemovePolicyDataFunc
-}
-
-func (fs *RemovePolicyDataFuncs) Invoke(policyID proto.PolicyID) {
-	if fs.fs != nil {
-		fs.fs(policyID)
-	}
-}
-
-func (fs *RemovePolicyDataFuncs) Append(f RemovePolicyDataFunc) *CbID {
-	if f == nil {
-		return &CbID{
-			dropper: func() {},
-		}
-	}
-	fs.fs = f
-	return &CbID{
-		dropper: func() {
-			fs.fs = nil
-		},
-	}
 }
 
 type AddMembersIPSetFunc func(setID string, members set.Set)
