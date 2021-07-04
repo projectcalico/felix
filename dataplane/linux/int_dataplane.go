@@ -467,7 +467,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	}
 
 	// TODO Integrate XDP and BPF infra.
-	if !config.BPFEnabled && dp.xdpState == nil {
+	if !config.BPFEnabled && config.XDPEnabled && dp.xdpState == nil {
 		xdpState, err := NewXDPState(config.XDPAllowGeneric)
 		if err == nil {
 			if err := xdpState.WipeXDP(); err != nil {
