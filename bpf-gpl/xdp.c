@@ -42,7 +42,7 @@
 #include "jump.h"
 
 SEC("prog")
-static CALI_BPF_INLINE int calico_xdp(struct xdp_md *xdp_ctx) {
+int calico_xdp(struct xdp_md *xdp_ctx) {
 
 	struct cali_tc_ctx ctx = {
 		.state = state_get(),
