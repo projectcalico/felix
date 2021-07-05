@@ -53,7 +53,7 @@ static CALI_BPF_INLINE int parse_packet_ip(struct cali_tc_ctx *ctx) {
 			goto deny;
 		} else {
 			CALI_DEBUG("Unknown ethertype on host interface (%x), allow\n",
-								protocol);
+									protocol);
 			goto allow_no_fib;
 		}
 	}
