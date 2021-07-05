@@ -131,6 +131,7 @@ static CALI_BPF_INLINE int skb_refresh_validate_ptrs(struct cali_tc_ctx *ctx, lo
 	if (ctx->data_start + (min_size + nh_len) > ctx->data_end) {
 		// This is an XDP program and there is not enough data for next header.
 		if (CALI_F_XDP) {
+			CALI_DEBUG("Too short to have %d bytes for next header\n");
 			return -2;
 		}
 
