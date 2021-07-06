@@ -142,7 +142,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 		// A packet that we automatically let through
 		ctx.fwd.res = TC_ACT_UNSPEC;
 		goto finalize;
-	default:
+	case -2:
 		// A malformed packet or a packet we don't support
 		CALI_DEBUG("Drop malformed or unsupported packet\n");
 		ctx.fwd.res = TC_ACT_SHOT;
