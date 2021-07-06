@@ -63,9 +63,9 @@ int calico_xdp(struct xdp_md *xdp_ctx) {
 		ctx.state->prog_start_time = bpf_ktime_get_ns();
 	}
 
-	// Packet is malformed or non an IPv4
-	if (parse_packet_ip(&ctx)) {
-		return ctx.fwd.res;
+	// Parse packets and drop malformed and unsupported ones
+	if (parse_packet_ip(&ctx) == -2) {
+		return XDP_DROP;
 	}
 
 	return XDP_PASS;

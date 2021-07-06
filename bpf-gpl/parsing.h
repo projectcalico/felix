@@ -88,19 +88,9 @@ static CALI_BPF_INLINE int parse_packet_ip(struct cali_tc_ctx *ctx) {
 
 allow_no_fib:
 	fwd_fib_set(&ctx->fwd, false);
-	if (CALI_F_XDP) {
-		ctx->fwd.res = XDP_PASS;
-	} else {
-		ctx->fwd.res = TC_ACT_UNSPEC;
-	}
 	return -1;
 deny:
-	if (CALI_F_XDP) {
-		ctx->fwd.res = XDP_DROP;
-	} else {
-		ctx->fwd.res = TC_ACT_SHOT;
-	}
-	return -1;
+	return -2;
 }
 
 #endif /* __CALI_PARSING_H__ */
