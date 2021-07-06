@@ -21,6 +21,14 @@
 static CALI_BPF_INLINE int parse_packet_ip(struct cali_tc_ctx *ctx) {
 	__u16 protocol = 0;
 
+	/* We need to make a decision based on Ethernet protocol, however,
+	 * the protocol number is not available to XDP programs like TC ones.
+	 * In TC programs protocol number is available via skb->protocol.
+	 * For that, in XDP programs we need to parse at least up to Ethernet
+	 * first, before making any decision. But in TC programs we can make
+	 * an initial decision based on Ethernet protocol before parsing packet
+	 * for more headers.
+	 */
 	if (CALI_F_XDP) {
 		if (skb_refresh_validate_ptrs(ctx, UDP_SIZE)) {
 			ctx->fwd.reason = CALI_REASON_SHORT;
@@ -58,6 +66,8 @@ static CALI_BPF_INLINE int parse_packet_ip(struct cali_tc_ctx *ctx) {
 		}
 	}
 
+	// In TC programs, parse packet and validate its size. This is
+	// already done for XDP programs at the beginning of function
 	if (!CALI_F_XDP) {
 		if (skb_refresh_validate_ptrs(ctx, UDP_SIZE)) {
 			ctx->fwd.reason = CALI_REASON_SHORT;

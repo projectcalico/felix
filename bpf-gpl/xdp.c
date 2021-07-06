@@ -43,7 +43,8 @@
 
 SEC("prog")
 int calico_xdp(struct xdp_md *xdp_ctx) {
-
+	/* Initialise the context, which is stored on the stack, and the state, which
+	 * we use to pass data from one program to the next via tail calls. */
 	struct cali_tc_ctx ctx = {
 		.state = state_get(),
 		.xdp = xdp_ctx,
