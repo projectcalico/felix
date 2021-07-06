@@ -140,6 +140,7 @@ static CALI_BPF_INLINE int calico_tc(struct __sk_buff *skb)
 	switch (parse_packet_ip(&ctx)) {
 	case -1:
 		// A packet that we automatically let through
+		fwd_fib_set(&ctx.fwd, false);
 		ctx.fwd.res = TC_ACT_UNSPEC;
 		goto finalize;
 	case -2:

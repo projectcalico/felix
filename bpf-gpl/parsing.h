@@ -97,7 +97,6 @@ static CALI_BPF_INLINE int parse_packet_ip(struct cali_tc_ctx *ctx) {
 	return 0;
 
 allow_no_fib:
-	fwd_fib_set(&ctx->fwd, false);
 	return -1;
 deny:
 	return -2;
