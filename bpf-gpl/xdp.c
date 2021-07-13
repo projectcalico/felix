@@ -41,8 +41,10 @@
 #include "failsafe.h"
 #include "jump.h"
 
-SEC("prog")
-int calico_xdp(struct xdp_md *xdp_ctx) {
+/* calico_xdp is the main function used in all of the xdp programs */
+static CALI_BPF_INLINE int calico_xdp(struct xdp_md *xdp_ctx)
+{
+	CALI_DEBUG("Entering calico_xdp_accepted_entrypoint\n");
 	/* Initialise the context, which is stored on the stack, and the state, which
 	 * we use to pass data from one program to the next via tail calls. */
 	struct cali_tc_ctx ctx = {
@@ -65,11 +67,51 @@ int calico_xdp(struct xdp_md *xdp_ctx) {
 	}
 
 	// Parse packets and drop malformed and unsupported ones
-	if (parse_packet_ip(&ctx) == -2) {
-		return XDP_DROP;
+	switch (parse_packet_ip(&ctx)) {
+	case -1:
+		ctx.fwd.res = XDP_DROP;
+		goto deny;
+	case -2:
+		ctx.fwd.res = XDP_PASS;
+		goto allow;
 	}
 
+	tc_state_fill_from_iphdr(ctx.state, ctx.ip_header);
+
+	switch(parse_packet_nextheader(&ctx)) {
+	case -1:
+		ctx.fwd.res = XDP_DROP;
+		goto deny;
+	case -2:
+		ctx.fwd.res = XDP_PASS;
+		goto allow;
+	}
+
+	if (is_failsafe_in(ctx.state->ip_proto, ctx.state->dport, ctx.state->ip_src)) {
+		CALI_DEBUG("Inbound failsafe port: %d. Skip policy\n", ctx.state->post_nat_dport);
+		ctx.state->pol_rc = CALI_POL_ALLOW;
+		goto allow;
+	}
+
+	return XDP_DROP;
+
+allow:
 	return XDP_PASS;
+
+deny:
+	return XDP_DROP;
+}
+
+#ifndef CALI_ENTRYPOINT_NAME_XDP
+#define CALI_ENTRYPOINT_NAME_XDP calico_entrypoint_xdp
+#endif
+
+// Entrypoint with definable name.  It's useful to redefine the name for each entrypoint
+// because the name is exposed by bpftool et al.
+__attribute__((section(XSTR(CALI_ENTRYPOINT_NAME_XDP))))
+int xdp_calico_entry(struct xdp_md *xdp_ctx)
+{
+	return calico_xdp(xdp_ctx);
 }
 
 char ____license[] __attribute__((section("license"), used)) = "GPL";
