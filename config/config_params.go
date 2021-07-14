@@ -467,6 +467,11 @@ func (config *Config) KubernetesProvider() Provider {
 	return ProviderNone
 }
 
+func (config *Config) ShouldEncryptWireguardHostTraffic() bool{
+	return config.KubernetesProvider() == ProviderAKS ||
+		(config.WireguardHostEncryptionEnabled && config.KubernetesProvider() == ProviderEKS)
+}
+
 func (config *Config) resolve() (changed bool, err error) {
 	newRawValues := make(map[string]string)
 	// Map from lower-case version of name to the highest-priority source found so far.
