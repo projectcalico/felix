@@ -1344,7 +1344,7 @@ func (w *Wireguard) constructWireguardDeltaForResync(wireguardClient netlinkshim
 func (w *Wireguard) ensureLink(netlinkClient netlinkshim.Interface) (bool, error) {
 	logCxt := log.WithField("ifaceName", w.config.InterfaceName)
 
-	if w.config.RouteSource == "WorkloadIPs" {
+	if w.config.EncryptHostTraffic {
 		log.Info("Enabling src valid mark for WireGuard")
 		if err := writeProcSys(allSrcValidMarkPath, "1"); err != nil {
 			return false, err
@@ -1490,7 +1490,7 @@ func (w *Wireguard) ensureLinkAddressV4(netlinkClient netlinkshim.Interface) err
 		}
 		logCxt.Debug("Address set on wireguard device")
 	}
-
+	logCxt.Debug("Address not set on wireguard device")
 	return nil
 }
 
