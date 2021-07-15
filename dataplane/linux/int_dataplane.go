@@ -942,7 +942,7 @@ func ConfigureDefaultMTUs(hostMTU int, c *Config) {
 		c.VXLANMTU = hostMTU - vxlanMTUOverhead
 	}
 	if c.Wireguard.MTU == 0 {
-		if c.Wireguard.EncryptHostTraffic {
+		if c.KubernetesProvider == config.ProviderAKS && c.Wireguard.EncryptHostTraffic {
 			// The default MTU on Azure is 1500, but the underlying network stack will fragment packets at 1400 bytes,
 			// see https://docs.microsoft.com/en-us/azure/virtual-network/virtual-network-tcpip-performance-tuning#azure-and-vm-mtu
 			// for details.
