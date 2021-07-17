@@ -513,6 +513,7 @@ type mapEntry struct {
 type progInfo struct {
 	Id     int    `json:"id"`
 	Type   string `json:"type"`
+	Name   string `json:"name"`
 	Tag    string `json:"tag"`
 	MapIds []int  `json:"map_ids"`
 	Err    string `json:"error"`
@@ -1024,6 +1025,59 @@ func (b *BPFLib) getMapArgs(ifName string) ([]string, error) {
 	return mapArgs, nil
 }
 
+func (b *BPFLib) getCalicoBPFProgIds() ([]int, error) {
+	// Get a list of ids of BPF programs that loaded by Calico.
+	// Programs are identified by 'name', inherited from func name.
+	// for example, in bpf/bpf-apache/filter.c, a function name is 'prefilter'.
+	progName := "prefilter"
+
+	prog := "bpftool"
+	args := []string {
+		"--json",
+		"--pretty",
+		"prog",
+		"show",
+	}
+	printCommand(prog, args...)
+	output, err := exec.Command(prog, args...).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get list of BPF programs: %s\n%s", err, output)
+	}
+	var p []progInfo
+	err = json.Unmarshal(output, &p)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse json output: %v\n%s", err, output)
+	}
+
+	var id = []int{}
+	for _, v := range p {
+		if v.Name == progName {
+			id = append(id, v.Id)
+		}
+	}
+
+	return id, nil
+}
+
+func (b *BPFLib) canRemoveXDP(ifName string, id []int) (bool, error) {
+	i, err := b.GetXDPID(ifName)
+	if err != nil {
+		// iproute2 error or Empty
+		if i == -1 {
+			return false, err
+		} else {
+			return true, nil
+		}
+	}
+	for _, v := range id {
+		if v == i {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func (b *BPFLib) LoadXDP(objPath, ifName string, mode XDPMode) error {
 	mapArgs, err := b.getMapArgs(ifName)
 	if err != nil {
@@ -1040,6 +1094,19 @@ func (b *BPFLib) LoadXDPAuto(ifName string, mode XDPMode) error {
 func (b *BPFLib) RemoveXDP(ifName string, mode XDPMode) error {
 	progName := getProgName(ifName)
 	progPath := filepath.Join(b.xdpDir, progName)
+
+	// Verify Calico XDP program
+	id, err := b.getCalicoBPFProgIds()
+	if err != nil {
+		return err
+	}
+	verify, err := b.canRemoveXDP(ifName, id)
+	if err != nil {
+		return err
+	}
+	if !verify {
+		return fmt.Errorf("failed to detach XDP program from %s: interface has bogus, but not loaded by Calico.", ifName)
+	}
 
 	prog := "ip"
 	args := []string{
@@ -1210,7 +1277,7 @@ func (b *BPFLib) GetXDPID(ifName string) (int, error) {
 		}
 	}
 
-	return -1, errors.New("ID not found")
+	return -2, errors.New("ID not found")
 }
 
 func (b *BPFLib) GetXDPMode(ifName string) (XDPMode, error) {
