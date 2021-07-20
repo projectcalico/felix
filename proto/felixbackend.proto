@@ -253,7 +253,7 @@ message Rule {
   repeated string dst_ip_set_ids = 11;
 
   // IP sets on which we should match both IP and port.
-  repeated string dst_ip_port_set_ids = 14;
+  repeated string dst_ip_port_set_ids = 15;
 
   Protocol not_protocol = 102;
 

@@ -207,7 +207,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 			log.WithFields(log.Fields{
 				"ipSetID": ipSetID,
 				"member":  member,
-			}).Debug("Member added to IP set.")
+			}).Debug("Member added to service IP set.")
 		}
 		callbacks.OnIPSetMemberAdded(ipSetID, member)
 	}
@@ -216,7 +216,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config) *Calc
 			log.WithFields(log.Fields{
 				"ipSetID": ipSetID,
 				"member":  member,
-			}).Debug("Member removed from IP set.")
+			}).Debug("Member removed from service IP set.")
 		}
 		callbacks.OnIPSetMemberRemoved(ipSetID, member)
 	}

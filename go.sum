@@ -94,12 +94,10 @@ github.com/blang/semver v3.5.1+incompatible/go.mod h1:kRBLl5iJ+tD4TcOOxsy/0fnweb
 github.com/boltdb/bolt v1.3.1/go.mod h1:clJnj/oiGkjum5o1McbSZDSLxVThjynRyGBgiAx27Ps=
 github.com/buger/jsonparser v0.0.0-20180808090653-f4dd9f5a6b44/go.mod h1:bbYlZJ7hK1yFx9hf58LP0zeX7UjIGs20ufpu3evjr+s=
 github.com/caddyserver/caddy v1.0.3/go.mod h1:G+ouvOY32gENkJC+jhgl62TyhvqEsFaDiZ4uw0RzP1E=
-github.com/caseydavenport/api v0.0.0-20210630213110-dfbd3368ef69 h1:Gc6ljEnPTczxgpazkjIM/L/NUn0T3GF44d5HCaVJzao=
-github.com/caseydavenport/api v0.0.0-20210630213110-dfbd3368ef69/go.mod h1:8raLpE2oURN0I33JpEniA3LmAs5uPZ1kGnW/YunYEB0=
-github.com/caseydavenport/libcalico-go v0.0.0-20210630215543-2ff75a457010 h1:o5jMD+Kr1laFU5ZNpbVkupyaJxENqqJJqRxryFvow4k=
-github.com/caseydavenport/libcalico-go v0.0.0-20210630215543-2ff75a457010/go.mod h1:QmWZhbjF93h92LFr0xr4Y+3BhfFD+rAokHiE7gPtlvI=
-github.com/caseydavenport/typha v0.1.4-0.20210701173932-10a524cc8393 h1:I7DY44zW5AquoHCrQM5QseSpAl3O1fysRGv0j8gkhn4=
-github.com/caseydavenport/typha v0.1.4-0.20210701173932-10a524cc8393/go.mod h1:FC6CYZwjGtXXgIgjoAU2qBzZuMwr+1YcVc8UY76bYdA=
+github.com/caseydavenport/libcalico-go v0.0.0-20210720162621-dff22edb83c2 h1:uJFOwBzgmAGPNguYcBOPDL9rfnTAzBG/94JlTsJi4b0=
+github.com/caseydavenport/libcalico-go v0.0.0-20210720162621-dff22edb83c2/go.mod h1:ZSjk5qLlsWC3mThaM3uoBYpWOClOWADxIKQbBMCuleA=
+github.com/caseydavenport/typha v0.1.4-0.20210720162703-0c2917f0e427 h1:uKuYED3IyYjHsw9h6lKr9OaiRw9e4z7KpFBQHyirimE=
+github.com/caseydavenport/typha v0.1.4-0.20210720162703-0c2917f0e427/go.mod h1:3S+0yQQAEo1d86tKgxCJnPpej3dv+7TWQVS586p57Ug=
 github.com/cenkalti/backoff v2.1.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/cespare/xxhash v1.1.0 h1:a6HrQnmkObjyL+Gs60czilIUGqrzKutQD6XZog3p+ko=
@@ -587,6 +585,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/posener/complete v1.1.1/go.mod h1:em0nMJCgc9GFtwrmVmEMR/ZL6WyhyjMBndrE9hABlRI=
 github.com/pquerna/cachecontrol v0.0.0-20171018203845-0dec1b30a021/go.mod h1:prYjPmNq4d1NPVmpShWobRqXY3q7Vp+80DqgxxUrUIA=
+github.com/projectcalico/api v0.0.0-20210719195019-905b702d58de h1:FGQiLbQSmMbTWGpRchChwGeRQoUZE4Xp91kSlQlAitc=
+github.com/projectcalico/api v0.0.0-20210719195019-905b702d58de/go.mod h1:8raLpE2oURN0I33JpEniA3LmAs5uPZ1kGnW/YunYEB0=
 github.com/projectcalico/go-json v0.0.0-20161128004156-6219dc7339ba h1:aaF2byUCZhzszHsfPEr2M3qcU4ibtD/yk/il2R7T1PU=
 github.com/projectcalico/go-json v0.0.0-20161128004156-6219dc7339ba/go.mod h1:q8EdCgBdMQzgiX/uk4GXLWLk+gIHd1a7mWUAamJKDb4=
 github.com/projectcalico/go-yaml-wrapper v0.0.0-20191112210931-090425220c54 h1:Jt2Pic9dxgJisekm8q2WV9FaWxUJhhRfwHSP640drww=
