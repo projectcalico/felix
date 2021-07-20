@@ -260,13 +260,23 @@ var _ = Describe("ParsedRule", func() {
 		prType := reflect.TypeOf(ParsedRule{})
 		numPRFields := prType.NumField()
 		prFields := set.New()
+
+		// Build a set of ParsedRule fields, minus the IPSetIDs variants.
 		for i := 0; i < numPRFields; i++ {
 			name := prType.Field(i).Name
-			if strings.Contains(name, "IPSetIDs") {
+			if strings.Contains(name, "IPSetIDs") || strings.Contains(name, "IPPortSetIDs") {
+				continue
+			}
+			if name == "OriginalDstService" || name == "OriginalDstServiceNamespace" {
+				// These don't exist on the model.Rule, as there is no translation done
+				// on the Service / ServiceNamespace fields that requires them.
 				continue
 			}
 			prFields.Add(name)
 		}
+
+		// Build a set of model.Rule fields, excluding
+		// those which aren't copied through to the ParsedRule.
 		mrType := reflect.TypeOf(model.Rule{})
 		numMRFields := mrType.NumField()
 		mrFields := set.New()
@@ -279,12 +289,19 @@ var _ = Describe("ParsedRule", func() {
 					!strings.Contains(name, "Service")) {
 				continue
 			}
+			if name == "DstService" || name == "DstServiceNamespace" {
+				// Service name and namespace are rendered on the ParsedRule
+				// as IPPortIPSetIDs.
+				continue
+			}
 			if strings.HasSuffix(name, "Net") {
 				// Deprecated XXXNet fields.
 				continue
 			}
 			mrFields.Add(name)
 		}
+
+		// Expect the two sets to match (minus the differences from above).
 		Expect(prFields.Len()).To(BeNumerically(">", 0))
 		Expect(prFields).To(Equal(mrFields))
 	})
