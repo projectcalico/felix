@@ -491,6 +491,7 @@ func (p *Builder) writeRule(r Rule, actionLabel string, destLeg matchLeg) {
 		log.WithField("rule", rule).Panic("proto.Rule has more than one DstIpSetIds")
 	}
 	if len(rule.DstIpSetIds) > 0 {
+		// writeIPSetOrMatch used here because Enterprise has >1 IP set that need to be ORed together.
 		log.WithField("ipSetIDs", rule.DstIpSetIds).Debugf("DstIpSetIds match")
 		p.writeIPSetOrMatch(destLeg, rule.DstIpSetIds)
 	}
@@ -499,13 +500,9 @@ func (p *Builder) writeRule(r Rule, actionLabel string, destLeg matchLeg) {
 		p.writeIPSetMatch(true, destLeg, rule.NotDstIpSetIds)
 	}
 
-	// TODO: Do we need to change BPF code to handle IP+port IP sets?
-	if len(rule.DstIpPortSetIds) > 1 {
-		log.WithField("rule", rule).Panic("proto.Rule has more than one DstIpPortSetIds")
-	}
 	if len(rule.DstIpPortSetIds) > 0 {
 		log.WithField("ipPortSetIDs", rule.DstIpPortSetIds).Debugf("DstIpPortSetIds match")
-		p.writeIPSetOrMatch(destLeg, rule.DstIpPortSetIds)
+		p.writeIPSetMatch(false, destLeg, rule.DstIpPortSetIds)
 	}
 
 	if len(rule.SrcPorts) > 0 || len(rule.SrcNamedPortIpSetIds) > 0 {

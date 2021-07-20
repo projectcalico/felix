@@ -17,10 +17,11 @@ package serviceindex
 import (
 	"fmt"
 
+	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 
 	v1 "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1"
+	discovery "k8s.io/api/discovery/v1beta1"
 
 	"github.com/projectcalico/felix/dispatcher"
 	"github.com/projectcalico/felix/ip"
@@ -64,7 +65,7 @@ func (idx *ServiceIndex) RegisterWith(allUpdDispatcher *dispatcher.Dispatcher) {
 }
 
 // OnUpdate makes ServiceIndex compatible with the Dispatcher.  It accepts
-// updates for endpoints and profiles and passes them through to the Update/DeleteXXX methods.
+// updates for endpoint slices and passes them through to the Update/Delete methods.
 func (idx *ServiceIndex) OnUpdate(update api.Update) (_ bool) {
 	switch key := update.Key.(type) {
 	case model.ResourceKey:
@@ -88,12 +89,13 @@ func (idx *ServiceIndex) UpdateEndpointSlice(es *discovery.EndpointSlice) {
 		idx.endpointSlicesByService[svc] = map[string]*discovery.EndpointSlice{}
 	}
 	k := fmt.Sprintf("%s/%s", es.Namespace, es.Name)
-	cached := idx.endpointSlices[k]
-	oldIPSetContributions := idx.membersFromEndpointSlice(cached)
 	logc := log.WithFields(log.Fields{"slice": k, "svc": svc})
 
 	if ipSet, ok := idx.activeIPSetsByService[svc]; ok {
 		logc.Debug("EndpointSlice belongs to an active service")
+
+		cached := idx.endpointSlices[k]
+		oldIPSetContributions := idx.membersFromEndpointSlice(cached)
 
 		// Service contributing these endpoints is active. We need to determine
 		// if any endpoints have changed, and if so send through membership updates.
@@ -148,7 +150,7 @@ func (idx *ServiceIndex) DeleteEndpointSlice(key model.ResourceKey) {
 	if ipSet, ok := idx.activeIPSetsByService[svc]; ok {
 		// Active service has had an EndpointSlice deleted. Iterate all the ip set members
 		// contributed by this endpoint slice and decref them. For those which go from 1 to 0,
-		// we should end a membership removal from the data plane.
+		// we should send a membership removal from the data plane.
 		oldContributions := idx.membersFromEndpointSlice(es)
 		log.Debugf("EndpointSlice Delete contributed members: %+v", oldContributions)
 		for _, oldMember := range oldContributions {
@@ -184,7 +186,7 @@ func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) [
 	}
 
 	// Create a member for each endpoint + port combination. If there
-	// are no ports specified, it means no ports (thus, not IP set membership). If nil is specified,
+	// are no ports specified, it means no ports (thus, no IP set membership). If nil is specified,
 	// it means ALL ports.
 	members := []labelindex.IPSetMember{}
 	for _, ep := range es.Endpoints {
@@ -236,7 +238,7 @@ func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
 	} else {
 		// This branch means that a new service name has generated the same ID as another.
 		// This branch is not possible because the ID is uniquely generated from the service name.
-		panic(fmt.Sprintf("BUG: Same ID generated for two service names: %s and %s", curr.ServiceName, serviceName))
+		logrus.Panicf("BUG: Same ID generated for two service names: %s and %s", curr.ServiceName, serviceName)
 	}
 
 	// New active service IP set.

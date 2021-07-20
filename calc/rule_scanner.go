@@ -104,7 +104,7 @@ func (d *IPSetData) UniqueID() string {
 	if d.cachedUID == "" {
 		if d.Service != "" {
 			// Service based IP set.
-			d.cachedUID = hash.MakeUniqueID("s", d.Service)
+			d.cachedUID = hash.MakeUniqueID("svc", d.Service)
 		} else {
 			// Selector / named-port based IP set.
 			selID := d.Selector.UniqueID()
