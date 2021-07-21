@@ -159,6 +159,15 @@ var _ = DescribeTable("RuleScanner rule conversion should generate correct Parse
 		model.Rule{Metadata: &model.RuleMetadata{Annotations: map[string]string{"key": "value"}}},
 		ParsedRule{Metadata: &model.RuleMetadata{Annotations: map[string]string{"key": "value"}}}),
 
+	// Services.
+	Entry("dest service",
+		model.Rule{DstService: "svc", DstServiceNamespace: "default"},
+		ParsedRule{
+			DstIPPortSetIDs:             []string{"svc:Jhwii46PCMT5NlhWsUqZmv7al8TeHFbNQMhoVg"},
+			OriginalDstService:          "svc",
+			OriginalDstServiceNamespace: "default",
+		}),
+
 	// Tags/Selectors.
 	Entry("source tag", model.Rule{SrcTag: "tag1"}, ParsedRule{SrcIPSetIDs: []string{tag1ID}}),
 	Entry("dest tag", model.Rule{DstTag: "tag1"}, ParsedRule{DstIPSetIDs: []string{tag1ID}}),
@@ -368,10 +377,18 @@ func (ur *scanUpdateRecorder) OnProfileInactive(key model.ProfileRulesKey) {
 }
 
 func (ur *scanUpdateRecorder) ipSetActive(ipSet *IPSetData) {
+	if ipSet.Service != "" {
+		// Not a selector-based set.
+		return
+	}
 	ur.activeSelectors.Add(ipSet.Selector.String())
 }
 
 func (ur *scanUpdateRecorder) ipSetInactive(ipSet *IPSetData) {
+	if ipSet.Service != "" {
+		// Not a selector-based set.
+		return
+	}
 	ur.activeSelectors.Discard(ipSet.Selector.String())
 }
 
