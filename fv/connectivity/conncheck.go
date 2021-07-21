@@ -509,8 +509,6 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 		}
 	} else {
 		if response != nil {
-			Errorf
-			Errorf
 			if e.ErrorStr != "" {
 				// Return a match if the error string expected is in the response
 				if strings.Contains(response.LastResponse.ErrorStr, e.ErrorStr) {
