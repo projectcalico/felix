@@ -376,6 +376,61 @@ func TestRuleRendering(t *testing.T) {
 
 }
 
+func TestIpPortRuleRendering(t *testing.T) {
+	RegisterTestingT(t)
+
+	h := mockHNS{}
+
+	// Windows 1803/RS4
+	h.SupportedFeatures.Acl.AclRuleId = true
+	h.SupportedFeatures.Acl.AclNoHostRulePriority = true
+
+	log.SetLevel(log.DebugLevel)
+
+	ipsc := mockIPSetCache{
+		IPSets: map[string][]string{
+			"ip-set-id": {"10.0.0.1,tcp:80", "10.0.0.2,udp:80"},
+		},
+	}
+
+	ps := NewPolicySets(&h, []IPSetCache{&ipsc}, mockReader(""))
+
+	// Tests of basic policy matches: CIDRs, protocol, ports.
+	ps.AddOrReplacePolicySet("basic", &proto.Policy{
+		OutboundRules: []*proto.Rule{
+			{
+				Action:          "Allow",
+				RuleId:          "rule-1",
+				DstIpPortSetIds: []string{"ip-set-id"},
+			},
+		},
+		InboundRules: []*proto.Rule{},
+	})
+
+	Expect(ps.GetPolicySetRules([]string{"basic"}, false)).To(Equal([]*hns.ACLPolicy{
+		{
+			Type: hns.ACL, Action: hns.Allow, Direction: hns.Out, RuleType: hns.Switch,
+			Priority:        1000,
+			Protocol:        6,
+			Id:              "basic-rule-1-0",
+			RemoteAddresses: "10.0.0.1",
+			RemotePorts:     "80",
+		},
+		{
+			Type: hns.ACL, Action: hns.Allow, Direction: hns.Out, RuleType: hns.Switch,
+			Priority:        1000,
+			Protocol:        17,
+			Id:              "basic-rule-1-1",
+			RemoteAddresses: "10.0.0.2",
+			RemotePorts:     "80",
+		},
+		// Default deny rule.
+		{Type: hns.ACL, Protocol: 256, Action: hns.Block, Direction: hns.Out, RuleType: hns.Switch, Priority: 1001},
+		// Default host/pod rule.
+		{Type: hns.ACL, Protocol: 256, Action: hns.Allow, Direction: hns.Out, RuleType: hns.Host},
+	}), "unexpected rules returned for IP+port policy")
+}
+
 func TestNegativeTestCases(t *testing.T) {
 
 	RegisterTestingT(t)
@@ -943,7 +998,7 @@ func TestMultiIpPortChunks(t *testing.T) {
 			Type: hns.ACL, Action: hns.Allow, Direction: hns.In, RuleType: hns.Switch, Priority: 1000, Protocol: 256,
 			Id: "selector-cidr-rule-1-0", RemoteAddresses: "10.0.0.1/32,10.0.0.2/32,10.0.0.3/32",
 		},
-		// Intersection with second CIDr picks up only one IP.
+		// Intersection with second CIDR picks up only one IP.
 		{
 			Type: hns.ACL, Action: hns.Allow, Direction: hns.In, RuleType: hns.Switch, Priority: 1000, Protocol: 256,
 			Id: "selector-cidr-rule-2-0", RemoteAddresses: "10.1.0.1/32",
