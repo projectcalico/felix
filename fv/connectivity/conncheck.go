@@ -463,7 +463,7 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 
 	if e.Expected {
 		if !response.HasConnectivity() {
-			logCtx.Debug("matcher failed: no connectivity")
+			logCtx.Error("matcher failed: no connectivity")
 			return false
 		}
 
@@ -476,17 +476,17 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 				}
 			}
 			if !match {
-				logCtx.Debug("matcher failed: snat check failed")
+				logCtx.Error("matcher failed: snat check failed")
 				return false
 			}
 		}
 
 		if e.clientMTUStart != 0 && e.clientMTUStart != response.ClientMTU.Start {
-			logCtx.Debug("matcher failed: client mtu start does not match")
+			logCtx.Error("matcher failed: client mtu start does not match")
 			return false
 		}
 		if e.clientMTUEnd != 0 && e.clientMTUEnd != response.ClientMTU.End {
-			logCtx.Debug("matcher failed: client mtu end does not match")
+			logCtx.Error("matcher failed: client mtu end does not match")
 			return false
 		}
 
@@ -496,19 +496,21 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 			lossPercent := response.Stats.LostPercent()
 
 			if e.ExpectedPacketLoss.MaxNumber >= 0 && lossCount > e.ExpectedPacketLoss.MaxNumber {
-				logCtx.Debug("matcher failed: packet loss max mismatch")
+				logCtx.Error("matcher failed: packet loss max mismatch")
 				return false
 			}
 			if e.ExpectedPacketLoss.MaxPercent >= 0 && lossPercent > e.ExpectedPacketLoss.MaxPercent {
-				logCtx.Debug("matcher failed: packet loss percent mismatch")
+				logCtx.Error("matcher failed: packet loss percent mismatch")
 				return false
 			}
 		} else if response.LastResponse.ErrorStr != "" {
-			logCtx.Debugf("matcher failed: last response error '%v'", response.LastResponse.ErrorStr)
+			logCtx.Errorf("matcher failed: last response error '%v'", response.LastResponse.ErrorStr)
 			return false
 		}
 	} else {
 		if response != nil {
+			Errorf
+			Errorf
 			if e.ErrorStr != "" {
 				// Return a match if the error string expected is in the response
 				if strings.Contains(response.LastResponse.ErrorStr, e.ErrorStr) {
@@ -520,12 +522,12 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 				// ExpectNone to pass
 				return true
 			}
-			logCtx.Debugf("matcher failed: nil response on un-expectation")
+			logCtx.Errorf("matcher failed: nil response on un-expectation")
 			return false
 		} else {
 			// Return false if we expect an error string and we don't get a response
 			if e.ErrorStr != "" {
-				logCtx.Debugf("matcher failed: expected an error string")
+				logCtx.Error("matcher failed: expected an error string")
 				return false
 			}
 		}
@@ -608,7 +610,7 @@ const BinaryName = "test-connection"
 func (cmd *CheckCmd) run(cName string, logMsg string) *Result {
 	// Ensure that the container has the 'test-connection' binary.
 	logCxt := log.WithField("container", cName)
-	logCxt.Debugf("Entering connectivity.Check(%v,%v,%v,%v,%v)",
+	logCxt.Errorf("Entering connectivity.Check(%v,%v,%v,%v,%v)",
 		cmd.ip, cmd.port, cmd.protocol, cmd.sendLen, cmd.recvLen)
 
 	args := []string{"exec", cName,
