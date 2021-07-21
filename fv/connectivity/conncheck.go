@@ -456,8 +456,14 @@ type ExpPacketLoss struct {
 }
 
 func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
+	logCtx := log.WithFields(log.Fields{
+		"ctx": "conncheck",
+		"fn":  "matches",
+	})
+
 	if e.Expected {
 		if !response.HasConnectivity() {
+			logCtx.Error("matcher failed: no connectivity")
 			return false
 		}
 
@@ -470,14 +476,17 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 				}
 			}
 			if !match {
+				logCtx.Error("matcher failed: snat check failed")
 				return false
 			}
 		}
 
 		if e.clientMTUStart != 0 && e.clientMTUStart != response.ClientMTU.Start {
+			logCtx.Error("matcher failed: client mtu start does not match")
 			return false
 		}
 		if e.clientMTUEnd != 0 && e.clientMTUEnd != response.ClientMTU.End {
+			logCtx.Error("matcher failed: client mtu end does not match")
 			return false
 		}
 
@@ -487,12 +496,15 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 			lossPercent := response.Stats.LostPercent()
 
 			if e.ExpectedPacketLoss.MaxNumber >= 0 && lossCount > e.ExpectedPacketLoss.MaxNumber {
+				logCtx.Error("matcher failed: packet loss max mismatch")
 				return false
 			}
 			if e.ExpectedPacketLoss.MaxPercent >= 0 && lossPercent > e.ExpectedPacketLoss.MaxPercent {
+				logCtx.Error("matcher failed: packet loss percent mismatch")
 				return false
 			}
 		} else if response.LastResponse.ErrorStr != "" {
+			logCtx.Errorf("matcher failed: last response error '%v'", response.LastResponse.ErrorStr)
 			return false
 		}
 	} else {
@@ -508,10 +520,12 @@ func (e Expectation) Matches(response *Result, checkSNAT bool) bool {
 				// ExpectNone to pass
 				return true
 			}
+			logCtx.Errorf("matcher failed: nil response on un-expectation")
 			return false
 		} else {
 			// Return false if we expect an error string and we don't get a response
 			if e.ErrorStr != "" {
+				logCtx.Error("matcher failed: expected an error string")
 				return false
 			}
 		}
@@ -594,7 +608,7 @@ const BinaryName = "test-connection"
 func (cmd *CheckCmd) run(cName string, logMsg string) *Result {
 	// Ensure that the container has the 'test-connection' binary.
 	logCxt := log.WithField("container", cName)
-	logCxt.Debugf("Entering connectivity.Check(%v,%v,%v,%v,%v)",
+	logCxt.Errorf("Entering connectivity.Check(%v,%v,%v,%v,%v)",
 		cmd.ip, cmd.port, cmd.protocol, cmd.sendLen, cmd.recvLen)
 
 	args := []string{"exec", cName,
