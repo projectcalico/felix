@@ -458,7 +458,7 @@ type bpfProgRunFn func(data []byte) (bpfRunResult, error)
 
 // runBpfUnitTest runs a small unit in isolation. It requires a small .c file
 // that wraps the unit and compiles into a calico_unittest section.
-func runBpfUnitTest(t *testing.T, source string, testFn func(bpfProgRunFn), opts ...testOption) {
+func runBpfUnitTest(t *testing.T, source string, progType string, testFn func(bpfProgRunFn), opts ...testOption) {
 	RegisterTestingT(t)
 
 	topts := testOpts{
@@ -500,7 +500,7 @@ outter:
 	Expect(err).NotTo(HaveOccurred())
 	defer os.RemoveAll(bpfFsDir)
 
-	objFname := "../../bpf-gpl/ut/" + strings.TrimSuffix(source, path.Ext(source)) + ".o"
+	objFname := "../../bpf-gpl/ut/" + progType + "_" + strings.TrimSuffix(source, path.Ext(source)) + ".o"
 
 	log.Infof("Patching binary %s", objFname)
 	bin, err := bpf.BinaryFromFile(objFname)

@@ -31,7 +31,7 @@ func TestICMPPortUnreachable(t *testing.T) {
 	_, ipv4, _, _, pktBytes, err := testPacketUDPDefault()
 	Expect(err).NotTo(HaveOccurred())
 
-	runBpfUnitTest(t, "icmp_port_unreachable.c", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "icmp_port_unreachable.c", "tc", func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0))

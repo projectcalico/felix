@@ -117,6 +117,17 @@ int calico_xdp_accepted_entrypoint(struct xdp_md *xdp)
 	return XDP_PASS;
 }
 
+
+__attribute__((section("1/2")))
+int calico_xdp_send_icmp_replies(struct xdp_md *xdp)
+{
+	CALI_DEBUG("Entring calico_xdp_send_icmp_replies\n");
+	/* Initialise the context, which is stored on the stack, and the state, which
+	 * we use to pass data from one program to the next via tail calls. */
+
+	return XDP_PASS;
+}
+
 #ifndef CALI_ENTRYPOINT_NAME_XDP
 #define CALI_ENTRYPOINT_NAME_XDP calico_entrypoint_xdp
 #endif

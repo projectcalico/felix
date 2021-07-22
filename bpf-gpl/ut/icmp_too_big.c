@@ -19,11 +19,8 @@
 #include "bpf.h"
 #include "nat.h"
 
-static CALI_BPF_INLINE int calico_unittest_entry (struct __sk_buff *skb)
+static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx)
 {
-	struct cali_tc_ctx ctx = {
-		.skb = skb,
-	};
-	return icmp_v4_too_big(&ctx);
+	return icmp_v4_too_big(ctx);
 }
 
