@@ -510,10 +510,11 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		// bpffs so there's nothing to clean up
 	}
 
+	ipsetsManager := newIPSetsManager(ipSetsV4, config.MaxIPSetSize)
+	dp.RegisterManager(ipsetsManager)
+
 	if !config.BPFEnabled {
 		// BPF mode disabled, create the iptables-only managers.
-		ipsetsManager := newIPSetsManager(ipSetsV4, config.MaxIPSetSize)
-		dp.RegisterManager(ipsetsManager)
 		dp.ipsetsSourceV4 = ipsetsManager
 		// TODO Connect host IP manager to BPF
 		dp.RegisterManager(newHostIPManager(
@@ -529,6 +530,9 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 			log.WithError(err).Info("Failed to remove BPF connect-time load balancer, ignoring.")
 		}
 		tc.CleanUpProgramsAndPins()
+	} else {
+		// In BPF mode we still use iptables for raw egress policy.
+		dp.RegisterManager(newRawEgressPolicyManager(rawTableV4, ruleRenderer, 4))
 	}
 
 	interfaceRegexes := make([]string, len(config.RulesConfig.WorkloadIfacePrefixes))
@@ -1301,6 +1305,14 @@ func (d *InternalDataplane) setUpIptablesBPF() {
 		t.InsertOrAppendRules("PREROUTING", []iptables.Rule{{
 			Action: iptables.JumpAction{Target: rules.ChainRawPrerouting},
 		}})
+
+		if t.IPVersion == 4 {
+			// Iptables for untracked egress policy.
+			t.UpdateChains(d.ruleRenderer.StaticRawEgressChains(t.IPVersion, uint32(tc.MarkSeenBypass)))
+			t.InsertOrAppendRules("OUTPUT", []iptables.Rule{{
+				Action: iptables.JumpAction{Target: rules.ChainRawOutput},
+			}})
+		}
 	}
 
 	if d.config.BPFExtToServiceConnmark != 0 {
