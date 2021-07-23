@@ -1489,8 +1489,9 @@ func (w *Wireguard) ensureLinkAddressV4(netlinkClient netlinkshim.Interface) err
 			}
 		}
 		logCxt.Debug("Address set on wireguard device")
+	} else {
+		logCxt.Debug("Address not set on wireguard device")
 	}
-	logCxt.Debug("Address not set on wireguard device")
 	return nil
 }
 
