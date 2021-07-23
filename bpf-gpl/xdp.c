@@ -110,8 +110,16 @@ __attribute__((section("1/0")))
 int calico_xdp_norm_pol_tail(struct xdp_md *xdp)
 {
 	CALI_DEBUG("Entering normal policy tail call\n");
+
+	struct cali_tc_state *state = state_get();
+	if (!state) {
+	        CALI_DEBUG("State map lookup failed: PASS\n");
+	        return XDP_PASS;
+	}
+
+	state->pol_rc = CALI_POL_ALLOW;
 	bpf_tail_call(xdp, &cali_jump, PROG_INDEX_EPILOGUE);
-	CALI_DEBUG("Tail call to post-policy program failed: DROP\n");
+	CALI_DEBUG("Tail call to post-policy program failed: PASS\n");
 	return XDP_PASS;
 }
 
