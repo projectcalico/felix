@@ -225,7 +225,7 @@ outter:
 	err = bin.WriteToFile(tempObj)
 	Expect(err).NotTo(HaveOccurred())
 
-	err = bpftoolProgLoadAll(tempObj, bpfFsDir, rules != nil, maps...)
+	err = bpftoolProgLoadAll(tempObj, bpfFsDir, "classifier", rules != nil, maps...)
 	Expect(err).NotTo(HaveOccurred())
 
 	if err != nil {
@@ -359,8 +359,8 @@ func cleanUpMaps() {
 	log.Info("Cleaned up all maps")
 }
 
-func bpftoolProgLoadAll(fname, bpfFsDir string, polProg bool, maps ...bpf.Map) error {
-	args := []string{"prog", "loadall", fname, bpfFsDir, "type", "classifier"}
+func bpftoolProgLoadAll(fname, bpfFsDir, progType string, polProg bool, maps ...bpf.Map) error {
+	args := []string{"prog", "loadall", fname, bpfFsDir, "type", progType}
 
 	for _, m := range maps {
 		args = append(args, "map", "name", m.GetName(), "pinned", m.Path())
@@ -515,12 +515,12 @@ outter:
 	err = bin.WriteToFile(tempObj)
 	Expect(err).NotTo(HaveOccurred())
 
-	err = bpftoolProgLoadAll(tempObj, bpfFsDir, true, maps...)
+	err = bpftoolProgLoadAll(tempObj, bpfFsDir, progType, true, maps...)
 	Expect(err).NotTo(HaveOccurred())
 
 	runTest := func() {
 		testFn(func(dataIn []byte) (bpfRunResult, error) {
-			res, err := bpftoolProgRun(bpfFsDir+"/calico_unittest", dataIn)
+			res, err := bpftoolProgRun(bpfFsDir+"/calico_unittest_"+progType, dataIn)
 			log.Debugf("dataIn  = %+v", dataIn)
 			if err == nil {
 				log.Debugf("dataOut = %+v", res.dataOut)

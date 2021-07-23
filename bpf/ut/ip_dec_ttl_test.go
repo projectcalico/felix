@@ -23,29 +23,62 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestIpDecTTL(t *testing.T) {
+func TestXDPIpDecTTL(t *testing.T) {
 	RegisterTestingT(t)
 
-	runBpfUnitTest(t, "ip_dec_ttl.c", "tc", func(bpfrun bpfProgRunFn) {
-		ip36 := *ipv4Default
-		ip36.TTL = 36
-		_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
-		Expect(err).NotTo(HaveOccurred())
+	progType := []string{"xdp"}
+	for _, prog := range progType {
+		runBpfUnitTest(t, "ip_dec_ttl.c", prog, func(bpfrun bpfProgRunFn) {
+			ip36 := *ipv4Default
+			ip36.TTL = 36
+			_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
 
-		res, err := bpfrun(pktBytes)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Retval).To(Equal(0))
+			res, err := bpfrun(pktBytes)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Retval).To(Equal(0))
 
-		Expect(res.dataOut).To(HaveLen(len(pktBytes)))
+			Expect(res.dataOut).To(HaveLen(len(pktBytes)))
 
-		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
-		fmt.Printf("pktR = %+v\n", pktR)
+			pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
+			fmt.Printf("pktR = %+v\n", pktR)
 
-		ip35 := *ipv4Default
-		ip35.TTL = 35
-		_, _, _, _, pktBytes, err = testPacket(nil, &ip35, nil, nil)
-		Expect(err).NotTo(HaveOccurred())
+			ip35 := *ipv4Default
+			ip35.TTL = 35
+			_, _, _, _, pktBytes, err = testPacket(nil, &ip35, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
 
-		Expect(res.dataOut).To(Equal(pktBytes))
-	})
+			Expect(res.dataOut).To(Equal(pktBytes))
+		})
+	}
+}
+
+func TestTCIpDecTTL(t *testing.T) {
+	RegisterTestingT(t)
+
+	progType := []string{"classifier"}
+	for _, prog := range progType {
+		runBpfUnitTest(t, "ip_dec_ttl.c", prog, func(bpfrun bpfProgRunFn) {
+			ip36 := *ipv4Default
+			ip36.TTL = 36
+			_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			res, err := bpfrun(pktBytes)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.Retval).To(Equal(0))
+
+			Expect(res.dataOut).To(HaveLen(len(pktBytes)))
+
+			pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
+			fmt.Printf("pktR = %+v\n", pktR)
+
+			ip35 := *ipv4Default
+			ip35.TTL = 35
+			_, _, _, _, pktBytes, err = testPacket(nil, &ip35, nil, nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(res.dataOut).To(Equal(pktBytes))
+		})
+	}
 }

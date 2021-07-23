@@ -32,7 +32,7 @@ func TestNatEncap(t *testing.T) {
 
 	var encapedPkt []byte
 
-	runBpfUnitTest(t, "nat_encap_test.c", "tc", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "nat_encap_test.c", "classifier", func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0))

@@ -21,7 +21,7 @@
 #include "xdp.c"
 static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx);
 // Entry point for XDP unit tests
-__attribute__((section("calico_unittest"))) int unittest(struct xdp_md *xdp)
+__attribute__((section("calico_unittest_xdp"))) int unittest(struct xdp_md *xdp)
 {
 	struct cali_tc_ctx ctx = {
 		.xdp = xdp,
@@ -34,7 +34,7 @@ __attribute__((section("calico_unittest"))) int unittest(struct xdp_md *xdp)
 #include "tc.c"
 static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx);
 // Entry point for TC unit tests
-__attribute__((section("calico_unittest"))) int unittest(struct __sk_buff *skb)
+__attribute__((section("calico_unittest_classifier"))) int unittest(struct __sk_buff *skb)
 {
 	struct cali_tc_ctx ctx = {
 		.skb = skb,

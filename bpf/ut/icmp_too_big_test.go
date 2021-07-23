@@ -33,7 +33,7 @@ func TestICMPTooBig(t *testing.T) {
 	Expect(err).NotTo(HaveOccurred())
 	udp := l4.(*layers.UDP)
 
-	runBpfUnitTest(t, "icmp_too_big.c", "tc", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "icmp_too_big.c", "classifier", func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0))
@@ -61,7 +61,7 @@ func TestICMPTooBigIPOptions(t *testing.T) {
 	_, _, _, _, pktBytes, err := testPacket(nil, ipv4, nil, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	runBpfUnitTest(t, "icmp_too_big.c", "tc", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "icmp_too_big.c", "classifier", func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0xffffffff))
