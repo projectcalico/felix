@@ -22,7 +22,7 @@
  * The struct must be 4 byte aligned, based on
  * samples/bpf/xdp2skb_meta_kern.c code in the Kernel source. */
 struct cali_metadata {
-	// Flags from parsing_metadata_flags
+	// Flags from cali_metadata_flags
 	__u32  flags;
 }__attribute__((aligned(4)));
 
@@ -40,22 +40,22 @@ static CALI_BPF_INLINE int xdp2tc_set_metadata(struct xdp_md *xdp, __u32 flags) 
 		int ret = bpf_xdp_adjust_meta(xdp, -(int)sizeof(*metadata));
 		if (ret < 0) {
 			CALI_DEBUG("Failed to add space for metadata: %d\n", ret);
-			return PARSING_ERROR;
+			return -1;
 		}
 
 		if (xdp->data_meta + sizeof(struct cali_metadata) > xdp->data) {
 			CALI_DEBUG("No enough space for metadata\n");
-			return PARSING_ERROR;
+			return -1;
 		}
 
 		metadata = (void *)(unsigned long)xdp->data_meta;
 
 		CALI_DEBUG("Set metadata for TC: %d\n", flags);
 		metadata->flags = flags;
-		return PARSING_OK;
+		return 0;
 	} else {
 		CALI_DEBUG("Setting metadata in TC no supported\n");
-		return PARSING_ERROR;
+		return -1;
 	}
 }
 
