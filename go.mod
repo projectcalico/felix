@@ -24,10 +24,10 @@ require (
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
-	github.com/projectcalico/api v0.0.0-20210719195019-905b702d58de
-	github.com/projectcalico/libcalico-go v1.7.2-0.20210719201741-620090001809
-	github.com/projectcalico/pod2daemon v0.0.0-20210618180306-4763e2755cba
-	github.com/projectcalico/typha v0.7.3-0.20210713193436-fe111503505d
+	github.com/projectcalico/api v0.0.0-20210721183356-e23a6f19214b
+	github.com/projectcalico/libcalico-go v1.7.2-0.20210722182803-fa83590e0e4f
+	github.com/projectcalico/pod2daemon v0.0.0-20210715003609-86f5318f4023
+	github.com/projectcalico/typha v0.7.3-0.20210723125404-ed98678aa32d
 	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/common v0.10.0
 	github.com/sirupsen/logrus v1.7.0
@@ -78,7 +78,3 @@ replace (
 	k8s.io/mount-utils => k8s.io/mount-utils v0.21.0-rc.0
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.21.0-rc.0
 )
-
-replace github.com/projectcalico/typha => github.com/caseydavenport/typha v0.1.4-0.20210720162703-0c2917f0e427
-
-replace github.com/projectcalico/libcalico-go => github.com/caseydavenport/libcalico-go v0.0.0-20210720162621-dff22edb83c2
