@@ -25,6 +25,6 @@ func TestMain(m *testing.M) {
 	initMapsOnce()
 	cleanUpMaps()
 	rc := m.Run()
-	//cleanUpMaps()
+	cleanUpMaps()
 	os.Exit(rc)
 }

@@ -102,6 +102,15 @@ deny:
 	return XDP_DROP;
 }
 
+__attribute__((section("1/0")))
+int calico_xdp_norm_pol_tail(struct xdp_md *xdp)
+{
+	CALI_DEBUG("Entering normal policy tail call\n");
+	bpf_tail_call(xdp, &cali_jump, PROG_INDEX_EPILOGUE);
+	CALI_DEBUG("Tail call to post-policy program failed: PASS\n");
+	return XDP_PASS;
+}
+
 __attribute__((section("1/1")))
 int calico_xdp_accepted_entrypoint(struct xdp_md *xdp)
 {
