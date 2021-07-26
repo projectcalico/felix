@@ -294,8 +294,8 @@ func bpftool(args ...string) ([]byte, error) {
 var (
 	mapInitOnce sync.Once
 
-	natMap, natBEMap, ctMap, rtMap, ipsMap, stateMap, testStateMap, jumpMap, affinityMap, arpMap, fsafeMap bpf.Map
-	allMaps, progMaps                                                                                      []bpf.Map
+	natMap, natBEMap, ctMap, rtMap, ipsMap, stateMap, testStateMap, jumpMap, xdpJumpMap, affinityMap, arpMap, fsafeMap bpf.Map
+	allMaps, progMaps                                                                                                  []bpf.Map
 )
 
 func initMapsOnce() {
@@ -309,12 +309,13 @@ func initMapsOnce() {
 		ipsMap = ipsets.Map(mc)
 		stateMap = state.Map(mc)
 		testStateMap = state.MapForTest(mc)
+		xdpJumpMap = MapForTest(mc)
 		jumpMap = jump.MapForTest(mc)
 		affinityMap = nat.AffinityMap(mc)
 		arpMap = arp.Map(mc)
 		fsafeMap = failsafes.Map(mc)
 
-		allMaps = []bpf.Map{natMap, natBEMap, ctMap, rtMap, ipsMap, stateMap, testStateMap, jumpMap, affinityMap, arpMap, fsafeMap}
+		allMaps = []bpf.Map{natMap, natBEMap, ctMap, rtMap, ipsMap, stateMap, testStateMap, jumpMap, xdpJumpMap, affinityMap, arpMap, fsafeMap}
 		for _, m := range allMaps {
 			err := m.EnsureExists()
 			if err != nil {
@@ -328,6 +329,7 @@ func initMapsOnce() {
 			ctMap,
 			rtMap,
 			jumpMap,
+			xdpJumpMap,
 			stateMap,
 			affinityMap,
 			arpMap,
@@ -345,7 +347,7 @@ func cleanUpMaps() {
 	defer log.SetLevel(logLevel)
 
 	for _, m := range allMaps {
-		if m == stateMap || m == testStateMap || m == jumpMap {
+		if m == stateMap || m == testStateMap || m == jumpMap || m == xdpJumpMap {
 			continue // Can't clean up array maps
 		}
 		log.WithField("map", m.GetName()).Info("Cleaning")
@@ -363,6 +365,14 @@ func bpftoolProgLoadAll(fname, bpfFsDir, progType string, polProg bool, maps ...
 	args := []string{"prog", "loadall", fname, bpfFsDir, "type", progType}
 
 	for _, m := range maps {
+		if (progType == "xdp") && (m == jumpMap) {
+			log.Println("XDP prog, skip jump map")
+			continue
+		}
+		if (progType == "classifier") && (m.GetName() == "cali_xdp_jump") {
+			log.Println("TC prog, skip xdp jump map")
+			continue
+		}
 		args = append(args, "map", "name", m.GetName(), "pinned", m.Path())
 	}
 
@@ -372,26 +382,31 @@ func bpftoolProgLoadAll(fname, bpfFsDir, progType string, polProg bool, maps ...
 		return err
 	}
 
+	lJumpMap := jumpMap
+	if progType == "xdp" {
+		lJumpMap = xdpJumpMap
+	}
+
 	if polProg {
 		polProgPath := path.Join(bpfFsDir, "1_0")
 		_, err = os.Stat(polProgPath)
 		if err == nil {
-			_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "0", "0", "0", "0", "value", "pinned", polProgPath)
+			_, err = bpftool("map", "update", "pinned", lJumpMap.Path(), "key", "0", "0", "0", "0", "value", "pinned", polProgPath)
 			if err != nil {
 				return errors.Wrap(err, "failed to update jump map (policy program)")
 			}
 		}
 	} else {
-		_, err = bpftool("map", "delete", "pinned", jumpMap.Path(), "key", "0", "0", "0", "0")
+		_, err = bpftool("map", "delete", "pinned", lJumpMap.Path(), "key", "0", "0", "0", "0")
 		if err != nil {
 			log.WithError(err).Info("failed to update jump map (deleting policy program)")
 		}
 	}
-	_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "1", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "1_1"))
+	_, err = bpftool("map", "update", "pinned", lJumpMap.Path(), "key", "1", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "1_1"))
 	if err != nil {
 		return errors.Wrap(err, "failed to update jump map (epilogue program)")
 	}
-	_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "2", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "1_2"))
+	_, err = bpftool("map", "update", "pinned", lJumpMap.Path(), "key", "2", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "1_2"))
 	if err != nil {
 		return errors.Wrap(err, "failed to update jump map (icmp program)")
 	}

@@ -85,7 +85,6 @@ func TestXDPIpDecTTL1(t *testing.T) {
 	}
 }
 
-/*
 func TestTCIpDecTTL(t *testing.T) {
 	RegisterTestingT(t)
 
@@ -114,4 +113,4 @@ func TestTCIpDecTTL(t *testing.T) {
 			Expect(res.dataOut).To(Equal(pktBytes))
 		})
 	}
-}*/
+}
