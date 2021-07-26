@@ -26,91 +26,54 @@ import (
 func TestXDPIpDecTTL(t *testing.T) {
 	RegisterTestingT(t)
 
-	progType := []string{"xdp"}
-	for _, prog := range progType {
-		runBpfUnitTest(t, "ip_dec_ttl.c", prog, func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "xdp_ip_dec_ttl.c", true, func(bpfrun bpfProgRunFn) {
 
-			ip36 := *ipv4Default
-			ip36.TTL = 128
-			_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
-			Expect(err).NotTo(HaveOccurred())
+		ip36 := *ipv4Default
+		ip36.TTL = 128
+		_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
+		Expect(err).NotTo(HaveOccurred())
 
-			res, err := bpfrun(pktBytes)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Retval).To(Equal(0))
+		res, err := bpfrun(pktBytes)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Retval).To(Equal(0))
 
-			Expect(res.dataOut).To(HaveLen(len(pktBytes)))
+		Expect(res.dataOut).To(HaveLen(len(pktBytes)))
 
-			pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
-			fmt.Printf("pktR = %+v\n", pktR)
+		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
+		fmt.Printf("pktR = %+v\n", pktR)
 
-			ip35 := *ipv4Default
-			ip35.TTL = 127
-			_, _, _, _, pktBytes, err = testPacket(nil, &ip35, nil, nil)
-			Expect(err).NotTo(HaveOccurred())
+		ip35 := *ipv4Default
+		ip35.TTL = 127
+		_, _, _, _, pktBytes, err = testPacket(nil, &ip35, nil, nil)
+		Expect(err).NotTo(HaveOccurred())
 
-			Expect(res.dataOut).To(Equal(pktBytes))
-		})
-	}
+		Expect(res.dataOut).To(Equal(pktBytes))
+	})
 }
 
-func TestXDPIpDecTTL1(t *testing.T) {
+func TestIpDecTTL(t *testing.T) {
 	RegisterTestingT(t)
 
-	progType := []string{"xdp"}
-	for _, prog := range progType {
-		runBpfUnitTest(t, "ip_dec_ttl.c", prog, func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "classifier_ip_dec_ttl.c", false, func(bpfrun bpfProgRunFn) {
+		ip36 := *ipv4Default
+		ip36.TTL = 36
+		_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
+		Expect(err).NotTo(HaveOccurred())
 
-			ip36 := *ipv4Default
-			ip36.TTL = 36
-			_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
-			Expect(err).NotTo(HaveOccurred())
+		res, err := bpfrun(pktBytes)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.Retval).To(Equal(0))
 
-			res, err := bpfrun(pktBytes)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Retval).To(Equal(0))
+		Expect(res.dataOut).To(HaveLen(len(pktBytes)))
 
-			Expect(res.dataOut).To(HaveLen(len(pktBytes)))
+		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
+		fmt.Printf("pktR = %+v\n", pktR)
 
-			pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
-			fmt.Printf("pktR = %+v\n", pktR)
+		ip35 := *ipv4Default
+		ip35.TTL = 35
+		_, _, _, _, pktBytes, err = testPacket(nil, &ip35, nil, nil)
+		Expect(err).NotTo(HaveOccurred())
 
-			ip35 := *ipv4Default
-			ip35.TTL = 35
-			_, _, _, _, pktBytes, err = testPacket(nil, &ip35, nil, nil)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(res.dataOut).To(Equal(pktBytes))
-		})
-	}
-}
-
-func TestTCIpDecTTL(t *testing.T) {
-	RegisterTestingT(t)
-
-	progType := []string{"classifier"}
-	for _, prog := range progType {
-		runBpfUnitTest(t, "ip_dec_ttl.c", prog, func(bpfrun bpfProgRunFn) {
-			ip36 := *ipv4Default
-			ip36.TTL = 36
-			_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
-			Expect(err).NotTo(HaveOccurred())
-
-			res, err := bpfrun(pktBytes)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(res.Retval).To(Equal(0))
-
-			Expect(res.dataOut).To(HaveLen(len(pktBytes)))
-
-			pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
-			fmt.Printf("pktR = %+v\n", pktR)
-
-			ip35 := *ipv4Default
-			ip35.TTL = 35
-			_, _, _, _, pktBytes, err = testPacket(nil, &ip35, nil, nil)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(res.dataOut).To(Equal(pktBytes))
-		})
-	}
+		Expect(res.dataOut).To(Equal(pktBytes))
+	})
 }
