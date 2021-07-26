@@ -109,9 +109,7 @@ deny:
 __attribute__((section("1/0")))
 int calico_xdp_norm_pol_tail(struct xdp_md *xdp)
 {
-	CALI_DEBUG("Entering normal policy tail call\n");
-	bpf_tail_call(xdp, &cali_jump, PROG_INDEX_EPILOGUE);
-	CALI_DEBUG("Tail call to post-policy program failed: PASS\n");
+	CALI_DEBUG("Entering normal policy tail call: PASS\n");
 	return XDP_PASS;
 }
 
@@ -126,13 +124,6 @@ int calico_xdp_accepted_entrypoint(struct xdp_md *xdp)
 	if (xdp2tc_set_metadata(xdp, CALI_META_ACCEPTED_BY_XDP)) {
 		CALI_DEBUG("Failed to set metadata for TC\n");
 	}
-	return XDP_PASS;
-}
-
-__attribute__((section("1/2")))
-int calico_xdp_send_icmp_replies(struct xdp_md *xdp)
-{
-	CALI_DEBUG("Entring calico_xdp_send_icmp_replies\n");
 	return XDP_PASS;
 }
 
