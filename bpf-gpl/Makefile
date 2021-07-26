@@ -59,7 +59,9 @@ CC := clang-11
 LD := llc-11
 
 UT_C_FILES:=$(shell find ut -name '*.c')
-UT_OBJS:=$(UT_C_FILES:.c=.o) $(shell ./list-ut-objs)
+UT_TC_OBJS:=$(addprefix ut/classifier_, $(notdir $(UT_C_FILES:.c=.o)))
+UT_XDP_OBJS:=ut/xdp_ip_dec_ttl.o
+UT_OBJS:=$(UT_TC_OBJS) $(UT_XDP_OBJS) $(shell ./list-ut-objs)
 
 OBJS:=$(shell ./list-objs)
 C_FILES:=tc.c connect_balancer.c
@@ -81,8 +83,10 @@ UT_CFLAGS=\
 	-I .
 
 # Mini-UT programs that test one or two functions.  These are each in their own files.
-ut/%.ll: ut/%.c ut/ut.h tc.c tc.d
+ut/classifier_%.ll: ut/%.c ut/ut.h tc.c tc.d
 	$(CC) $(UT_CFLAGS) $(CFLAGS) -c $< -o $@
+ut/xdp_%.ll: ut/%.c ut/ut.h xdp.c xdp.d
+	$(CC) $(UT_CFLAGS) $(CFLAGS) -DCALI_COMPILE_FLAGS=64 -D__XDP_PROG__ -c $< -o $@
 
 # Production and UT versions of the main binaries.
 # Combining the targets into one rule causes make to fail to rebuild the .ll files.  Not sure why.
