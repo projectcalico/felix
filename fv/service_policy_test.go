@@ -178,7 +178,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Service network policy test
 		Expect(err).NotTo(HaveOccurred())
 
 		// Expect traffic is allowed to the endpoint specified in the service - w1, TCP 80
-		// Traffic the other direciton, and to other ports should not be allowed.
+		// Traffic the other direction, and to other ports should not be allowed.
 		cc.ResetExpectations()
 		cc.ExpectSome(w[0], w[1].Port(80))
 		cc.ExpectNone(w[0], w[1].Port(81))
@@ -265,7 +265,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Service network policy test
 		Expect(err).NotTo(HaveOccurred())
 
 		// Expect traffic is denied to the endpoint specified in the service - w1, TCP 80
-		// Traffic the other direciton, and to other ports should be allowed.
+		// Traffic the other direction, and to other ports should be allowed.
 		cc.ResetExpectations()
 		cc.ExpectNone(w[0], w[1].Port(80))
 		cc.ExpectSome(w[0], w[1].Port(81))
