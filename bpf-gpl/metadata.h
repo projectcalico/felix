@@ -40,22 +40,22 @@ static CALI_BPF_INLINE int xdp2tc_set_metadata(struct xdp_md *xdp, __u32 flags) 
 		int ret = bpf_xdp_adjust_meta(xdp, -(int)sizeof(*metadata));
 		if (ret < 0) {
 			CALI_DEBUG("Failed to add space for metadata: %d\n", ret);
-			return -1;
+			return PARSING_ERROR;
 		}
 
 		if (xdp->data_meta + sizeof(struct cali_metadata) > xdp->data) {
 			CALI_DEBUG("No enough space for metadata\n");
-			return -1;
+			return PARSING_ERROR;
 		}
 
 		metadata = (void *)(unsigned long)xdp->data_meta;
 
 		CALI_DEBUG("Set metadata for TC: %d\n", flags);
 		metadata->flags = flags;
-		return 0;
+		return PARSING_OK;
 	} else {
 		CALI_DEBUG("Setting metadata in TC no supported\n");
-		return -1;
+		return PARSING_ERROR;
 	}
 }
 
