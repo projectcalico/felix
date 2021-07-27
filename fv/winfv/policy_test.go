@@ -79,13 +79,13 @@ var _ = Describe("Windows policy test", func() {
 
 	Context("ingress policy tests", func() {
 		It("client pod can connect to porter pod", func() {
-			cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client -n demo -- wget %v -T 5 -O -`, porter)
+			cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client -n demo -- wget %v -T 5 -qO -`, porter)
 			output, _, err := powershell(cmd)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(strings.Contains(output, "200")).To(BeTrue())
+			Expect(output).To(Equal("foobar"))
 		})
 		It("client-b pod can't connect to porter pod", func() {
-			cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client-b -n demo -- wget %v -T 5 -O -`, porter)
+			cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client-b -n demo -- wget %v -T 5 -qO -`, porter)
 			_, _, err := powershell(cmd)
 			Expect(err).To(HaveOccurred())
 		})
