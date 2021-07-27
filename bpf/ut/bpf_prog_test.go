@@ -134,7 +134,7 @@ func TestCompileTemplateRun(t *testing.T) {
 
 func TestLoadZeroProgram(t *testing.T) {
 	RegisterTestingT(t)
-	fd, err := bpf.LoadBPFProgramFromInsns(nil, "Apache-2.0", false)
+	fd, err := bpf.LoadBPFProgramFromInsns(nil, "Apache-2.0", unix.BPF_PROG_TYPE_SCHED_CLS)
 	if err == nil {
 		_ = fd.Close()
 	}
@@ -238,7 +238,7 @@ outter:
 		pg := polprog.NewBuilder(alloc, ipsMap.MapFD(), stateMap.MapFD(), jumpMap.MapFD())
 		insns, err := pg.Instructions(*rules)
 		Expect(err).NotTo(HaveOccurred())
-		polProgFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", false)
+		polProgFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", unix.BPF_PROG_TYPE_SCHED_CLS)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() { _ = polProgFD.Close() }()
 		progFDBytes := make([]byte, 4)
@@ -552,23 +552,17 @@ func withSubtests(v bool) testOption {
 	}
 }
 
-var _ = withSubtests
-
 func withLogLevel(l log.Level) testOption {
 	return func(o *testOpts) {
 		o.logLevel = l
 	}
 }
 
-var _ = withLogLevel
-
 func withExtraMap(m bpf.Map) testOption {
 	return func(o *testOpts) {
 		o.extraMaps = append(o.extraMaps, m)
 	}
 }
-
-var _ = withExtraMap
 
 // layersMatchFields matches all Exported fields and ignore the ones explicitly
 // listed. It always ignores BaseLayer as that is not set by the tests.
@@ -948,7 +942,7 @@ func TestJumpMap(t *testing.T) {
 	rules := polprog.Rules{}
 	insns, err := pg.Instructions(rules)
 	Expect(err).NotTo(HaveOccurred())
-	progFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", false)
+	progFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", unix.BPF_PROG_TYPE_SCHED_CLS)
 	Expect(err).NotTo(HaveOccurred())
 
 	k := make([]byte, 4)
