@@ -146,7 +146,7 @@ blocks:
 - name: Windows FV
   task:
     secrets:
-      - name: private-repo
+      - name: banzai-secrets
     prologue:
       commands:
         # Load the github access secrets.  First fix the permissions.
