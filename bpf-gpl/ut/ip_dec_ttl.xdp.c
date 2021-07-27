@@ -15,10 +15,17 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#include "tc_ut.h"
-#include "nat.h"
+#include "xdp_ut.h"
 
 static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx)
 {
-	return icmp_v4_port_unreachable(ctx);
+	if (skb_refresh_validate_ptrs(ctx, UDP_SIZE)) {
+		ctx->fwd.reason = CALI_REASON_SHORT;
+		CALI_DEBUG("Too short\n");
+		return -1;
+	}
+
+	ip_dec_ttl(ctx->ip_header);
+
+	return 0;
 }
