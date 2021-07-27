@@ -26,7 +26,7 @@ import (
 func TestIpDecTTL(t *testing.T) {
 	RegisterTestingT(t)
 
-	runBpfUnitTest(t, "ip_dec_ttl.c", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "ip_dec_ttl.tc.c", false, func(bpfrun bpfProgRunFn) {
 		ip36 := *ipv4Default
 		ip36.TTL = 36
 		_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
