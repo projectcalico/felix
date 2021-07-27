@@ -83,7 +83,7 @@ UT_CFLAGS=\
 UT_XDP_CFLAGS=$(UT_CFLAGS) -DCALI_COMPILE_FLAGS=64
 
 # Mini-UT programs that test one or two functions.  These are each in their own files.
-ut/%.tc.ll: ut/%.tc.c ut/ut.h tc.c tc.d
+ut/%.tc.ll: ut/%.tc.c ut/tc_ut.h tc.c tc.d
 	$(CC) $(UT_CFLAGS) $(CFLAGS) -c $< -o $@
 ut/%.xdp.ll: ut/%.xdp.c ut/xdp_ut.h xdp.c xdp.d
 	$(CC) $(UT_XDP_CFLAGS) $(CFLAGS) -c $< -o $@
