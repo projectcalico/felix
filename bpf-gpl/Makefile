@@ -1,5 +1,5 @@
 # Project Calico BPF dataplane build scripts.
-# Copyright (c) 2020 Tigera, Inc. All rights reserved.
+# Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -58,8 +58,9 @@ CFLAGS += -I/usr/include/$(TRIPLET)
 CC := clang-11
 LD := llc-11
 
-UT_C_FILES:=$(shell find ut -name '*.c')
-UT_OBJS:=$(UT_C_FILES:.c=.o) $(shell ./list-ut-objs)
+UT_TC_FILES:=$(shell find ut -name '*.tc.c')
+UT_XDP_FILES:=$(shell find ut -name '*.xdp.c')
+UT_OBJS:=$(UT_TC_FILES:.c=.o) $(UT_XDP_FILES:.c=.o) $(shell ./list-ut-objs)
 
 OBJS:=$(shell ./list-objs)
 C_FILES:=tc.c connect_balancer.c
@@ -79,10 +80,13 @@ UT_CFLAGS=\
 	-DUNITTEST \
 	-DCALI_LOG_PFX=UNITTEST \
 	-I .
+UT_XDP_CFLAGS=$(UT_CFLAGS) -DCALI_COMPILE_FLAGS=64
 
 # Mini-UT programs that test one or two functions.  These are each in their own files.
-ut/%.ll: ut/%.c ut/ut.h tc.c tc.d
+ut/%.tc.ll: ut/%.tc.c ut/tc_ut.h tc.c tc.d
 	$(CC) $(UT_CFLAGS) $(CFLAGS) -c $< -o $@
+ut/%.xdp.ll: ut/%.xdp.c ut/xdp_ut.h xdp.c xdp.d
+	$(CC) $(UT_XDP_CFLAGS) $(CFLAGS) -c $< -o $@
 
 # Production and UT versions of the main binaries.
 # Combining the targets into one rule causes make to fail to rebuild the .ll files.  Not sure why.

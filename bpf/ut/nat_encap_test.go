@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ func TestNatEncap(t *testing.T) {
 
 	var encapedPkt []byte
 
-	runBpfUnitTest(t, "nat_encap_test.c", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "nat_encap_test.tc.c", false, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0))
@@ -51,7 +51,7 @@ func TestNatEncap(t *testing.T) {
 		encapedPkt = res.dataOut
 	})
 
-	runBpfUnitTest(t, "nat_decap_test.c", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "nat_decap_test.tc.c", false, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(encapedPkt)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0))
