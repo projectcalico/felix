@@ -33,7 +33,7 @@ func TestICMPttlExceeded(t *testing.T) {
 	_, ipv4, _, _, pktBytes, err := testPacketUDPDefault()
 	Expect(err).NotTo(HaveOccurred())
 
-	runBpfUnitTest(t, "icmp_ttl_exceeded.c", false, func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "icmp_ttl_exceeded.tc.c", false, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0))

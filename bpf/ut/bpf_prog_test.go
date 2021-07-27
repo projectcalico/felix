@@ -363,10 +363,10 @@ func cleanUpMaps() {
 
 func bpftoolProgLoadAll(fname, bpfFsDir string, polProg bool, forXDP bool, maps ...bpf.Map) error {
 	args := []string{"prog", "loadall", fname, bpfFsDir, "type", "classifier"}
-
 	if forXDP {
 		args = []string{"prog", "loadall", fname, bpfFsDir, "type", "xdp"}
 	}
+
 	for _, m := range maps {
 		if forXDP && m == tcJumpMap {
 			log.Info("XDP program, skipping TC jump map")
