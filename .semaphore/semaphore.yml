@@ -146,6 +146,7 @@ blocks:
 - name: Windows FV
   task:
     secrets:
+      - name: banzai-secrets
       - name: private-repo
     prologue:
       commands:
