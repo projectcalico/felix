@@ -134,14 +134,14 @@ blocks:
   #    secrets:
   #    - name: google-service-account-for-gce
 
-- name: Build Windows binary
-  dependencies: []
-  task:
-    jobs:
-    - name: "Build Windows binary"
-      commands:
-      - checkout
-      - make bin/calico-felix.exe
+  #- name: Build Windows binary
+  #  dependencies: []
+  #  task:
+  #    jobs:
+  #    - name: "Build Windows binary"
+  #      commands:
+  #      - checkout
+  #      - make bin/calico-felix.exe
 
 - name: Windows FV
   dependencies: ["Build Windows binary"]
