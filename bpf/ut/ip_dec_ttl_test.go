@@ -23,34 +23,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-func TestXDPIpDecTTL(t *testing.T) {
-	RegisterTestingT(t)
-
-	runBpfUnitTest(t, "ip_dec_ttl.xdp.c", true, func(bpfrun bpfProgRunFn) {
-
-		ip36 := *ipv4Default
-		ip36.TTL = 128
-		_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		res, err := bpfrun(pktBytes)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.Retval).To(Equal(0))
-
-		Expect(res.dataOut).To(HaveLen(len(pktBytes)))
-
-		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
-		fmt.Printf("pktR = %+v\n", pktR)
-
-		ip35 := *ipv4Default
-		ip35.TTL = 127
-		_, _, _, _, pktBytes, err = testPacket(nil, &ip35, nil, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		Expect(res.dataOut).To(Equal(pktBytes))
-	})
-}
-
 func TestIpDecTTL(t *testing.T) {
 	RegisterTestingT(t)
 
