@@ -15,14 +15,10 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#include "ut.h"
-#include "bpf.h"
+#include "tc_ut.h"
 #include "nat.h"
 
-static CALI_BPF_INLINE int calico_unittest_entry (struct __sk_buff *skb)
+static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx)
 {
-	struct cali_tc_ctx ctx = {
-		.skb = skb,
-	};
-	return icmp_v4_port_unreachable(&ctx);
+	return icmp_v4_ttl_exceeded(ctx);
 }

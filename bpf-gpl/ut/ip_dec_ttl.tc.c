@@ -15,18 +15,17 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#include "ut.h"
-#include "bpf.h"
-#include "nat.h"
+#include "tc_ut.h"
 
-static CALI_BPF_INLINE int calico_unittest_entry (struct __sk_buff *skb)
+static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx)
 {
-	struct cali_tc_ctx ctx = {
-		.skb = skb,
-		.fwd = {
-			.res = TC_ACT_UNSPEC,
-			.reason = CALI_REASON_UNKNOWN,
-		},
-	};
-	return vxlan_v4_encap(&ctx, HOST_IP, 0x02020202);
+	if (skb_refresh_validate_ptrs(ctx, UDP_SIZE)) {
+		ctx->fwd.reason = CALI_REASON_SHORT;
+		CALI_DEBUG("Too short\n");
+		return -1;
+	}
+
+	ip_dec_ttl(ctx->ip_header);
+
+	return 0;
 }

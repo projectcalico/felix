@@ -15,11 +15,11 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#include "tc.c"
+#include "tc_ut.h"
+#include "nat.h"
 
-static CALI_BPF_INLINE int calico_unittest_entry (struct __sk_buff *skb);
-
-__attribute__((section("calico_unittest"))) int unittest(struct __sk_buff *skb)
+static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx)
 {
-	return calico_unittest_entry(skb);
+	return icmp_v4_too_big(ctx);
 }
+
