@@ -15,11 +15,12 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+#include "bpf.h"
+static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx);
 
 #ifdef __XDP_PROG__
 
 #include "xdp.c"
-static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx);
 // Entry point for XDP unit tests
 __attribute__((section("calico_unittest"))) int unittest(struct xdp_md *xdp)
 {
@@ -32,7 +33,7 @@ __attribute__((section("calico_unittest"))) int unittest(struct xdp_md *xdp)
 #else
 
 #include "tc.c"
-static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx);
+//static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx);
 // Entry point for TC unit tests
 __attribute__((section("calico_unittest"))) int unittest(struct __sk_buff *skb)
 {

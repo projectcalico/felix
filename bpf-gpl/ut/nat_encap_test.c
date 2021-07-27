@@ -21,17 +21,7 @@
 
 static CALI_BPF_INLINE int calico_unittest_entry (struct cali_tc_ctx *ctx)
 {
-	/*
-	struct cali_tc_ctx ctx = {
-		.skb = skb,
-		.fwd = {
-			.res = TC_ACT_UNSPEC,
-			.reason = CALI_REASON_UNKNOWN,
-		},
-	};*/
-
 	ctx->fwd.res = TC_ACT_UNSPEC;
 	ctx->fwd.reason  = CALI_REASON_UNKNOWN;
-
 	return vxlan_v4_encap(ctx, HOST_IP, 0x02020202);
 }

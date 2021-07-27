@@ -369,11 +369,11 @@ func bpftoolProgLoadAll(fname, bpfFsDir string, polProg bool, forXDP bool, maps 
 	}
 	for _, m := range maps {
 		if forXDP && m == tcJumpMap {
-			log.Println("XDP prog, skip jump map")
+			log.Info("XDP program, skipping TC jump map")
 			continue
 		}
 		if !forXDP && m == xdpJumpMap {
-			log.Println("TC prog, skip xdp jump map")
+			log.Info("TC program, skipping XDP jump map")
 			continue
 		}
 		args = append(args, "map", "name", m.GetName(), "pinned", m.Path())
