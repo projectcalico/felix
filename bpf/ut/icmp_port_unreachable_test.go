@@ -31,7 +31,7 @@ func TestICMPPortUnreachable(t *testing.T) {
 	_, ipv4, _, _, pktBytes, err := testPacketUDPDefault()
 	Expect(err).NotTo(HaveOccurred())
 
-	runBpfUnitTest(t, "icmp_port_unreachable.tc.c", false, func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "icmp_port_unreachable.c", false, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0))
@@ -68,7 +68,7 @@ func TestNATNoBackendFromHEP(t *testing.T) {
 		Expect(err).NotTo(HaveOccurred())
 	}()
 
-	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
+	runBpfTest(t, "calico_from_host_ep", false, nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.RetvalStr()).To(Equal("TC_ACT_UNSPEC"), "expected program to return TC_ACT_UNSPEC")
@@ -86,7 +86,7 @@ func TestNATNoBackendFromHEP(t *testing.T) {
 	)
 	Expect(err).NotTo(HaveOccurred())
 
-	runBpfTest(t, "calico_from_host_ep", nil, func(bpfrun bpfProgRunFn) {
+	runBpfTest(t, "calico_from_host_ep", false, nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.RetvalStr()).To(Equal("TC_ACT_UNSPEC"), "expected program to return TC_ACT_UNSPEC")
