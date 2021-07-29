@@ -182,7 +182,7 @@ outter:
 	Expect(err).NotTo(HaveOccurred())
 	defer os.RemoveAll(bpfFsDir)
 
-	obj := "../../bpf-gpl/bin/xdp_debug.o"
+	obj := "../../bpf-gpl/bin/xdp_debug"
 	progLog := ""
 	if !forXDP {
 		obj = "../../bpf-gpl/bin/test_"
@@ -411,6 +411,8 @@ func bpftoolProgLoadAll(fname, bpfFsDir string, polProg bool, forXDP bool, maps 
 	if err != nil {
 		return errors.Wrap(err, "failed to update jump map (epilogue program)")
 	}
+
+	// There is no icmp program in the XDP obj, so we must skip it
 	if !forXDP {
 		_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "2", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "1_2"))
 		if err != nil {

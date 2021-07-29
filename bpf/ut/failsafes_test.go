@@ -233,53 +233,6 @@ func TestFailsafes(t *testing.T) {
 	}
 }
 
-/*
-func TestXDPFailsafes(t *testing.T) {
-	RegisterTestingT(t)
-
-	defer resetBPFMaps()
-
-	hostIP = dstIP // set host IP to the default dest
-	hostCIDR := ip.CIDRFromNetIP(hostIP).(ip.V4CIDR)
-
-	// Setup routing so that failsafe check knows it is localhost
-	rtKey := routes.NewKey(hostCIDR).AsBytes()
-	rtVal := routes.NewValueWithIfIndex(routes.FlagsLocalHost, 1).AsBytes()
-	err := rtMap.Update(rtKey, rtVal)
-	Expect(err).NotTo(HaveOccurred())
-
-	// Set up failsafe to accept incoming connections from srcIP (1.1.1.1/16)
-	err = fsafeMap.Update(
-		failsafes.MakeKey(17, 5678, false, srcIP.String(), 16).ToSlice(),
-		failsafes.Value(),
-	)
-	Expect(err).NotTo(HaveOccurred())
-
-	// Set up failsafe to accept outgoing connections to 3.3.3.3/16
-	err = fsafeMap.Update(
-		failsafes.MakeKey(17, 5678, true, fsafeDstIP.String(), 16).ToSlice(),
-		failsafes.Value(),
-	)
-	Expect(err).NotTo(HaveOccurred())
-
-	for _, test := range failsafeTests {
-		_, _, _, _, pktBytes, err := testPacket(nil, test.IPHeaderIPv4, test.IPHeaderUDP, nil)
-		Expect(err).NotTo(HaveOccurred())
-
-		prog := "calico_xdp"
-		result := "XDP_DROP"
-		if test.Allowed {
-			result = "XDP_PASS"
-		}
-
-		runBpfTest(t, prog, true, test.Rules, func(bpfrun bpfProgRunFn) {
-			res, err := bpfrun(pktBytes)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(res.RetvalStr()).To(Equal(result), fmt.Sprintf("expected program to return %s", result))
-		})
-	}
-}
-*/
 type failsafeTest struct {
 	Description  string
 	Rules        *polprog.Rules
