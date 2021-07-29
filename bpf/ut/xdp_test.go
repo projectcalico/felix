@@ -1,5 +1,5 @@
-// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
-//
+// Copyright (c) 2021 Tigera, Inc. All rights reserved.
+
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Copyright (c) 2020  All rights reserved.
-
 package ut_test
 
 import (
-	"os"
-	"testing"
+	"github.com/projectcalico/felix/bpf"
 )
 
-func TestMain(m *testing.M) {
-	initMapsOnce()
-	cleanUpMaps()
-	rc := m.Run()
-	cleanUpMaps()
-	os.Exit(rc)
+func MapForTest(mc *bpf.MapContext) bpf.Map {
+	return mc.NewPinnedMap(bpf.MapParameters{
+		Filename:   "/sys/fs/bpf/cali_xdp_jump",
+		Type:       "prog_array",
+		KeySize:    4,
+		ValueSize:  4,
+		MaxEntries: 8,
+		Name:       "cali_jump",
+	})
 }
