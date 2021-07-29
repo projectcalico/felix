@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ func TestICMPTooBig(t *testing.T) {
 	Expect(err).NotTo(HaveOccurred())
 	udp := l4.(*layers.UDP)
 
-	runBpfUnitTest(t, "icmp_too_big.c", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "icmp_too_big.c", false, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0))
@@ -61,7 +61,7 @@ func TestICMPTooBigIPOptions(t *testing.T) {
 	_, _, _, _, pktBytes, err := testPacket(nil, ipv4, nil, nil)
 	Expect(err).NotTo(HaveOccurred())
 
-	runBpfUnitTest(t, "icmp_too_big.c", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "icmp_too_big.c", false, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.Retval).To(Equal(0xffffffff))

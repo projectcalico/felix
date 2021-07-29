@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2020 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ import (
 func TestIpDecTTL(t *testing.T) {
 	RegisterTestingT(t)
 
-	runBpfUnitTest(t, "ip_dec_ttl.c", func(bpfrun bpfProgRunFn) {
+	runBpfUnitTest(t, "ip_dec_ttl.c", false, func(bpfrun bpfProgRunFn) {
 		ip36 := *ipv4Default
 		ip36.TTL = 36
 		_, _, _, _, pktBytes, err := testPacket(nil, &ip36, nil, nil)
