@@ -134,7 +134,7 @@ func TestCompileTemplateRun(t *testing.T) {
 
 func TestLoadZeroProgram(t *testing.T) {
 	RegisterTestingT(t)
-	fd, err := bpf.LoadBPFProgramFromInsns(nil, "Apache-2.0", false)
+	fd, err := bpf.LoadBPFProgramFromInsns(nil, "Apache-2.0", unix.BPF_PROG_TYPE_SCHED_CLS)
 	if err == nil {
 		_ = fd.Close()
 	}
@@ -240,7 +240,7 @@ outter:
 		pg := polprog.NewBuilder(alloc, ipsMap.MapFD(), stateMap.MapFD(), tcJumpMap.MapFD())
 		insns, err := pg.Instructions(*rules)
 		Expect(err).NotTo(HaveOccurred())
-		polProgFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", false)
+		polProgFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", unix.BPF_PROG_TYPE_SCHED_CLS)
 		Expect(err).NotTo(HaveOccurred())
 		defer func() { _ = polProgFD.Close() }()
 		progFDBytes := make([]byte, 4)
@@ -409,7 +409,7 @@ func bpftoolProgLoadAll(fname, bpfFsDir string, polProg bool, forXDP bool, maps 
 	}
 	_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "1", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "1_1"))
 	if err != nil {
-		return errors.Wrap(err, "failed to update jump map (epilogue program)")
+		return errors.Wrap(err, "failed to update jump map (allowed program)")
 	}
 
 	// There is no icmp program in the XDP obj, so we must skip it
@@ -971,7 +971,7 @@ func TestJumpMap(t *testing.T) {
 	rules := polprog.Rules{}
 	insns, err := pg.Instructions(rules)
 	Expect(err).NotTo(HaveOccurred())
-	progFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", false)
+	progFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", unix.BPF_PROG_TYPE_SCHED_CLS)
 	Expect(err).NotTo(HaveOccurred())
 
 	k := make([]byte, 4)
