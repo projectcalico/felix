@@ -1592,7 +1592,7 @@ func runTest(t *testing.T, tp testPolicy) {
 	}()
 
 	// Give the policy program somewhere to jump to.
-	epiFD := installEpilogueProgram(tcJumpMap)
+	epiFD := installAllowedProgram(tcJumpMap)
 	defer func() {
 		err := epiFD.Close()
 		Expect(err).NotTo(HaveOccurred())
@@ -1613,8 +1613,8 @@ func runTest(t *testing.T, tp testPolicy) {
 	}
 }
 
-// installEpilogueProgram installs a trivial BPF program into the jump table that returns RCEpilogueReached.
-func installEpilogueProgram(jumpMap bpf.Map) bpf.ProgFD {
+// installAllowedProgram installs a trivial BPF program into the jump table that returns RCAllowedReached.
+func installAllowedProgram(jumpMap bpf.Map) bpf.ProgFD {
 	b := asm.NewBlock()
 
 	// Load the RC into the return register.
