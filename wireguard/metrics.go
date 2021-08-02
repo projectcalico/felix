@@ -124,7 +124,6 @@ func MustNewWireguardMetrics() *Metrics {
 func NewWireguardMetrics() (*Metrics, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		logrus.WithError(err).Warn("cannot register wireguard metrics stats")
 		return nil, err
 	}
 	return NewWireguardMetricsWithShims(hostname, netlinkshim.NewRealWireguard, defaultCollectionRatelimit), nil
@@ -149,13 +148,13 @@ func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (ne
 func (collector *Metrics) getDevices() []*wgtypes.Device {
 	wgClient, err := collector.newWireguardClient()
 	if err != nil {
-		collector.logCtx.WithError(err).Warn("something went wrong initializing wireguard rpc client")
+		collector.logCtx.WithError(err).Debug("something went wrong initializing wireguard rpc client")
 		return nil
 	}
 
 	devices, err := wgClient.Devices()
 	if err != nil {
-		collector.logCtx.WithError(err).Warn("something went wrong enumerating wireguard devices")
+		collector.logCtx.WithError(err).Debug("something went wrong enumerating wireguard devices")
 		return nil
 	}
 	return devices
