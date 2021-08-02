@@ -78,7 +78,7 @@ func (collector *Metrics) Describe(d chan<- *prometheus.Desc) {
 
 func (collector *Metrics) descsByDevice(d chan<- *prometheus.Desc, device *wgtypes.Device) {
 	if device == nil {
-		collector.logCtx.Debug("BUG: called descsByDevice with nil device")
+		collector.logCtx.Error("BUG: called descsByDevice with nil device")
 		return
 	}
 
@@ -95,7 +95,7 @@ func (collector *Metrics) descsByDevice(d chan<- *prometheus.Desc, device *wgtyp
 
 func (collector *Metrics) descByPeer(d chan<- *prometheus.Desc, peer *wgtypes.Peer) {
 	if peer == nil {
-		collector.logCtx.Debug("BUG: called descByPeer with nil peer")
+		collector.logCtx.Error("BUG: called descByPeer with nil peer")
 		return
 	}
 
@@ -149,13 +149,13 @@ func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (ne
 func (collector *Metrics) getDevices() []*wgtypes.Device {
 	wgClient, err := collector.newWireguardClient()
 	if err != nil {
-		collector.logCtx.WithError(err).Warn("error initializing wireguard client devices")
+		collector.logCtx.WithError(err).Warn("something went wrong initializing wireguard rpc client")
 		return nil
 	}
 
 	devices, err := wgClient.Devices()
 	if err != nil {
-		collector.logCtx.WithError(err).Warn("error enumerating wireguard devices")
+		collector.logCtx.WithError(err).Warn("something went wrong enumerating wireguard devices")
 		return nil
 	}
 	return devices
