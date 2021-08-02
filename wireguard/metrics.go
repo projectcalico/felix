@@ -78,7 +78,7 @@ func (collector *Metrics) Describe(d chan<- *prometheus.Desc) {
 
 func (collector *Metrics) descsByDevice(d chan<- *prometheus.Desc, device *wgtypes.Device) {
 	if device == nil {
-		collector.logCtx.Error("BUG: called descsByDevice with nil device")
+		collector.logCtx.Debug("BUG: called descsByDevice with nil device")
 		return
 	}
 
@@ -95,7 +95,7 @@ func (collector *Metrics) descsByDevice(d chan<- *prometheus.Desc, device *wgtyp
 
 func (collector *Metrics) descByPeer(d chan<- *prometheus.Desc, peer *wgtypes.Peer) {
 	if peer == nil {
-		collector.logCtx.Error("BUG: called descByPeer with nil peer")
+		collector.logCtx.Debug("BUG: called descByPeer with nil peer")
 		return
 	}
 
@@ -124,7 +124,7 @@ func MustNewWireguardMetrics() *Metrics {
 func NewWireguardMetrics() (*Metrics, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		logrus.WithError(err).Error("cannot register wireguard metrics stats")
+		logrus.WithError(err).Warn("cannot register wireguard metrics stats")
 		return nil, err
 	}
 	return NewWireguardMetricsWithShims(hostname, netlinkshim.NewRealWireguard, defaultCollectionRatelimit), nil
@@ -149,13 +149,13 @@ func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (ne
 func (collector *Metrics) getDevices() []*wgtypes.Device {
 	wgClient, err := collector.newWireguardClient()
 	if err != nil {
-		collector.logCtx.WithError(err).Error("error initializing wireguard client devices")
+		collector.logCtx.WithError(err).Warn("error initializing wireguard client devices")
 		return nil
 	}
 
 	devices, err := wgClient.Devices()
 	if err != nil {
-		collector.logCtx.WithError(err).Error("error listing wireguard devices")
+		collector.logCtx.WithError(err).Warn("error enumerating wireguard devices")
 		return nil
 	}
 	return devices
@@ -166,7 +166,7 @@ func (collector *Metrics) refreshStats(m chan<- prometheus.Metric) {
 		collector.logCtx.WithFields(logrus.Fields{
 			"since":              ct.String(),
 			"ratelimit_interval": collector.rateLimitInterval.String(),
-		}).Error("refreshStats disallowed due to rate limit")
+		}).Debug("refreshStats disallowed due to rate limit")
 		return
 	}
 	devices := collector.getDevices()
