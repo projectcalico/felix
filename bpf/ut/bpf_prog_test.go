@@ -258,6 +258,9 @@ outter:
 		insns, err := pg.Instructions(*rules)
 		Expect(err).NotTo(HaveOccurred())
 		polProgFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", unix.BPF_PROG_TYPE_SCHED_CLS)
+		if forXDP {
+			polProgFD, err = bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", unix.BPF_PROG_TYPE_XDP)
+		}
 		Expect(err).NotTo(HaveOccurred())
 		defer func() { _ = polProgFD.Close() }()
 		progFDBytes := make([]byte, 4)

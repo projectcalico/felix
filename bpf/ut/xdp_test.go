@@ -16,10 +16,13 @@ package ut_test
 
 import (
 	"fmt"
+	"net"
 	"testing"
 
 	"github.com/projectcalico/felix/bpf"
 	"github.com/projectcalico/felix/bpf/failsafes"
+	"github.com/projectcalico/felix/bpf/polprog"
+	"github.com/projectcalico/felix/proto"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -32,6 +35,139 @@ const (
 	TOS_SET    = 128
 )
 
+var denyAllRulesXDP = polprog.Rules{
+	ForXDP:           true,
+	ForHostInterface: true,
+	HostNormalTiers: []polprog.Tier{{
+		Policies: []polprog.Policy{{
+			Name: "deny all",
+			Rules: []polprog.Rule{{Rule: &proto.Rule{
+				Action: "Deny",
+			}}},
+		}},
+	}},
+}
+
+var allowAllRulesXDP = polprog.Rules{
+	ForXDP:           true,
+	ForHostInterface: true,
+	HostNormalTiers: []polprog.Tier{{
+		Policies: []polprog.Policy{{
+			Name: "Allow all",
+			Rules: []polprog.Rule{{Rule: &proto.Rule{
+				Action: "allow",
+			}}},
+		}},
+	}},
+}
+
+var unmatchedRuleXDP = polprog.Rules{
+	ForXDP:           true,
+	ForHostInterface: true,
+	HostNormalTiers: []polprog.Tier{{
+		Name:      "dafault",
+		EndAction: "pass",
+		Policies: []polprog.Policy{{
+			Name: "Allow all",
+			Rules: []polprog.Rule{{
+				Rule: &proto.Rule{
+					DstNet: []string{"1.2.3.4/16"},
+					Action: "Allow",
+				}}},
+		}},
+	}}}
+
+type xdpTest struct {
+	Description string
+	Rules       *polprog.Rules
+	IPv4Header  *layers.IPv4
+	NextHeader  gopacket.Layer
+	Drop        bool
+	Metadata    bool
+}
+
+var xdpTestCases = []xdpTest{
+	{
+		Description: "Packets that is not matched at all",
+		Rules:       nil,
+		IPv4Header:  ipv4Default,
+		Drop:        false,
+		Metadata:    false,
+	},
+	{
+		Description: "Match with failsafe, then pass with metadata",
+		Rules:       nil,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     5,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(4, 4, 4, 4),
+			DstIP:   net.IPv4(4, 4, 4, 4),
+		},
+		NextHeader: &layers.UDP{
+			DstPort: 53,
+			SrcPort: 53,
+		},
+		Drop:     false,
+		Metadata: true,
+	},
+	{
+		Description: "Match against a deny policy, then drop packet",
+		Rules:       &denyAllRulesXDP,
+		IPv4Header:  ipv4Default,
+		Drop:        true,
+		Metadata:    false,
+	},
+	{
+		Description: "Match against an allow policy, then pass with metadata",
+		Rules:       &allowAllRulesXDP,
+		IPv4Header:  ipv4Default,
+		Drop:        false,
+		Metadata:    true,
+	},
+	{
+		Description: "Unmatched packet against failsafe and a policy",
+		Rules:       &unmatchedRuleXDP,
+		IPv4Header:  ipv4Default,
+		Drop:        false,
+		Metadata:    false,
+	},
+}
+
+func TestXDPPrograms(t *testing.T) {
+	RegisterTestingT(t)
+
+	defer resetBPFMaps()
+	err := fsafeMap.Update(
+		failsafes.MakeKey(17, 53, false, "4.4.4.4", 16).ToSlice(),
+		failsafes.Value(),
+	)
+	Expect(err).NotTo(HaveOccurred())
+
+	for _, tc := range xdpTestCases {
+		runBpfTest(t, "calico_entrypoint_xdp", true, tc.Rules, func(bpfrun bpfProgRunFn) {
+			_, _, _, _, pktBytes, err := testPacket(nil, tc.IPv4Header, tc.NextHeader, nil)
+			Expect(err).NotTo(HaveOccurred())
+			res, err := bpfrun(pktBytes)
+			Expect(err).NotTo(HaveOccurred())
+			result := "XDP_PASS"
+			if tc.Drop {
+				result = "XDP_DROP"
+			}
+			Expect(res.RetvalStrXDP()).To(Equal(result), fmt.Sprintf("expected the program to return %s", result))
+			pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
+			fmt.Printf("pktR = %+v\n", pktR)
+			Expect(res.dataOut).To(HaveLen(len(pktBytes)))
+			if tc.Metadata {
+				Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_SET)))
+			} else {
+				Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_NOTSET)))
+			}
+		})
+	}
+}
+
 func MapForTest(mc *bpf.MapContext) bpf.Map {
 	return mc.NewPinnedMap(bpf.MapParameters{
 		Filename:   "/sys/fs/bpf/cali_jump_xdp",
@@ -40,54 +176,5 @@ func MapForTest(mc *bpf.MapContext) bpf.Map {
 		ValueSize:  4,
 		MaxEntries: 8,
 		Name:       "cali_jump",
-	})
-}
-
-// Test case where the packet is not matched
-func TestXDPNoMatch(t *testing.T) {
-	RegisterTestingT(t)
-
-	resetBPFMaps()
-	iphdr := *ipv4Default
-	iphdr.TOS = 0
-	_, _, _, _, pktBytes, err := testPacket(nil, &iphdr, nil, nil)
-	Expect(err).NotTo(HaveOccurred())
-
-	runBpfTest(t, "calico_entrypoint_xdp", true, nil, func(bpfrun bpfProgRunFn) {
-		res, err := bpfrun(pktBytes)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.RetvalStrXDP()).To(Equal("XDP_PASS"), "expected program to return  XDP_PASS")
-
-		Expect(res.dataOut).To(HaveLen(len(pktBytes)))
-
-		pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
-		fmt.Printf("pktR = %+v\n", pktR)
-
-		Expect(res.dataOut).To(Equal(pktBytes))
-		Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_NOTSET)))
-	})
-}
-
-func TestXDPFailSafe(t *testing.T) {
-	RegisterTestingT(t)
-
-	iphdr := *ipv4Default
-	iphdr.TOS = 0
-	_, _, _, _, pktBytes, err := testPacket(nil, &iphdr, nil, nil)
-	Expect(err).NotTo(HaveOccurred())
-
-	defer resetBPFMaps()
-	err = fsafeMap.Update(
-		failsafes.MakeKey(17, 5678, false, srcIP.String(), 16).ToSlice(),
-		failsafes.Value(),
-	)
-	Expect(err).NotTo(HaveOccurred())
-
-	runBpfTest(t, "calico_entrypoint_xdp", true, nil, func(bpfrun bpfProgRunFn) {
-		res, err := bpfrun(pktBytes)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(res.RetvalStrXDP()).To(Equal("XDP_PASS"), "expected program to return  XDP_PASS")
-		Expect(res.dataOut).To(HaveLen(len(pktBytes)))
-		Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_SET)))
 	})
 }
