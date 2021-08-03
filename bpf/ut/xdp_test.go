@@ -26,6 +26,12 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+const (
+	TOS_BYTE   = 15
+	TOS_NOTSET = 0
+	TOS_SET    = 128
+)
+
 func MapForTest(mc *bpf.MapContext) bpf.Map {
 	return mc.NewPinnedMap(bpf.MapParameters{
 		Filename:   "/sys/fs/bpf/cali_jump_xdp",
@@ -37,7 +43,8 @@ func MapForTest(mc *bpf.MapContext) bpf.Map {
 	})
 }
 
-func TestXDPNoFailsafe(t *testing.T) {
+// Test case where the packet is not matched
+func TestXDPNoMatch(t *testing.T) {
 	RegisterTestingT(t)
 
 	resetBPFMaps()
@@ -57,7 +64,7 @@ func TestXDPNoFailsafe(t *testing.T) {
 		fmt.Printf("pktR = %+v\n", pktR)
 
 		Expect(res.dataOut).To(Equal(pktBytes))
-		Expect(res.dataOut[15]).To(Equal(uint8(0)))
+		Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_NOTSET)))
 	})
 }
 
@@ -74,12 +81,13 @@ func TestXDPFailSafe(t *testing.T) {
 		failsafes.MakeKey(17, 5678, false, srcIP.String(), 16).ToSlice(),
 		failsafes.Value(),
 	)
+	Expect(err).NotTo(HaveOccurred())
 
 	runBpfTest(t, "calico_entrypoint_xdp", true, nil, func(bpfrun bpfProgRunFn) {
 		res, err := bpfrun(pktBytes)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(res.RetvalStrXDP()).To(Equal("XDP_PASS"), "expected program to return  XDP_PASS")
 		Expect(res.dataOut).To(HaveLen(len(pktBytes)))
-		Expect(res.dataOut[15]).To(Equal(uint8(128)))
+		Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_SET)))
 	})
 }

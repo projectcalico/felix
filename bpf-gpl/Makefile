@@ -97,7 +97,6 @@ xdp%.ll: xdp.c xdp.d calculate-flags
 test_xdp%.ll: xdp.c xdp.d calculate-flags
 	$(COMPILE)
 
-
 LINK=$(LD) -march=bpf -filetype=obj -o $@ $<
 bin/to%.o: to%.ll | bin
 	$(LINK)
