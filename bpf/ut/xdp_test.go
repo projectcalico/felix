@@ -128,6 +128,20 @@ var xdpTestCases = []xdpTest{
 		Metadata:    false,
 	},
 	{
+		Description: "Deny all rule, packet must drop",
+		Rules:       &denyAllRulesXDP,
+		IPv4Header:  ipv4Default,
+		Drop:        true,
+		Metadata:    false,
+	},
+	{
+		Description: "Allow all rule, packet must pass with metada",
+		Rules:       &allowAllRulesXDP,
+		IPv4Header:  ipv4Default,
+		Drop:        false,
+		Metadata:    true,
+	},
+	{
 		Description: "Match with failsafe, then pass with metadata",
 		Rules:       nil,
 		IPv4Header: &layers.IPv4{
