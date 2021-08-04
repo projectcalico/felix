@@ -102,6 +102,7 @@ type xdpTest struct {
 	Metadata    bool
 }
 
+// TODO: Add some test cases to match destination IP:Port
 var xdpTestCases = []xdpTest{
 	{
 		Description: "1 - A malformed packet, must drop",
@@ -122,7 +123,7 @@ var xdpTestCases = []xdpTest{
 		Metadata: false,
 	},
 	{
-		Description: "2 - Packets that is not matched at all",
+		Description: "2 - Packets not matched, must pass without metadata",
 		Rules:       nil,
 		IPv4Header:  ipv4Default,
 		Drop:        false,
@@ -143,7 +144,7 @@ var xdpTestCases = []xdpTest{
 		Metadata:    true,
 	},
 	{
-		Description: "5 - Match with failsafe, then pass with metadata",
+		Description: "5 - Match with failsafe, must pass with metadata",
 		Rules:       nil,
 		IPv4Header: &layers.IPv4{
 			Version: 4,
@@ -171,7 +172,7 @@ var xdpTestCases = []xdpTest{
 			SrcIP:   net.IPv4(9, 8, 7, 6),
 			DstIP:   net.IPv4(10, 0, 0, 10),
 		},
-		NextHeader: &layers.UDP{
+		NextHeader: &layers.TCP{
 			DstPort: 80,
 			SrcPort: 55555,
 		},
@@ -179,7 +180,7 @@ var xdpTestCases = []xdpTest{
 		Metadata: false,
 	},
 	{
-		Description: "7 - Match against a policy, must pass with metadata",
+		Description: "7 - Match against an allow policy, must pass with metadata",
 		Rules:       &oneXDPRule,
 		IPv4Header: &layers.IPv4{
 			Version: 4,
@@ -207,7 +208,7 @@ var xdpTestCases = []xdpTest{
 			SrcIP:   net.IPv4(8, 8, 8, 8),
 			DstIP:   net.IPv4(9, 9, 9, 9),
 		},
-		NextHeader: &layers.TCP{
+		NextHeader: &layers.UDP{
 			DstPort: 8080,
 			SrcPort: 54321,
 		},
@@ -239,14 +240,14 @@ func TestXDPPrograms(t *testing.T) {
 			pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
 			fmt.Printf("pktR = %+v\n", pktR)
 			Expect(res.RetvalStrXDP()).To(Equal(result), fmt.Sprintf("expected the program to return %s", result))
-			pktR = gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
-			fmt.Printf("pktR = %+v\n", pktR)
 			Expect(res.dataOut).To(HaveLen(len(pktBytes)))
 			if tc.Metadata {
 				Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_SET)))
+				res.dataOut[TOS_BYTE] = TOS_NOTSET
 			} else {
 				Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_NOTSET)))
 			}
+			Expect(res.dataOut).To(Equal(pktBytes))
 		})
 	}
 }
