@@ -76,16 +76,17 @@ var oneXDPRule = polprog.Rules{
 	ForXDP:           true,
 	ForHostInterface: true,
 	HostNormalTiers: []polprog.Tier{{
+		EndAction: "pass",
 		Policies: []polprog.Policy{{
 			Name: "Allow some",
 			Rules: []polprog.Rule{
 				{
 					Rule: &proto.Rule{
-						DstNet: []string{"1.2.3.4/16"},
+						SrcNet: []string{"3.3.0.0/16"},
 						Action: "Allow",
 					}}, {
 					Rule: &proto.Rule{
-						DstNet: []string{"10.0.0.0/24"},
+						SrcNet: []string{"9.8.7.0/24"},
 						Action: "Deny",
 					}},
 			}}},
@@ -103,7 +104,7 @@ type xdpTest struct {
 
 var xdpTestCases = []xdpTest{
 	{
-		Description: "A malformed packet, must drop",
+		Description: "1 - A malformed packet, must drop",
 		Rules:       &allowAllRulesXDP,
 		IPv4Header: &layers.IPv4{
 			Version: 4,
@@ -121,28 +122,28 @@ var xdpTestCases = []xdpTest{
 		Metadata: false,
 	},
 	{
-		Description: "Packets that is not matched at all",
+		Description: "2 - Packets that is not matched at all",
 		Rules:       nil,
 		IPv4Header:  ipv4Default,
 		Drop:        false,
 		Metadata:    false,
 	},
 	{
-		Description: "Deny all rule, packet must drop",
+		Description: "3 - Deny all rule, packet must drop",
 		Rules:       &denyAllRulesXDP,
 		IPv4Header:  ipv4Default,
 		Drop:        true,
 		Metadata:    false,
 	},
 	{
-		Description: "Allow all rule, packet must pass with metada",
+		Description: "4 - Allow all rule, packet must pass with metada",
 		Rules:       &allowAllRulesXDP,
 		IPv4Header:  ipv4Default,
 		Drop:        false,
 		Metadata:    true,
 	},
 	{
-		Description: "Match with failsafe, then pass with metadata",
+		Description: "5 - Match with failsafe, then pass with metadata",
 		Rules:       nil,
 		IPv4Header: &layers.IPv4{
 			Version: 4,
@@ -160,7 +161,7 @@ var xdpTestCases = []xdpTest{
 		Metadata: true,
 	},
 	{
-		Description: "Match against a deny policy, must drop",
+		Description: "6 - Match against a deny policy, must drop",
 		Rules:       &oneXDPRule,
 		IPv4Header: &layers.IPv4{
 			Version: 4,
@@ -178,7 +179,7 @@ var xdpTestCases = []xdpTest{
 		Metadata: false,
 	},
 	{
-		Description: "Match against a policy, must pass with metadata",
+		Description: "7 - Match against a policy, must pass with metadata",
 		Rules:       &oneXDPRule,
 		IPv4Header: &layers.IPv4{
 			Version: 4,
@@ -196,7 +197,7 @@ var xdpTestCases = []xdpTest{
 		Metadata: true,
 	},
 	{
-		Description: "Unmatched packet against failsafe and a policy",
+		Description: " 8 - Unmatched packet against failsafe and a policy",
 		Rules:       &oneXDPRule,
 		IPv4Header: &layers.IPv4{
 			Version: 4,
