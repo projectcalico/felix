@@ -1,0 +1,251 @@
+// Copyright (c) 2019-2021 Tigera, Inc. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package ut_test
+
+import (
+	"fmt"
+	"net"
+	"testing"
+
+	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/failsafes"
+	"github.com/projectcalico/felix/bpf/polprog"
+	"github.com/projectcalico/felix/proto"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	. "github.com/onsi/gomega"
+)
+
+func MapForTest(mc *bpf.MapContext) bpf.Map {
+	return mc.NewPinnedMap(bpf.MapParameters{
+		Filename:   "/sys/fs/bpf/cali_jump_xdp",
+		Type:       "prog_array",
+		KeySize:    4,
+		ValueSize:  4,
+		MaxEntries: 8,
+		Name:       "cali_jump",
+	})
+}
+
+const (
+	TOS_BYTE   = 15
+	TOS_NOTSET = 0
+	TOS_SET    = 128
+)
+
+var denyAllRulesXDP = polprog.Rules{
+	ForXDP:           true,
+	ForHostInterface: true,
+	HostNormalTiers: []polprog.Tier{{
+		Policies: []polprog.Policy{{
+			Name: "deny all",
+			Rules: []polprog.Rule{{Rule: &proto.Rule{
+				Action: "Deny",
+			}}},
+		}},
+	}},
+}
+
+var allowAllRulesXDP = polprog.Rules{
+	ForXDP:           true,
+	ForHostInterface: true,
+	HostNormalTiers: []polprog.Tier{{
+		Policies: []polprog.Policy{{
+			Name: "Allow all",
+			Rules: []polprog.Rule{{Rule: &proto.Rule{
+				Action: "allow",
+			}}},
+		}},
+	}},
+}
+
+var oneXDPRule = polprog.Rules{
+	ForXDP:           true,
+	ForHostInterface: true,
+	HostNormalTiers: []polprog.Tier{{
+		Policies: []polprog.Policy{{
+			Name: "Allow some",
+			Rules: []polprog.Rule{
+				{
+					Rule: &proto.Rule{
+						DstNet: []string{"1.2.3.4/16"},
+						Action: "Allow",
+					}}, {
+					Rule: &proto.Rule{
+						DstNet: []string{"10.0.0.0/24"},
+						Action: "Deny",
+					}},
+			}}},
+	}},
+}
+
+type xdpTest struct {
+	Description string
+	Rules       *polprog.Rules
+	IPv4Header  *layers.IPv4
+	NextHeader  gopacket.Layer
+	Drop        bool
+	Metadata    bool
+}
+
+var xdpTestCases = []xdpTest{
+	{
+		Description: "A malformed packet, must drop",
+		Rules:       &allowAllRulesXDP,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     4,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(4, 4, 4, 4),
+			DstIP:   net.IPv4(1, 1, 1, 1),
+		},
+		NextHeader: &layers.UDP{
+			DstPort: 53,
+			SrcPort: 54321,
+		},
+		Drop:     true,
+		Metadata: false,
+	},
+	{
+		Description: "Packets that is not matched at all",
+		Rules:       nil,
+		IPv4Header:  ipv4Default,
+		Drop:        false,
+		Metadata:    false,
+	},
+	{
+		Description: "Deny all rule, packet must drop",
+		Rules:       &denyAllRulesXDP,
+		IPv4Header:  ipv4Default,
+		Drop:        true,
+		Metadata:    false,
+	},
+	{
+		Description: "Allow all rule, packet must pass with metada",
+		Rules:       &allowAllRulesXDP,
+		IPv4Header:  ipv4Default,
+		Drop:        false,
+		Metadata:    true,
+	},
+	{
+		Description: "Match with failsafe, then pass with metadata",
+		Rules:       nil,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     5,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(4, 4, 4, 4),
+			DstIP:   net.IPv4(1, 1, 1, 1),
+		},
+		NextHeader: &layers.UDP{
+			DstPort: 53,
+			SrcPort: 54321,
+		},
+		Drop:     false,
+		Metadata: true,
+	},
+	{
+		Description: "Match against a deny policy, must drop",
+		Rules:       &oneXDPRule,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     5,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(9, 8, 7, 6),
+			DstIP:   net.IPv4(10, 0, 0, 10),
+		},
+		NextHeader: &layers.UDP{
+			DstPort: 80,
+			SrcPort: 55555,
+		},
+		Drop:     true,
+		Metadata: false,
+	},
+	{
+		Description: "Match against a policy, must pass with metadata",
+		Rules:       &oneXDPRule,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     5,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(3, 3, 3, 3),
+			DstIP:   net.IPv4(1, 2, 3, 4),
+		},
+		NextHeader: &layers.TCP{
+			DstPort: 80,
+			SrcPort: 55555,
+		},
+		Drop:     false,
+		Metadata: true,
+	},
+	{
+		Description: "Unmatched packet against failsafe and a policy",
+		Rules:       &oneXDPRule,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     5,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(8, 8, 8, 8),
+			DstIP:   net.IPv4(9, 9, 9, 9),
+		},
+		NextHeader: &layers.TCP{
+			DstPort: 8080,
+			SrcPort: 54321,
+		},
+		Drop:     false,
+		Metadata: false,
+	},
+}
+
+func TestXDPPrograms(t *testing.T) {
+	RegisterTestingT(t)
+
+	defer resetBPFMaps()
+	err := fsafeMap.Update(
+		failsafes.MakeKey(17, 53, false, "4.4.4.4", 16).ToSlice(),
+		failsafes.Value(),
+	)
+	Expect(err).NotTo(HaveOccurred())
+
+	for _, tc := range xdpTestCases {
+		runBpfTest(t, "calico_entrypoint_xdp", true, tc.Rules, func(bpfrun bpfProgRunFn) {
+			_, _, _, _, pktBytes, err := testPacket(nil, tc.IPv4Header, tc.NextHeader, nil)
+			Expect(err).NotTo(HaveOccurred())
+			res, err := bpfrun(pktBytes)
+			Expect(err).NotTo(HaveOccurred())
+			result := "XDP_PASS"
+			if tc.Drop {
+				result = "XDP_DROP"
+			}
+			pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
+			fmt.Printf("pktR = %+v\n", pktR)
+			Expect(res.RetvalStrXDP()).To(Equal(result), fmt.Sprintf("expected the program to return %s", result))
+			pktR = gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
+			fmt.Printf("pktR = %+v\n", pktR)
+			Expect(res.dataOut).To(HaveLen(len(pktBytes)))
+			if tc.Metadata {
+				Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_SET)))
+			} else {
+				Expect(res.dataOut[TOS_BYTE]).To(Equal(uint8(TOS_NOTSET)))
+			}
+		})
+	}
+}
