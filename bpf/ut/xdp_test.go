@@ -29,6 +29,17 @@ import (
 	. "github.com/onsi/gomega"
 )
 
+func MapForTest(mc *bpf.MapContext) bpf.Map {
+	return mc.NewPinnedMap(bpf.MapParameters{
+		Filename:   "/sys/fs/bpf/cali_jump_xdp",
+		Type:       "prog_array",
+		KeySize:    4,
+		ValueSize:  4,
+		MaxEntries: 8,
+		Name:       "cali_jump",
+	})
+}
+
 const (
 	TOS_BYTE   = 15
 	TOS_NOTSET = 0
@@ -61,21 +72,25 @@ var allowAllRulesXDP = polprog.Rules{
 	}},
 }
 
-var unmatchedRuleXDP = polprog.Rules{
+var oneXDPRule = polprog.Rules{
 	ForXDP:           true,
 	ForHostInterface: true,
 	HostNormalTiers: []polprog.Tier{{
-		Name:      "dafault",
-		EndAction: "pass",
 		Policies: []polprog.Policy{{
-			Name: "Allow all",
-			Rules: []polprog.Rule{{
-				Rule: &proto.Rule{
-					DstNet: []string{"1.2.3.4/16"},
-					Action: "Allow",
-				}}},
-		}},
-	}}}
+			Name: "Allow some",
+			Rules: []polprog.Rule{
+				{
+					Rule: &proto.Rule{
+						DstNet: []string{"1.2.3.4/16"},
+						Action: "Allow",
+					}}, {
+					Rule: &proto.Rule{
+						DstNet: []string{"10.0.0.0/24"},
+						Action: "Deny",
+					}},
+			}}},
+	}},
+}
 
 type xdpTest struct {
 	Description string
@@ -87,6 +102,24 @@ type xdpTest struct {
 }
 
 var xdpTestCases = []xdpTest{
+	{
+		Description: "A malformed packet, must drop",
+		Rules:       &allowAllRulesXDP,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     4,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(4, 4, 4, 4),
+			DstIP:   net.IPv4(1, 1, 1, 1),
+		},
+		NextHeader: &layers.UDP{
+			DstPort: 53,
+			SrcPort: 54321,
+		},
+		Drop:     true,
+		Metadata: false,
+	},
 	{
 		Description: "Packets that is not matched at all",
 		Rules:       nil,
@@ -103,35 +136,68 @@ var xdpTestCases = []xdpTest{
 			TTL:     64,
 			Flags:   layers.IPv4DontFragment,
 			SrcIP:   net.IPv4(4, 4, 4, 4),
-			DstIP:   net.IPv4(4, 4, 4, 4),
+			DstIP:   net.IPv4(1, 1, 1, 1),
 		},
 		NextHeader: &layers.UDP{
 			DstPort: 53,
-			SrcPort: 53,
+			SrcPort: 54321,
 		},
 		Drop:     false,
 		Metadata: true,
 	},
 	{
-		Description: "Match against a deny policy, then drop packet",
-		Rules:       &denyAllRulesXDP,
-		IPv4Header:  ipv4Default,
-		Drop:        true,
-		Metadata:    false,
+		Description: "Match against a deny policy, must drop",
+		Rules:       &oneXDPRule,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     5,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(9, 8, 7, 6),
+			DstIP:   net.IPv4(10, 0, 0, 10),
+		},
+		NextHeader: &layers.UDP{
+			DstPort: 80,
+			SrcPort: 55555,
+		},
+		Drop:     true,
+		Metadata: false,
 	},
 	{
-		Description: "Match against an allow policy, then pass with metadata",
-		Rules:       &allowAllRulesXDP,
-		IPv4Header:  ipv4Default,
-		Drop:        false,
-		Metadata:    true,
+		Description: "Match against a policy, must pass with metadata",
+		Rules:       &oneXDPRule,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     5,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(3, 3, 3, 3),
+			DstIP:   net.IPv4(1, 2, 3, 4),
+		},
+		NextHeader: &layers.TCP{
+			DstPort: 80,
+			SrcPort: 55555,
+		},
+		Drop:     false,
+		Metadata: true,
 	},
 	{
 		Description: "Unmatched packet against failsafe and a policy",
-		Rules:       &unmatchedRuleXDP,
-		IPv4Header:  ipv4Default,
-		Drop:        false,
-		Metadata:    false,
+		Rules:       &oneXDPRule,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     5,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(8, 8, 8, 8),
+			DstIP:   net.IPv4(9, 9, 9, 9),
+		},
+		NextHeader: &layers.TCP{
+			DstPort: 8080,
+			SrcPort: 54321,
+		},
+		Drop:     false,
+		Metadata: false,
 	},
 }
 
@@ -155,8 +221,10 @@ func TestXDPPrograms(t *testing.T) {
 			if tc.Drop {
 				result = "XDP_DROP"
 			}
-			Expect(res.RetvalStrXDP()).To(Equal(result), fmt.Sprintf("expected the program to return %s", result))
 			pktR := gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
+			fmt.Printf("pktR = %+v\n", pktR)
+			Expect(res.RetvalStrXDP()).To(Equal(result), fmt.Sprintf("expected the program to return %s", result))
+			pktR = gopacket.NewPacket(res.dataOut, layers.LayerTypeEthernet, gopacket.Default)
 			fmt.Printf("pktR = %+v\n", pktR)
 			Expect(res.dataOut).To(HaveLen(len(pktBytes)))
 			if tc.Metadata {
@@ -166,15 +234,4 @@ func TestXDPPrograms(t *testing.T) {
 			}
 		})
 	}
-}
-
-func MapForTest(mc *bpf.MapContext) bpf.Map {
-	return mc.NewPinnedMap(bpf.MapParameters{
-		Filename:   "/sys/fs/bpf/cali_jump_xdp",
-		Type:       "prog_array",
-		KeySize:    4,
-		ValueSize:  4,
-		MaxEntries: 8,
-		Name:       "cali_jump",
-	})
 }
