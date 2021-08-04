@@ -116,7 +116,7 @@ int calico_xdp_norm_pol_tail(struct xdp_md *xdp)
 __attribute__((section("1/1")))
 int calico_xdp_accepted_entrypoint(struct xdp_md *xdp)
 {
-	CALI_DEBUG("Entring calico_xdp_accepted_entrypoint\n");
+	CALI_DEBUG("Entering calico_xdp_accepted_entrypoint\n");
 	/* Initialise the context, which is stored on the stack, and the state, which
 	 * we use to pass data from one program to the next via tail calls. */
 
