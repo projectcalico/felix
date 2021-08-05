@@ -79,16 +79,20 @@ var oneXDPRule = polprog.Rules{
 		EndAction: "pass",
 		Policies: []polprog.Policy{{
 			Name: "Allow some",
-			Rules: []polprog.Rule{
-				{
-					Rule: &proto.Rule{
-						SrcNet: []string{"3.3.0.0/16"},
-						Action: "Allow",
-					}}, {
-					Rule: &proto.Rule{
-						SrcNet: []string{"9.8.7.0/24"},
-						Action: "Deny",
-					}},
+			Rules: []polprog.Rule{{
+				Rule: &proto.Rule{
+					SrcNet: []string{"9.8.2.1/32"},
+					DstNet: []string{"1.2.8.9/32"},
+					Action: "Deny",
+				}}, {
+				Rule: &proto.Rule{
+					DstNet: []string{"1.2.0.0/16"},
+					Action: "Allow",
+				}}, {
+				Rule: &proto.Rule{
+					SrcNet: []string{"9.8.7.0/24"},
+					Action: "Deny",
+				}},
 			}}},
 	}},
 }
@@ -102,7 +106,6 @@ type xdpTest struct {
 	Metadata    bool
 }
 
-// TODO: Add some test cases to match destination IP:Port
 var xdpTestCases = []xdpTest{
 	{
 		Description: "1 - A malformed packet, must drop",
@@ -180,7 +183,25 @@ var xdpTestCases = []xdpTest{
 		Metadata: false,
 	},
 	{
-		Description: "7 - Match against an allow policy, must pass with metadata",
+		Description: "7 - Match against a deny policy, must drop",
+		Rules:       &oneXDPRule,
+		IPv4Header: &layers.IPv4{
+			Version: 4,
+			IHL:     5,
+			TTL:     64,
+			Flags:   layers.IPv4DontFragment,
+			SrcIP:   net.IPv4(9, 8, 2, 1),
+			DstIP:   net.IPv4(1, 2, 8, 9),
+		},
+		NextHeader: &layers.TCP{
+			DstPort: 80,
+			SrcPort: 55555,
+		},
+		Drop:     true,
+		Metadata: false,
+	},
+	{
+		Description: "8 - Match against an allow policy, must pass with metadata",
 		Rules:       &oneXDPRule,
 		IPv4Header: &layers.IPv4{
 			Version: 4,
@@ -198,7 +219,7 @@ var xdpTestCases = []xdpTest{
 		Metadata: true,
 	},
 	{
-		Description: " 8 - Unmatched packet against failsafe and a policy",
+		Description: "9 - Unmatched packet against failsafe and a policy",
 		Rules:       &oneXDPRule,
 		IPv4Header: &layers.IPv4{
 			Version: 4,

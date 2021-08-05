@@ -76,6 +76,10 @@ static CALI_BPF_INLINE int calico_xdp(struct xdp_md *xdp)
 	}
 
 	tc_state_fill_from_iphdr(&ctx);
+	/* XDP is executed before the network stack, i.e. before any NAT.
+	 * For that, all fields in tc.state related to dst ip are identical.
+	 * So, we fill all the 3 dst ip fields with the original dst ip.*/ 
+	ctx.state->post_nat_ip_dst = ctx.ip_header->daddr;
 
 	switch(tc_state_fill_from_nexthdr(&ctx)) {
 	case PARSING_ERROR:
