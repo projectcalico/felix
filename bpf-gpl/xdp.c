@@ -84,10 +84,18 @@ static CALI_BPF_INLINE int calico_xdp(struct xdp_md *xdp)
 		goto allow;
 	}
 
-	// Allow a packet if it hits an entry in the failsafe map
+	// Allow a packet if it hits an entry in the inbound ports failsafe map
 	if (is_failsafe_in(ctx.state->ip_proto, ctx.state->dport, ctx.state->ip_src)) {
 		CALI_DEBUG("Inbound failsafe port: %d. Skip policy\n", ctx.state->dport);
-		goto allow_with_metadata;
+		ctx.state->pol_rc = CALI_POL_ALLOW;
+		goto allow;
+	}
+
+	// Allow a packet if it hits an entry in the outbound ports failsafe map
+	if (is_failsafe_out(ctx.state->ip_proto, ctx.state->sport, ctx.state->ip_src)) {
+		CALI_DEBUG("Outbound failsafe port: %d. Skip policy\n", ctx.state->sport);
+		ctx.state->pol_rc = CALI_POL_ALLOW;
+		goto allow;
 	}
 
 	// Jump to the policy program
@@ -95,12 +103,6 @@ static CALI_BPF_INLINE int calico_xdp(struct xdp_md *xdp)
 	bpf_tail_call(xdp, &cali_jump, PROG_INDEX_POLICY);
 
 allow:
-	return XDP_PASS;
-
-allow_with_metadata:
-	if (xdp2tc_set_metadata(xdp, CALI_META_ACCEPTED_BY_XDP)) {
-		CALI_DEBUG("Failed to set metadata for TC\n");
-	}
 	return XDP_PASS;
 
 deny:
@@ -121,7 +123,7 @@ int calico_xdp_norm_pol_tail(struct xdp_md *xdp)
 __attribute__((section("1/1")))
 int calico_xdp_accepted_entrypoint(struct xdp_md *xdp)
 {
-	CALI_DEBUG("Entring calico_xdp_accepted_entrypoint\n");
+	CALI_DEBUG("Entering calico_xdp_accepted_entrypoint\n");
 	// Share with TC the packet is already accepted and accept it there too.
 	if (xdp2tc_set_metadata(xdp, CALI_META_ACCEPTED_BY_XDP)) {
 		CALI_DEBUG("Failed to set metadata for TC\n");
