@@ -15,6 +15,9 @@
 package intdataplane
 
 import (
+	"strings"
+
+	"github.com/projectcalico/libcalico-go/lib/set"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/felix/iptables"
@@ -25,11 +28,13 @@ import (
 // policyManager simply renders policy/profile updates into iptables.Chain objects and sends
 // them to the dataplane layer.
 type policyManager struct {
-	rawTable     iptablesTable
-	mangleTable  iptablesTable
-	filterTable  iptablesTable
-	ruleRenderer policyRenderer
-	ipVersion    uint8
+	rawTable       iptablesTable
+	mangleTable    iptablesTable
+	filterTable    iptablesTable
+	ruleRenderer   policyRenderer
+	ipVersion      uint8
+	outboundOnly   bool
+	ipSetsCallback func(neededIPSets set.Set)
 }
 
 type policyRenderer interface {
@@ -47,11 +52,35 @@ func newPolicyManager(rawTable, mangleTable, filterTable iptablesTable, ruleRend
 	}
 }
 
+func newRawEgressPolicyManager(rawTable iptablesTable, ruleRenderer policyRenderer, ipVersion uint8, ipSetsCallback func(neededIPSets set.Set)) *policyManager {
+	return &policyManager{
+		rawTable:       rawTable,
+		mangleTable:    &noopTable{},
+		filterTable:    &noopTable{},
+		ruleRenderer:   ruleRenderer,
+		ipVersion:      ipVersion,
+		outboundOnly:   true,
+		ipSetsCallback: ipSetsCallback,
+	}
+}
+
 func (m *policyManager) OnUpdate(msg interface{}) {
 	switch msg := msg.(type) {
 	case *proto.ActivePolicyUpdate:
 		log.WithField("id", msg.Id).Debug("Updating policy chains")
 		chains := m.ruleRenderer.PolicyToIptablesChains(msg.Id, msg.Policy, m.ipVersion)
+		if m.outboundOnly {
+			neededIPSets := set.New()
+			filteredChains := []*iptables.Chain(nil)
+			for _, chain := range chains {
+				if strings.Contains(chain.Name, string(rules.PolicyOutboundPfx)) {
+					filteredChains = append(filteredChains, chain)
+					neededIPSets.AddAll(chain.IPSetIDs())
+				}
+			}
+			chains = filteredChains
+			m.ipSetsCallback(neededIPSets)
+		}
 		// We can't easily tell whether the policy is in use in a particular table, and, if the policy
 		// type gets changed it may move between tables.  Hence, we put the policy into all tables.
 		// The iptables layer will avoid programming it if it is not actually used.
@@ -88,3 +117,11 @@ func (m *policyManager) CompleteDeferredWork() error {
 	// Nothing to do, we don't defer any work.
 	return nil
 }
+
+// noopTable fulfils the iptablesTable interface but does nothing.
+type noopTable struct{}
+
+func (t *noopTable) UpdateChain(chain *iptables.Chain) {}
+func (t *noopTable) UpdateChains([]*iptables.Chain)    {}
+func (t *noopTable) RemoveChains([]*iptables.Chain)    {}
+func (t *noopTable) RemoveChainByName(name string)     {}
