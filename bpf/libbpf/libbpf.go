@@ -23,6 +23,7 @@ import (
 )
 
 // #cgo CFLAGS: -I../../bpf-gpl/include/libbpf/src
+// #cgo LDFLAGS: -L../../bpf-gpl/include/libbpf/src -lbpf -lelf -lz
 // #include <stdlib.h>
 // #include "libbpf_api.h"
 import "C"
@@ -69,15 +70,15 @@ func (o *Obj) AttachKprobe(progName, fn string) (*Link, error) {
 }
 
 func (o *Obj) AttachClassifier(secName, ifName, hook string) error {
-	isIngress := false
+	isIngress := 0
 	cSecName := C.CString(secName)
 	cIfName := C.CString(ifName)
 	defer C.free(unsafe.Pointer(cSecName))
 	defer C.free(unsafe.Pointer(cIfName))
 	if hook == "ingress" {
-		isIngress = true
+		isIngress = 1
 	}
-	err := C.bpf_tc_program_attach(o.obj, cSecName, cIfName, isIngress)
+	err := C.bpf_tc_program_attach(o.obj, cSecName, cIfName, C.int(isIngress))
 	if err > 0 {
 		return fmt.Errorf("Error attaching tc program")
 	}

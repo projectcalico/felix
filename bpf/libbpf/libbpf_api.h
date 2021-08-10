@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include <libbpf.h>
+#include "libbpf.h"
 #include <linux/limits.h>
 #include <net/if.h>
 
@@ -98,7 +98,7 @@ int bpf_link_destroy(struct bpf_link *link) {
 	return bpf_link__destroy(link);
 }
 
-int bpf_tc_program_attach (struct bpf_object *obj, char *secName, char *ifName, bool isIngress) {
+int bpf_tc_program_attach (struct bpf_object *obj, char *secName, char *ifName, int isIngress) {
 	int ifIndex = if_nametoindex(ifName);
 	int err = 0;
 

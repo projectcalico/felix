@@ -37,6 +37,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/libbpf"
 )
 
 type AttachPoint struct {
