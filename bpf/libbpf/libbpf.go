@@ -68,6 +68,22 @@ func (o *Obj) AttachKprobe(progName, fn string) (*Link, error) {
 	return &Link{link: link.link}, nil
 }
 
+func (o *Obj) AttachClassifier(secName, ifName, hook string) error {
+	isIngress := false
+	cSecName := C.CString(secName)
+	cIfName := C.CString(ifName)
+	defer C.free(unsafe.Pointer(cSecName))
+	defer C.free(unsafe.Pointer(cIfName))
+	if hook == "ingress" {
+		isIngress = true
+	}
+	err := C.bpf_tc_program_attach(o.obj, cSecName, cIfName, isIngress)
+	if err > 0 {
+		return fmt.Errorf("Error attaching tc program")
+	}
+	return nil
+}
+
 func (l *Link) Close() error {
 	if l.link != nil {
 		err := C.bpf_link_destroy(l.link)

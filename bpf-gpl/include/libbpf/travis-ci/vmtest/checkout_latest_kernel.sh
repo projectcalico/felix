@@ -8,12 +8,22 @@ CWD=$(pwd)
 LIBBPF_PATH=$(pwd)
 REPO_PATH=$1
 
-BPF_NEXT_ORIGIN=https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git
-LINUX_SHA=$(cat ${LIBBPF_PATH}/CHECKPOINT-COMMIT)
-SNAPSHOT_URL=https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/snapshot/bpf-next-${LINUX_SHA}.tar.gz
+KERNEL_ORIGIN=${KERNEL_ORIGIN:-https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git}
+KERNEL_BRANCH=${KERNEL_BRANCH:-CHECKPOINT}
+if [[ "${KERNEL_BRANCH}" = 'CHECKPOINT' ]]; then
+  echo "using CHECKPOINT sha1"
+  LINUX_SHA=$(cat ${LIBBPF_PATH}/CHECKPOINT-COMMIT)
+else
+  echo "using ${KERNEL_BRANCH} sha1"
+  LINUX_SHA=$(git ls-remote ${KERNEL_ORIGIN} ${KERNEL_BRANCH} | awk '{print $1}')
+fi
+SNAPSHOT_URL=${KERNEL_ORIGIN}/snapshot/bpf-next-${LINUX_SHA}.tar.gz
 
 echo REPO_PATH = ${REPO_PATH}
+
+echo KERNEL_ORIGIN = ${KERNEL_ORIGIN}
 echo LINUX_SHA = ${LINUX_SHA}
+echo SNAPSHOT_URL = ${SNAPSHOT_URL}
 
 if [ ! -d "${REPO_PATH}" ]; then
 	echo
@@ -22,14 +32,14 @@ if [ ! -d "${REPO_PATH}" ]; then
 	mkdir -p $(dirname "${REPO_PATH}")
 	cd $(dirname "${REPO_PATH}")
 	# attempt to fetch desired bpf-next repo snapshot
-	if wget ${SNAPSHOT_URL} && tar xf bpf-next-${LINUX_SHA}.tar.gz ; then
+	if wget -nv ${SNAPSHOT_URL} && tar xf bpf-next-${LINUX_SHA}.tar.gz --totals ; then
 		mv bpf-next-${LINUX_SHA} $(basename ${REPO_PATH})
 	else
 		# but fallback to git fetch approach if that fails
 		mkdir -p $(basename ${REPO_PATH})
 		cd $(basename ${REPO_PATH})
 		git init
-		git remote add bpf-next ${BPF_NEXT_ORIGIN}
+		git remote add bpf-next ${KERNEL_ORIGIN}
 		# try shallow clone first
 		git fetch --depth 32 bpf-next
 		# check if desired SHA exists

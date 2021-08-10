@@ -14,6 +14,7 @@
 
 #include <libbpf.h>
 #include <linux/limits.h>
+#include <net/if.h>
 
 #define MAX_ERRNO 4095
 bool IS_ERR(const void *ptr) {
@@ -97,3 +98,25 @@ int bpf_link_destroy(struct bpf_link *link) {
 	return bpf_link__destroy(link);
 }
 
+int bpf_tc_program_attach (struct bpf_object *obj, char *secName, char *ifName, bool isIngress) {
+	int ifIndex = if_nametoindex(ifName);
+	int err = 0;
+
+	DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_EGRESS);
+	DECLARE_LIBBPF_OPTS(bpf_tc_opts, attach);
+
+	if (isIngress) {
+		hook.attach_point = BPF_TC_INGRESS;
+	}
+
+	attach.prog_fd = bpf_program__fd(bpf_object__find_program_by_name(obj, secName));
+	hook.ifindex = ifIndex;
+	err = bpf_tc_hook_create(&hook);
+	if (err) {
+		return -1;
+	}
+	err = bpf_tc_attach(&hook, &attach);
+	if (err) {
+		return -2;
+	}
+}

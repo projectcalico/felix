@@ -49,6 +49,7 @@
 #include "parsing.h"
 #include "failsafe.h"
 #include "metadata.h"
+#include "bpf_helpers.h"
 
 /* calico_tc is the main function used in all of the tc programs.  It is specialised
  * for particular hook at build time based on the CALI_F build flags.
@@ -1097,7 +1098,8 @@ deny:
 
 // Entrypoint with definable name.  It's useful to redefine the name for each entrypoint
 // because the name is exposed by bpftool et al.
-__attribute__((section(XSTR(CALI_ENTRYPOINT_NAME))))
+//__attribute__((section(XSTR(CALI_ENTRYPOINT_NAME))))
+SEC("classifier/"XSTR(CALI_ENTRYPOINT_NAME))
 int tc_calico_entry(struct __sk_buff *skb)
 {
 	return calico_tc(skb);
