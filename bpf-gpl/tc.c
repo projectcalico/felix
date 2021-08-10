@@ -422,7 +422,8 @@ deny:
 	goto finalize;
 }
 
-__attribute__((section("1/1")))
+//__attribute__((section("1/1")))
+SEC("classifier/1/1")
 int calico_tc_skb_accepted_entrypoint(struct __sk_buff *skb)
 {
 	CALI_DEBUG("Entering calico_tc_skb_accepted_entrypoint\n");
@@ -1038,7 +1039,8 @@ deny:
 	}
 }
 
-__attribute__((section("1/2")))
+//__attribute__((section("1/2")))
+SEC("classifier/1/2")
 int calico_tc_skb_send_icmp_replies(struct __sk_buff *skb)
 {
 	__u32 fib_flags = 0;

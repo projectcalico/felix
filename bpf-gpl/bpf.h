@@ -51,7 +51,7 @@ struct bpf_map_def_extended {
 	__u32 key_size;
 	__u32 value_size;
 	__u32 max_entries;
-	__u32 pinning_strategy;
+	__u32 map_flags;
 };
 #endif
 
@@ -323,6 +323,7 @@ struct {                                                                        
         __type(key, key_type);                                                          \
         __type(value, val_type);                                                        \
         __uint(max_entries, size);                                                      \
+	__uint(map_flags, flags);							\
 }map_symbol(name, ver) SEC(".maps");                                                    \
         MAP_LOOKUP_FN(name, ver)                                                        \
         MAP_UPDATE_FN(name, ver)                                                        \
