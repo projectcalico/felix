@@ -23,7 +23,6 @@ import (
 )
 
 // #cgo CFLAGS: -I../../bpf-gpl/include/libbpf/src
-// #cgo LDFLAGS: -L../../bpf-gpl/include/libbpf/src -lbpf -lelf -lz
 // #include <stdlib.h>
 // #include "libbpf_api.h"
 import "C"

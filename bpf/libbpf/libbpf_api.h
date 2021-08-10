@@ -98,6 +98,7 @@ int bpf_link_destroy(struct bpf_link *link) {
 	return bpf_link__destroy(link);
 }
 
+
 int bpf_tc_program_attach (struct bpf_object *obj, char *secName, char *ifName, int isIngress) {
 	int ifIndex = if_nametoindex(ifName);
 	int err = 0;

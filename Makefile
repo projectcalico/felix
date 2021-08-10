@@ -172,7 +172,7 @@ libbpf.a:
 
 ifeq ($(ARCH), amd64)
 CGO_ENABLED=1
-CGO_LDFLAGS="-Lbpf-gpl/include/libbpf/src -lbpf -lelf -lz"
+CGO_LDFLAGS="-L/go/src/github.com/projectcalico/felix/bpf-gpl/include/libbpf/src -lbpf -lelf -lz"
 else
 CGO_ENABLED=0
 CGO_LDFLAGS=""

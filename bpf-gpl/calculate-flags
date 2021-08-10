@@ -121,6 +121,7 @@ fi
 
 args+=("-DCALI_COMPILE_FLAGS=${flags}")
 args+=("-DCALI_ENTRYPOINT_NAME=calico_${from_or_to}_${ep_type}_ep")
+args+=("-D__LIBBPF_LOADER__")
 
 echo "Flags: ${args[*]}" 1>&2
 echo "${args[*]}"
