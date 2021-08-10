@@ -141,6 +141,7 @@ clean:
 	find . -name "*.pyc" -type f -delete
 	$(DOCKER_GO_BUILD) make -C bpf-apache clean
 	$(DOCKER_GO_BUILD) make -C bpf-gpl clean
+	$(DOCKER_GO_BUILD) make -C bpf-gpl/include/libbpf/src clean
 	-docker rmi $(FELIX_IMAGE)-wgtool:latest-amd64
 	-docker rmi $(FELIX_IMAGE)-wgtool:latest
 
@@ -166,15 +167,21 @@ sub-build-%:
 bin/calico-felix: bin/calico-felix-$(ARCH)
 	ln -f bin/calico-felix-$(ARCH) bin/calico-felix
 
+libbpf.a:
+	$(DOCKER_GO_BUILD) sh -c "make -j -C bpf-gpl/include/libbpf/src BUILD_STATIC_ONLY=1"
+
 ifeq ($(ARCH), amd64)
 CGO_ENABLED=1
+CGO_LDFLAGS="-Lbpf-gpl/include/libbpf/src -lbpf -lelf -lz"
 else
 CGO_ENABLED=0
+CGO_LDFLAGS=""
 endif
 
-DOCKER_GO_BUILD_CGO=$(DOCKER_RUN) -e CGO_ENABLED=$(CGO_ENABLED) $(CALICO_BUILD)
+DOCKER_GO_BUILD_CGO=$(DOCKER_RUN) -e CGO_ENABLED=$(CGO_ENABLED) -e CGO_LDFLAGS=$(CGO_LDFLAGS) $(CALICO_BUILD)
+DOCKER_GO_BUILD_CGO_WINDOWS=$(DOCKER_RUN) -e CGO_ENABLED=$(CGO_ENABLED) $(CALICO_BUILD)
 
-bin/calico-felix-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
+bin/calico-felix-$(ARCH): libbpf.a $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	@echo Building felix for $(ARCH) on $(BUILDARCH)
 	mkdir -p bin
 	if [ "$(SEMAPHORE)" != "true" -o ! -e $@ ] ; then \
@@ -182,7 +189,7 @@ bin/calico-felix-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	     sh -c 'go build -v -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/cmd/calico-felix"'; \
 	fi
 
-bin/calico-felix-race-$(ARCH): $(SRC_FILES) $(LOCAL_BUILD_DEP)
+bin/calico-felix-race-$(ARCH): libbpf.a $(SRC_FILES) $(LOCAL_BUILD_DEP)
 	@echo Building felix with race detector enabled for $(ARCH) on $(BUILDARCH)
 	mkdir -p bin
 	if [ "$(SEMAPHORE)" != "true" -o ! -e $@ ] ; then \
