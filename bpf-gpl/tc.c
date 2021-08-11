@@ -422,7 +422,6 @@ deny:
 	goto finalize;
 }
 
-//__attribute__((section("1/1")))
 SEC("classifier/1/1")
 int calico_tc_skb_accepted_entrypoint(struct __sk_buff *skb)
 {
@@ -1039,7 +1038,6 @@ deny:
 	}
 }
 
-//__attribute__((section("1/2")))
 SEC("classifier/1/2")
 int calico_tc_skb_send_icmp_replies(struct __sk_buff *skb)
 {
@@ -1100,7 +1098,6 @@ deny:
 
 // Entrypoint with definable name.  It's useful to redefine the name for each entrypoint
 // because the name is exposed by bpftool et al.
-//__attribute__((section(XSTR(CALI_ENTRYPOINT_NAME))))
 SEC("classifier/"XSTR(CALI_ENTRYPOINT_NAME))
 int tc_calico_entry(struct __sk_buff *skb)
 {
