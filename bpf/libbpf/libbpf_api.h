@@ -15,6 +15,8 @@
 #include "libbpf.h"
 #include <linux/limits.h>
 #include <net/if.h>
+#include <bpf.h>
+//#include <errno.h>
 
 #define MAX_ERRNO 4095
 bool IS_ERR(const void *ptr) {
@@ -133,5 +135,17 @@ int bpf_tc_remove_qdisc (char *ifName) {
         hook.ifindex = ifIndex;
         err = bpf_tc_hook_destroy(&hook);
         return err;
+}
+
+int bpf_tc_update_jump_map(struct bpf_object *obj, char* mapName, char *progName, int progIndex) {
+	int prog_fd = bpf_program__fd(bpf_object__find_program_by_name(obj, progName));
+	if (prog_fd < 0) {
+		return -1;
+	}
+	int map_fd = bpf_object__find_map_fd_by_name(obj, mapName);
+	if (map_fd < 0) {
+		return -1;
+	}
+	return bpf_map_update_elem(map_fd, &progIndex, &prog_fd, 0);
 }
 

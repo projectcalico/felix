@@ -94,11 +94,6 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	_, err = os.Stat(tempBinary)
-	if err != nil {
-		fmt.Println("sridhar stat error ", tempBinary)
-	} else {
-		fmt.Println("sridhar stat no error", tempBinary)
-	}
 	// Using the RLock allows multiple attach calls to proceed in parallel unless
 	// CleanUpJumpMaps() (which takes the writer lock) is running.
 	logCxt.Debug("AttachProgram waiting for lock...")
@@ -115,6 +110,18 @@ func (ap AttachPoint) AttachProgram() error {
 		//fmt.Println("sridhar ", tempBinary)
 		//time.Sleep(100 * time.Second)
 		return err
+	}
+	err = obj.UpdateJumpMap("cali_jump", "calico_tc_norm_pol_tail", 0)
+	if err != nil {
+		fmt.Println("Error updating calico_tc_norm_pol_tail")
+	}
+	err = obj.UpdateJumpMap("cali_jump", "calico_tc_skb_accepted_entrypoint", 1)
+	if err != nil {
+		fmt.Println("Error updating calico_tc_skb_accepted_entrypoint")
+	}
+	err = obj.UpdateJumpMap("cali_jump", "calico_tc_skb_send_icmp_replies", 2)
+	if err != nil {
+		fmt.Println("Error updating calico_tc_skb_send_icmp_replies")
 	}
 	err = obj.AttachClassifier(SectionName(ap.Type, ap.ToOrFrom), ap.Iface, string(ap.Hook))
 	if err != nil {
