@@ -58,15 +58,18 @@ struct bpf_obj_wrapper bpf_obj_open_load(char *filename) {
 		return obj;
 	}
 	bpf_object__for_each_map(map, obj.obj) {
-		len = snprintf(buf, PATH_MAX, "%s/%s", path, bpf_map__name(map));
-		if (len < 0) {
-			obj.obj = NULL;
-			return obj;
-		}
-		obj.errno = bpf_map__set_pin_path(map, buf);
-		if (obj.errno) {
-			obj.obj = NULL;
-			return obj;
+		if (strcmp(bpf_map__name(map), "cali_jump") != 0)
+		{
+			len = snprintf(buf, PATH_MAX, "%s/%s", path, bpf_map__name(map));
+			if (len < 0) {
+				obj.obj = NULL;
+				return obj;
+			}
+			obj.errno = bpf_map__set_pin_path(map, buf);
+			if (obj.errno) {
+				obj.obj = NULL;
+				return obj;
+			}
 		}
 	}
 	obj.errno = bpf_object__load(obj.obj);
