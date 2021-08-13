@@ -96,8 +96,8 @@ func TestPrecompiledBinariesAreLoadable(t *testing.T) {
 								defer deleteLink(veth)
 
 								ap.Iface = vethName
-								//err := tc.EnsureQdisc(ap.Iface)
-								//Expect(err).NotTo(HaveOccurred())
+								err := tc.EnsureQdisc(ap.Iface)
+								Expect(err).NotTo(HaveOccurred())
 								err = ap.AttachProgram()
 								Expect(err).NotTo(HaveOccurred())
 							})

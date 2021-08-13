@@ -112,12 +112,26 @@ int bpf_tc_program_attach (struct bpf_object *obj, char *secName, char *ifName, 
 
 	attach.prog_fd = bpf_program__fd(bpf_object__find_program_by_name(obj, secName));
 	hook.ifindex = ifIndex;
-	err = bpf_tc_hook_create(&hook);
-	if (err) {
-		return -1;
-	}
-	err = bpf_tc_attach(&hook, &attach);
-	if (err) {
-		return -2;
-	}
+	return bpf_tc_attach(&hook, &attach);
 }
+
+int bpf_tc_create_qdisc (char *ifName) {
+	int ifIndex = if_nametoindex(ifName);
+	int err = 0;
+
+	DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_INGRESS);
+	hook.ifindex = ifIndex;
+	err = bpf_tc_hook_create(&hook);
+	return err;
+}
+
+int bpf_tc_remove_qdisc (char *ifName) {
+        int ifIndex = if_nametoindex(ifName);
+        int err = 0;
+
+        DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_EGRESS | BPF_TC_INGRESS);
+        hook.ifindex = ifIndex;
+        err = bpf_tc_hook_destroy(&hook);
+        return err;
+}
+

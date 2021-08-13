@@ -463,11 +463,12 @@ func EnsureQdisc(ifaceName string) error {
 		log.WithField("iface", ifaceName).Debug("Already have a clsact qdisc on this interface")
 		return nil
 	}
-	_, err = ExecTC("qdisc", "add", "dev", ifaceName, "clsact")
+	return libbpf.CreateQDisc(ifaceName)
+	/*_, err = ExecTC("qdisc", "add", "dev", ifaceName, "clsact")
 	if err != nil {
 		return fmt.Errorf("failed to add qdisc to interface '%s': %w", ifaceName, err)
-	}
-	return nil
+	}*/
+	//return nil
 }
 
 func HasQdisc(ifaceName string) (bool, error) {
@@ -490,11 +491,12 @@ func RemoveQdisc(ifaceName string) error {
 	if !hasQdisc {
 		return nil
 	}
-	_, err = ExecTC("qdisc", "del", "dev", ifaceName, "clsact")
+	/*_, err = ExecTC("qdisc", "del", "dev", ifaceName, "clsact")
 	if err != nil {
 		return fmt.Errorf("failed to remove qdisc from interface '%s': %w", ifaceName, err)
-	}
-	return nil
+	}*/
+
+	return libbpf.RemoveQDisc(ifaceName)
 }
 
 func (ap *AttachPoint) ProgramID() (string, error) {

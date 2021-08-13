@@ -77,11 +77,33 @@ func (o *Obj) AttachClassifier(secName, ifName, hook string) error {
 	if hook == "ingress" {
 		isIngress = 1
 	}
+	fmt.Println(ifName)
 	err := C.bpf_tc_program_attach(o.obj, cSecName, cIfName, C.int(isIngress))
-	if err > 0 {
-		return fmt.Errorf("Error attaching tc program")
+	if err != 0 {
+		return fmt.Errorf("Error attaching tc program ", err)
 	}
 	return nil
+}
+
+func CreateQDisc(ifName string) error {
+	cIfName := C.CString(ifName)
+	defer C.free(unsafe.Pointer(cIfName))
+	fmt.Println(ifName)
+	err := C.bpf_tc_create_qdisc(cIfName)
+	if err != 0 {
+		return fmt.Errorf("Error creating qdisc")
+	}
+	return nil
+}
+
+func RemoveQDisc(ifName string) error {
+       cIfName := C.CString(ifName)
+        defer C.free(unsafe.Pointer(cIfName))
+        err := C.bpf_tc_remove_qdisc(cIfName)
+        if err != 0 {
+                return fmt.Errorf("Error removing qdisc")
+        }
+        return nil
 }
 
 func (l *Link) Close() error {

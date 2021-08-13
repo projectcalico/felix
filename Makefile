@@ -328,7 +328,7 @@ ut combined.coverprofile: $(SRC_FILES) build-bpf
 fv/fv.test: $(SRC_FILES) $(FV_SRC_FILES)
 	# We pre-build the FV test binaries so that we can run them
 	# outside a container and allow them to interact with docker.
-	$(DOCKER_GO_BUILD) go test $(BUILD_FLAGS) ./$(shell dirname $@) -c --tags fvtests -o $@
+	$(DOCKER_GO_BUILD_CGO) go test $(BUILD_FLAGS) ./$(shell dirname $@) -c --tags fvtests -o $@
 
 REMOTE_DEPS=fv/infrastructure/crds
 
@@ -477,13 +477,13 @@ bin/iptables-locker: $(LOCAL_BUILD_DEP) go.mod $(shell find iptables -type f -na
 bin/test-workload: $(LOCAL_BUILD_DEP) go.mod fv/cgroup/cgroup.go fv/utils/utils.go fv/connectivity/*.go fv/test-workload/*.go
 	@echo Building test-workload...
 	mkdir -p bin
-	$(DOCKER_GO_BUILD) \
+	$(DOCKER_GO_BUILD_CGO) \
 	    sh -c 'go build -v -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/fv/test-workload"'
 
 bin/test-connection: $(LOCAL_BUILD_DEP) go.mod fv/cgroup/cgroup.go fv/utils/utils.go fv/connectivity/*.go fv/test-connection/*.go
 	@echo Building test-connection...
 	mkdir -p bin
-	$(DOCKER_GO_BUILD) \
+	$(DOCKER_GO_BUILD_CGO) \
 	    sh -c 'go build -v -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/fv/test-connection"'
 
 st:
