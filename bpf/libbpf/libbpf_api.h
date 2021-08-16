@@ -40,14 +40,14 @@ struct bpf_link_wrapper {
 	int errno;
 };
 
-struct bpf_obj_wrapper bpf_obj_open_load(char *filename) {
+struct bpf_obj_wrapper bpf_obj_open_load(char *filename, char *ifaceName) {
 	struct bpf_obj_wrapper obj;
 	obj.obj = bpf_object__open(filename);
 	obj.errno = 0;
 	struct bpf_map *map;
 	int err, len;
 	char buf[PATH_MAX];
-	char path[] = "/sys/fs/bpf/tc/globals/";
+	char path[] = "/sys/fs/bpf/tc/";
 
 	if (obj.obj == NULL) {
 		return obj;
@@ -58,18 +58,23 @@ struct bpf_obj_wrapper bpf_obj_open_load(char *filename) {
 		return obj;
 	}
 	bpf_object__for_each_map(map, obj.obj) {
-		if (strcmp(bpf_map__name(map), "cali_jump") != 0)
-		{
-			len = snprintf(buf, PATH_MAX, "%s/%s", path, bpf_map__name(map));
-			if (len < 0) {
+		if (bpf_map__def(map)->type == BPF_MAP_TYPE_PROG_ARRAY) {
+			if (ifaceName == NULL) {
 				obj.obj = NULL;
 				return obj;
 			}
-			obj.errno = bpf_map__set_pin_path(map, buf);
-			if (obj.errno) {
-				obj.obj = NULL;
-				return obj;
-			}
+			len = snprintf(buf, PATH_MAX, "%s/%s/%s", path, ifaceName, bpf_map__name(map));
+		} else {
+			len = snprintf(buf, PATH_MAX, "%s/%s/%s", path, "globals", bpf_map__name(map));
+		}
+		if (len < 0) {
+			obj.obj = NULL;
+			return obj;
+		}
+		obj.errno = bpf_map__set_pin_path(map, buf);
+		if (obj.errno) {
+			obj.obj = NULL;
+			return obj;
 		}
 	}
 	obj.errno = bpf_object__load(obj.obj);

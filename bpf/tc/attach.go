@@ -105,10 +105,8 @@ func (ap AttachPoint) AttachProgram() error {
 	if err != nil {
 		return err
 	}
-	obj, err := libbpf.OpenObject(tempBinary)
+	obj, err := libbpf.OpenObject(tempBinary, ap.Iface, string(ap.Hook))
 	if err != nil {
-		//fmt.Println("sridhar ", tempBinary)
-		//time.Sleep(100 * time.Second)
 		return err
 	}
 	err = obj.UpdateJumpMap("cali_jump", "calico_tc_norm_pol_tail", 0)
@@ -309,7 +307,7 @@ func (ap AttachPoint) IsAttached() (bool, error) {
 
 // tcDirRegex matches tc's auto-created directory names so we can clean them up when removing maps without accidentally
 // removing other user-created dirs..
-var tcDirRegex = regexp.MustCompile(`[0-9a-f]{40}`)
+var tcDirRegex = regexp.MustCompile(`[0-9a-f]`)
 
 // CleanUpJumpMaps scans for cali_jump maps that are still pinned to the filesystem but no longer referenced by
 // our BPF programs.

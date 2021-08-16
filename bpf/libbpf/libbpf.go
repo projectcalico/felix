@@ -35,11 +35,19 @@ type Link struct {
 	link *C.struct_bpf_link
 }
 
-func OpenObject(filename string) (*Obj, error) {
+func OpenObject(filename, ifaceName, hook string) (*Obj, error) {
 	bpf.IncreaseLockedMemoryQuota()
 	cFilename := C.CString(filename)
+	if hook == "ingress" {
+		ifaceName = ifaceName + "_igr"
+	} else {
+		ifaceName = ifaceName + "_egr"
+	}
+	cIfacename := C.CString(ifaceName)
 	defer C.free(unsafe.Pointer(cFilename))
-	obj := C.bpf_obj_open_load(cFilename)
+	defer C.free(unsafe.Pointer(cIfacename))
+
+	obj := C.bpf_obj_open_load(cFilename, cIfacename)
 	if obj.obj == nil {
 		msg := "error loading program"
 		if obj.errno != 0 {
