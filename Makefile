@@ -173,12 +173,13 @@ libbpf.a:
 ifeq ($(ARCH), amd64)
 CGO_ENABLED=1
 CGO_LDFLAGS="-L/go/src/github.com/projectcalico/felix/bpf-gpl/include/libbpf/src -lbpf -lelf -lz"
+CGO_CFLAGS="-I/go/src/github.com/projectcalico/felix/bpf-gpl/include/libbpf/src"
 else
 CGO_ENABLED=0
 CGO_LDFLAGS=""
 endif
 
-DOCKER_GO_BUILD_CGO=$(DOCKER_RUN) -e CGO_ENABLED=$(CGO_ENABLED) -e CGO_LDFLAGS=$(CGO_LDFLAGS) $(CALICO_BUILD)
+DOCKER_GO_BUILD_CGO=$(DOCKER_RUN) -e CGO_ENABLED=$(CGO_ENABLED) -e CGO_LDFLAGS=$(CGO_LDFLAGS) -e CGO_CFLAGS=$(CGO_CFLAGS) $(CALICO_BUILD)
 DOCKER_GO_BUILD_CGO_WINDOWS=$(DOCKER_RUN) -e CGO_ENABLED=$(CGO_ENABLED) $(CALICO_BUILD)
 
 bin/calico-felix-$(ARCH): libbpf.a $(SRC_FILES) $(LOCAL_BUILD_DEP)
@@ -474,16 +475,16 @@ bin/iptables-locker: $(LOCAL_BUILD_DEP) go.mod $(shell find iptables -type f -na
 	$(DOCKER_GO_BUILD) \
 	    sh -c 'go build -v -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/fv/iptables-locker"'
 
-bin/test-workload: $(LOCAL_BUILD_DEP) libbpf.a go.mod fv/cgroup/cgroup.go fv/utils/utils.go fv/connectivity/*.go fv/test-workload/*.go
+bin/test-workload: $(LOCAL_BUILD_DEP) go.mod fv/cgroup/cgroup.go fv/utils/utils.go fv/connectivity/*.go fv/test-workload/*.go
 	@echo Building test-workload...
 	mkdir -p bin
-	$(DOCKER_GO_BUILD_CGO) \
+	$(DOCKER_GO_BUILD) \
 	    sh -c 'go build -v -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/fv/test-workload"'
 
-bin/test-connection: $(LOCAL_BUILD_DEP) libbpf.a go.mod fv/cgroup/cgroup.go fv/utils/utils.go fv/connectivity/*.go fv/test-connection/*.go
+bin/test-connection: $(LOCAL_BUILD_DEP) go.mod fv/cgroup/cgroup.go fv/utils/utils.go fv/connectivity/*.go fv/test-connection/*.go
 	@echo Building test-connection...
 	mkdir -p bin
-	$(DOCKER_GO_BUILD_CGO) \
+	$(DOCKER_GO_BUILD) \
 	    sh -c 'go build -v -o $@ -v $(BUILD_FLAGS) $(LDFLAGS) "$(PACKAGE_NAME)/fv/test-connection"'
 
 st:
@@ -652,7 +653,7 @@ bin/bpf_debug.test: $(GENERATED_FILES) $(shell find bpf/ -name '*.go')
 	$(DOCKER_GO_BUILD_CGO) go test $(BUILD_FLAGS) ./bpf/ut -c -gcflags="-N -l" -o $@
 
 .PHONY: ut-bpf
-ut-bpf: bin/bpf_ut.test bin/bpf.test build-bpf
+ut-bpf: libbpf.a bin/bpf_ut.test bin/bpf.test build-bpf
 	$(DOCKER_RUN) \
 		--privileged \
 		-e RUN_AS_ROOT=true \

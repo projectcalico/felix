@@ -125,14 +125,6 @@ func (ap AttachPoint) AttachProgram() error {
 	if err != nil {
 		return err
 	}
-	/*
-		_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
-			"bpf", "da", "obj", tempBinary,
-			"sec", SectionName(ap.Type, ap.ToOrFrom),
-		)
-		if err != nil {
-			return err
-		}*/
 
 	// Success: clean up the old programs.
 	var progErrs []error
@@ -469,11 +461,6 @@ func EnsureQdisc(ifaceName string) error {
 		return nil
 	}
 	return libbpf.CreateQDisc(ifaceName)
-	/*_, err = ExecTC("qdisc", "add", "dev", ifaceName, "clsact")
-	if err != nil {
-		return fmt.Errorf("failed to add qdisc to interface '%s': %w", ifaceName, err)
-	}*/
-	//return nil
 }
 
 func HasQdisc(ifaceName string) (bool, error) {
@@ -496,11 +483,6 @@ func RemoveQdisc(ifaceName string) error {
 	if !hasQdisc {
 		return nil
 	}
-	/*_, err = ExecTC("qdisc", "del", "dev", ifaceName, "clsact")
-	if err != nil {
-		return fmt.Errorf("failed to remove qdisc from interface '%s': %w", ifaceName, err)
-	}*/
-
 	return libbpf.RemoveQDisc(ifaceName)
 }
 

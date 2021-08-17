@@ -22,8 +22,6 @@ import (
 	"github.com/projectcalico/felix/bpf"
 )
 
-// #cgo CFLAGS: -I../../bpf-gpl/include/libbpf/src
-// #include <stdlib.h>
 // #include "libbpf_api.h"
 import "C"
 
