@@ -93,7 +93,6 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	_, err = os.Stat(tempBinary)
 	// Using the RLock allows multiple attach calls to proceed in parallel unless
 	// CleanUpJumpMaps() (which takes the writer lock) is running.
 	logCxt.Debug("AttachProgram waiting for lock...")
@@ -101,10 +100,6 @@ func (ap AttachPoint) AttachProgram() error {
 	defer tcLock.RUnlock()
 	logCxt.Debug("AttachProgram got lock.")
 
-	progsToClean, err := ap.listAttachedPrograms()
-	if err != nil {
-		return err
-	}
 	obj, err := libbpf.OpenObject(tempBinary, ap.Iface, string(ap.Hook))
 	if err != nil {
 		return err
@@ -122,6 +117,10 @@ func (ap AttachPoint) AttachProgram() error {
 		fmt.Println("Error updating calico_tc_skb_send_icmp_replies")
 	}
 	err = obj.AttachClassifier(SectionName(ap.Type, ap.ToOrFrom), ap.Iface, string(ap.Hook))
+	if err != nil {
+		return err
+	}
+	progsToClean, err := ap.listAttachedPrograms()
 	if err != nil {
 		return err
 	}
