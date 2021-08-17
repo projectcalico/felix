@@ -78,8 +78,8 @@ func TestJumpMapCleanup(t *testing.T) {
 
 		t.Log("Cleaning up, should remove the first map.")
 		tc.CleanUpJumpMaps()
-		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps), "unexpected number of jump maps after clean up")
-		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs), "unexpected number of TC dirs after clean up")
+		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps after clean up")
+		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs after clean up")
 
 		// Remove the program.
 		t.Log("Removing all programs and cleaning up, should return to base state.")
