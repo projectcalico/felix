@@ -82,7 +82,6 @@ var _ = describeBPFTests(withTunnel("ipip"), withProto("tcp"), withDSR())
 var _ = describeBPFTests(withTunnel("ipip"), withProto("udp"), withDSR())
 var _ = describeBPFTests(withTunnel("wireguard"), withProto("tcp"))
 var _ = describeBPFTests(withTunnel("wireguard"), withProto("tcp"), withConnTimeLoadBalancingEnabled())
-
 // Run a stripe of tests with BPF logging disabled since the compiler tends to optimise the code differently
 // with debug disabled and that can lead to verifier issues.
 var _ = describeBPFTests(withProto("tcp"),
@@ -562,7 +561,6 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						cc.Expect(Some, w[0], w[1])
 						cc.CheckConnectivity()
 						cc.ResetExpectations()
-
 						By("handling ingress program removal")
 						felixes[0].Exec("tc", "filter", "del", "ingress", "dev", w[0].InterfaceName)
 
@@ -580,7 +578,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						Eventually(func() string {
 							out, _ := felixes[0].ExecOutput("tc", "filter", "show", "ingress", "dev", w[0].InterfaceName)
 							return out
-						}, "5s", "200ms").Should(ContainSubstring("calico_from_workload_ep"))
+						}, "5s", "200ms").Should(ContainSubstring("tc_calico_entry"))
 
 						By("handling egress program removal")
 						felixes[0].Exec("tc", "filter", "del", "egress", "dev", w[0].InterfaceName)
@@ -593,7 +591,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						Eventually(func() string {
 							out, _ := felixes[0].ExecOutput("tc", "filter", "show", "egress", "dev", w[0].InterfaceName)
 							return out
-						}, "5s", "200ms").Should(ContainSubstring("calico_to_workload_ep"))
+						}, "5s", "200ms").Should(ContainSubstring("tc_calico_entry"))
 						cc.CheckConnectivity()
 
 						By("Handling qdisc removal")
@@ -606,11 +604,11 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						Eventually(func() string {
 							out, _ := felixes[0].ExecOutput("tc", "filter", "show", "ingress", "dev", w[0].InterfaceName)
 							return out
-						}, "5s", "200ms").Should(ContainSubstring("calico_from_workload_ep"))
+						}, "5s", "200ms").Should(ContainSubstring("tc_calico_entry"))
 						Eventually(func() string {
 							out, _ := felixes[0].ExecOutput("tc", "filter", "show", "egress", "dev", w[0].InterfaceName)
 							return out
-						}, "5s", "200ms").Should(ContainSubstring("calico_to_workload_ep"))
+						}, "5s", "200ms").Should(ContainSubstring("tc_calico_entry"))
 						cc.CheckConnectivity()
 						cc.ResetExpectations()
 
