@@ -36,7 +36,8 @@ SHARED_OBJDIR := $(OBJDIR)/sharedobjs
 STATIC_OBJDIR := $(OBJDIR)/staticobjs
 OBJS := bpf.o btf.o libbpf.o libbpf_errno.o netlink.o \
 	nlattr.o str_error.o libbpf_probes.o bpf_prog_linfo.o xsk.o \
-	btf_dump.o hashmap.o ringbuf.o
+	btf_dump.o hashmap.o ringbuf.o strset.o linker.o gen_loader.o \
+	relo_core.o
 SHARED_OBJS := $(addprefix $(SHARED_OBJDIR)/,$(OBJS))
 STATIC_OBJS := $(addprefix $(STATIC_OBJDIR)/,$(OBJS))
 
@@ -48,9 +49,9 @@ ifndef BUILD_STATIC_ONLY
 	VERSION_SCRIPT := libbpf.map
 endif
 
-HEADERS := bpf.h libbpf.h btf.h xsk.h libbpf_util.h \
+HEADERS := bpf.h libbpf.h btf.h libbpf_common.h libbpf_legacy.h xsk.h \
 	   bpf_helpers.h bpf_helper_defs.h bpf_tracing.h \
-	   bpf_endian.h bpf_core_read.h libbpf_common.h
+	   bpf_endian.h bpf_core_read.h skel_internal.h
 UAPI_HEADERS := $(addprefix $(TOPDIR)/include/uapi/linux/,\
 			    bpf.h bpf_common.h btf.h)
 
@@ -60,12 +61,19 @@ INSTALL = install
 
 DESTDIR ?=
 
-ifeq ($(shell uname -m),x86_64)
+ifeq ($(filter-out %64 %64be %64eb %64le %64el s390x, $(shell uname -m)),)
 	LIBSUBDIR := lib64
 else
 	LIBSUBDIR := lib
 endif
 
+# By default let the pc file itself use ${prefix} in includedir/libdir so that
+# the prefix can be overridden at runtime (eg: --define-prefix)
+ifndef LIBDIR
+	LIBDIR_PC := $$\{prefix\}/$(LIBSUBDIR)
+else
+	LIBDIR_PC := $(LIBDIR)
+endif
 PREFIX ?= /usr
 LIBDIR ?= $(PREFIX)/$(LIBSUBDIR)
 INCLUDEDIR ?= $(PREFIX)/include
@@ -93,7 +101,7 @@ $(OBJDIR)/libbpf.so.$(LIBBPF_VERSION): $(SHARED_OBJS)
 
 $(OBJDIR)/libbpf.pc:
 	$(Q)sed -e "s|@PREFIX@|$(PREFIX)|" \
-		-e "s|@LIBDIR@|$(LIBDIR)|" \
+		-e "s|@LIBDIR@|$(LIBDIR_PC)|" \
 		-e "s|@VERSION@|$(LIBBPF_VERSION)|" \
 		< libbpf.pc.template > $@
 
@@ -114,7 +122,7 @@ define do_install
 	$(Q)if [ ! -d '$(DESTDIR)$2' ]; then		\
 		$(INSTALL) -d -m 755 '$(DESTDIR)$2';	\
 	fi;
-	$(Q)$(INSTALL) $1 $(if $3,-m $3,) '$(DESTDIR)$2'
+	$(Q)$(INSTALL) $(if $3,-m $3,) $1 '$(DESTDIR)$2'
 endef
 
 # Preserve symlinks at installation.
@@ -123,7 +131,7 @@ define do_s_install
 	$(Q)if [ ! -d '$(DESTDIR)$2' ]; then		\
 		$(INSTALL) -d -m 755 '$(DESTDIR)$2';	\
 	fi;
-	$(Q)cp -fpR $1 '$(DESTDIR)$2'
+	$(Q)cp -fR $1 '$(DESTDIR)$2'
 endef
 
 install: all install_headers install_pkgconfig
