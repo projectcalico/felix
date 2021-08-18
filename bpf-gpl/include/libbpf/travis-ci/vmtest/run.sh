@@ -415,17 +415,18 @@ set -eux
 
 echo 'Running setup commands'
 %s
-%s
-echo $? > /exitstatus
+set +e; %s; exitstatus=\$?; set -e
+echo \$exitstatus > /exitstatus
 chmod 644 /exitstatus" "${setup_envvars}" "${setup_cmd}")
 fi
 
 echo "${setup_script}" | sudo tee "$mnt/etc/rcS.d/S50-run-tests" > /dev/null
 sudo chmod 755 "$mnt/etc/rcS.d/S50-run-tests"
 
+fold_shutdown="$(travis_fold start shutdown)"
 poweroff_script="#!/bin/sh
 
-echo travis_fold:start:shutdown
+echo ${fold_shutdown}
 echo -e '\033[1;33mShutdown\033[0m\n'
 
 poweroff"
@@ -434,11 +435,17 @@ sudo chmod 755 "$mnt/etc/rcS.d/S99-poweroff"
 
 sudo umount "$mnt"
 
-qemu-system-x86_64 -nodefaults -display none -serial mon:stdio \
-	-cpu kvm64 -enable-kvm -smp "$(nproc)" -m 2G \
-	-drive file="$IMG",format=raw,index=1,media=disk,if=virtio,cache=none \
-	-kernel "$vmlinuz" -append "root=/dev/vda rw console=ttyS0,115200$APPEND"
+echo "Starting VM with $(nproc) CPUs..."
 
+if kvm-ok ; then
+  accel="-cpu kvm64 -enable-kvm"
+else
+  accel="-cpu qemu64 -machine accel=tcg"
+fi
+qemu-system-x86_64 -nodefaults -display none -serial mon:stdio \
+  ${accel} -smp "$(nproc)" -m 4G \
+  -drive file="$IMG",format=raw,index=1,media=disk,if=virtio,cache=none \
+  -kernel "$vmlinuz" -append "root=/dev/vda rw console=ttyS0,115200$APPEND"
 sudo mount -o loop "$IMG" "$mnt"
 if exitstatus="$(cat "$mnt/exitstatus" 2>/dev/null)"; then
 	printf '\nTests exit status: %s\n' "$exitstatus" >&2

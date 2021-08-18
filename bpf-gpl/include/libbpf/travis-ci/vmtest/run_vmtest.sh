@@ -4,7 +4,7 @@ set -eu
 
 source $(cd $(dirname $0) && pwd)/helpers.sh
 
-VMTEST_SETUPCMD="PROJECT_NAME=${PROJECT_NAME} ./${PROJECT_NAME}/travis-ci/vmtest/run_selftests.sh"
+VMTEST_SETUPCMD="GITHUB_WORKFLOW=${GITHUB_WORKFLOW:-} PROJECT_NAME=${PROJECT_NAME} ./${PROJECT_NAME}/travis-ci/vmtest/run_selftests.sh"
 
 echo "KERNEL: $KERNEL"
 echo
@@ -14,17 +14,17 @@ ${VMTEST_ROOT}/build_pahole.sh travis-ci/vmtest/pahole
 
 travis_fold start install_clang "Installing Clang/LLVM"
 
-# Install required packages
 wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-echo "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic main" | sudo tee -a /etc/apt/sources.list
+sudo add-apt-repository "deb http://apt.llvm.org/focal/ llvm-toolchain-focal main"
 sudo apt-get update
-sudo apt-get -y install clang-12 lld-12 llvm-12
-sudo apt-get -y install python-docutils # for rst2man
+sudo apt-get install --allow-downgrades -y libc6=2.31-0ubuntu9.2
+sudo aptitude install -y g++ libelf-dev
+sudo aptitude install -y clang-14 lld-14 llvm-14
 
 travis_fold end install_clang
 
 # Build selftests (and latest kernel, if necessary)
-KERNEL="${KERNEL}" ${VMTEST_ROOT}/prepare_selftests.sh travis-ci/vmtest/bpf-next
+${VMTEST_ROOT}/prepare_selftests.sh travis-ci/vmtest/bpf-next
 
 # Escape whitespace characters.
 setup_cmd=$(sed 's/\([[:space:]]\)/\\\1/g' <<< "${VMTEST_SETUPCMD}")
