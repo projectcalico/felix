@@ -27,7 +27,6 @@
 #include "skb.h"
 #include "routes.h"
 #include "nat_types.h"
-#include "parsing.h"
 
 #ifndef CALI_VXLAN_VNI
 #define CALI_VXLAN_VNI 0xca11c0

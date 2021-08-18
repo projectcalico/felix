@@ -23,7 +23,6 @@
 #include "bpf.h"
 #include "icmp.h"
 #include "types.h"
-#include "parsing.h"
 
 // Connection tracking.
 
