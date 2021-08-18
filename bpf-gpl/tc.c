@@ -567,7 +567,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 			 * WARNING: this modifies the ip_header pointer in the main context; need to
 			 * be careful in later code to avoid overwriting that. */
 			l3_csum_off += sizeof(*ctx->ip_header) + sizeof(struct icmphdr);
-			ctx->ip_header = (struct iphdr *)(ICMPHDR(ctx) + 1); /* skip to inner ip */
+			ctx->ip_header = (struct iphdr *)(parsing_icmphdr(ctx) + 1); /* skip to inner ip */
 			if (ctx->ip_header->ihl != 5) {
 				CALI_INFO("ICMP inner IP header has options; unsupported\n");
 				ctx->fwd.reason = CALI_REASON_IP_OPTIONS;
@@ -663,7 +663,7 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 				CALI_DEBUG("Too short for TCP: DROP\n");
 				goto deny;
 			}
-			ct_ctx_nat.tcp = TCPHDR(ctx);
+			ct_ctx_nat.tcp = parsing_tcphdr(ctx);
 		}
 
 		// If we get here, we've passed policy.
@@ -788,10 +788,10 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 
 		switch (ctx->ip_header->protocol) {
 		case IPPROTO_TCP:
-			TCPHDR(ctx)->dest = bpf_htons(state->post_nat_dport);
+			parsing_tcphdr(ctx)->dest = bpf_htons(state->post_nat_dport);
 			break;
 		case IPPROTO_UDP:
-			UDPHDR(ctx)->dest = bpf_htons(state->post_nat_dport);
+			parsing_udphdr(ctx)->dest = bpf_htons(state->post_nat_dport);
 			break;
 		}
 
@@ -871,10 +871,10 @@ static CALI_BPF_INLINE struct fwd calico_tc_skb_accepted(struct cali_tc_ctx *ctx
 
 		switch (ctx->ip_header->protocol) {
 		case IPPROTO_TCP:
-			TCPHDR(ctx)->source = bpf_htons(state->ct_result.nat_port);
+			parsing_tcphdr(ctx)->source = bpf_htons(state->ct_result.nat_port);
 			break;
 		case IPPROTO_UDP:
-			UDPHDR(ctx)->source = bpf_htons(state->ct_result.nat_port);
+			parsing_tcphdr(ctx)->source = bpf_htons(state->ct_result.nat_port);
 			break;
 		}
 
@@ -993,7 +993,7 @@ nat_encap:
 				reason = CALI_REASON_SHORT;
 				goto deny;
 			}
-			__builtin_memcpy(&ETHHDR(ctx)->h_dest, arpv->mac_dst, ETH_ALEN);
+			__builtin_memcpy(&parsing_ethhdr(ctx)->h_dest, arpv->mac_dst, ETH_ALEN);
 			if (state->ct_result.ifindex_fwd == skb->ifindex) {
 				/* No need to change src MAC, if we are at the right device */
 			} else {

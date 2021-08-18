@@ -120,12 +120,10 @@ struct cali_tc_ctx {
   /* Our single copies of the data start/end pointers loaded from the skb. */
   void *data_start;
   void *data_end;
-
-  struct cali_tc_state *state;
-
   struct iphdr *ip_header;
   void *nh;
 
+  struct cali_tc_state *state;
   struct calico_nat_dest *nat_dest;
   struct arp_key arpk;
   struct fwd fwd;
