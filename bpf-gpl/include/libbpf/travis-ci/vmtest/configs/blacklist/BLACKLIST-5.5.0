@@ -25,7 +25,6 @@ fexit_test		# bpf_prog_test_tracing missing
 flow_dissector		# bpf_link-based flow dissector is in 5.8+
 flow_dissector_reattach
 for_each		# v5.12+
-get_func_ip_test	# v5.15+
 get_stack_raw_tp	# exercising BPF verifier bug causing infinite loop
 hash_large_key		# v5.11+
 ima			# v5.11+
@@ -35,15 +34,12 @@ kfunc_call		# v5.13+
 link_pinning		# bpf_link is missing
 linked_vars		# v5.13+
 load_bytes_relative	# new functionality in 5.8
-lookup_and_delete	# v5.14+
 map_init		# per-CPU LRU missing
 map_ptr			# test uses BPF_MAP_TYPE_RINGBUF, added in 5.8
 metadata		# v5.10+
-migrate_reuseport	# v5.14+
 mmap			# 5.5 kernel is too permissive with re-mmaping
 modify_return		# fmod_ret support is missing
 module_attach		# module BTF support missing (v5.11+)
-netcnt
 ns_current_pid_tgid	# bpf_get_ns_current_pid_tgid() helper is missing
 pe_preserve_elems	# v5.10+
 perf_branches		# bpf_read_branch_records() helper is missing
@@ -74,11 +70,9 @@ sockmap_listen		# no listen socket supportin SOCKMAP
 sockopt_sk
 stacktrace_build_id	# v5.9+
 stack_var_off		# v5.12+
-syscall			# v5.14+
 task_local_storage	# v5.12+
 tcp_hdr_options		# v5.10+, new TCP header options feature in BPF
 tcpbpf_user		# LINK_CREATE is missing
-tc_redirect		# v5.14+
 test_bpffs		# v5.10+, new CONFIG_BPF_PRELOAD=y and CONFIG_BPF_PRELOAD_UMG=y|m
 test_bprm_opts		# v5.11+
 test_global_funcs	# kernel doesn't support BTF linkage=global on FUNCs
@@ -87,10 +81,7 @@ test_lsm		# no BPF_LSM support
 test_overhead		# no fmod_ret support
 test_profiler		# needs verifier logic improvements from v5.10+
 test_skb_pkt_end	# v5.11+
-timer			# v5.15+
-timer_mim		# v5.15+
 trace_ext		# v5.10+
-trace_printk		# v5.14+
 trampoline_count	# v5.12+ have lower allowed limits
 udp_limit		# no cgroup/sock_release BPF program type (5.9+)
 varlen			# verifier bug fixed in later kernels
@@ -98,7 +89,6 @@ vmlinux			# hrtimer_nanosleep() signature changed incompatibly
 xdp_adjust_tail		# new XDP functionality added in 5.8
 xdp_attach		# IFLA_XDP_EXPECTED_FD support is missing
 xdp_bpf2bpf		# freplace is missing
-xdp_context_test_run	# v5.15+
 xdp_cpumap_attach	# v5.9+
 xdp_devmap_attach	# new feature in 5.8
 xdp_link		# v5.9+

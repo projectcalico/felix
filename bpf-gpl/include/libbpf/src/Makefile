@@ -36,8 +36,7 @@ SHARED_OBJDIR := $(OBJDIR)/sharedobjs
 STATIC_OBJDIR := $(OBJDIR)/staticobjs
 OBJS := bpf.o btf.o libbpf.o libbpf_errno.o netlink.o \
 	nlattr.o str_error.o libbpf_probes.o bpf_prog_linfo.o xsk.o \
-	btf_dump.o hashmap.o ringbuf.o strset.o linker.o gen_loader.o \
-	relo_core.o
+	btf_dump.o hashmap.o ringbuf.o strset.o linker.o
 SHARED_OBJS := $(addprefix $(SHARED_OBJDIR)/,$(OBJS))
 STATIC_OBJS := $(addprefix $(STATIC_OBJDIR)/,$(OBJS))
 
@@ -49,9 +48,9 @@ ifndef BUILD_STATIC_ONLY
 	VERSION_SCRIPT := libbpf.map
 endif
 
-HEADERS := bpf.h libbpf.h btf.h libbpf_common.h libbpf_legacy.h xsk.h \
+HEADERS := bpf.h libbpf.h btf.h xsk.h \
 	   bpf_helpers.h bpf_helper_defs.h bpf_tracing.h \
-	   bpf_endian.h bpf_core_read.h skel_internal.h
+	   bpf_endian.h bpf_core_read.h libbpf_common.h
 UAPI_HEADERS := $(addprefix $(TOPDIR)/include/uapi/linux/,\
 			    bpf.h bpf_common.h btf.h)
 
@@ -61,7 +60,7 @@ INSTALL = install
 
 DESTDIR ?=
 
-ifeq ($(filter-out %64 %64be %64eb %64le %64el s390x, $(shell uname -m)),)
+ifeq ($(shell uname -m),x86_64)
 	LIBSUBDIR := lib64
 else
 	LIBSUBDIR := lib

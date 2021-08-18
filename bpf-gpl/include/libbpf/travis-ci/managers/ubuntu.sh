@@ -20,4 +20,4 @@ if ! ldd build/libbpf.so | grep -q libelf; then
     exit 1
 fi
 make -j$((4*$(nproc))) -C src OBJDIR=../build DESTDIR=../install install
-CFLAGS=${CFLAGS} $(dirname $0)/test_compile.sh
+rm -rf build install

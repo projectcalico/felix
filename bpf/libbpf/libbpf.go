@@ -38,15 +38,15 @@ type TCOpts struct {
 }
 
 const (
-	policyProgram string  = "calico_tc_norm_pol_tail"
+	policyProgram   string = "calico_tc_norm_pol_tail"
 	epilogueProgram string = "calico_tc_skb_accepted_entrypoint"
-	icmpProgram string = "calico_tc_skb_send_icmp_replies"
+	icmpProgram     string = "calico_tc_skb_send_icmp_replies"
 )
 
 const (
-	POLICY_PROGRAM_INDEX int = 0
+	POLICY_PROGRAM_INDEX   int = 0
 	EPILOGUE_PROGRAM_INDEX int = 1
-	ICMP_PROGRAM_INDEX int = 2
+	ICMP_PROGRAM_INDEX     int = 2
 )
 
 func OpenObject(filename, ifaceName, hook string) (*Obj, error) {

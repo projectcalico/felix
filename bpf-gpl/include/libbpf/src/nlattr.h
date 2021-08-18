@@ -13,7 +13,6 @@
 #include <string.h>
 #include <errno.h>
 #include <linux/netlink.h>
-#include <linux/rtnetlink.h>
 
 /* avoid multiple definition of netlink features */
 #define __LINUX_NETLINK_H
@@ -53,15 +52,6 @@ struct libbpf_nla_policy {
 	uint16_t	maxlen;
 };
 
-struct libbpf_nla_req {
-	struct nlmsghdr nh;
-	union {
-		struct ifinfomsg ifinfo;
-		struct tcmsg tc;
-	};
-	char buf[128];
-};
-
 /**
  * @ingroup attr
  * Iterate over a stream of attributes
@@ -81,7 +71,7 @@ struct libbpf_nla_req {
  */
 static inline void *libbpf_nla_data(const struct nlattr *nla)
 {
-	return (void *)nla + NLA_HDRLEN;
+	return (char *) nla + NLA_HDRLEN;
 }
 
 static inline uint8_t libbpf_nla_getattr_u8(const struct nlattr *nla)
@@ -118,47 +108,47 @@ int libbpf_nla_dump_errormsg(struct nlmsghdr *nlh);
 
 static inline struct nlattr *nla_data(struct nlattr *nla)
 {
-	return (struct nlattr *)((void *)nla + NLA_HDRLEN);
+	return (struct nlattr *)((char *)nla + NLA_HDRLEN);
 }
 
-static inline struct nlattr *req_tail(struct libbpf_nla_req *req)
+static inline struct nlattr *nh_tail(struct nlmsghdr *nh)
 {
-	return (struct nlattr *)((void *)req + NLMSG_ALIGN(req->nh.nlmsg_len));
+	return (struct nlattr *)((char *)nh + NLMSG_ALIGN(nh->nlmsg_len));
 }
 
-static inline int nlattr_add(struct libbpf_nla_req *req, int type,
+static inline int nlattr_add(struct nlmsghdr *nh, size_t maxsz, int type,
 			     const void *data, int len)
 {
 	struct nlattr *nla;
 
-	if (NLMSG_ALIGN(req->nh.nlmsg_len) + NLA_ALIGN(NLA_HDRLEN + len) > sizeof(*req))
+	if (NLMSG_ALIGN(nh->nlmsg_len) + NLA_ALIGN(NLA_HDRLEN + len) > maxsz)
 		return -EMSGSIZE;
 	if (!!data != !!len)
 		return -EINVAL;
 
-	nla = req_tail(req);
+	nla = nh_tail(nh);
 	nla->nla_type = type;
 	nla->nla_len = NLA_HDRLEN + len;
 	if (data)
 		memcpy(nla_data(nla), data, len);
-	req->nh.nlmsg_len = NLMSG_ALIGN(req->nh.nlmsg_len) + NLA_ALIGN(nla->nla_len);
+	nh->nlmsg_len = NLMSG_ALIGN(nh->nlmsg_len) + NLA_ALIGN(nla->nla_len);
 	return 0;
 }
 
-static inline struct nlattr *nlattr_begin_nested(struct libbpf_nla_req *req, int type)
+static inline struct nlattr *nlattr_begin_nested(struct nlmsghdr *nh,
+						 size_t maxsz, int type)
 {
 	struct nlattr *tail;
 
-	tail = req_tail(req);
-	if (nlattr_add(req, type | NLA_F_NESTED, NULL, 0))
+	tail = nh_tail(nh);
+	if (nlattr_add(nh, maxsz, type | NLA_F_NESTED, NULL, 0))
 		return NULL;
 	return tail;
 }
 
-static inline void nlattr_end_nested(struct libbpf_nla_req *req,
-				     struct nlattr *tail)
+static inline void nlattr_end_nested(struct nlmsghdr *nh, struct nlattr *tail)
 {
-	tail->nla_len = (void *)req_tail(req) - (void *)tail;
+	tail->nla_len = (char *)nh_tail(nh) - (char *)tail;
 }
 
 #endif /* __LIBBPF_NLATTR_H */

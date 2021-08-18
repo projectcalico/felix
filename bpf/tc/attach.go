@@ -62,6 +62,7 @@ var optsLock sync.RWMutex
 var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
 var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
+
 /*
 func init() {
 	if optsMap == nil {
@@ -517,12 +518,13 @@ func (ap *AttachPoint) ProgramID() (string, error) {
 		optsLock.RLock()
 		defer optsLock.RUnlock()
 		if val, ok := optsMap[key]; ok {
-		progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), val)
-		if err != nil {
-			return "", errors.New("failed to find TC program")
+			progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), val)
+			if err != nil {
+				return "", errors.New("failed to find TC program")
+			}
+			return strconv.Itoa(progId), nil
 		}
-		return strconv.Itoa(progId), nil
-	}}
+	}
 	return "", errors.New("failed to find TC program")
 }
 
