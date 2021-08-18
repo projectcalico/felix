@@ -58,7 +58,7 @@ type AttachPoint struct {
 
 var optsMap map[string]*libbpf.TCOpts
 var tcLock sync.RWMutex
-
+var optsLock sync.RWMutex
 var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
 var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
@@ -135,7 +135,9 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	key := ap.Iface + "_" + string(ap.Hook)
+	optsLock.Lock()
 	optsMap[key] = opts
+	optsLock.Unlock()
 	// Success: clean up the old programs.
 	var progErrs []error
 	for _, p := range progsToClean {
@@ -500,13 +502,16 @@ func (ap *AttachPoint) ProgramID() (string, error) {
 	logCtx := log.WithField("iface", ap.Iface)
 	logCtx.Info("Finding TC program ID")
 	key := ap.Iface + "_" + string(ap.Hook)
-	if val, ok := optsMap[key]; ok {
+	if optsMap != nil {
+		optsLock.RLock()
+		defer optsLock.RUnlock()
+		if val, ok := optsMap[key]; ok {
 		progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), val)
 		if err != nil {
 			return "", errors.New("failed to find TC program")
 		}
 		return strconv.Itoa(progId), nil
-	}
+	}}
 	return "", errors.New("failed to find TC program")
 }
 
