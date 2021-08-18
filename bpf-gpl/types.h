@@ -118,21 +118,13 @@ struct cali_tc_ctx {
   struct xdp_md *xdp;
 
   /* Our single copies of the data start/end pointers loaded from the skb. */
-  union {
-  	void *data_start;
-  	struct ethhdr *eth; /* If there is an ethhdr it's at the start. */
-  };
+  void *data_start;
   void *data_end;
 
   struct cali_tc_state *state;
 
   struct iphdr *ip_header;
-  union {
-    void *nh;
-    struct tcphdr *tcp_header;
-    struct udphdr *udp_header;
-    struct icmphdr *icmp_header;
-  };
+  void *nh;
 
   struct calico_nat_dest *nat_dest;
   struct arp_key arpk;
