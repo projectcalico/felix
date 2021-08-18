@@ -22,6 +22,9 @@ type Obj struct {
 type Link struct {
 }
 
+type TCOpts struct {
+}
+
 func OpenObject(filename, ifaceName, hook string) (*Obj, error) {
 	panic("LIBBPF syscall stub")
 }
@@ -53,3 +56,8 @@ func (l *Link) Close() error {
 func (o *Obj) Close() error {
 	panic("LIBBPF syscall stub")
 }
+
+func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
+	panic("LIBBPF syscall stub")
+}
+

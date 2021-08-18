@@ -66,6 +66,8 @@ func TestJumpMapCleanup(t *testing.T) {
 		Expect(err).NotTo(HaveOccurred())
 		err = ap.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
+		ok := tc.GetTCOpts(ap.Iface, string(ap.Hook))
+		Expect(ok).To(Equal(true))
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
 

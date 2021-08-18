@@ -33,6 +33,10 @@ type Link struct {
 	link *C.struct_bpf_link
 }
 
+type TCOpts struct {
+	opts C.struct_bpf_tc_opts
+}
+
 func OpenObject(filename, ifaceName, hook string) (*Obj, error) {
 	bpf.IncreaseLockedMemoryQuota()
 	cFilename := C.CString(filename)
@@ -74,7 +78,7 @@ func (o *Obj) AttachKprobe(progName, fn string) (*Link, error) {
 	return &Link{link: link.link}, nil
 }
 
-func (o *Obj) AttachClassifier(secName, ifName, hook string) error {
+func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
 	isIngress := 0
 	cSecName := C.CString(secName)
 	cIfName := C.CString(ifName)
@@ -83,18 +87,16 @@ func (o *Obj) AttachClassifier(secName, ifName, hook string) error {
 	if hook == "ingress" {
 		isIngress = 1
 	}
-	fmt.Println(ifName)
-	err := C.bpf_tc_program_attach(o.obj, cSecName, cIfName, C.int(isIngress))
-	if err != 0 {
-		return fmt.Errorf("Error attaching tc program ", err)
+	opts := C.bpf_tc_program_attach(o.obj, cSecName, cIfName, C.int(isIngress))
+	if opts.opts.prog_fd < 0 || opts.errno != 0 {
+		return nil, fmt.Errorf("Error attaching tc program ")
 	}
-	return nil
+	return &TCOpts{opts: opts.opts}, nil
 }
 
 func CreateQDisc(ifName string) error {
 	cIfName := C.CString(ifName)
 	defer C.free(unsafe.Pointer(cIfName))
-	fmt.Println(ifName)
 	err := C.bpf_tc_create_qdisc(cIfName)
 	if err != 0 {
 		return fmt.Errorf("Error creating qdisc")
@@ -122,6 +124,20 @@ func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
 		return fmt.Errorf("Error updating %s at index %d", mapName, mapIndex)
 	}
 	return nil
+}
+
+func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
+	isIngress := 0
+	cIfName := C.CString(ifaceName)
+	defer C.free(unsafe.Pointer(cIfName))
+	if hook == "ingress" {
+		isIngress = 1
+	}
+	progId := C.bpf_tc_query_iface(cIfName, opts.opts, C.int(isIngress))
+	if int(progId) < 0 {
+		return -1, fmt.Errorf("Error querying interface %s", ifaceName)
+	}
+	return int(progId), nil
 }
 
 func (l *Link) Close() error {

@@ -41,6 +41,11 @@ struct bpf_link_wrapper {
 	int errno;
 };
 
+struct bpf_tc_wrapper {
+	struct bpf_tc_opts opts;
+	int errno;
+};
+
 struct bpf_obj_wrapper bpf_obj_open_load(char *filename, char *ifaceName) {
 	struct bpf_obj_wrapper obj;
 	obj.obj = bpf_object__open(filename);
@@ -110,9 +115,11 @@ int bpf_link_destroy(struct bpf_link *link) {
 }
 
 
-int bpf_tc_program_attach (struct bpf_object *obj, char *secName, char *ifName, int isIngress) {
+struct bpf_tc_wrapper bpf_tc_program_attach (struct bpf_object *obj, char *secName, char *ifName, int isIngress) {
 	int ifIndex = if_nametoindex(ifName);
 	int err = 0;
+	struct bpf_tc_wrapper tc;
+	tc.errno = 0;
 
 	DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_EGRESS);
 	DECLARE_LIBBPF_OPTS(bpf_tc_opts, attach);
@@ -122,8 +129,31 @@ int bpf_tc_program_attach (struct bpf_object *obj, char *secName, char *ifName, 
 	}
 
 	attach.prog_fd = bpf_program__fd(bpf_object__find_program_by_name(obj, secName));
+	if (attach.prog_fd < 0) {
+		tc.opts.prog_fd = attach.prog_fd;
+		return tc;
+	}
 	hook.ifindex = ifIndex;
-	return bpf_tc_attach(&hook, &attach);
+	tc.errno = bpf_tc_attach(&hook, &attach);
+	memcpy (&tc.opts, &attach, sizeof(struct bpf_tc_opts));
+	return tc;
+}
+
+int bpf_tc_query_iface (char *ifName, struct bpf_tc_opts opts, int isIngress) {
+	int ifIndex = if_nametoindex(ifName);
+	int err = 0;
+
+	DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_EGRESS);
+	if (isIngress) {
+		hook.attach_point = BPF_TC_INGRESS;
+	}
+	hook.ifindex = ifIndex;
+	opts.prog_fd = opts.prog_id = opts.flags = 0;
+	err = bpf_tc_query(&hook, &opts);
+	if (err) {
+		return err;
+	}
+	return opts.prog_id;
 }
 
 int bpf_tc_create_qdisc (char *ifName) {
