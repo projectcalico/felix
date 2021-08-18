@@ -498,6 +498,17 @@ func RemoveQdisc(ifaceName string) error {
 	return libbpf.RemoveQDisc(ifaceName)
 }
 
+func RemoveTCOpts(ifaceName string) {
+	optsLock.Lock()
+	defer optsLock.Unlock()
+	if optsMap != nil {
+		key := ifaceName + "_" + "ingress"
+		delete(optsMap, key)
+		key = ifaceName + "_" + "egress"
+		delete(optsMap, key)
+	}
+}
+
 func (ap *AttachPoint) ProgramID() (string, error) {
 	logCtx := log.WithField("iface", ap.Iface)
 	logCtx.Info("Finding TC program ID")
