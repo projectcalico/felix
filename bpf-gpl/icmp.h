@@ -25,6 +25,7 @@
 #include "bpf.h"
 #include "log.h"
 #include "skb.h"
+#include "parsing.h"
 
 static CALI_BPF_INLINE int icmp_v4_reply(struct cali_tc_ctx *ctx,
 					__u8 type, __u8 code, __be32 un)
@@ -113,14 +114,14 @@ static CALI_BPF_INLINE int icmp_v4_reply(struct cali_tc_ctx *ctx,
 	ctx->ip_header->saddr = INTF_IP;
 	ctx->ip_header->daddr = ip_orig.saddr;
 
-	ctx->icmp_header->type = type;
-	ctx->icmp_header->code = code;
-	*((__be32 *)&ctx->icmp_header->un) = un;
-	ctx->icmp_header->checksum = 0;
+	parsing_icmphdr(ctx)->type = type;
+	parsing_icmphdr(ctx)->code = code;
+	*((__be32 *)&parsing_icmphdr(ctx)->un) = un;
+	parsing_icmphdr(ctx)->checksum = 0;
 
 	__wsum ip_csum = bpf_csum_diff(0, 0, (void *)ctx->ip_header, sizeof(*ctx->ip_header), 0);
-	__wsum icmp_csum = bpf_csum_diff(0, 0, (void *)ctx->icmp_header,
-		len -  sizeof(*ctx->ip_header) - skb_iphdr_offset(), 0);
+	__wsum icmp_csum = bpf_csum_diff(0, 0, ctx->nh,
+		len - sizeof(struct iphdr) - skb_iphdr_offset(), 0);
 
 	ret = bpf_l3_csum_replace(ctx->skb,
 			skb_iphdr_offset() + offsetof(struct iphdr, check), 0, ip_csum, 0);

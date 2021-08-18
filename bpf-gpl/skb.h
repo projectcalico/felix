@@ -18,7 +18,6 @@
 #ifndef __SKB_H__
 #define __SKB_H__
 
-
 #include <linux/if_ether.h>
 #include <linux/ip.h>
 #include <linux/udp.h>
@@ -92,6 +91,26 @@ static CALI_BPF_INLINE long skb_iphdr_offset(void)
 		// Normal L2 interface: skb is [ether|IP|payload]
 		return sizeof(struct ethhdr);
 	}
+}
+
+static CALI_BPF_INLINE struct ethhdr* parsing_ethhdr(struct cali_tc_ctx *ctx)
+{
+	return (struct ethhdr *)ctx->data_start;
+}
+
+static CALI_BPF_INLINE struct tcphdr* parsing_tcphdr(struct cali_tc_ctx *ctx)
+{
+	return (struct tcphdr *)ctx->nh;
+}
+
+static CALI_BPF_INLINE struct udphdr* parsing_udphdr(struct cali_tc_ctx *ctx)
+{
+	return (struct udphdr *)ctx->nh;
+}
+
+static CALI_BPF_INLINE struct icmphdr* parsing_icmphdr(struct cali_tc_ctx *ctx)
+{
+	return (struct icmphdr *)ctx->nh;
 }
 
 /* skb_refresh_hdr_ptrs refreshes the ip_header/nh fields in the context.
