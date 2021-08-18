@@ -332,9 +332,9 @@ func (b *PinnedMap) EnsureExists() error {
 		"name", b.versionedName(),
 		"flags", fmt.Sprint(b.Flags),
 	)
-	out, err := cmd.CombinedOutput()
+	_, err := cmd.CombinedOutput()
 	if err != nil {
-		logrus.WithField("out", string(out)).Error("Failed to run bpftool")
+		logrus.WithField("name", b.versionedName()).Error("Failed to run bpftool")
 		return err
 	}
 	b.fd, err = GetMapFDByPin(b.versionedFilename())
