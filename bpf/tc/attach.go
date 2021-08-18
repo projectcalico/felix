@@ -37,6 +37,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/libbpf"
 )
 
 type AttachPoint struct {
@@ -55,11 +56,18 @@ type AttachPoint struct {
 	ExtToServiceConnmark uint32
 }
 
+var optsMap map[string] *libbpf.TCOpts
 var tcLock sync.RWMutex
 
 var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
 var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
+
+func init() {
+	if optsMap == nil {
+		optsMap = make(map[string] *libbpf.TCOpts)
+	}
+}
 
 func (ap AttachPoint) Log() *log.Entry {
 	return log.WithFields(log.Fields{
@@ -102,15 +110,28 @@ func (ap AttachPoint) AttachProgram() error {
 	if err != nil {
 		return err
 	}
-
-	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
-		"bpf", "da", "obj", tempBinary,
-		"sec", SectionName(ap.Type, ap.ToOrFrom),
-	)
+	obj, err := libbpf.OpenObject(tempBinary, ap.Iface, string(ap.Hook))
 	if err != nil {
 		return err
 	}
-
+	err = obj.UpdateJumpMap("cali_jump", "calico_tc_norm_pol_tail", 0)
+	if err != nil {
+		fmt.Println("Error updating calico_tc_norm_pol_tail")
+	}
+	err = obj.UpdateJumpMap("cali_jump", "calico_tc_skb_accepted_entrypoint", 1)
+	if err != nil {
+		fmt.Println("Error updating calico_tc_skb_accepted_entrypoint")
+	}
+	err = obj.UpdateJumpMap("cali_jump", "calico_tc_skb_send_icmp_replies", 2)
+	if err != nil {
+		fmt.Println("Error updating calico_tc_skb_send_icmp_replies")
+	}
+	opts, err := obj.AttachClassifier(SectionName(ap.Type, ap.ToOrFrom), ap.Iface, string(ap.Hook))
+	if err != nil {
+		return err
+	}
+	key := ap.Iface + "_" + string(ap.Hook)
+	optsMap[key] = opts
 	// Success: clean up the old programs.
 	var progErrs []error
 	for _, p := range progsToClean {
@@ -284,7 +305,7 @@ func (ap AttachPoint) IsAttached() (bool, error) {
 
 // tcDirRegex matches tc's auto-created directory names so we can clean them up when removing maps without accidentally
 // removing other user-created dirs..
-var tcDirRegex = regexp.MustCompile(`[0-9a-f]{40}`)
+var tcDirRegex = regexp.MustCompile(`[0-9a-f]`)
 
 // CleanUpJumpMaps scans for cali_jump maps that are still pinned to the filesystem but no longer referenced by
 // our BPF programs.
@@ -445,11 +466,7 @@ func EnsureQdisc(ifaceName string) error {
 		log.WithField("iface", ifaceName).Debug("Already have a clsact qdisc on this interface")
 		return nil
 	}
-	_, err = ExecTC("qdisc", "add", "dev", ifaceName, "clsact")
-	if err != nil {
-		return fmt.Errorf("failed to add qdisc to interface '%s': %w", ifaceName, err)
-	}
-	return nil
+	return libbpf.CreateQDisc(ifaceName)
 }
 
 func HasQdisc(ifaceName string) (bool, error) {
@@ -472,21 +489,18 @@ func RemoveQdisc(ifaceName string) error {
 	if !hasQdisc {
 		return nil
 	}
-	_, err = ExecTC("qdisc", "del", "dev", ifaceName, "clsact")
-	if err != nil {
-		return fmt.Errorf("failed to remove qdisc from interface '%s': %w", ifaceName, err)
-	}
-	return nil
+	return libbpf.RemoveQDisc(ifaceName)
 }
 
 func (ap *AttachPoint) ProgramID() (string, error) {
 	logCtx := log.WithField("iface", ap.Iface)
 	logCtx.Info("Finding TC program ID")
+	/*
 	out, err := ExecTC("filter", "show", "dev", ap.Iface, string(ap.Hook))
 	if err != nil {
 		return "", fmt.Errorf("failed to find TC filter for interface %v: %w", ap.Iface, err)
 	}
-	logCtx.Infof("out:\n%v", out)
+	logCtx.Infof("out:\n%v", out) 
 
 	progName := ap.ProgramName()
 	for _, line := range strings.Split(out, "\n") {
@@ -499,7 +513,15 @@ func (ap *AttachPoint) ProgramID() (string, error) {
 			return "", fmt.Errorf("failed to process TC output: %v", line)
 		}
 	}
-
+	*/
+	key := ap.Iface + "_" + string(ap.Hook)
+	if val, ok := optsMap[key]; ok {
+		progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), val)
+		if err != nil {
+			return "", errors.New("failed to find TC program")
+		}
+		return strconv.Itoa(progId), nil
+	}
 	return "", errors.New("failed to find TC program")
 }
 
@@ -511,4 +533,10 @@ func (ap *AttachPoint) JumpMapFDMapKey() string {
 
 func (ap *AttachPoint) IfaceName() string {
 	return ap.Iface
+}
+
+func GetTCOpts (ifaceName, hook string) bool {
+	key := ifaceName + "_" + hook
+	_, ok := optsMap[key]
+	return ok
 }
