@@ -56,7 +56,7 @@ type AttachPoint struct {
 	ExtToServiceConnmark uint32
 }
 
-var optsMap map[string] *libbpf.TCOpts
+var optsMap map[string]*libbpf.TCOpts
 var tcLock sync.RWMutex
 
 var ErrDeviceNotFound = errors.New("device not found")
@@ -65,7 +65,7 @@ var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
 
 func init() {
 	if optsMap == nil {
-		optsMap = make(map[string] *libbpf.TCOpts)
+		optsMap = make(map[string]*libbpf.TCOpts)
 	}
 }
 
@@ -495,25 +495,6 @@ func RemoveQdisc(ifaceName string) error {
 func (ap *AttachPoint) ProgramID() (string, error) {
 	logCtx := log.WithField("iface", ap.Iface)
 	logCtx.Info("Finding TC program ID")
-	/*
-	out, err := ExecTC("filter", "show", "dev", ap.Iface, string(ap.Hook))
-	if err != nil {
-		return "", fmt.Errorf("failed to find TC filter for interface %v: %w", ap.Iface, err)
-	}
-	logCtx.Infof("out:\n%v", out) 
-
-	progName := ap.ProgramName()
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, progName) {
-			re := regexp.MustCompile(`id (\d+)`)
-			m := re.FindStringSubmatch(line)
-			if len(m) > 0 {
-				return m[1], nil
-			}
-			return "", fmt.Errorf("failed to process TC output: %v", line)
-		}
-	}
-	*/
 	key := ap.Iface + "_" + string(ap.Hook)
 	if val, ok := optsMap[key]; ok {
 		progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), val)
@@ -535,7 +516,7 @@ func (ap *AttachPoint) IfaceName() string {
 	return ap.Iface
 }
 
-func GetTCOpts (ifaceName, hook string) bool {
+func GetTCOpts(ifaceName, hook string) bool {
 	key := ifaceName + "_" + hook
 	_, ok := optsMap[key]
 	return ok

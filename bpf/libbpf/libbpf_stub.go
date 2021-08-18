@@ -33,7 +33,7 @@ func (o *Obj) AttachKprobe(progName, fn string) (*Link, error) {
 	panic("LIBBPF syscall stub")
 }
 
-func (o *Obj) AttachClassifier(secName, ifName, hook string) error {
+func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
 	panic("LIBBPF syscall stub")
 }
 
@@ -60,4 +60,3 @@ func (o *Obj) Close() error {
 func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
 	panic("LIBBPF syscall stub")
 }
-

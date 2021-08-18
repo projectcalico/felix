@@ -49,8 +49,7 @@ const (
 )
 
 func SectionName(endpointType EndpointType, fromOrTo ToOrFromEp) string {
-	return "tc_calico_entry"
-	//return fmt.Sprintf("calico_%s_%s_ep", fromOrTo, endpointType)
+	return fmt.Sprintf("calico_%s_%s_ep", fromOrTo, endpointType)
 }
 
 func ProgFilename(epType EndpointType, toOrFrom ToOrFromEp, epToHostDrop, fib, dsr bool, logLevel string) string {

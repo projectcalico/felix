@@ -107,11 +107,11 @@ func CreateQDisc(ifName string) error {
 func RemoveQDisc(ifName string) error {
 	cIfName := C.CString(ifName)
 	defer C.free(unsafe.Pointer(cIfName))
-        err := C.bpf_tc_remove_qdisc(cIfName)
-        if err != 0 {
-                return fmt.Errorf("Error removing qdisc")
-        }
-        return nil
+	err := C.bpf_tc_remove_qdisc(cIfName)
+	if err != 0 {
+		return fmt.Errorf("Error removing qdisc")
+	}
+	return nil
 }
 
 func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
