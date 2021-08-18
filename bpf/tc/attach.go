@@ -62,12 +62,12 @@ var tcLock sync.RWMutex
 var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
 var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
-
+/*
 func init() {
 	if optsMap == nil {
 		optsMap = make(map[string]*libbpf.TCOpts)
 	}
-}
+}*/
 
 func (ap AttachPoint) Log() *log.Entry {
 	return log.WithFields(log.Fields{
@@ -81,6 +81,9 @@ func (ap AttachPoint) Log() *log.Entry {
 func (ap AttachPoint) AttachProgram() error {
 	logCxt := log.WithField("attachPoint", ap)
 
+	if optsMap == nil {
+		optsMap = make(map[string]*libbpf.TCOpts)
+	}
 	tempDir, err := ioutil.TempDir("", "calico-tc")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary directory: %w", err)
@@ -106,6 +109,7 @@ func (ap AttachPoint) AttachProgram() error {
 	defer tcLock.RUnlock()
 	logCxt.Debug("AttachProgram got lock.")
 
+	//nolint
 	progsToClean, err := ap.listAttachedPrograms()
 	if err != nil {
 		return err
@@ -126,6 +130,10 @@ func (ap AttachPoint) AttachProgram() error {
 	if err != nil {
 		return err
 	}
+	if opts == nil {
+		return fmt.Errorf("error attaching classifier to %v", ap.Iface)
+	}
+
 	key := ap.Iface + "_" + string(ap.Hook)
 	optsMap[key] = opts
 	// Success: clean up the old programs.
