@@ -114,17 +114,13 @@ func (ap AttachPoint) AttachProgram() error {
 	if err != nil {
 		return err
 	}
-	err = obj.UpdateJumpMap("cali_jump", "calico_tc_norm_pol_tail", 0)
-	if err != nil {
-		fmt.Println("Error updating calico_tc_norm_pol_tail")
+	isHost := false
+	if ap.Type == "host" {
+		isHost = true
 	}
-	err = obj.UpdateJumpMap("cali_jump", "calico_tc_skb_accepted_entrypoint", 1)
+	err = obj.UpdateJumpMaps(isHost)
 	if err != nil {
-		fmt.Println("Error updating calico_tc_skb_accepted_entrypoint")
-	}
-	err = obj.UpdateJumpMap("cali_jump", "calico_tc_skb_send_icmp_replies", 2)
-	if err != nil {
-		fmt.Println("Error updating calico_tc_skb_send_icmp_replies")
+		return fmt.Errorf("error updating jump map %v", err)
 	}
 	opts, err := obj.AttachClassifier(SectionName(ap.Type, ap.ToOrFrom), ap.Iface, string(ap.Hook))
 	if err != nil {

@@ -49,6 +49,10 @@ func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
 	panic("LIBBPF syscall stub")
 }
 
+func (o *Obj) UpdateJumpMaps(isHost bool) error {
+	panic("LIBBPF syscall stub")
+}
+
 func (l *Link) Close() error {
 	panic("LIBBPF syscall stub")
 }

@@ -37,6 +37,18 @@ type TCOpts struct {
 	opts C.struct_bpf_tc_opts
 }
 
+const (
+	policyProgram string  = "calico_tc_norm_pol_tail"
+	epilogueProgram string = "calico_tc_skb_accepted_entrypoint"
+	icmpProgram string = "calico_tc_skb_send_icmp_replies"
+)
+
+const (
+	POLICY_PROGRAM_INDEX int = 0
+	EPILOGUE_PROGRAM_INDEX int = 1
+	ICMP_PROGRAM_INDEX int = 2
+)
+
 func OpenObject(filename, ifaceName, hook string) (*Obj, error) {
 	bpf.IncreaseLockedMemoryQuota()
 	cFilename := C.CString(filename)
@@ -114,7 +126,7 @@ func RemoveQDisc(ifName string) error {
 	return nil
 }
 
-func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
+func (o *Obj) updateJumpMap(mapName, progName string, mapIndex int) error {
 	cMapName := C.CString(mapName)
 	cProgName := C.CString(progName)
 	defer C.free(unsafe.Pointer(cMapName))
@@ -122,6 +134,24 @@ func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
 	err := C.bpf_tc_update_jump_map(o.obj, cMapName, cProgName, C.int(mapIndex))
 	if err != 0 {
 		return fmt.Errorf("Error updating %s at index %d", mapName, mapIndex)
+	}
+	return nil
+}
+
+func (o *Obj) UpdateJumpMaps(isHost bool) error {
+	if !isHost {
+		err := o.updateJumpMap("cali_jump", policyProgram, POLICY_PROGRAM_INDEX)
+		if err != nil {
+			return fmt.Errorf("error updating policy program %v", err)
+		}
+	}
+	err := o.updateJumpMap("cali_jump", epilogueProgram, EPILOGUE_PROGRAM_INDEX)
+	if err != nil {
+		return fmt.Errorf("error updating epilogue program %v", err)
+	}
+	err = o.updateJumpMap("cali_jump", icmpProgram, ICMP_PROGRAM_INDEX)
+	if err != nil {
+		return fmt.Errorf("error updating icmp program %v", err)
 	}
 	return nil
 }
