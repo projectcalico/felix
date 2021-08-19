@@ -219,7 +219,7 @@ func RunWithFixedName(name string, opts RunOpts, args ...string) (c *Container) 
 	if opts.SameNamespace != nil {
 		runArgs = append(runArgs, "--network=container:"+opts.SameNamespace.Name)
 	} else {
-		runArgs = append(runArgs, "--hostname", c.Name)
+		runArgs = append(runArgs, "--network", "kind", "--hostname", c.Name)
 	}
 
 	// Add remaining args
@@ -233,20 +233,11 @@ func RunWithFixedName(name string, opts RunOpts, args ...string) (c *Container) 
 		Expect(err).NotTo(HaveOccurred())
 	}
 
-	// Get the command's output pipes, so we can merge those into the test's own logging.
-	stdout, err := c.runCmd.StdoutPipe()
-	Expect(err).NotTo(HaveOccurred())
-	stderr, err := c.runCmd.StderrPipe()
-	Expect(err).NotTo(HaveOccurred())
+	c.MergeLogging()
 
 	// Start the container running.
-	err = c.runCmd.Start()
+	err := c.runCmd.Start()
 	Expect(err).NotTo(HaveOccurred())
-
-	// Merge container's output into our own logging.
-	c.logFinished.Add(2)
-	go c.copyOutputToLog("stdout", stdout, &c.logFinished, &c.stdoutWatches)
-	go c.copyOutputToLog("stderr", stderr, &c.logFinished, &c.stderrWatches)
 
 	// Note: it might take a long time for the container to start running, e.g. if the image
 	// needs to be downloaded.
@@ -300,19 +291,12 @@ func (c *Container) WatchStdoutFor(re *regexp.Regexp) chan struct{} {
 func (c *Container) Start() {
 	c.runCmd = utils.Command("docker", "start", "--attach", c.Name)
 
-	stdout, err := c.runCmd.StdoutPipe()
-	Expect(err).NotTo(HaveOccurred())
-	stderr, err := c.runCmd.StderrPipe()
-	Expect(err).NotTo(HaveOccurred())
-
 	// Start the container running.
-	err = c.runCmd.Start()
+	err := c.runCmd.Start()
 	Expect(err).NotTo(HaveOccurred())
 
 	// Merge container's output into our own logging.
-	c.logFinished.Add(2)
-	go c.copyOutputToLog("stdout", stdout, &c.logFinished, &c.stdoutWatches)
-	go c.copyOutputToLog("stderr", stderr, &c.logFinished, nil)
+	c.MergeLogging()
 
 	c.WaitUntilRunning()
 
@@ -327,6 +311,19 @@ func (c *Container) Remove() {
 	Expect(err).NotTo(HaveOccurred())
 
 	log.WithField("container", c).Info("Removed container.")
+}
+
+func (c *Container) MergeLogging() {
+	// Get the command's output pipes, so we can merge those into the test's own logging.
+	stdout, err := c.runCmd.StdoutPipe()
+	Expect(err).NotTo(HaveOccurred())
+	stderr, err := c.runCmd.StderrPipe()
+	Expect(err).NotTo(HaveOccurred())
+
+	// Merge container's output into our own logging.
+	c.logFinished.Add(2)
+	go c.copyOutputToLog("stdout", stdout, &c.logFinished, &c.stdoutWatches)
+	go c.copyOutputToLog("stderr", stderr, &c.logFinished, nil)
 }
 
 func (c *Container) copyOutputToLog(streamName string, stream io.Reader, done *sync.WaitGroup, watches *[]*watch) {

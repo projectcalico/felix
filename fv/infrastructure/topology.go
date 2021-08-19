@@ -291,7 +291,7 @@ func StartNNodeTopology(n int, opts TopologyOptions, infra DatastoreInfra) (feli
 		if w != nil {
 			// Wait for any Felix restart...
 			log.Info("Wait for Felix to restart")
-			Eventually(w, "10s").Should(BeClosed(),
+			Eventually(w, "1000m").Should(BeClosed(),
 				fmt.Sprintf("Timed out waiting for %s to restart", felix.Name))
 		}
 
