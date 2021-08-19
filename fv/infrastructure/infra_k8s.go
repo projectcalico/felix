@@ -17,8 +17,8 @@ package infrastructure
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -46,6 +46,10 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/names"
 	"github.com/projectcalico/libcalico-go/lib/options"
 
+	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
+	"sigs.k8s.io/kind/pkg/cluster"
+	"sigs.k8s.io/kind/pkg/cmd"
+
 	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/utils"
 )
@@ -55,6 +59,7 @@ type K8sDatastoreInfra struct {
 	bpfLog               *containers.Container
 	k8sApiContainer      *containers.Container
 	k8sControllerManager *containers.Container
+	clusterProvider      *cluster.Provider
 
 	calicoClient client.Interface
 	K8sClient    *kubernetes.Clientset
@@ -100,35 +105,19 @@ func TearDownK8sInfra(kds *K8sDatastoreInfra) {
 	log.Info("TearDownK8sInfra starting")
 	var wg sync.WaitGroup
 
-	if kds.etcdContainer != nil {
-		kds.etcdContainer.StopLogs()
-	}
 	if kds.k8sApiContainer != nil {
 		kds.k8sApiContainer.StopLogs()
 	}
-	if kds.k8sControllerManager != nil {
-		kds.k8sControllerManager.StopLogs()
-	}
-
-	if kds.etcdContainer != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			kds.etcdContainer.Stop()
-		}()
-	}
 	if kds.k8sApiContainer != nil {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			kds.k8sApiContainer.Stop()
-		}()
-	}
-	if kds.k8sControllerManager != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			kds.k8sControllerManager.Stop()
+
+			//kds.k8sApiContainer.Stop()
+			err := kds.clusterProvider.Delete("felix-fv-test", "/tmp/kubeconfig")
+			if err != nil {
+				log.Warnf("failed to delete kind cluster: %w", err)
+			}
 		}()
 	}
 	wg.Wait()
@@ -169,67 +158,12 @@ func (kds *K8sDatastoreInfra) PerTestSetup() {
 	K8sInfra.runningTest = ginkgo.CurrentGinkgoTestDescription().FullTestText
 }
 
-func runK8sApiserver(etcdIp string) *containers.Container {
-	return containers.Run("apiserver",
-		containers.RunOpts{
-			AutoRemove: true,
-			StopSignal: "SIGKILL",
-		},
-		"-v", os.Getenv("PRIVATE_KEY")+":/private.key",
-		utils.Config.K8sImage,
-		"kube-apiserver",
-		"--v=0",
-		"--service-cluster-ip-range=10.101.0.0/16",
-		"--authorization-mode=RBAC",
-		"--insecure-port=8080", // allow insecure connection from controller manager.
-		"--insecure-bind-address=0.0.0.0",
-		fmt.Sprintf("--etcd-servers=http://%s:2379", etcdIp),
-		"--service-account-key-file=/private.key",
-		"--max-mutating-requests-inflight=0",
-		"--max-requests-inflight=0",
-	)
-}
-
-func runK8sControllerManager(apiserverIp string) *containers.Container {
-	c := containers.Run("controller-manager",
-		containers.RunOpts{
-			AutoRemove: true,
-			StopSignal: "SIGKILL",
-		},
-		"-v", os.Getenv("PRIVATE_KEY")+":/private.key",
-		utils.Config.K8sImage,
-		"kube-controller-manager",
-		fmt.Sprintf("--master=%v:8080", apiserverIp),
-		// We run trivially small clusters, so increase the QPS to get the
-		// cluster to start up as fast as possible.
-		"--kube-api-qps=100",
-		"--kube-api-burst=200",
-		"--min-resync-period=3m",
-		// Disable node CIDRs since the controller manager stalls for 10s if
-		// they are enabled.
-		"--allocate-node-cidrs=false",
-		"--leader-elect=false",
-		"--v=0",
-		"--service-account-private-key-file=/private.key",
-		"--concurrent-gc-syncs=50",
-	)
-	return c
-}
-
 func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 	log.Info("Starting Kubernetes infrastructure")
 
-	log.Info("Starting etcd")
 	kds := &K8sDatastoreInfra{}
 
-	// Start etcd, which will back the k8s API server.
-	kds.etcdContainer = RunEtcd()
-	if kds.etcdContainer == nil {
-		return nil, errors.New("failed to create etcd container")
-	}
-	log.Info("Started etcd")
-
-	// Start the k8s API server.
+	// Start the kind cluster.
 	//
 	// The clients in this test - Felix, Typha and the test code itself - all connect
 	// anonymously to the API server, because (a) they aren't running in pods in a proper
@@ -239,15 +173,60 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 	// authorization mode.  So we specify the "RBAC" authorization mode instead, and create a
 	// ClusterRoleBinding that gives the "system:anonymous" user unlimited power (aka the
 	// "cluster-admin" role).
-	log.Info("Starting API server")
-	kds.k8sApiContainer = runK8sApiserver(kds.etcdContainer.IP)
 
-	if kds.k8sApiContainer == nil {
-		TearDownK8sInfra(kds)
-		return nil, errors.New("failed to create k8s API server container")
+	log.Info("Starting kind cluster")
+
+	config := &v1alpha4.Cluster{
+		Name: "felix-fv-test",
+		Nodes: []v1alpha4.Node{
+			{
+				ExtraPortMappings: []v1alpha4.PortMapping{
+					{
+						ContainerPort: int32(8080),
+						HostPort:      int32(8080),
+					},
+				},
+			},
+		},
+		Networking: v1alpha4.Networking{
+			DisableDefaultCNI: true,
+			PodSubnet:         "192.168.0.0/16",
+			ServiceSubnet:     "10.101.0.0/16",
+		},
 	}
+	cluster.CreateWithV1Alpha4Config(config)
+	provider := cluster.NewProvider(cluster.ProviderWithLogger(cmd.NewLogger()))
+	err := provider.Create("felix-fv-test", cluster.CreateWithV1Alpha4Config(config))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kind cluster: %w", err)
+	}
+	c := &containers.Container{Name: "felix-fv-test-control-plane"}
 
-	log.Info("Started API server")
+	// Fill in rest of container struct.
+	c.IP = c.GetIP()
+	c.IPPrefix = c.GetIPPrefix()
+	c.Hostname = c.GetHostname()
+	kds.k8sApiContainer = c
+
+	kubeconfig, err := provider.KubeConfig("felix-fv-test", true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get kubeconfig: %w", err)
+	}
+	err = ioutil.WriteFile("/tmp/kubeconfig", []byte(kubeconfig), 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to write kubeconfig: %w", err)
+	}
+	kds.clusterProvider = provider
+
+	//provider.KubeConfig("felix-fv-"test, internal bool)
+	//kds.k8sApiContainer = runK8sApiserver(kds.etcdContainer.IP)
+
+	//if kds.k8sApiContainer == nil {
+	//	TearDownK8sInfra(kds)
+	//	return nil, errors.New("failed to create k8s API server container")
+	//}
+
+	log.Info("Started kind cluser")
 
 	start := time.Now()
 	for {
@@ -312,17 +291,8 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 	}
 	log.Info("List namespaces successfully.")
 
-	log.Info("Starting controller manager.")
-	kds.k8sControllerManager = runK8sControllerManager(kds.k8sApiContainer.IP)
-	if kds.k8sApiContainer == nil {
-		TearDownK8sInfra(kds)
-		return nil, errors.New("failed to create k8s contoller manager container")
-	}
-
-	log.Info("Started controller manager.")
-
 	// Copy CRD registration manifests into the API server container, and apply it.
-	err := kds.k8sApiContainer.CopyFileIntoContainer("infrastructure/crds", "/crds")
+	err = kds.k8sApiContainer.CopyFileIntoContainer("infrastructure/crds/crd", "/crds")
 	if err != nil {
 		TearDownK8sInfra(kds)
 		return nil, err
@@ -333,9 +303,9 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 		return nil, err
 	}
 
-	kds.EndpointIP = kds.k8sApiContainer.IP
-	kds.Endpoint = fmt.Sprintf("https://%s:6443", kds.k8sApiContainer.IP)
-	kds.BadEndpoint = fmt.Sprintf("https://%s:1234", kds.k8sApiContainer.IP)
+	kds.EndpointIP = c.IP
+	kds.Endpoint = fmt.Sprintf("https://%s:6443", c.IP)
+	kds.BadEndpoint = fmt.Sprintf("https://%s:1234", c.IP)
 
 	start = time.Now()
 	for {
@@ -365,7 +335,7 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 	start = time.Now()
 	for {
 		cmd := utils.Command("docker", "cp",
-			kds.k8sApiContainer.Name+":/var/run/kubernetes/apiserver.crt",
+			c.Name+":/etc/kubernetes/pki/apiserver.crt",
 			kds.CertFileName,
 		)
 		err = cmd.Run()
@@ -516,6 +486,7 @@ func cleanupIPAM(clientset *kubernetes.Clientset, calicoClient client.Interface)
 
 func (kds *K8sDatastoreInfra) GetDockerArgs() []string {
 	return []string{
+		"-e", "CALICO_DATASTORE_TYPE=kubernetes",
 		"-e", "CALICO_DATASTORE_TYPE=kubernetes",
 		"-e", "FELIX_DATASTORETYPE=kubernetes",
 		"-e", "TYPHA_DATASTORETYPE=kubernetes",
