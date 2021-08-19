@@ -275,6 +275,9 @@ outter:
 // runBpfTest runs a specific section of the entire bpf program in isolation
 func runBpfTest(t *testing.T, section string, forXDP bool, rules *polprog.Rules, testFn func(bpfProgRunFn), opts ...testOption) {
 	RegisterTestingT(t)
+	if !forXDP {
+		section = "classifier_" + section
+	}
 	setupAndRun(t, "debug", section, forXDP, rules, func(progName string) {
 		t.Run(section, func(_ *testing.T) {
 			testFn(func(dataIn []byte) (bpfRunResult, error) {
@@ -414,7 +417,11 @@ func bpftoolProgLoadAll(fname, bpfFsDir string, forXDP bool, polProg bool, maps 
 	}
 
 	if polProg {
-		polProgPath := path.Join(bpfFsDir, "1_0")
+		polProgPath := "1_0"
+		if !forXDP {
+			polProgPath = "classifier_0"
+		}
+		polProgPath = path.Join(bpfFsDir, polProgPath)
 		_, err = os.Stat(polProgPath)
 		if err == nil {
 			_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "0", "0", "0", "0", "value", "pinned", polProgPath)
@@ -428,13 +435,18 @@ func bpftoolProgLoadAll(fname, bpfFsDir string, forXDP bool, polProg bool, maps 
 			log.WithError(err).Info("failed to update jump map (deleting policy program)")
 		}
 	}
-	_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "1", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "1_1"))
+	polProgPath := "1_1"
+	if !forXDP {
+		polProgPath = "classifier_1"
+	}
+	_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "1", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, polProgPath))
 	if err != nil {
+		//time.Sleep(100*time.Second)
 		return errors.Wrap(err, "failed to update jump map (allowed program)")
 	}
 
 	if !forXDP {
-		_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "2", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "1_2"))
+		_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "2", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "classifier_2"))
 		if err != nil {
 			return errors.Wrap(err, "failed to update jump map (icmp program)")
 		}
