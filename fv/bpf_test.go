@@ -562,7 +562,6 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						cc.Expect(Some, w[0], w[1])
 						cc.CheckConnectivity()
 						cc.ResetExpectations()
-
 						By("handling ingress program removal")
 						felixes[0].Exec("tc", "filter", "del", "ingress", "dev", w[0].InterfaceName)
 
@@ -580,7 +579,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						Eventually(func() string {
 							out, _ := felixes[0].ExecOutput("tc", "filter", "show", "ingress", "dev", w[0].InterfaceName)
 							return out
-						}, "5s", "200ms").Should(ContainSubstring("calico_from_workload_ep"))
+						}, "5s", "200ms").Should(ContainSubstring("calico_from_wor"))
 
 						By("handling egress program removal")
 						felixes[0].Exec("tc", "filter", "del", "egress", "dev", w[0].InterfaceName)
@@ -593,7 +592,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						Eventually(func() string {
 							out, _ := felixes[0].ExecOutput("tc", "filter", "show", "egress", "dev", w[0].InterfaceName)
 							return out
-						}, "5s", "200ms").Should(ContainSubstring("calico_to_workload_ep"))
+						}, "5s", "200ms").Should(ContainSubstring("calico_to_wor"))
 						cc.CheckConnectivity()
 
 						By("Handling qdisc removal")
@@ -606,11 +605,11 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						Eventually(func() string {
 							out, _ := felixes[0].ExecOutput("tc", "filter", "show", "ingress", "dev", w[0].InterfaceName)
 							return out
-						}, "5s", "200ms").Should(ContainSubstring("calico_from_workload_ep"))
+						}, "5s", "200ms").Should(ContainSubstring("calico_from_wor"))
 						Eventually(func() string {
 							out, _ := felixes[0].ExecOutput("tc", "filter", "show", "egress", "dev", w[0].InterfaceName)
 							return out
-						}, "5s", "200ms").Should(ContainSubstring("calico_to_workload_ep"))
+						}, "5s", "200ms").Should(ContainSubstring("calico_to_wor"))
 						cc.CheckConnectivity()
 						cc.ResetExpectations()
 
