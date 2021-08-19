@@ -61,13 +61,13 @@ struct bpf_map_def_extended __attribute__((section("maps"))) cali_v4_ip_sets = {
 };
 #else
 struct bpf_map_def_extended __attribute__((section("maps"))) cali_v4_ip_sets = {
-        .type           = BPF_MAP_TYPE_LPM_TRIE,
-        .key_size       = sizeof(union ip4_set_lpm_key),
-        .value_size     = sizeof(__u32),
-        .max_entries    = 1024*1024,
-        .map_flags      = BPF_F_NO_PREALLOC,
+	.type           = BPF_MAP_TYPE_LPM_TRIE,
+	.key_size       = sizeof(union ip4_set_lpm_key),
+	.value_size     = sizeof(__u32),
+	.max_entries    = 1024*1024,
+	.map_flags      = BPF_F_NO_PREALLOC,
 #ifndef __BPFTOOL_LOADER__
-        .pinning_strategy        = MAP_PIN_GLOBAL,
+	.pinning_strategy        = MAP_PIN_GLOBAL,
 #endif
 };
 #endif

@@ -562,6 +562,7 @@ func describeBPFTests(opts ...bpfTestOpt) bool {
 						cc.Expect(Some, w[0], w[1])
 						cc.CheckConnectivity()
 						cc.ResetExpectations()
+
 						By("handling ingress program removal")
 						felixes[0].Exec("tc", "filter", "del", "ingress", "dev", w[0].InterfaceName)
 

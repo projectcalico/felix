@@ -19,17 +19,10 @@ package libbpf
 type Obj struct {
 }
 
-type Link struct {
-}
-
 type TCOpts struct {
 }
 
 func OpenObject(filename, ifaceName, hook string) (*Obj, error) {
-	panic("LIBBPF syscall stub")
-}
-
-func (o *Obj) AttachKprobe(progName, fn string) (*Link, error) {
 	panic("LIBBPF syscall stub")
 }
 
@@ -50,10 +43,6 @@ func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
 }
 
 func (o *Obj) UpdateJumpMaps(isHost bool) error {
-	panic("LIBBPF syscall stub")
-}
-
-func (l *Link) Close() error {
 	panic("LIBBPF syscall stub")
 }
 

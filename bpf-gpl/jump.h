@@ -41,13 +41,13 @@ struct bpf_map_def_extended __attribute__((section("maps"))) cali_jump = {
 };
 #else
 struct bpf_map_def_extended __attribute__((section("maps"))) cali_jump = {
-        .type = BPF_MAP_TYPE_PROG_ARRAY,
-        .key_size = 4,
-        .value_size = 4,
-        .max_entries = 8,
+	.type = BPF_MAP_TYPE_PROG_ARRAY,
+	.key_size = 4,
+	.value_size = 4,
+	.max_entries = 8,
 #ifndef __BPFTOOL_LOADER__
-        .map_id = 1,
-        .pinning_strategy = 1 /* object namespace */,
+	.map_id = 1,
+	.pinning_strategy = 1 /* object namespace */,
 #endif
 };
 #endif
