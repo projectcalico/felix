@@ -423,6 +423,7 @@ func (m *bpfEndpointManager) onWorkloadEnpdointRemove(msg *proto.WorkloadEndpoin
 		iface.info.endpointID = nil
 		return false
 	})
+	tc.RemoveTCOpts(oldWEP.Name)
 }
 
 // onPolicyUpdate stores the policy in the cache and marks any endpoints using it dirty.
