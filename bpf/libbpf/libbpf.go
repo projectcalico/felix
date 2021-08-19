@@ -29,23 +29,19 @@ type Obj struct {
 	obj *C.struct_bpf_object
 }
 
-type Link struct {
-	link *C.struct_bpf_link
-}
-
 type TCOpts struct {
 	opts C.struct_bpf_tc_opts
 }
 
 const (
 	policyProgram   string = "calico_tc_norm_pol_tail"
-	epilogueProgram string = "calico_tc_skb_accepted_entrypoint"
+	allowedProgram  string = "calico_tc_skb_accepted_entrypoint"
 	icmpProgram     string = "calico_tc_skb_send_icmp_replies"
 )
 
 const (
 	POLICY_PROGRAM_INDEX   int = 0
-	EPILOGUE_PROGRAM_INDEX int = 1
+	ALLOWED_PROGRAM_INDEX  int = 1
 	ICMP_PROGRAM_INDEX     int = 2
 )
 
@@ -71,23 +67,6 @@ func OpenObject(filename, ifaceName, hook string) (*Obj, error) {
 		return nil, fmt.Errorf(msg)
 	}
 	return &Obj{obj: obj.obj}, nil
-}
-
-func (o *Obj) AttachKprobe(progName, fn string) (*Link, error) {
-	cProgName := C.CString(progName)
-	cFnName := C.CString(fn)
-	defer C.free(unsafe.Pointer(cProgName))
-	defer C.free(unsafe.Pointer(cFnName))
-	link := C.bpf_program_attach_kprobe(o.obj, cProgName, cFnName)
-	if link.link == nil {
-		msg := "error attaching kprobe"
-		if link.errno != 0 {
-			errno := syscall.Errno(-int64(link.errno))
-			msg = fmt.Sprintf("error attaching kprobe: %v", errno.Error())
-		}
-		return nil, fmt.Errorf(msg)
-	}
-	return &Link{link: link.link}, nil
 }
 
 func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
@@ -145,7 +124,7 @@ func (o *Obj) UpdateJumpMaps(isHost bool) error {
 			return fmt.Errorf("error updating policy program %v", err)
 		}
 	}
-	err := o.updateJumpMap("cali_jump", epilogueProgram, EPILOGUE_PROGRAM_INDEX)
+	err := o.updateJumpMap("cali_jump", allowedProgram, ALLOWED_PROGRAM_INDEX)
 	if err != nil {
 		return fmt.Errorf("error updating epilogue program %v", err)
 	}
@@ -168,18 +147,6 @@ func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
 		return -1, fmt.Errorf("Error querying interface %s", ifaceName)
 	}
 	return int(progId), nil
-}
-
-func (l *Link) Close() error {
-	if l.link != nil {
-		err := C.bpf_link_destroy(l.link)
-		if err != 0 {
-			return fmt.Errorf("error destroying link: %v", err)
-		}
-		l.link = nil
-		return nil
-	}
-	return fmt.Errorf("link nil")
 }
 
 func (o *Obj) Close() error {
