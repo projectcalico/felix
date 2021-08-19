@@ -25,9 +25,8 @@ import (
 	"strconv"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/projectcalico/felix/bpf"
+	log "github.com/sirupsen/logrus"
 )
 
 type AttachPoint struct {
