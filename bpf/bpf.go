@@ -1059,23 +1059,25 @@ func (b *BPFLib) getCalicoBPFProgIds() ([]int, error) {
 	return id, nil
 }
 
-func (b *BPFLib) canRemoveXDP(ifName string, id []int) (bool, error) {
+func (b *BPFLib) canRemoveXDP(ifName string) (error) {
+	// Verify XDP program of interface is loaded by Calico.
+	// If not, return err.
+	id, err := b.getCalicoBPFProgIds()
+	if err != nil {
+		return err
+	}
 	i, err := b.GetXDPID(ifName)
 	if err != nil {
-		// iproute2 error or Empty
-		if i == -1 {
-			return false, err
-		} else {
-			return true, nil
-		}
+		return err;
 	}
+
 	for _, v := range id {
 		if v == i {
-			return true, nil
+			return nil
 		}
 	}
 
-	return false, nil
+	return fmt.Errorf("failed to detach XDP program from %s: interface has bogus, but not loaded by Calico.", ifName )
 }
 
 func (b *BPFLib) LoadXDP(objPath, ifName string, mode XDPMode) error {
@@ -1094,18 +1096,10 @@ func (b *BPFLib) LoadXDPAuto(ifName string, mode XDPMode) error {
 func (b *BPFLib) RemoveXDP(ifName string, mode XDPMode) error {
 	progName := getProgName(ifName)
 	progPath := filepath.Join(b.xdpDir, progName)
-
 	// Verify Calico XDP program
-	id, err := b.getCalicoBPFProgIds()
+	err := b.canRemoveXDP(ifName)
 	if err != nil {
 		return err
-	}
-	verify, err := b.canRemoveXDP(ifName, id)
-	if err != nil {
-		return err
-	}
-	if !verify {
-		return fmt.Errorf("failed to detach XDP program from %s: interface has bogus, but not loaded by Calico.", ifName)
 	}
 
 	prog := "ip"
@@ -1277,7 +1271,7 @@ func (b *BPFLib) GetXDPID(ifName string) (int, error) {
 		}
 	}
 
-	return -2, errors.New("ID not found")
+	return -1, errors.New("ID not found")
 }
 
 func (b *BPFLib) GetXDPMode(ifName string) (XDPMode, error) {
