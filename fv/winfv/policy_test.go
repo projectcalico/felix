@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
-	"strings"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -57,9 +56,15 @@ func getPodIP(name, namespace string) string {
 	return ip
 }
 
+func kubectlExec(command string) error {
+	cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config -n demo exec %v`, command)
+	_, _, err := powershell(cmd)
+	return err
+}
+
 var _ = Describe("Windows policy test", func() {
 	var (
-		porter, client, clientB, nginx string
+		porter, client, clientB, nginx, nginxB string
 	)
 
 	BeforeEach(func() {
@@ -68,24 +73,49 @@ var _ = Describe("Windows policy test", func() {
 		clientB = getPodIP("client-b", "demo")
 		porter = getPodIP("porter", "demo")
 		nginx = getPodIP("nginx", "demo")
-		log.Infof("Pod IP client %s, client-b %s, porter %s, nginx %s",
-			client, clientB, porter, nginx)
+		nginxB = getPodIP("nginx-b", "demo")
+		log.Infof("Pod IPs: client %s, client-b %s, porter %s, nginx %s, nginx-b %s",
+			client, clientB, porter, nginx, nginxB)
 
 		Expect(client).NotTo(BeEmpty())
 		Expect(clientB).NotTo(BeEmpty())
 		Expect(porter).NotTo(BeEmpty())
 		Expect(nginx).NotTo(BeEmpty())
+		Expect(nginxB).NotTo(BeEmpty())
 	})
 
 	Context("ingress policy tests", func() {
 		It("client pod can connect to porter pod", func() {
-			cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client -n demo -- wget %v -T 5 -qO -`, porter)
-			output, _, err := powershell(cmd)
+			err := kubectlExec(fmt.Sprintf(`-t client -- wget %v -T 5 -qO -`, porter))
 			Expect(err).NotTo(HaveOccurred())
-			Expect(output).To(Equal("foobar"))
 		})
 		It("client-b pod can't connect to porter pod", func() {
-			cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client-b -n demo -- wget %v -T 5 -qO -`, porter)
+			err := kubectlExec(fmt.Sprintf(`-t client-b -- wget %v -T 5 -qO -`, porter))
+			Expect(err).To(HaveOccurred())
+		})
+	})
+	Context("egress policy tests", func() {
+		It("porter pod can connect to nginx pod", func() {
+			err := kubectlExec(fmt.Sprintf(`-t porter -- powershell -Command 'Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 %v'`, nginx))
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("porter pod cannot connect to nginx-b pod", func() {
+			err := kubectlExec(fmt.Sprintf(`-t porter -- powershell -Command 'Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 %v'`, nginxB))
+			Expect(err).To(HaveOccurred())
+		})
+		It("porter pod cannot connect to google.com", func() {
+			err := kubectlExec(`-t porter -- powershell -Command 'Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 www.google.com'`)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+	Context("egress policy tests", func() {
+		It("porter pod can connect to nginx pod", func() {
+			cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client -n demo -- wget %v -T 5 -qO -`, nginx)
+			_, _, err := powershell(cmd)
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("porter pod can't connect to google.com", func() {
+			cmd := `c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client-b -n demo -- wget %v -T 5 -qO www.google.com`
 			_, _, err := powershell(cmd)
 			Expect(err).To(HaveOccurred())
 		})
