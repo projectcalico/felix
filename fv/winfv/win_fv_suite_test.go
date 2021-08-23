@@ -18,7 +18,6 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"os"
 	"testing"
 
 	"github.com/onsi/ginkgo/reporters"
@@ -32,6 +31,6 @@ func init() {
 
 func TestNetworkingWindows(t *testing.T) {
 	RegisterFailHandler(Fail)
-	junitReporter := reporters.NewJUnitReporter(os.Getenv("REPORT"))
+	junitReporter := reporters.NewJUnitReporter("../report/fv_suite.xml")
 	RunSpecsWithDefaultAndCustomReporters(t, "Felix windows Suite", []Reporter{junitReporter})
 }
