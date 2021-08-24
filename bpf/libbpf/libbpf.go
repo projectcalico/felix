@@ -33,6 +33,12 @@ type TCOpts struct {
 	opts C.struct_bpf_tc_opts
 }
 
+type Map struct {
+	name string
+	mtype int
+}
+
+const MapTypeProgrArray = C.BPF_MAP_TYPE_PROG_ARRAY
 const (
 	policyProgram  string = "calico_tc_norm_pol_tail"
 	allowedProgram string = "calico_tc_skb_accepted_entrypoint"
@@ -45,28 +51,63 @@ const (
 	ICMP_PROGRAM_INDEX
 )
 
-func OpenObject(filename, ifaceName, hook string) (*Obj, error) {
+func (m *Map) Name() string {
+	return m.name
+}
+
+func (m *Map) Type() int {
+	return m.mtype
+}
+
+func (m *Map) SetPinPath(obj *Obj, path string) error {
+	cPath := C.CString(path)
+	cMapName := C.CString(m.Name())
+	defer C.free(unsafe.Pointer(cPath))
+	defer C.free(unsafe.Pointer(cMapName))
+	err := C.bpf_pin_map(obj.obj, cMapName, cPath)
+	if err != 0 {
+		return fmt.Errorf("pinning map failed %v", err)
+	}
+	return nil
+}
+
+func OpenObject(filename string) (*Obj, error) {
 	bpf.IncreaseLockedMemoryQuota()
 	cFilename := C.CString(filename)
-	if hook == "ingress" {
-		ifaceName = ifaceName + "_igr"
-	} else {
-		ifaceName = ifaceName + "_egr"
-	}
-	cIfacename := C.CString(ifaceName)
 	defer C.free(unsafe.Pointer(cFilename))
-	defer C.free(unsafe.Pointer(cIfacename))
-
-	obj := C.bpf_obj_open_load(cFilename, cIfacename)
+	obj := C.bpf_obj_open(cFilename)
 	if obj.obj == nil {
-		msg := "error loading program"
+		msg := "error opening object"
 		if obj.errno != 0 {
 			errno := syscall.Errno(-int64(obj.errno))
-			msg = fmt.Sprintf("error loading program: %v", errno.Error())
+			msg = fmt.Sprintf("error opening object: %v", errno.Error())
 		}
 		return nil, fmt.Errorf(msg)
 	}
 	return &Obj{obj: obj.obj}, nil
+}
+
+func (o *Obj) Load() error {
+	err := C.bpf_obj_load(o.obj)
+	if err != 0 {
+		return fmt.Errorf("error loading object %v", err)
+	}
+	return nil
+}
+
+func (o *Obj) Maps() ([]Map, error) {
+	var list[]Map
+	data := C.getMaps(o.obj)
+	length := int(C.numMaps(o.obj))
+	if data != nil {
+		slice := (*[1 << 28]C.struct_bpf_map_data)(unsafe.Pointer(data))[:length:length]
+		for _, val := range slice {
+			d := Map{name: C.GoString(val.name), mtype: int(val.mtype)}
+			list = append(list, d)
+		}
+		return list, nil
+	}
+	return nil, fmt.Errorf("error getting maps from object")
 }
 
 func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {

@@ -437,7 +437,7 @@ deny:
 	goto finalize;
 }
 
-SEC("classifier/1")
+SEC("classifier/tc/accept")
 int calico_tc_skb_accepted_entrypoint(struct __sk_buff *skb)
 {
 	CALI_DEBUG("Entering calico_tc_skb_accepted_entrypoint\n");
@@ -1053,7 +1053,7 @@ deny:
 	}
 }
 
-SEC("classifier/2")
+SEC("classifier/tc/icmp")
 int calico_tc_skb_send_icmp_replies(struct __sk_buff *skb)
 {
 	__u32 fib_flags = 0;
@@ -1112,10 +1112,10 @@ deny:
 #endif
 
 #define ENTRY_FUNC(x)				\
-	SEC("classifier/"XSTR(x))			\
+	SEC("classifier/"XSTR(x))		\
 	int  x(struct __sk_buff *skb)		\
 	{					\
-		return calico_tc(skb);			\
+		return calico_tc(skb);		\
 	}
 
 // Entrypoint with definable name.  It's useful to redefine the name for each entrypoint

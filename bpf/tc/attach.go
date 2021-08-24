@@ -63,13 +63,6 @@ var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
 var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
 
-/*
-func init() {
-	if optsMap == nil {
-		optsMap = make(map[string]*libbpf.TCOpts)
-	}
-}*/
-
 func (ap AttachPoint) Log() *log.Entry {
 	return log.WithFields(log.Fields{
 		"iface": ap.Iface,
@@ -115,9 +108,34 @@ func (ap AttachPoint) AttachProgram() error {
 	if err != nil {
 		return err
 	}
-	obj, err := libbpf.OpenObject(tempBinary, ap.Iface, string(ap.Hook))
+	obj, err := libbpf.OpenObject(tempBinary)
 	if err != nil {
 		return err
+	}
+	maps, err := obj.Maps()
+	if err != nil {
+		return fmt.Errorf("error getting maps %v", err)
+	}
+	pinPath := ap.Iface
+	for _, m := range maps {
+		if m.Type() == libbpf.MapTypeProgrArray && m.Name() == "cali_jump" {
+			if ap.Hook == HookIngress {
+				pinPath = pinPath + "_igr/"
+			} else {
+				pinPath = pinPath + "_egr/"
+			}
+		} else {
+			pinPath = "globals/"
+		}
+		pinPath = "/sys/fs/bpf/tc/" + pinPath + m.Name()
+		err = m.SetPinPath(obj, pinPath)
+		if err != nil {
+			return fmt.Errorf("error pinning map %v errno %v", m.Name(), err)
+		}
+	}
+	err = obj.Load()
+	if err != nil {
+		return fmt.Errorf("error loading program %v", err)
 	}
 	isHost := false
 	if ap.Type == "host" {

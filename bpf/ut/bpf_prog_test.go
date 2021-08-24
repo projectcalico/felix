@@ -419,7 +419,7 @@ func bpftoolProgLoadAll(fname, bpfFsDir string, forXDP bool, polProg bool, maps 
 	if polProg {
 		polProgPath := "1_0"
 		if !forXDP {
-			polProgPath = "classifier_0"
+			polProgPath = "classifier_tc_policy"
 		}
 		polProgPath = path.Join(bpfFsDir, polProgPath)
 		_, err = os.Stat(polProgPath)
@@ -437,7 +437,7 @@ func bpftoolProgLoadAll(fname, bpfFsDir string, forXDP bool, polProg bool, maps 
 	}
 	polProgPath := "1_1"
 	if !forXDP {
-		polProgPath = "classifier_1"
+		polProgPath = "classifier_tc_accept"
 	}
 	_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "1", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, polProgPath))
 	if err != nil {
@@ -446,7 +446,7 @@ func bpftoolProgLoadAll(fname, bpfFsDir string, forXDP bool, polProg bool, maps 
 	}
 
 	if !forXDP {
-		_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "2", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "classifier_2"))
+		_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "2", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, "classifier_tc_icmp"))
 		if err != nil {
 			return errors.Wrap(err, "failed to update jump map (icmp program)")
 		}

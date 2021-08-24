@@ -17,7 +17,6 @@
 #include <net/if.h>
 #include <bpf.h>
 #include <stdlib.h>
-//#include <errno.h>
 
 #define MAX_ERRNO 4095
 bool IS_ERR(const void *ptr) {
@@ -46,74 +45,71 @@ struct bpf_tc_wrapper {
 	int errno;
 };
 
-struct bpf_obj_wrapper bpf_obj_open_load(char *filename, char *ifaceName) {
+struct bpf_map_data {
+	char *name;
+	int mtype;
+};
+
+struct bpf_obj_wrapper bpf_obj_open(char *filename) {
 	struct bpf_obj_wrapper obj;
 	obj.obj = bpf_object__open(filename);
 	obj.errno = 0;
-	struct bpf_map *map;
-	int err, len;
-	char buf[PATH_MAX];
-	char path[] = "/sys/fs/bpf/tc/";
 
-	if (obj.obj == NULL) {
-		return obj;
-	}
 	if (IS_ERR(obj.obj)) {
 		obj.errno = ERR_VAL(obj.obj);
 		obj.obj = NULL;
-		return obj;
-	}
-	bpf_object__for_each_map(map, obj.obj) {
-		if (bpf_map__def(map)->type == BPF_MAP_TYPE_PROG_ARRAY) {
-			if (ifaceName == NULL) {
-				obj.obj = NULL;
-				return obj;
-			}
-			len = snprintf(buf, PATH_MAX, "%s/%s/%s", path, ifaceName, bpf_map__name(map));
-		} else {
-			len = snprintf(buf, PATH_MAX, "%s/%s/%s", path, "globals", bpf_map__name(map));
-		}
-		if (len < 0) {
-			obj.obj = NULL;
-			return obj;
-		}
-		obj.errno = bpf_map__set_pin_path(map, buf);
-		if (obj.errno) {
-			obj.obj = NULL;
-			return obj;
-		}
-	}
-	obj.errno = bpf_object__load(obj.obj);
-
-	if (obj.errno) {
-		obj.obj = NULL;
-		return obj;
 	}
 	return obj;
 }
 
-struct bpf_link_wrapper bpf_program_attach_kprobe(struct bpf_object *obj, char *progName, char *fn) {
-	struct bpf_link_wrapper link;
-	link.link = NULL;
-	link.errno = 0;
-	struct bpf_program *prog = bpf_object__find_program_by_name(obj, progName);
-	if (prog == NULL) {
-		return link;
-	}
-	link.link = bpf_program__attach_kprobe(prog, false, fn);
-	if (link.link == NULL) {
-		return link;
-	}
-	if (IS_ERR(link.link)) {
-		link.errno = ERR_VAL(link.link);
-	}
-	return link;
+int bpf_obj_load(struct bpf_object *obj) {
+	return bpf_object__load(obj);
 }
 
-int bpf_link_destroy(struct bpf_link *link) {
-	return bpf_link__destroy(link);
+int numMaps(struct bpf_object *obj) {
+	int count = 0;
+	struct bpf_map *map;
+	bpf_object__for_each_map(map, obj) {
+		count++;
+	}
+	return count;
 }
 
+struct bpf_map_data* getMaps(struct bpf_object *obj) {
+	int mapCount = numMaps(obj);
+	struct bpf_map *map;
+	const char *temp;
+	int index = 0;
+
+	if (!mapCount) {
+		return NULL;
+	}
+	struct bpf_map_data *mapData = (struct bpf_map_data*)calloc(mapCount, sizeof(struct bpf_map_data));
+	if (!mapData) {
+		return NULL;
+	}
+	bpf_object__for_each_map(map, obj) {
+		if (!map) {
+			continue;
+		}
+		mapData[index].name = (char*)calloc(BPF_OBJ_NAME_LEN, sizeof(char));
+		if (!mapData[index].name) {
+			continue;
+		}
+		temp = bpf_map__name(map);
+		strncpy(mapData[index].name, temp, BPF_OBJ_NAME_LEN);
+		mapData[index++].mtype = bpf_map__type(map);
+	}
+	return mapData;
+}
+
+int bpf_pin_map(struct bpf_object *obj, char *mapName, char *pinPath) {
+	struct bpf_map *map = bpf_object__find_map_by_name(obj, mapName);
+	if (!map) {
+		return -1;
+	}
+	return bpf_map__set_pin_path(map, pinPath);
+}
 
 struct bpf_tc_wrapper bpf_tc_program_attach (struct bpf_object *obj, char *secName, char *ifName, int isIngress) {
 	int ifIndex = if_nametoindex(ifName);
