@@ -56,7 +56,7 @@ func TestJumpMapCleanup(t *testing.T) {
 		// Start with a clean base state in case another test left something behind.
 		t.Log("Doing initial clean up")
 		tc.CleanUpJumpMaps()
-
+		tc.InitTcOpts()
 		t.Log("Adding program, should add one dir and one map.")
 		startingJumpMaps := countJumpMaps()
 		startingTCDirs := countTCDirs()
@@ -66,8 +66,9 @@ func TestJumpMapCleanup(t *testing.T) {
 		Expect(err).NotTo(HaveOccurred())
 		err = ap.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
-		ok := tc.GetTCOpts(ap.Iface, string(ap.Hook))
+		val, ok := tc.GetTCOpts(ap.Iface + "_" + string(ap.Hook))
 		Expect(ok).To(Equal(true))
+		Expect(val).NotTo(Equal(nil))
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
 

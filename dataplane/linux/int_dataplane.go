@@ -554,6 +554,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 		// Register map managers first since they create the maps that will be used by the endpoint manager.
 		// Important that we create the maps before we load a BPF program with TC since we make sure the map
 		// metadata name is set whereas TC doesn't set that field.
+		tc.InitTcOpts()
 		ipSetIDAllocator := idalloc.New()
 		ipSetsMap := bpfipsets.Map(bpfMapContext)
 		err := ipSetsMap.EnsureExists()

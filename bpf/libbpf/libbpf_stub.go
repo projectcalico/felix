@@ -16,13 +16,38 @@
 
 package libbpf
 
+const MapTypeProgrArray = 3
+
 type Obj struct {
 }
 
 type TCOpts struct {
 }
 
-func OpenObject(filename, ifaceName, hook string) (*Obj, error) {
+type Map struct {
+}
+
+func (m *Map) Name() string {
+	panic("LIBBPF syscall stub")
+}
+
+func (m *Map) Type() int {
+	panic("LIBBPF syscall stub")
+}
+
+func (m *Map) SetPinPath(obj *Obj, path string) error {
+	panic("LIBBPF syscall stub")
+}
+
+func OpenObject(filename string) (*Obj, error) {
+	panic("LIBBPF syscall stub")
+}
+
+func (o *Obj) Load() error {
+	panic("LIBBPF syscall stub")
+}
+
+func (o *Obj) Maps() ([]Map, error) {
 	panic("LIBBPF syscall stub")
 }
 
@@ -39,10 +64,6 @@ func RemoveQDisc(ifName string) error {
 }
 
 func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
-	panic("LIBBPF syscall stub")
-}
-
-func (o *Obj) UpdateJumpMaps(isHost bool) error {
 	panic("LIBBPF syscall stub")
 }
 

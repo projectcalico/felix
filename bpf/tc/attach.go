@@ -75,9 +75,6 @@ func (ap AttachPoint) Log() *log.Entry {
 func (ap AttachPoint) AttachProgram() error {
 	logCxt := log.WithField("attachPoint", ap)
 
-	if optsMap == nil {
-		optsMap = make(map[string]*libbpf.TCOpts)
-	}
 	tempDir, err := ioutil.TempDir("", "calico-tc")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary directory: %w", err)
@@ -141,7 +138,7 @@ func (ap AttachPoint) AttachProgram() error {
 	if ap.Type == "host" {
 		isHost = true
 	}
-	err = obj.UpdateJumpMaps(isHost)
+	err = UpdateJumpMap(obj, isHost)
 	if err != nil {
 		return fmt.Errorf("error updating jump map %v", err)
 	}
@@ -154,9 +151,7 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	key := ap.Iface + "_" + string(ap.Hook)
-	optsLock.Lock()
-	optsMap[key] = opts
-	optsLock.Unlock()
+	updateTcOpts(key, opts)
 	// Success: clean up the old programs.
 	var progErrs []error
 	for _, p := range progsToClean {
@@ -533,9 +528,8 @@ func (ap *AttachPoint) ProgramID() (string, error) {
 	logCtx.Info("Finding TC program ID")
 	key := ap.Iface + "_" + string(ap.Hook)
 	if optsMap != nil {
-		optsLock.RLock()
-		defer optsLock.RUnlock()
-		if val, ok := optsMap[key]; ok {
+		val, ok := GetTCOpts(key)
+		if ok {
 			progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), val)
 			if err != nil {
 				return "", errors.New("failed to find TC program")
@@ -556,8 +550,38 @@ func (ap *AttachPoint) IfaceName() string {
 	return ap.Iface
 }
 
-func GetTCOpts(ifaceName, hook string) bool {
-	key := ifaceName + "_" + hook
-	_, ok := optsMap[key]
-	return ok
+func GetTCOpts(key string) (*libbpf.TCOpts, bool) {
+	optsLock.RLock()
+	defer optsLock.RUnlock()
+	val, ok := optsMap[key]
+	return val, ok
+}
+
+func InitTcOpts() {
+        optsMap = make(map[string]*libbpf.TCOpts)
+}
+
+// nolint
+func updateTcOpts(key string, opts *libbpf.TCOpts) {
+        optsLock.Lock()
+        defer optsLock.Unlock()
+        optsMap[key] = opts
+}
+
+func UpdateJumpMap(obj *libbpf.Obj, isHost bool) error {
+        if !isHost {
+                err := obj.UpdateJumpMap("cali_jump", string(policyProgram), POLICY_PROGRAM_INDEX)
+                if err != nil {
+                        return fmt.Errorf("error updating policy program %v", err)
+                }
+        }
+        err := obj.UpdateJumpMap("cali_jump", string(allowProgram), ALLOW_PROGRAM_INDEX)
+        if err != nil {
+                return fmt.Errorf("error updating epilogue program %v", err)
+        }
+        err = obj.UpdateJumpMap("cali_jump", string(icmpProgram), ICMP_PROGRAM_INDEX)
+        if err != nil {
+                return fmt.Errorf("error updating icmp program %v", err)
+        }
+        return nil
 }
