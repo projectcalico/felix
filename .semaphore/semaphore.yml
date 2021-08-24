@@ -185,7 +185,11 @@ blocks:
       - name: WIN_PPK_KEY
         value: win_ppk_key
       - name: K8S_VERSION
-        value: 1.20.1
+        value: 1.20.10
+      - name: WINDOWS_VERSION
+        value: "2004"
+      - name: BACKEND
+        value: vxlan
     jobs:
       - name: FV Test matrix
         commands:
