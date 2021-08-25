@@ -564,6 +564,7 @@ func updateTCOpts(key string, opts *libbpf.TCOpts) {
         optsMap[key] = opts
 }
 
+// nolint
 func updateJumpMap(obj *libbpf.Obj, isHost bool) error {
         if !isHost {
                 err := obj.UpdateJumpMap("cali_jump", string(policyProgram), POLICY_PROGRAM_INDEX)
