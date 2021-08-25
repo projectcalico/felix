@@ -56,7 +56,7 @@ type AttachPoint struct {
 	ExtToServiceConnmark uint32
 }
 
-var optsMap map[string]*libbpf.TCOpts
+var optsMap = map[string]*libbpf.TCOpts{}
 var tcLock sync.RWMutex
 var optsLock sync.RWMutex
 var ErrDeviceNotFound = errors.New("device not found")
@@ -138,7 +138,7 @@ func (ap AttachPoint) AttachProgram() error {
 	if ap.Type == "host" {
 		isHost = true
 	}
-	err = UpdateJumpMap(obj, isHost)
+	err = updateJumpMap(obj, isHost)
 	if err != nil {
 		return fmt.Errorf("error updating jump map %v", err)
 	}
@@ -151,7 +151,7 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	key := ap.Iface + "_" + string(ap.Hook)
-	updateTcOpts(key, opts)
+	updateTCOpts(key, opts)
 	// Success: clean up the old programs.
 	var progErrs []error
 	for _, p := range progsToClean {
@@ -557,18 +557,14 @@ func GetTCOpts(key string) (*libbpf.TCOpts, bool) {
 	return val, ok
 }
 
-func InitTcOpts() {
-        optsMap = make(map[string]*libbpf.TCOpts)
-}
-
 // nolint
-func updateTcOpts(key string, opts *libbpf.TCOpts) {
+func updateTCOpts(key string, opts *libbpf.TCOpts) {
         optsLock.Lock()
         defer optsLock.Unlock()
         optsMap[key] = opts
 }
 
-func UpdateJumpMap(obj *libbpf.Obj, isHost bool) error {
+func updateJumpMap(obj *libbpf.Obj, isHost bool) error {
         if !isHost {
                 err := obj.UpdateJumpMap("cali_jump", string(policyProgram), POLICY_PROGRAM_INDEX)
                 if err != nil {

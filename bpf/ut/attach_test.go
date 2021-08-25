@@ -56,7 +56,6 @@ func TestJumpMapCleanup(t *testing.T) {
 		// Start with a clean base state in case another test left something behind.
 		t.Log("Doing initial clean up")
 		tc.CleanUpJumpMaps()
-		tc.InitTcOpts()
 		t.Log("Adding program, should add one dir and one map.")
 		startingJumpMaps := countJumpMaps()
 		startingTCDirs := countTCDirs()
