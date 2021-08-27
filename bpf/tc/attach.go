@@ -56,6 +56,9 @@ type AttachPoint struct {
 	ExtToServiceConnmark uint32
 }
 
+// struct bpf_tc_opts that is used for attaching a program is required 
+// to get the prog id attached to the ingress/egress hook of the interface.
+// Hence libbpf.TCOPts needs to be stored.
 var optsMap = map[string]*libbpf.TCOpts{}
 var tcLock sync.RWMutex
 var optsLock sync.RWMutex
@@ -109,39 +112,39 @@ func (ap AttachPoint) AttachProgram() error {
 	if err != nil {
 		return err
 	}
-	maps, err := obj.Maps()
-	if err != nil {
-		return fmt.Errorf("error getting maps %v", err)
-	}
-	pinPath := ap.Iface
-	for _, m := range maps {
-		if m.Type() == libbpf.MapTypeProgrArray && m.Name() == "cali_jump" {
+
+	baseDir := "/sys/fs/bpf/tc/"
+	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap(obj) {
+		subDir := "globals"
+		if m.Type() == libbpf.MapTypeProgrArray && strings.Contains(m.Name(), "cali_jump") {
 			if ap.Hook == HookIngress {
-				pinPath = pinPath + "_igr/"
+				subDir = ap.Iface + "_igr/"
 			} else {
-				pinPath = pinPath + "_egr/"
+				subDir = ap.Iface + "_egr/"
 			}
-		} else {
-			pinPath = "globals/"
 		}
-		pinPath = "/sys/fs/bpf/tc/" + pinPath + m.Name()
-		err = m.SetPinPath(obj, pinPath)
-		if err != nil {
-			return fmt.Errorf("error pinning map %v errno %v", m.Name(), err)
+		pinPath := path.Join(baseDir, subDir, m.Name())
+		perr := m.SetPinPath(pinPath)
+		if perr != nil {
+			return fmt.Errorf("error pinning map %v errno %v", m.Name(), perr)
 		}
 	}
+
 	err = obj.Load()
 	if err != nil {
 		return fmt.Errorf("error loading program %v", err)
 	}
+
 	isHost := false
 	if ap.Type == "host" {
 		isHost = true
 	}
+
 	err = updateJumpMap(obj, isHost)
 	if err != nil {
 		return fmt.Errorf("error updating jump map %v", err)
 	}
+
 	opts, err := obj.AttachClassifier(SectionName(ap.Type, ap.ToOrFrom), ap.Iface, string(ap.Hook))
 	if err != nil {
 		return err
@@ -515,12 +518,10 @@ func RemoveQdisc(ifaceName string) error {
 func RemoveTCOpts(ifaceName string) {
 	optsLock.Lock()
 	defer optsLock.Unlock()
-	if optsMap != nil {
-		key := ifaceName + "_" + "ingress"
-		delete(optsMap, key)
-		key = ifaceName + "_" + "egress"
-		delete(optsMap, key)
-	}
+	key := ifaceName + "_" + "ingress"
+	delete(optsMap, key)
+	key = ifaceName + "_" + "egress"
+	delete(optsMap, key)
 }
 
 func (ap *AttachPoint) ProgramID() (string, error) {
@@ -559,26 +560,26 @@ func GetTCOpts(key string) (*libbpf.TCOpts, bool) {
 
 // nolint
 func updateTCOpts(key string, opts *libbpf.TCOpts) {
-        optsLock.Lock()
-        defer optsLock.Unlock()
-        optsMap[key] = opts
+	optsLock.Lock()
+	defer optsLock.Unlock()
+	optsMap[key] = opts
 }
 
 // nolint
 func updateJumpMap(obj *libbpf.Obj, isHost bool) error {
-        if !isHost {
-                err := obj.UpdateJumpMap("cali_jump", string(policyProgram), POLICY_PROGRAM_INDEX)
-                if err != nil {
-                        return fmt.Errorf("error updating policy program %v", err)
-                }
-        }
-        err := obj.UpdateJumpMap("cali_jump", string(allowProgram), ALLOW_PROGRAM_INDEX)
-        if err != nil {
-                return fmt.Errorf("error updating epilogue program %v", err)
-        }
-        err = obj.UpdateJumpMap("cali_jump", string(icmpProgram), ICMP_PROGRAM_INDEX)
-        if err != nil {
-                return fmt.Errorf("error updating icmp program %v", err)
-        }
-        return nil
+	if !isHost {
+		err := obj.UpdateJumpMap("cali_jump", string(policyProgram), POLICY_PROGRAM_INDEX)
+		if err != nil {
+			return fmt.Errorf("error updating policy program %v", err)
+		}
+	}
+	err := obj.UpdateJumpMap("cali_jump", string(allowProgram), ALLOW_PROGRAM_INDEX)
+	if err != nil {
+		return fmt.Errorf("error updating epilogue program %v", err)
+	}
+	err = obj.UpdateJumpMap("cali_jump", string(icmpProgram), ICMP_PROGRAM_INDEX)
+	if err != nil {
+		return fmt.Errorf("error updating icmp program %v", err)
+	}
+	return nil
 }

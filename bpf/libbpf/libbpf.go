@@ -16,7 +16,6 @@ package libbpf
 
 import (
 	"fmt"
-	"syscall"
 	"unsafe"
 
 	"github.com/projectcalico/felix/bpf"
@@ -34,26 +33,38 @@ type TCOpts struct {
 }
 
 type Map struct {
-	name string
-	mtype int
+	bpfMap *C.struct_bpf_map
 }
 
 const MapTypeProgrArray = C.BPF_MAP_TYPE_PROG_ARRAY
 
+type QdiskHook string
+
+const (
+  QdiskIngress QdiskHook = "ingress"
+  QdiskEgress QdiskHook = "egress"
+)
+
 func (m *Map) Name() string {
-	return m.name
+	name, err := C.bpf_map__name(m.bpfMap)
+	if err != nil {
+		return ""
+	}
+	return C.GoString(name)
 }
 
 func (m *Map) Type() int {
-	return m.mtype
+	mapType, err := C.bpf_map__type(m.bpfMap)
+	if err != nil {
+		return -1
+	}
+	return int(mapType)
 }
 
-func (m *Map) SetPinPath(obj *Obj, path string) error {
+func (m *Map) SetPinPath(path string) error {
 	cPath := C.CString(path)
-	cMapName := C.CString(m.Name())
 	defer C.free(unsafe.Pointer(cPath))
-	defer C.free(unsafe.Pointer(cMapName))
-	err := C.bpf_pin_map(obj.obj, cMapName, cPath)
+	err := C.bpf_map__set_pin_path(m.bpfMap, cPath)
 	if err != 0 {
 		return fmt.Errorf("pinning map failed %v", err)
 	}
@@ -64,39 +75,38 @@ func OpenObject(filename string) (*Obj, error) {
 	bpf.IncreaseLockedMemoryQuota()
 	cFilename := C.CString(filename)
 	defer C.free(unsafe.Pointer(cFilename))
-	obj := C.bpf_obj_open(cFilename)
-	if obj.obj == nil {
-		msg := "error opening object"
-		if obj.errno != 0 {
-			errno := syscall.Errno(-int64(obj.errno))
-			msg = fmt.Sprintf("error opening object: %v", errno.Error())
-		}
-		return nil, fmt.Errorf(msg)
+	obj, err := C.bpf_object__open(cFilename)
+	if err != nil {
+		return nil, fmt.Errorf("error opening object %v", err)
 	}
-	return &Obj{obj: obj.obj}, nil
+	return &Obj{obj: obj}, nil
 }
 
 func (o *Obj) Load() error {
-	err := C.bpf_obj_load(o.obj)
+	err := C.bpf_object__load(o.obj)
 	if err != 0 {
 		return fmt.Errorf("error loading object %v", err)
 	}
 	return nil
 }
 
-func (o *Obj) Maps() ([]Map, error) {
-	var list[]Map
-	data := C.getMaps(o.obj)
-	length := int(C.numMaps(o.obj))
-	if data != nil {
-		slice := (*[1 << 28]C.struct_bpf_map_data)(unsafe.Pointer(data))[:length:length]
-		for _, val := range slice {
-			d := Map{name: C.GoString(val.name), mtype: int(val.mtype)}
-			list = append(list, d)
-		}
-		return list, nil
+func (o *Obj) FirstMap() (*Map, error) {
+	bpfMap, err := C.bpf_map__next(nil, o.obj)
+	if bpfMap == nil || err != nil {
+		return nil, fmt.Errorf("error getting first map %v", err)
 	}
-	return nil, fmt.Errorf("error getting maps from object")
+	return &Map{bpfMap: bpfMap}, nil
+}
+
+func (m *Map) NextMap(obj *Obj) (*Map, error) {
+	bpfMap, err := C.bpf_map__next(m.bpfMap, obj.obj)
+	if err != nil {
+		return nil, fmt.Errorf("error getting next map %v", err)
+	}
+	if bpfMap == nil && err == nil {
+		return nil, nil
+	}
+	return &Map{bpfMap: bpfMap}, nil
 }
 
 func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
@@ -105,10 +115,16 @@ func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
 	cIfName := C.CString(ifName)
 	defer C.free(unsafe.Pointer(cSecName))
 	defer C.free(unsafe.Pointer(cIfName))
-	if hook == "ingress" {
+	ifIndex, err := C.if_nametoindex(cIfName)
+	if err != nil {
+		return nil, err
+	}
+
+	if hook == string(QdiskIngress) {
 		isIngress = 1
 	}
-	opts := C.bpf_tc_program_attach(o.obj, cSecName, cIfName, C.int(isIngress))
+
+	opts := C.bpf_tc_program_attach(o.obj, cSecName, C.int(ifIndex), C.int(isIngress))
 	if opts.opts.prog_fd < 0 || opts.errno != 0 {
 		return nil, fmt.Errorf("Error attaching tc program ")
 	}
@@ -118,8 +134,12 @@ func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
 func CreateQDisc(ifName string) error {
 	cIfName := C.CString(ifName)
 	defer C.free(unsafe.Pointer(cIfName))
-	err := C.bpf_tc_create_qdisc(cIfName)
-	if err != 0 {
+	ifIndex, err := C.if_nametoindex(cIfName)
+	if err != nil {
+		return err
+	}
+	_, err = C.bpf_tc_create_qdisc(C.int(ifIndex))
+	if err != nil {
 		return fmt.Errorf("Error creating qdisc")
 	}
 	return nil
@@ -128,8 +148,12 @@ func CreateQDisc(ifName string) error {
 func RemoveQDisc(ifName string) error {
 	cIfName := C.CString(ifName)
 	defer C.free(unsafe.Pointer(cIfName))
-	err := C.bpf_tc_remove_qdisc(cIfName)
-	if err != 0 {
+	ifIndex, err := C.if_nametoindex(cIfName)
+	if err != nil {
+		return err
+	}
+	_, err = C.bpf_tc_remove_qdisc(C.int(ifIndex))
+	if err != nil {
 		return fmt.Errorf("Error removing qdisc")
 	}
 	return nil
@@ -151,10 +175,14 @@ func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
 	isIngress := 0
 	cIfName := C.CString(ifaceName)
 	defer C.free(unsafe.Pointer(cIfName))
+	ifIndex, err := C.if_nametoindex(cIfName)
+	if err != nil {
+		return -1, err
+	}
 	if hook == "ingress" {
 		isIngress = 1
 	}
-	progId := C.bpf_tc_query_iface(cIfName, opts.opts, C.int(isIngress))
+	progId := C.bpf_tc_query_iface(C.int(ifIndex), opts.opts, C.int(isIngress))
 	if int(progId) < 0 {
 		return -1, fmt.Errorf("Error querying interface %s", ifaceName)
 	}

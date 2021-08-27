@@ -441,7 +441,6 @@ func bpftoolProgLoadAll(fname, bpfFsDir string, forXDP bool, polProg bool, maps 
 	}
 	_, err = bpftool("map", "update", "pinned", jumpMap.Path(), "key", "1", "0", "0", "0", "value", "pinned", path.Join(bpfFsDir, polProgPath))
 	if err != nil {
-		//time.Sleep(100*time.Second)
 		return errors.Wrap(err, "failed to update jump map (allowed program)")
 	}
 
