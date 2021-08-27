@@ -197,3 +197,12 @@ func (o *Obj) Close() error {
 	}
 	return fmt.Errorf("error: libbpf obj nil")
 }
+
+func (o *Obj) Free() error {
+	if o.obj != nil {
+		C.free(unsafe.Pointer(o.obj))
+		o.obj = nil
+		return nil
+	}
+	return fmt.Errorf("error freeing libbpf obj")
+}

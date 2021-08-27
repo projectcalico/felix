@@ -181,7 +181,10 @@ func (ap AttachPoint) AttachProgram() error {
 	if len(progErrs) != 0 {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
-
+	err = obj.Free()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
