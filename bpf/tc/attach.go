@@ -37,6 +37,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 
 	"github.com/projectcalico/felix/bpf"
+	"github.com/projectcalico/felix/bpf/libbpf"
 )
 
 type AttachPoint struct {
@@ -55,8 +56,12 @@ type AttachPoint struct {
 	ExtToServiceConnmark uint32
 }
 
+// struct bpf_tc_opts that is used for attaching a program is required
+// to get the prog id attached to the ingress/egress hook of the interface.
+// Hence libbpf.TCOPts needs to be stored.
+var optsMap = map[string]*libbpf.TCOpts{}
 var tcLock sync.RWMutex
-
+var optsLock sync.RWMutex
 var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
 var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
@@ -98,19 +103,58 @@ func (ap AttachPoint) AttachProgram() error {
 	defer tcLock.RUnlock()
 	logCxt.Debug("AttachProgram got lock.")
 
+	//nolint
 	progsToClean, err := ap.listAttachedPrograms()
 	if err != nil {
 		return err
 	}
-
-	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
-		"bpf", "da", "obj", tempBinary,
-		"sec", SectionName(ap.Type, ap.ToOrFrom),
-	)
+	obj, err := libbpf.OpenObject(tempBinary)
 	if err != nil {
 		return err
 	}
 
+	baseDir := "/sys/fs/bpf/tc/"
+	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap() {
+		subDir := "globals"
+		if m.Type() == libbpf.MapTypeProgrArray && strings.Contains(m.Name(), "cali_jump") {
+			if ap.Hook == HookIngress {
+				subDir = ap.Iface + "_igr/"
+			} else {
+				subDir = ap.Iface + "_egr/"
+			}
+		}
+		pinPath := path.Join(baseDir, subDir, m.Name())
+		perr := m.SetPinPath(pinPath)
+		if perr != nil {
+			return fmt.Errorf("error pinning map %v errno %v", m.Name(), perr)
+		}
+	}
+
+	err = obj.Load()
+	if err != nil {
+		return fmt.Errorf("error loading program %v", err)
+	}
+
+	isHost := false
+	if ap.Type == "host" {
+		isHost = true
+	}
+
+	err = updateJumpMap(obj, isHost)
+	if err != nil {
+		return fmt.Errorf("error updating jump map %v", err)
+	}
+
+	opts, err := obj.AttachClassifier(SectionName(ap.Type, ap.ToOrFrom), ap.Iface, string(ap.Hook))
+	if err != nil {
+		return err
+	}
+	if opts == nil {
+		return fmt.Errorf("error attaching classifier to %v", ap.Iface)
+	}
+
+	key := ap.Iface + "_" + string(ap.Hook)
+	updateTCOpts(key, opts)
 	// Success: clean up the old programs.
 	var progErrs []error
 	for _, p := range progsToClean {
@@ -137,7 +181,10 @@ func (ap AttachPoint) AttachProgram() error {
 	if len(progErrs) != 0 {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
-
+	err = obj.Close()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -284,7 +331,7 @@ func (ap AttachPoint) IsAttached() (bool, error) {
 
 // tcDirRegex matches tc's auto-created directory names so we can clean them up when removing maps without accidentally
 // removing other user-created dirs..
-var tcDirRegex = regexp.MustCompile(`[0-9a-f]{40}`)
+var tcDirRegex = regexp.MustCompile(`[0-9a-f]`)
 
 // CleanUpJumpMaps scans for cali_jump maps that are still pinned to the filesystem but no longer referenced by
 // our BPF programs.
@@ -445,11 +492,7 @@ func EnsureQdisc(ifaceName string) error {
 		log.WithField("iface", ifaceName).Debug("Already have a clsact qdisc on this interface")
 		return nil
 	}
-	_, err = ExecTC("qdisc", "add", "dev", ifaceName, "clsact")
-	if err != nil {
-		return fmt.Errorf("failed to add qdisc to interface '%s': %w", ifaceName, err)
-	}
-	return nil
+	return libbpf.CreateQDisc(ifaceName)
 }
 
 func HasQdisc(ifaceName string) (bool, error) {
@@ -472,34 +515,32 @@ func RemoveQdisc(ifaceName string) error {
 	if !hasQdisc {
 		return nil
 	}
-	_, err = ExecTC("qdisc", "del", "dev", ifaceName, "clsact")
-	if err != nil {
-		return fmt.Errorf("failed to remove qdisc from interface '%s': %w", ifaceName, err)
-	}
-	return nil
+	return libbpf.RemoveQDisc(ifaceName)
+}
+
+func RemoveTCOpts(ifaceName string) {
+	optsLock.Lock()
+	defer optsLock.Unlock()
+	key := ifaceName + "_" + "ingress"
+	delete(optsMap, key)
+	key = ifaceName + "_" + "egress"
+	delete(optsMap, key)
 }
 
 func (ap *AttachPoint) ProgramID() (string, error) {
 	logCtx := log.WithField("iface", ap.Iface)
 	logCtx.Info("Finding TC program ID")
-	out, err := ExecTC("filter", "show", "dev", ap.Iface, string(ap.Hook))
-	if err != nil {
-		return "", fmt.Errorf("failed to find TC filter for interface %v: %w", ap.Iface, err)
-	}
-	logCtx.Infof("out:\n%v", out)
-
-	progName := ap.ProgramName()
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, progName) {
-			re := regexp.MustCompile(`id (\d+)`)
-			m := re.FindStringSubmatch(line)
-			if len(m) > 0 {
-				return m[1], nil
+	key := ap.Iface + "_" + string(ap.Hook)
+	if optsMap != nil {
+		val, ok := GetTCOpts(key)
+		if ok {
+			progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), val)
+			if err != nil {
+				return "", errors.New("failed to find TC program")
 			}
-			return "", fmt.Errorf("failed to process TC output: %v", line)
+			return strconv.Itoa(progId), nil
 		}
 	}
-
 	return "", errors.New("failed to find TC program")
 }
 
@@ -511,4 +552,37 @@ func (ap *AttachPoint) JumpMapFDMapKey() string {
 
 func (ap *AttachPoint) IfaceName() string {
 	return ap.Iface
+}
+
+func GetTCOpts(key string) (*libbpf.TCOpts, bool) {
+	optsLock.RLock()
+	defer optsLock.RUnlock()
+	val, ok := optsMap[key]
+	return val, ok
+}
+
+// nolint
+func updateTCOpts(key string, opts *libbpf.TCOpts) {
+	optsLock.Lock()
+	defer optsLock.Unlock()
+	optsMap[key] = opts
+}
+
+// nolint
+func updateJumpMap(obj *libbpf.Obj, isHost bool) error {
+	if !isHost {
+		err := obj.UpdateJumpMap("cali_jump", string(policyProgram), POLICY_PROGRAM_INDEX)
+		if err != nil {
+			return fmt.Errorf("error updating policy program %v", err)
+		}
+	}
+	err := obj.UpdateJumpMap("cali_jump", string(allowProgram), ALLOW_PROGRAM_INDEX)
+	if err != nil {
+		return fmt.Errorf("error updating epilogue program %v", err)
+	}
+	err = obj.UpdateJumpMap("cali_jump", string(icmpProgram), ICMP_PROGRAM_INDEX)
+	if err != nil {
+		return fmt.Errorf("error updating icmp program %v", err)
+	}
+	return nil
 }
