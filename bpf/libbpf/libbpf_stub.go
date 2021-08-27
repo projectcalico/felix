@@ -51,7 +51,7 @@ func (o *Obj) FirstMap() (*Map, error) {
 	panic("LIBBPF syscall stub")
 }
 
-func (m *Map) NextMap(obj *Obj) (*Map, error) {
+func (m *Map) NextMap() (*Map, error) {
 	panic("LIBBPF syscall stub")
 }
 
@@ -76,9 +76,5 @@ func (o *Obj) Close() error {
 }
 
 func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
-	panic("LIBBPF syscall stub")
-}
-
-func (o *Obj) Free() error {
 	panic("LIBBPF syscall stub")
 }

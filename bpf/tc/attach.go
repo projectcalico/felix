@@ -114,7 +114,7 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	baseDir := "/sys/fs/bpf/tc/"
-	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap(obj) {
+	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap() {
 		subDir := "globals"
 		if m.Type() == libbpf.MapTypeProgrArray && strings.Contains(m.Name(), "cali_jump") {
 			if ap.Hook == HookIngress {
@@ -181,7 +181,7 @@ func (ap AttachPoint) AttachProgram() error {
 	if len(progErrs) != 0 {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
-	err = obj.Free()
+	err = obj.Close()
 	if err != nil {
 		return err
 	}

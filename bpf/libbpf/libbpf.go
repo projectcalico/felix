@@ -34,6 +34,7 @@ type TCOpts struct {
 
 type Map struct {
 	bpfMap *C.struct_bpf_map
+	bpfObj *C.struct_bpf_object
 }
 
 const MapTypeProgrArray = C.BPF_MAP_TYPE_PROG_ARRAY
@@ -95,18 +96,18 @@ func (o *Obj) FirstMap() (*Map, error) {
 	if bpfMap == nil || err != nil {
 		return nil, fmt.Errorf("error getting first map %v", err)
 	}
-	return &Map{bpfMap: bpfMap}, nil
+	return &Map{bpfMap: bpfMap, bpfObj: o.obj}, nil
 }
 
-func (m *Map) NextMap(obj *Obj) (*Map, error) {
-	bpfMap, err := C.bpf_map__next(m.bpfMap, obj.obj)
+func (m *Map) NextMap() (*Map, error) {
+	bpfMap, err := C.bpf_map__next(m.bpfMap, m.bpfObj)
 	if err != nil {
 		return nil, fmt.Errorf("error getting next map %v", err)
 	}
 	if bpfMap == nil && err == nil {
 		return nil, nil
 	}
-	return &Map{bpfMap: bpfMap}, nil
+	return &Map{bpfMap: bpfMap, bpfObj: m.bpfObj}, nil
 }
 
 func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
@@ -196,13 +197,4 @@ func (o *Obj) Close() error {
 		return nil
 	}
 	return fmt.Errorf("error: libbpf obj nil")
-}
-
-func (o *Obj) Free() error {
-	if o.obj != nil {
-		C.free(unsafe.Pointer(o.obj))
-		o.obj = nil
-		return nil
-	}
-	return fmt.Errorf("error freeing libbpf obj")
 }

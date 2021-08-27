@@ -328,7 +328,7 @@ ut combined.coverprofile: $(SRC_FILES) build-bpf
 ###############################################################################
 # FV Tests
 ###############################################################################
-fv/fv.test: $(SRC_FILES) $(FV_SRC_FILES)
+fv/fv.test: $(LIBBPF_PATH)/libbpf.a $(SRC_FILES) $(FV_SRC_FILES)
 	# We pre-build the FV test binaries so that we can run them
 	# outside a container and allow them to interact with docker.
 	$(DOCKER_GO_BUILD_CGO) go test $(BUILD_FLAGS) ./$(shell dirname $@) -c --tags fvtests -o $@
