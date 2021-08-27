@@ -78,3 +78,7 @@ func (o *Obj) Close() error {
 func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
 	panic("LIBBPF syscall stub")
 }
+
+func (o *Obj) Free() error {
+	panic("LIBBPF syscall stub")
+}
