@@ -18,10 +18,39 @@
 #include <bpf.h>
 #include <stdlib.h>
 
+#define MAX_ERRNO 4095
+bool IS_ERR(const void *ptr) {
+     if((long)ptr >= -MAX_ERRNO && (long)ptr < 0) {
+         return true;
+     }
+     return false;
+}
+
+long ERR_VAL(const void *ptr) {
+      return (long) ptr;
+}
+
+struct bpf_obj_wrapper {
+        struct bpf_object *obj;
+        int errno;
+};
+
 struct bpf_tc_wrapper {
 	struct bpf_tc_opts opts;
 	int errno;
 };
+
+struct bpf_obj_wrapper bpf_obj_open_load(char *filename) {
+	struct bpf_obj_wrapper obj;
+	obj.obj = bpf_object__open(filename);
+	obj.errno = 0;
+
+	if (obj.obj != NULL && IS_ERR(obj.obj)) {
+		obj.errno = ERR_VAL(obj.obj);
+		obj.obj = NULL;
+	}
+	return obj;
+}
 
 struct bpf_tc_wrapper bpf_tc_program_attach (struct bpf_object *obj, char *secName, int ifIndex, int isIngress) {
 	int err = 0;

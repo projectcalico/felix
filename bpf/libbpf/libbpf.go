@@ -17,6 +17,7 @@ package libbpf
 import (
 	"fmt"
 	"unsafe"
+	"syscall"
 
 	"github.com/projectcalico/felix/bpf"
 )
@@ -72,15 +73,21 @@ func (m *Map) SetPinPath(path string) error {
 	return nil
 }
 
+// bpf_obj__open does not set errno. Errno is returned in the obj.
 func OpenObject(filename string) (*Obj, error) {
 	bpf.IncreaseLockedMemoryQuota()
 	cFilename := C.CString(filename)
 	defer C.free(unsafe.Pointer(cFilename))
-	obj, err := C.bpf_object__open(cFilename)
-	if err != nil {
-		return nil, fmt.Errorf("error opening object %v", err)
+	obj := C.bpf_obj_open_load(cFilename)
+	if obj.obj == nil {
+		msg := "error opening program"
+		if obj.errno != 0 {
+			errno := syscall.Errno(-int64(obj.errno))
+			msg = fmt.Sprintf("error opening program: %v", errno.Error())
+		}
+		return nil, fmt.Errorf(msg)
 	}
-	return &Obj{obj: obj}, nil
+	return &Obj{obj: obj.obj}, nil
 }
 
 func (o *Obj) Load() error {
