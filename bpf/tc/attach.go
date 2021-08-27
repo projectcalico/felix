@@ -56,7 +56,7 @@ type AttachPoint struct {
 	ExtToServiceConnmark uint32
 }
 
-// struct bpf_tc_opts that is used for attaching a program is required 
+// struct bpf_tc_opts that is used for attaching a program is required
 // to get the prog id attached to the ingress/egress hook of the interface.
 // Hence libbpf.TCOPts needs to be stored.
 var optsMap = map[string]*libbpf.TCOpts{}

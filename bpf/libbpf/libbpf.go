@@ -41,8 +41,8 @@ const MapTypeProgrArray = C.BPF_MAP_TYPE_PROG_ARRAY
 type QdiskHook string
 
 const (
-  QdiskIngress QdiskHook = "ingress"
-  QdiskEgress QdiskHook = "egress"
+	QdiskIngress QdiskHook = "ingress"
+	QdiskEgress  QdiskHook = "egress"
 )
 
 func (m *Map) Name() string {

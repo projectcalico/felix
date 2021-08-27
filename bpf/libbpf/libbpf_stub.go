@@ -35,7 +35,7 @@ func (m *Map) Type() int {
 	panic("LIBBPF syscall stub")
 }
 
-func (m *Map) SetPinPath(obj *Obj, path string) error {
+func (m *Map) SetPinPath(path string) error {
 	panic("LIBBPF syscall stub")
 }
 
@@ -47,7 +47,11 @@ func (o *Obj) Load() error {
 	panic("LIBBPF syscall stub")
 }
 
-func (o *Obj) Maps() ([]Map, error) {
+func (o *Obj) FirstMap() (*Map, error) {
+	panic("LIBBPF syscall stub")
+}
+
+func (m *Map) NextMap(obj *Obj) (*Map, error) {
 	panic("LIBBPF syscall stub")
 }
 
