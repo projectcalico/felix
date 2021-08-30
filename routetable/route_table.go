@@ -838,6 +838,8 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 		// Link attributes might be nil for the special "no-OIF" interface name.
 		routeFilter.LinkIndex = linkAttrs.Index
 	}
+
+	logCxt.Info("RouteFilter: ", f)
 	programmedRoutes, err := nl.RouteListFiltered(r.netlinkFamily, routeFilter, routeFilterFlags)
 	if err != nil {
 		// Filter the error so that we don't spam errors if the interface is being torn
@@ -851,6 +853,8 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 		}
 		return nil, filteredErr
 	}
+
+	logCxt.Info("Programmed Routes:", programmedRoutes)
 
 	var routesToDelete []netlink.Route
 	expectedTargets := r.ifaceNameToTargets[ifaceName]
