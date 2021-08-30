@@ -188,7 +188,29 @@ type RouteTable struct {
 	conntrack         conntrackIface
 	time              timeshim.Interface
 
+	additionalLogFields    log.Fields
+	additionalRouteFilters netlink.Route
+
 	opReporter logutils.OpRecorder
+}
+
+type RouteTableOptions func(*RouteTable)
+
+// WithAdditionalLogFields - add additional log fields to merge into logCxt.
+//  useful if we want to discern between multiple route tables in operation e.g. in vxlan_mgr.go
+func WithAddiionalLogFields(fields log.Fields) RouteTableOptions {
+	return func(rt *RouteTable) {
+		rt.additionalLogFields = fields
+	}
+}
+
+// WithAdditionalRouteFilters - add additional route filters used in fullResyncRoutesForLink.
+//  this causes the aforementioned function to only touch specified programmed routes that match the filter.
+//  netlink.Route fields Table and LinkIndex will be ignored!
+func WithAdditionalRouteFilters(filter netlink.Route) RouteTableOptions {
+	return func(rt *RouteTable) {
+		rt.additionalRouteFilters = filter
+	}
 }
 
 func New(
@@ -201,7 +223,7 @@ func New(
 	removeExternalRoutes bool,
 	tableIndex int,
 	opReporter logutils.OpRecorder,
-	additionalLoggingFields ...log.Fields,
+	routeTableoptions ...RouteTableOptions,
 ) *RouteTable {
 	return NewWithShims(
 		interfaceRegexes,
@@ -217,7 +239,7 @@ func New(
 		removeExternalRoutes,
 		tableIndex,
 		opReporter,
-		additionalLoggingFields...,
+		routeTableoptions...,
 	)
 }
 
@@ -236,7 +258,7 @@ func NewWithShims(
 	removeExternalRoutes bool,
 	tableIndex int,
 	opReporter logutils.OpRecorder,
-	additionalLoggingFields ...log.Fields,
+	routeTableoptions ...RouteTableOptions,
 ) *RouteTable {
 	var regexpParts []string
 	includeNoOIF := false
@@ -263,13 +285,7 @@ func NewWithShims(
 		"ifaceRegex": ifaceNamePattern,
 	}
 
-	for _, addLogFields := range additionalLoggingFields {
-		for k, v := range addLogFields {
-			logFields[k] = v
-		}
-	}
-
-	return &RouteTable{
+	rt := &RouteTable{
 		logCxt:                         log.WithFields(logFields),
 		ipVersion:                      ipVersion,
 		netlinkFamily:                  family,
@@ -295,6 +311,12 @@ func NewWithShims(
 		tableIndex:                     tableIndex,
 		opReporter:                     opReporter,
 	}
+
+	for _, opt := range routeTableoptions {
+		opt(rt)
+	}
+
+	return rt
 }
 
 func (r *RouteTable) OnIfaceStateChanged(ifaceName string, state ifacemonitor.State) {
@@ -804,9 +826,10 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 	// was oper down before we tried to do the sync but that prevented us from removing
 	// routes from an interface in some corner cases (such as being admin up but oper
 	// down).
-	routeFilter := &netlink.Route{
-		Table: r.tableIndex,
-	}
+	f := r.additionalRouteFilters
+	routeFilter := &f
+	routeFilter.Table = r.tableIndex
+
 	routeFilterFlags := netlink.RT_FILTER_OIF
 	if r.tableIndex != 0 {
 		routeFilterFlags |= netlink.RT_FILTER_TABLE

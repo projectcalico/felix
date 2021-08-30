@@ -100,6 +100,9 @@ func newVXLANManager(
 ) *vxlanManager {
 	nlHandle, _ := netlink.NewHandle()
 
+	noencTarget := routetable.Target{Type: routetable.TargetTypeNoEncap}
+	bhTarget := routetable.Target{Type: routetable.TargetTypeBlackhole}
+
 	blackHoleProto := defaultVXLANProto
 	if dpConfig.DeviceRouteProtocol != syscall.RTPROT_BOOT {
 		blackHoleProto = dpConfig.DeviceRouteProtocol
@@ -115,7 +118,8 @@ func newVXLANManager(
 		false,
 		0,
 		opRecorder,
-		log.Fields{"name": "blackhole"},
+		routetable.WithAddiionalLogFields(log.Fields{"name": "blackhole"}),
+		routetable.WithAdditionalRouteFilters(netlink.Route{Type: bhTarget.RouteType()}),
 	)
 
 	return newVXLANManagerWithShims(
@@ -129,7 +133,8 @@ func newVXLANManager(
 			return routetable.New(interfaceRegexes, ipVersion, vxlan, netlinkTimeout,
 				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0,
 				opRecorder,
-				log.Fields{"name": "noencap"},
+				routetable.WithAddiionalLogFields(log.Fields{"name": "noencap"}),
+				routetable.WithAdditionalRouteFilters(netlink.Route{Type: noencTarget.RouteType()}),
 			)
 		},
 	)
@@ -454,7 +459,7 @@ func (m *vxlanManager) KeepVXLANDeviceInSync(mtu int, xsumBroken bool, wait time
 			continue
 		} else {
 			if m.getNoEncapRouteTable() == nil {
-				noEncapRouteTable := m.noEncapRTConstruct([]string{"^" + parent.Attrs().Name + "$"}, 4, false, m.dpConfig.NetlinkTimeout, m.dpConfig.DeviceRouteSourceAddress,
+				noEncapRouteTable := m.noEncapRTConstruct([]string{"^" + parent.Attrs().Name + "$", routetable.InterfaceNone}, 4, false, m.dpConfig.NetlinkTimeout, m.dpConfig.DeviceRouteSourceAddress,
 					m.noEncapProtocol, false)
 				m.setNoEncapRouteTable(noEncapRouteTable)
 			}
