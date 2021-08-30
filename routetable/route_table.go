@@ -842,6 +842,10 @@ func (r *RouteTable) fullResyncRoutesForLink(logCxt *log.Entry, ifaceName string
 		routeFilter.LinkIndex = linkAttrs.Index
 	}
 
+	if routeFilter.Type != syscall.RTN_UNSPEC {
+		routeFilterFlags |= netlink.RT_FILTER_TYPE
+	}
+
 	logCxt.Info("RouteFilter: ", f)
 	programmedRoutes, err := nl.RouteListFiltered(r.netlinkFamily, routeFilter, routeFilterFlags)
 	if err != nil {
