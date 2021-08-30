@@ -430,7 +430,7 @@ func NewIntDataplaneDriver(config Config) *InternalDataplane {
 	if config.RulesConfig.VXLANEnabled {
 		routeTableVXLAN := routetable.New([]string{"^vxlan.calico$"}, 4, true, config.NetlinkTimeout,
 			config.DeviceRouteSourceAddress, config.DeviceRouteProtocol, true, 0,
-			dp.loopSummarizer)
+			dp.loopSummarizer, log.Fields{"name": "vxlan_main"})
 
 		vxlanManager := newVXLANManager(
 			ipSetsV4,

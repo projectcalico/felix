@@ -201,6 +201,7 @@ func New(
 	removeExternalRoutes bool,
 	tableIndex int,
 	opReporter logutils.OpRecorder,
+	additionalLoggingFields ...log.Fields,
 ) *RouteTable {
 	return NewWithShims(
 		interfaceRegexes,
@@ -216,6 +217,7 @@ func New(
 		removeExternalRoutes,
 		tableIndex,
 		opReporter,
+		additionalLoggingFields...,
 	)
 }
 
@@ -234,6 +236,7 @@ func NewWithShims(
 	removeExternalRoutes bool,
 	tableIndex int,
 	opReporter logutils.OpRecorder,
+	additionalLoggingFields ...log.Fields,
 ) *RouteTable {
 	var regexpParts []string
 	includeNoOIF := false
@@ -255,11 +258,19 @@ func NewWithShims(
 		log.WithField("ipVersion", ipVersion).Panic("Unknown IP version")
 	}
 
+	logFields := log.Fields{
+		"ipVersion":  ipVersion,
+		"ifaceRegex": ifaceNamePattern,
+	}
+
+	for _, addLogFields := range additionalLoggingFields {
+		for k, v := range addLogFields {
+			logFields[k] = v
+		}
+	}
+
 	return &RouteTable{
-		logCxt: log.WithFields(log.Fields{
-			"ipVersion":  ipVersion,
-			"ifaceRegex": ifaceNamePattern,
-		}),
+		logCxt:                         log.WithFields(logFields),
 		ipVersion:                      ipVersion,
 		netlinkFamily:                  family,
 		ifacePrefixRegexp:              regexp.MustCompile(ifaceNamePattern),

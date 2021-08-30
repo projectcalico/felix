@@ -115,6 +115,7 @@ func newVXLANManager(
 		false,
 		0,
 		opRecorder,
+		log.Fields{"name": "blackhole"},
 	)
 
 	return newVXLANManagerWithShims(
@@ -127,7 +128,9 @@ func newVXLANManager(
 			deviceRouteSourceAddress net.IP, deviceRouteProtocol int, removeExternalRoutes bool) routeTable {
 			return routetable.New(interfaceRegexes, ipVersion, vxlan, netlinkTimeout,
 				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0,
-				opRecorder)
+				opRecorder,
+				log.Fields{"name": "noencap"},
+			)
 		},
 	)
 }
