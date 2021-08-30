@@ -188,7 +188,6 @@ type RouteTable struct {
 	conntrack         conntrackIface
 	time              timeshim.Interface
 
-	additionalLogFields    log.Fields
 	additionalRouteFilters netlink.Route
 
 	opReporter logutils.OpRecorder
@@ -200,7 +199,10 @@ type RouteTableOptions func(*RouteTable)
 //  useful if we want to discern between multiple route tables in operation e.g. in vxlan_mgr.go
 func WithAddiionalLogFields(fields log.Fields) RouteTableOptions {
 	return func(rt *RouteTable) {
-		rt.additionalLogFields = fields
+		if rt.logCxt != nil {
+			log.WithField("fields", fields).Debug("setting additional fields")
+			rt.logCxt = rt.logCxt.WithFields(fields)
+		}
 	}
 }
 
@@ -209,6 +211,7 @@ func WithAddiionalLogFields(fields log.Fields) RouteTableOptions {
 //  netlink.Route fields Table and LinkIndex will be ignored!
 func WithAdditionalRouteFilters(filter netlink.Route) RouteTableOptions {
 	return func(rt *RouteTable) {
+		log.WithField("filter", filter).Debug("setting additional route table filters")
 		rt.additionalRouteFilters = filter
 	}
 }
