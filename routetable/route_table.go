@@ -806,6 +806,8 @@ func (r *RouteTable) routeListFilterParams(linkAttrs *netlink.LinkAttrs) (*netli
 
 	if r.additionalRouteFilters == nil {
 		routeFilter = &netlink.Route{}
+	} else {
+		routeFilter = r.additionalRouteFilters
 	}
 
 	routeFilter.Table = r.tableIndex
