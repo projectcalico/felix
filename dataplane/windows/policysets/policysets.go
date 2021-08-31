@@ -383,21 +383,37 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 			return addr, protocol, port
 		}
 
-		// Each member includes both an address and a port, which means one rule per member.
-		// TODO: We could optimize this by combining all addresses with the same port into a single rule.
-		for i, m := range ipsetMembers {
+		// Each member includes both an address and a port.
+		// However, we can combine all addresses across all members that share the same proto+port into a single rule.
+		type members struct {
+			proto uint16
+			port  string
+			addrs []string
+		}
+		membersByPort := map[string]*members{}
+		for _, m := range ipsetMembers {
 			// The member should be of the format <IP>,(tcp|udp):<port number>
 			addr, proto, port := parseIPPortMember(m)
+			var m *members
+			m = membersByPort[fmt.Sprintf("%d/%s", proto, port)]
+			if m == nil {
+				m = &members{proto: proto, port: port}
+				membersByPort[fmt.Sprintf("%d/%s", proto, port)] = m
+			}
+			m.addrs = append(m.addrs, addr)
+		}
 
+		i := 0
+		for _, m := range membersByPort {
 			newPolicy := *aclPolicy
-			newPolicy.RemoteAddresses = addr
-			newPolicy.RemotePorts = port
-			newPolicy.Protocol = proto
+			newPolicy.RemoteAddresses = strings.Join(m.addrs, ",")
+			newPolicy.RemotePorts = m.port
+			newPolicy.Protocol = m.proto
 			if s.supportedFeatures.Acl.AclRuleId {
 				newPolicy.Id = fmt.Sprintf("%s-%s-%d", policyId, ruleCopy.RuleId, i)
-				i++
 			}
 			aclPolicies = append(aclPolicies, &newPolicy)
+			i++
 		}
 
 		// DstIpPortSetIds are mutually exclusive with other fields - if specified, then no other rule match criteria can be.
