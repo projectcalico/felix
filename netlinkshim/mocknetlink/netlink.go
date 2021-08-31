@@ -319,7 +319,8 @@ func (d *MockNetlinkDataplane) NewMockNetlink() (netlinkshim.Interface, error) {
 	if d.PersistentlyFailToConnect || d.shouldFail(FailNextNewNetlink) {
 		return nil, SimulatedError
 	}
-	Expect(d.NetlinkOpen).To(BeFalse())
+	// remove this assertion to allow for multiple route tables to be tested with each other
+	// Expect(d.NetlinkOpen).To(BeFalse(), "netlink open should be false")
 	d.NetlinkOpen = true
 	return d, nil
 }

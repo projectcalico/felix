@@ -25,6 +25,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
@@ -1069,6 +1070,54 @@ var _ = Describe("RouteTable (main table)", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(dataplane.RouteKeyToRoute).To(ConsistOf(cali1RouteTable100, gatewayRoute))
 			Expect(dataplane.AddedRouteKeys).To(BeEmpty())
+		})
+	})
+})
+
+var _ = Describe("RouteTable filtered (main table)", func() {
+	var dataplane *mocknetlink.MockNetlinkDataplane
+	var caliLink *mocknetlink.MockLink
+	var t *mocktime.MockTime
+	var rt1, rt2 *RouteTable
+
+	BeforeEach(func() {
+		dataplane = mocknetlink.New()
+		caliLink = dataplane.AddIface(4, "cali4", true, true)
+
+		t = mocktime.New()
+		t.SetAutoIncrement(11 * time.Second)
+	})
+
+	newRouteTable := func(interfaces []string, dp *mocknetlink.MockNetlinkDataplane, rp netlink.RouteProtocol, options ...RouteTableOption) *RouteTable {
+		return NewWithShims(
+			interfaces,
+			4,
+			dp.NewMockNetlink,
+			false,
+			10*time.Second,
+			dp.AddStaticArpEntry,
+			dp,
+			t,
+			nil,
+			rp,
+			true,
+			0,
+			logutils.NewSummarizer("test"),
+			options...,
+		)
+	}
+
+	Describe("not using filters", func() {
+
+		It("should be constructable", func() {
+			rt1 = newRouteTable([]string{"^cali.*"}, dataplane, 80, WithAdditionalLogFields(logrus.Fields{"route_table": "cali"}))
+			rt2 = newRouteTable([]string{InterfaceNone}, dataplane, 80, WithAdditionalLogFields(logrus.Fields{"route_table": "nooif"}))
+
+			rt1.SetRoutes(caliLink.LinkAttrs.Name, []Target{})
+			rt2.SetRoutes("", []Target{})
+
+			Expect(rt1.Apply()).NotTo(HaveOccurred())
+			Expect(rt2.Apply()).NotTo(HaveOccurred())
 		})
 	})
 })
