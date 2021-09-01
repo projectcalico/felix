@@ -108,16 +108,4 @@ var _ = Describe("Windows policy test", func() {
 			Expect(err).To(HaveOccurred())
 		})
 	})
-	Context("egress policy tests", func() {
-		It("porter pod can connect to nginx pod", func() {
-			cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client -n demo -- wget %v -T 5 -qO -`, nginx)
-			_, _, err := powershell(cmd)
-			Expect(err).NotTo(HaveOccurred())
-		})
-		It("porter pod can't connect to google.com", func() {
-			cmd := `c:\k\kubectl.exe --kubeconfig=c:\k\config exec -t client-b -n demo -- wget %v -T 5 -qO www.google.com`
-			_, _, err := powershell(cmd)
-			Expect(err).To(HaveOccurred())
-		})
-	})
 })
