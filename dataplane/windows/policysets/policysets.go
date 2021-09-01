@@ -390,7 +390,12 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 			port  string
 			addrs []string
 		}
+
+		// We need to consolidate addrs based on ports/protocols, so use a map to lookup.
 		membersByPort := map[string]*members{}
+
+		// We need to ensure the ordering of generated rules is deterministic, so use a slice.
+		orderedMembers := []*members{}
 		for _, m := range ipsetMembers {
 			// The member should be of the format <IP>,(tcp|udp):<port number>
 			addr, proto, port := parseIPPortMember(m)
@@ -399,12 +404,12 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 			if m == nil {
 				m = &members{proto: proto, port: port}
 				membersByPort[fmt.Sprintf("%d/%s", proto, port)] = m
+				orderedMembers = append(orderedMembers, m)
 			}
 			m.addrs = append(m.addrs, addr)
 		}
 
-		i := 0
-		for _, m := range membersByPort {
+		for i, m := range orderedMembers {
 			newPolicy := *aclPolicy
 			newPolicy.RemoteAddresses = strings.Join(m.addrs, ",")
 			newPolicy.RemotePorts = m.port
@@ -413,7 +418,6 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 				newPolicy.Id = fmt.Sprintf("%s-%s-%d", policyId, ruleCopy.RuleId, i)
 			}
 			aclPolicies = append(aclPolicies, &newPolicy)
-			i++
 		}
 
 		// DstIpPortSetIds are mutually exclusive with other fields - if specified, then no other rule match criteria can be.
