@@ -68,7 +68,7 @@ var _ = Describe("Windows policy test", func() {
 	)
 
 	BeforeEach(func() {
-		// Get Pod IPs.
+		// Get IPs of the pods installed by the test infra setup.
 		client = getPodIP("client", "demo")
 		clientB = getPodIP("client-b", "demo")
 		porter = getPodIP("porter", "demo")
