@@ -158,7 +158,7 @@ blocks:
         - export REPORT_DIR=~/report
         - export LOGS_DIR=~/fv.log
         - export SHORT_WORKFLOW_ID=$(echo ${SEMAPHORE_WORKFLOW_ID} | sha256sum | cut -c -8)
-        - export CLUSTER_NAME=sem-${SEMAPHORE_PROJECT_NAME}-pr${SEMAPHORE_GIT_PR_NUMBER}-${SHORT_WORKFLOW_ID}
+        - export CLUSTER_NAME=sem-${SEMAPHORE_PROJECT_NAME}-pr${SEMAPHORE_GIT_PR_NUMBER}-${BACKEND}-${SHORT_WORKFLOW_ID}
         - export KEYPAIR_NAME=${CLUSTER_NAME}
         - echo CLUSTER_NAME=${CLUSTER_NAME}
         - sudo apt-get install putty-tools
@@ -176,8 +176,6 @@ blocks:
     env_vars:
       - name: SEMAPHORE_ARTIFACT_EXPIRY
         value: 2w
-      - name: AWS_DEFAULT_REGION
-        value: us-west-2
       - name: MASTER_CONNECT_KEY_PUB
         value: master_ssh_key.pub
       - name: MASTER_CONNECT_KEY
@@ -188,12 +186,19 @@ blocks:
         value: 1.20.10
       - name: WINDOWS_VERSION
         value: "2004"
-      - name: BACKEND
-        value: vxlan
     jobs:
-      - name: FV Test matrix
+      - name: vxlan - Windows FV
         commands:
           - ./.semaphore/run-win-fv
+        env_vars:
+          - name: BACKEND
+            value: vxlan
+      - name: bgp - Windows FV
+        commands:
+          - ./.semaphore/run-win-fv
+        env_vars:
+          - name: BACKEND
+            value: bgp
 
             #- name: Static checks on e1-standard-8
             #  dependencies: []
