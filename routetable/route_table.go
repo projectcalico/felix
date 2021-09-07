@@ -188,31 +188,27 @@ type RouteTable struct {
 	conntrack         conntrackIface
 	time              timeshim.Interface
 
-	additionalRouteFilters *netlink.Route
+	additionalRouteFilter *netlink.Route
 
 	opReporter logutils.OpRecorder
 }
 
-type RouteTableOptions func(rt *RouteTable)
+type RouteTableOption func(rt *RouteTable)
 
 // WithAdditionalLogFields - add additional log fields to merge into logCxt.
 //  useful if we want to discern between multiple route tables in operation e.g. in vxlan_mgr.go
-func WithAddiionalLogFields(fields log.Fields) RouteTableOptions {
+func WithAdditionalLogFields(fields log.Fields) RouteTableOption {
 	return func(rt *RouteTable) {
-		if rt.logCxt != nil {
-			rt.logCxt = rt.logCxt.WithFields(fields)
-			return
-		}
-
+		rt.logCxt = rt.logCxt.WithFields(fields)
 	}
 }
 
-// WithAdditionalRouteFilters - add additional route filters used in fullResyncRoutesForLink.
+// WithAdditionalRouteFilter - add additional route filters used in fullResyncRoutesForLink.
 //  this causes the aforementioned function to only touch specified programmed routes that match the filter.
 //  netlink.Route fields Table and LinkIndex will be ignored!
-func WithAdditionalRouteFilters(filter *netlink.Route) RouteTableOptions {
+func WithAdditionalRouteFilter(filter *netlink.Route) RouteTableOption {
 	return func(rt *RouteTable) {
-		rt.additionalRouteFilters = filter
+		rt.additionalRouteFilter = filter
 	}
 }
 
@@ -226,7 +222,7 @@ func New(
 	removeExternalRoutes bool,
 	tableIndex int,
 	opReporter logutils.OpRecorder,
-	opts ...RouteTableOptions,
+	opts ...RouteTableOption,
 ) *RouteTable {
 	return NewWithShims(
 		interfaceRegexes,
@@ -261,7 +257,7 @@ func NewWithShims(
 	removeExternalRoutes bool,
 	tableIndex int,
 	opReporter logutils.OpRecorder,
-	opts ...RouteTableOptions,
+	opts ...RouteTableOption,
 ) *RouteTable {
 	var regexpParts []string
 	includeNoOIF := false
@@ -804,10 +800,10 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 func (r *RouteTable) routeListFilterParams(linkAttrs *netlink.LinkAttrs) (*netlink.Route, uint64) {
 	var routeFilter *netlink.Route
 
-	if r.additionalRouteFilters == nil {
+	if r.additionalRouteFilter == nil {
 		routeFilter = &netlink.Route{}
 	} else {
-		routeFilter = r.additionalRouteFilters
+		routeFilter = r.additionalRouteFilter
 	}
 
 	routeFilter.Table = r.tableIndex
