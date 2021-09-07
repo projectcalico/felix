@@ -118,8 +118,8 @@ func newVXLANManager(
 		false,
 		0,
 		opRecorder,
-		routetable.WithAddiionalLogFields(log.Fields{"route_table": "vxlan_blackhole"}),
-		routetable.WithAdditionalRouteFilters(&netlink.Route{Type: bhTarget.RouteType()}),
+		routetable.WithAdditionalLogFields(log.Fields{"route_table": "vxlan_blackhole"}),
+		routetable.WithAdditionalRouteFilter(&netlink.Route{Type: bhTarget.RouteType()}),
 	)
 
 	return newVXLANManagerWithShims(
@@ -133,8 +133,8 @@ func newVXLANManager(
 			return routetable.New(interfaceRegexes, ipVersion, vxlan, netlinkTimeout,
 				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0,
 				opRecorder,
-				routetable.WithAddiionalLogFields(log.Fields{"route_table": "vxlan_noencap"}),
-				routetable.WithAdditionalRouteFilters(&netlink.Route{Type: noencTarget.RouteType()}),
+				routetable.WithAdditionalLogFields(log.Fields{"route_table": "vxlan_noencap"}),
+				routetable.WithAdditionalRouteFilter(&netlink.Route{Type: noencTarget.RouteType()}),
 			)
 		},
 	)
