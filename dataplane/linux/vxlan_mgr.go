@@ -105,9 +105,6 @@ func newVXLANManager(
 		blackHoleProto = dpConfig.DeviceRouteProtocol
 	}
 
-	noencTarget := routetable.Target{Type: routetable.TargetTypeNoEncap}
-	bhTarget := routetable.Target{Type: routetable.TargetTypeBlackhole}
-
 	brt := routetable.New(
 		[]string{routetable.InterfaceNone},
 		4,
@@ -119,7 +116,7 @@ func newVXLANManager(
 		0,
 		opRecorder,
 		routetable.WithAdditionalLogFields(log.Fields{"route_table": "vxlan_blackhole"}),
-		routetable.WithAdditionalRouteFilter(&netlink.Route{Type: bhTarget.RouteType()}),
+		routetable.WithAdditionalRouteFilter(&netlink.Route{Type: syscall.RTN_BLACKHOLE}),
 	)
 
 	return newVXLANManagerWithShims(
@@ -134,7 +131,7 @@ func newVXLANManager(
 				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0,
 				opRecorder,
 				routetable.WithAdditionalLogFields(log.Fields{"route_table": "vxlan_noencap"}),
-				routetable.WithAdditionalRouteFilter(&netlink.Route{Type: noencTarget.RouteType()}),
+				routetable.WithAdditionalRouteFilter(&netlink.Route{Type: syscall.RTN_UNICAST}),
 			)
 		},
 	)
