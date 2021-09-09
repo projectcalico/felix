@@ -62,6 +62,16 @@ func kubectlExec(command string) error {
 	return err
 }
 
+// These Windows policy FV tests rely on a 2 node cluster (1 Linux and 1 Windows) provisioned using internal tooling.
+// The test infra setup creates some pods:
+// - "client" and "clientB" are busybox pods
+// - "nginx" and "nginxB" are nginx pods
+// - "porter" is a Windows server/client pod using the calico/porter image
+//
+// The test infra setup also applies some network policies on the pods:
+// - "allow-dns": egress policy that allows the porter pod to reach UDP port 53
+// - "allow-nginx": egress policy that allows the porter pod to reach the nginx pods on TCP port 80
+// - "allow-client": ingress policy that allows the client pods to reach the porter pods on TCP port 80
 var _ = Describe("Windows policy test", func() {
 	var (
 		porter, client, clientB, nginx, nginxB string
