@@ -42,6 +42,7 @@ import (
 
 	"github.com/projectcalico/libcalico-go/lib/set"
 
+	"github.com/projectcalico/api/pkg/lib/numorstring"
 	"github.com/projectcalico/felix/bpf"
 	"github.com/projectcalico/felix/bpf/polprog"
 	"github.com/projectcalico/felix/bpf/tc"
@@ -144,6 +145,7 @@ type bpfEndpointManager struct {
 	vxlanPort               uint16
 	dsrEnabled              bool
 	bpfExtToServiceConnmark int
+	psnatPorts              numorstring.Port
 
 	ipSetMap bpf.Map
 	stateMap bpf.Map
@@ -212,6 +214,7 @@ func newBPFEndpointManager(
 		vxlanPort:               uint16(config.VXLANPort),
 		dsrEnabled:              config.BPFNodePortDSREnabled,
 		bpfExtToServiceConnmark: config.BPFExtToServiceConnmark,
+		psnatPorts:              config.BPFPSNATPorts,
 		ipSetMap:                ipSetMap,
 		stateMap:                stateMap,
 		ruleRenderer:            iptablesRuleRenderer,
@@ -987,8 +990,8 @@ func (m *bpfEndpointManager) calculateTCAttachPoint(policyDirection PolDirection
 	ap.DSR = m.dsrEnabled
 	ap.LogLevel = m.bpfLogLevel
 	ap.VXLANPort = m.vxlanPort
-	ap.PSNATStart = 20000
-	ap.PSNATEnd = 30000
+	ap.PSNATStart = m.psnatPorts.MinPort
+	ap.PSNATEnd = m.psnatPorts.MaxPort
 
 	return ap
 }
