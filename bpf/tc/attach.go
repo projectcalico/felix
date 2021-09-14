@@ -59,7 +59,7 @@ var tcLock sync.RWMutex
 
 var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
-var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
+var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+) ([^ ]+)`)
 
 func (ap AttachPoint) Log() *log.Entry {
 	return log.WithFields(log.Fields{
@@ -91,13 +91,6 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	skipAttachment, csum := bpf.CheckAttachedProgs(ap.IfaceName(), tempBinary)
-	if skipAttachment {
-		logCxt.Info("Programs already attached, skip re-attaching")
-		return nil
-	}
-	log.Info("Marva ", csum)
-
 	// Using the RLock allows multiple attach calls to proceed in parallel unless
 	// CleanUpJumpMaps() (which takes the writer lock) is running.
 	logCxt.Debug("AttachProgram waiting for lock...")
@@ -108,6 +101,15 @@ func (ap AttachPoint) AttachProgram() error {
 	progsToClean, err := ap.listAttachedPrograms()
 	if err != nil {
 		return err
+	}
+
+	matchedHash, objHash := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
+	for _, p := range progsToClean {
+		log.Info("Found progs: ", p.object)
+		if matchedHash && ap.FileName() == p.object {
+			logCxt.Info("Programs already attached, skip re-attaching")
+			return nil
+		}
 	}
 
 	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
@@ -145,7 +147,7 @@ func (ap AttachPoint) AttachProgram() error {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
-	bpf.RememberAttachedProgs(ap.IfaceName(), csum)
+	bpf.RememberAttachedProgs(ap.IfaceName(), ap.FileName(), objHash)
 	return nil
 }
 
@@ -204,6 +206,7 @@ func isDumpInterrupted(err error) bool {
 type attachedProg struct {
 	pref   string
 	handle string
+	object string
 }
 
 func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
@@ -223,6 +226,7 @@ func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
 			p := attachedProg{
 				pref:   sm[1],
 				handle: sm[2],
+				object: strings.Split(sm[3], ":")[0],
 			}
 			log.WithField("prog", p).Debug("Found old calico program")
 			progsToClean = append(progsToClean, p)

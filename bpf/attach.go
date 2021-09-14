@@ -15,7 +15,8 @@
 package bpf
 
 import (
-	"io"
+	"encoding/json"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
@@ -24,55 +25,63 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func CheckAttachedProgs(iface, binaryFile string) (bool, string) {
-	var loadedProgCSUM []byte
+const (
+	BPF_PROG_BINARY_DIR    = "/usr/lib/calico/bpf"
+	ATTACHED_PROG_HASH_DIR = "/var/run/calico/bpf"
+)
 
-	hashCmd := exec.Command("sha256sum", binaryFile)
-	log.Info(binaryFile)
-	outBytes, err := hashCmd.Output()
-	if err != nil {
-		log.Info("zero:", err)
-		return false, ""
-	}
-
-	calculatedCSUM := strings.Split(string(outBytes), " ")[0]
-	log.Info(calculatedCSUM)
-	log.Info(len(calculatedCSUM))
-
-	filename := path.Join("/var/lib/calico", iface)
-	log.Info("File is ", filename)
-	if _, err := os.Stat(filename); err == nil {
-		log.Info("HEREE")
-		file, err := os.Open(filename)
-		if err != nil {
-			log.Info("one:", err)
-			return false, calculatedCSUM
-		}
-		defer file.Close()
-
-		//TODO: boundry
-		log.Info("Calculated CSUM:", calculatedCSUM)
-		log.Info("loaded CSUMM:", loadedProgCSUM)
-		_, err = io.ReadFull(file, loadedProgCSUM[:])
-		if string(loadedProgCSUM) == calculatedCSUM {
-			log.Info("two:")
-			return true, calculatedCSUM
-		}
-	}
-
-	log.Info("three:")
-	return false, calculatedCSUM
+type AttachedProgInfo struct {
+	Name string `json:"name"`
+	Hash string `json:"hash"`
 }
 
-func RememberAttachedProgs(iface, csum string) {
-	log.Info("Mansour", iface)
-	filename := path.Join("/var/lib/calico", iface)
-	file, err := os.Create(filename)
+func CheckAttachedProgs(iface, progName string) (bool, string) {
+	var progInfo AttachedProgInfo
+	var bytesToRead []byte
+
+	binaryName := path.Join(BPF_PROG_BINARY_DIR, progName)
+	hashCmd := exec.Command("sha256sum", binaryName)
+	outBytes, err := hashCmd.Output()
 	if err != nil {
 		log.Info(err)
+		return false, ""
 	}
-	defer file.Close()
+	calculatedHash := strings.Split(string(outBytes), " ")[0]
 
-	log.Info("Mazdak", csum)
-	_, err = io.WriteString(file, csum)
+	name := iface + "_" + strings.TrimSuffix(progName, path.Ext(progName)) + ".json"
+	filename := path.Join(ATTACHED_PROG_HASH_DIR, name)
+	if bytesToRead, err = ioutil.ReadFile(filename); err != nil {
+		log.Info(err)
+		return false, calculatedHash
+	}
+
+	if err := json.Unmarshal(bytesToRead, &progInfo); err != nil {
+		log.Info(err)
+		return false, calculatedHash
+	}
+
+	if progInfo.Hash == calculatedHash {
+		return true, calculatedHash
+	}
+
+	return false, calculatedHash
+}
+
+func RememberAttachedProgs(iface, progName, csum string) {
+	var progInfo = AttachedProgInfo{
+		Name: progName,
+		Hash: csum,
+	}
+
+	if err := os.MkdirAll(ATTACHED_PROG_HASH_DIR, 0600); err != nil {
+		log.Info(err)
+		return
+	}
+
+	bytesToWrite, err := json.Marshal(progInfo)
+	name := iface + "_" + strings.TrimSuffix(progName, path.Ext(progName)) + ".json"
+	filename := path.Join(ATTACHED_PROG_HASH_DIR, name)
+	if err = ioutil.WriteFile(filename, bytesToWrite, 0400); err != nil {
+		log.Info(err)
+	}
 }

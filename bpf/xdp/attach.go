@@ -82,8 +82,12 @@ func (ap *AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	skipAttachment, csum := bpf.CheckAttachedProgs(tempBinary, ap.FileName())
-	if skipAttachment {
+	matchedHash, objHash := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
+	attached, err := ap.IsAttached()
+	if err != nil {
+		ap.Log().Info(err)
+	}
+	if matchedHash && attached {
 		ap.Log().Info("Programs already attached, skip re-attaching")
 		return nil
 	}
@@ -148,7 +152,7 @@ func (ap *AttachPoint) AttachProgram() error {
 	}
 
 	// program is now attached. Now we should store this in addition to some extra information to prevent unncessary reloads in future
-	bpf.RememberAttachedProgs(ap.FileName(), csum)
+	bpf.RememberAttachedProgs(ap.FileName(), ap.FileName(), objHash)
 	return nil
 }
 
