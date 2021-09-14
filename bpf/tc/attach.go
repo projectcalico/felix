@@ -91,11 +91,12 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	skipAttachment, csum := bpf.CheckAttachedProgs(tempBinary, ap.FileName())
+	skipAttachment, csum := bpf.CheckAttachedProgs(ap.IfaceName(), tempBinary)
 	if skipAttachment {
 		logCxt.Info("Programs already attached, skip re-attaching")
 		return nil
 	}
+	log.Info("Marva ", csum)
 
 	// Using the RLock allows multiple attach calls to proceed in parallel unless
 	// CleanUpJumpMaps() (which takes the writer lock) is running.
@@ -144,7 +145,7 @@ func (ap AttachPoint) AttachProgram() error {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
-	bpf.RememberAttachedProgs(ap.FileName(), csum)
+	bpf.RememberAttachedProgs(ap.IfaceName(), csum)
 	return nil
 }
 

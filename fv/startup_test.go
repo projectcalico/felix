@@ -40,7 +40,7 @@ var _ = infrastructure.DatastoreDescribe("Felix startup speed", []apiconfig.Data
 			"FELIX_BPFENABLED":              "true",
 			"FELIX_DEBUGDISABLELOGDROPPING": "true",
 		}
-		felixes, _ = infrastructure.StartNNodeTopology(3, opts, infra)
+		felixes, _ = infrastructure.StartNNodeTopology(2, opts, infra)
 
 		err := infra.AddAllowToDatastore("host-endpoint=='true'")
 		Expect(err).NotTo(HaveOccurred())
@@ -51,12 +51,13 @@ var _ = infrastructure.DatastoreDescribe("Felix startup speed", []apiconfig.Data
 		for _, felix := range felixes {
 			log.Info("Felix is about to start")
 			felix.Start()
+			time.Sleep(3 * time.Second)
 			<-felix.WatchStdoutFor(regexp.MustCompile("Felix starting up"))
 			log.Info("Felix is started")
 			felix.Restart()
 			<-felix.WatchStdoutFor(regexp.MustCompile("Felix starting up"))
 			log.Info("Felix is restarted")
-			time.Sleep(60 * time.Minute)
+			time.Sleep(1 * time.Second)
 		}
 	})
 
