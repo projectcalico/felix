@@ -156,7 +156,9 @@ func (ap *AttachPoint) AttachProgram() error {
 	}
 
 	// program is now attached. Now we should store this in addition to some extra information to prevent unncessary reloads in future
-	bpf.RememberAttachedProgs(ap.FileName(), ap.FileName(), objHash)
+	if err = bpf.RememberAttachedProgs(ap.FileName(), ap.FileName(), objHash); err != nil {
+		ap.Log().Error(err)
+	}
 	return nil
 }
 

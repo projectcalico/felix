@@ -150,7 +150,9 @@ func (ap AttachPoint) AttachProgram() error {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
-	bpf.RememberAttachedProgs(ap.IfaceName(), ap.FileName(), objHash)
+	if err = bpf.RememberAttachedProgs(ap.IfaceName(), ap.FileName(), objHash); err != nil {
+		log.Error(err)
+	}
 	return nil
 }
 
