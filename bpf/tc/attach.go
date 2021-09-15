@@ -105,7 +105,6 @@ func (ap AttachPoint) AttachProgram() error {
 
 	matchedHash, objHash := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
 	for _, p := range progsToClean {
-		log.Info("Found progs: ", p.object)
 		if matchedHash && ap.FileName() == p.object {
 			logCxt.Info("Programs already attached, skip re-attaching")
 			return nil
