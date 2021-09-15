@@ -61,7 +61,7 @@ var tcLock sync.RWMutex
 
 var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
-var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
+var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+) ([^ ]+)`)
 
 func (ap AttachPoint) Log() *log.Entry {
 	return log.WithFields(log.Fields{
@@ -105,6 +105,14 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
+	matchedHash, objHash := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
+	for _, p := range progsToClean {
+		if matchedHash && ap.FileName() == p.object {
+			logCxt.Info("Programs already attached, skip re-attaching")
+			return nil
+		}
+	}
+
 	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
 		"bpf", "da", "obj", tempBinary,
 		"sec", SectionName(ap.Type, ap.ToOrFrom),
@@ -140,6 +148,7 @@ func (ap AttachPoint) AttachProgram() error {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
+	bpf.RememberAttachedProgs(ap.IfaceName(), ap.FileName(), objHash)
 	return nil
 }
 
@@ -198,6 +207,7 @@ func isDumpInterrupted(err error) bool {
 type attachedProg struct {
 	pref   string
 	handle string
+	object string
 }
 
 func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
@@ -217,6 +227,7 @@ func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
 			p := attachedProg{
 				pref:   sm[1],
 				handle: sm[2],
+				object: strings.Split(sm[3], ":")[0],
 			}
 			log.WithField("prog", p).Debug("Found old calico program")
 			progsToClean = append(progsToClean, p)
