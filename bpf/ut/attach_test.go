@@ -69,12 +69,12 @@ func TestJumpMapCleanup(t *testing.T) {
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
 
-		t.Log("Replacing program should add another map and dir.")
+		t.Log("Replacing program should not add another map and dir.")
 		ap.HostIP = net.ParseIP("10.0.0.2")
 		err = ap.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
-		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+2), "unexpected number of jump maps after replacing program")
-		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+2), "unexpected number of TC dirs after replacing program")
+		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps after replacing program")
+		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs after replacing program")
 
 		t.Log("Cleaning up, should remove the first map.")
 		tc.CleanUpJumpMaps()

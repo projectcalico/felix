@@ -82,6 +82,20 @@ func (ap *AttachPoint) AttachProgram() error {
 		return err
 	}
 
+	matchedHash, objHash, err := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
+	if err == nil {
+		attached, err := ap.IsAttached()
+		if err != nil {
+			ap.Log().Info(err)
+		}
+		if matchedHash && attached {
+			ap.Log().Info("Programs already attached, skip re-attaching")
+			return nil
+		}
+	} else {
+		ap.Log().Info(err)
+	}
+
 	// Note that there are a few considerations here.
 	//
 	// Firstly, we use -force when attaching, so as to minimise any flap in the XDP program when
@@ -140,6 +154,9 @@ func (ap *AttachPoint) AttachProgram() error {
 	if !attachmentSucceeded {
 		return fmt.Errorf("Couldn't attach XDP program %v section %v to iface %v; modes=%v errs=%v", tempBinary, sectionName, ap.Iface, ap.Modes, errs)
 	}
+
+	// program is now attached. Now we should store this in addition to some extra information to prevent unncessary reloads in future
+	bpf.RememberAttachedProgs(ap.FileName(), ap.FileName(), objHash)
 	return nil
 }
 
