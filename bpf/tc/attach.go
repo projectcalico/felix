@@ -103,12 +103,16 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	matchedHash, objHash := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
-	for _, p := range progsToClean {
-		if matchedHash && ap.FileName() == p.object {
-			logCxt.Info("Programs already attached, skip re-attaching")
-			return nil
+	matchedHash, objHash, err := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
+	if err == nil {
+		for _, p := range progsToClean {
+			if matchedHash && ap.FileName() == p.object {
+				logCxt.Info("Programs already attached, skip re-attaching")
+				return nil
+			}
 		}
+	} else {
+		logCxt.Info(err)
 	}
 
 	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),

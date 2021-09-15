@@ -21,8 +21,6 @@ import (
 	"os/exec"
 	"path"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -35,7 +33,7 @@ type AttachedProgInfo struct {
 	Hash string `json:"hash"`
 }
 
-func CheckAttachedProgs(iface, progName string) (bool, string) {
+func CheckAttachedProgs(iface, progName string) (bool, string, error) {
 	var progInfo AttachedProgInfo
 	var bytesToRead []byte
 
@@ -43,50 +41,47 @@ func CheckAttachedProgs(iface, progName string) (bool, string) {
 	hashCmd := exec.Command("sha256sum", binaryName)
 	outBytes, err := hashCmd.Output()
 	if err != nil {
-		log.Info(err)
-		return false, ""
+		return false, "", err
 	}
 	calculatedHash := strings.Split(string(outBytes), " ")[0]
 
 	name := iface + "_" + strings.TrimSuffix(progName, path.Ext(progName)) + ".json"
 	filename := path.Join(ATTACHED_PROG_HASH_DIR, name)
 	if bytesToRead, err = ioutil.ReadFile(filename); err != nil {
-		log.Info(err)
-		return false, calculatedHash
+		return false, calculatedHash, err
 	}
 
 	if err := json.Unmarshal(bytesToRead, &progInfo); err != nil {
-		log.Info(err)
-		return false, calculatedHash
+		return false, calculatedHash, err
 	}
 
 	if progInfo.Hash == calculatedHash {
-		return true, calculatedHash
+		return true, calculatedHash, nil
 	}
 
-	return false, calculatedHash
+	return false, calculatedHash, nil
 }
 
-func RememberAttachedProgs(iface, progName, csum string) {
+func RememberAttachedProgs(iface, progName, csum string) error {
 	var progInfo = AttachedProgInfo{
 		Name: progName,
 		Hash: csum,
 	}
 
 	if err := os.MkdirAll(ATTACHED_PROG_HASH_DIR, 0600); err != nil {
-		log.Info(err)
-		return
+		return err
 	}
 
 	bytesToWrite, err := json.Marshal(progInfo)
 	if err != nil {
-		log.Info(err)
-		return
+		return err
 	}
 
 	name := iface + "_" + strings.TrimSuffix(progName, path.Ext(progName)) + ".json"
 	filename := path.Join(ATTACHED_PROG_HASH_DIR, name)
 	if err = ioutil.WriteFile(filename, bytesToWrite, 0400); err != nil {
-		log.Info(err)
+		return err
 	}
+
+	return nil
 }

@@ -82,14 +82,18 @@ func (ap *AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	matchedHash, objHash := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
-	attached, err := ap.IsAttached()
-	if err != nil {
+	matchedHash, objHash, err := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
+	if err == nil {
+		attached, err := ap.IsAttached()
+		if err != nil {
+			ap.Log().Info(err)
+		}
+		if matchedHash && attached {
+			ap.Log().Info("Programs already attached, skip re-attaching")
+			return nil
+		}
+	} else {
 		ap.Log().Info(err)
-	}
-	if matchedHash && attached {
-		ap.Log().Info("Programs already attached, skip re-attaching")
-		return nil
 	}
 
 	// Note that there are a few considerations here.
