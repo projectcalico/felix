@@ -79,6 +79,11 @@ func RememberAttachedProgs(iface, progName, csum string) {
 	}
 
 	bytesToWrite, err := json.Marshal(progInfo)
+	if err != nil {
+		log.Info(err)
+		return
+	}
+
 	name := iface + "_" + strings.TrimSuffix(progName, path.Ext(progName)) + ".json"
 	filename := path.Join(ATTACHED_PROG_HASH_DIR, name)
 	if err = ioutil.WriteFile(filename, bytesToWrite, 0400); err != nil {
