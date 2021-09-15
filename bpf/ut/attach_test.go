@@ -35,7 +35,7 @@ func TestJumpMapCleanup(t *testing.T) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(bpffs).To(Equal("/sys/fs/bpf"))
 
-	ap := tc.AttachPoint{
+	ap1 := tc.AttachPoint{
 		Type:     tc.EpTypeWorkload,
 		ToOrFrom: tc.ToEp,
 		Hook:     tc.HookIngress,
@@ -43,15 +43,27 @@ func TestJumpMapCleanup(t *testing.T) {
 		LogLevel: "DEBUG",
 	}
 
-	t.Run(ap.ProgramName(), func(t *testing.T) {
+	ap2 := tc.AttachPoint{
+		Type:     tc.EpTypeWorkload,
+		ToOrFrom: tc.ToEp,
+		Hook:     tc.HookEgress,
+		DSR:      false,
+		LogLevel: "DEBUG",
+	}
+
+	t.Run(ap1.ProgramName(), func(t *testing.T) {
 		RegisterTestingT(t)
 
-		vethName, veth := createVeth()
-		defer deleteLink(veth)
+		vethName1, veth1 := createVeth()
+		defer deleteLink(veth1)
+		ap1.Iface = vethName1
 
-		ap.Iface = vethName
+		vethName2, veth2 := createVeth()
+		defer deleteLink(veth2)
+		ap2.Iface = vethName2
 
-		log.Debugf("Testing %v in %v", ap.ProgramName(), ap.FileName())
+		log.Debugf("Testing %v in %v and %v in %v", ap1.ProgramName(), ap1.FileName(),
+			ap2.ProgramName(), ap2.FileName())
 
 		// Start with a clean base state in case another test left something behind.
 		t.Log("Doing initial clean up")
@@ -60,30 +72,42 @@ func TestJumpMapCleanup(t *testing.T) {
 		t.Log("Adding program, should add one dir and one map.")
 		startingJumpMaps := countJumpMaps()
 		startingTCDirs := countTCDirs()
-		ap.HostIP = net.ParseIP("10.0.0.1")
-		ap.IntfIP = net.ParseIP("10.0.0.2")
-		err := tc.EnsureQdisc(ap.Iface)
+		ap1.HostIP = net.ParseIP("10.0.0.1")
+		ap1.IntfIP = net.ParseIP("10.0.0.2")
+		err := tc.EnsureQdisc(ap1.Iface)
 		Expect(err).NotTo(HaveOccurred())
-		err = ap.AttachProgram()
+		err = ap1.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
 
-		t.Log("Replacing program should add another map and dir.")
-		ap.HostIP = net.ParseIP("10.0.0.2")
-		err = ap.AttachProgram()
+		t.Log("Replacing program should not add another map and dir.")
+		ap1.HostIP = net.ParseIP("10.0.0.2")
+		err = ap1.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
-		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+2), "unexpected number of jump maps after replacing program")
-		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+2), "unexpected number of TC dirs after replacing program")
+		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps after replacing program")
+		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs after replacing program")
+
+		t.Log("Adding another program, should add one dir and one map.")
+		ap2.HostIP = net.ParseIP("10.0.1.1")
+		ap2.IntfIP = net.ParseIP("10.0.1.2")
+		err = tc.EnsureQdisc(ap2.Iface)
+		Expect(err).NotTo(HaveOccurred())
+		err = ap2.AttachProgram()
+		Expect(err).NotTo(HaveOccurred())
+		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+2), "unexpected number of jump maps")
+		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+2), "unexpected number of TC dirs")
 
 		t.Log("Cleaning up, should remove the first map.")
 		tc.CleanUpJumpMaps()
-		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps after clean up")
-		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs after clean up")
+		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+2), "unexpected number of jump maps after clean up")
+		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+2), "unexpected number of TC dirs after clean up")
 
 		// Remove the program.
 		t.Log("Removing all programs and cleaning up, should return to base state.")
-		err = tc.RemoveQdisc(vethName)
+		err = tc.RemoveQdisc(vethName1)
+		Expect(err).NotTo(HaveOccurred())
+		err = tc.RemoveQdisc(vethName2)
 		Expect(err).NotTo(HaveOccurred())
 		tc.CleanUpJumpMaps()
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps), "unexpected number of jump maps")
