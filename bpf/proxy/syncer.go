@@ -544,6 +544,11 @@ func (s *Syncer) apply(state DPSyncerState) error {
 		skey := getSvcKey(sname, "")
 		eps := state.EpsMap[sname]
 
+		if len(eps) == 0 {
+			log.Debugf("Service %s not written due to no Endpoints", sname)
+			continue
+		}
+
 		err := s.applySvc(skey, sinfo, eps)
 		if err != nil {
 			return err
