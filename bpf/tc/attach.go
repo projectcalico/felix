@@ -109,13 +109,14 @@ func (ap AttachPoint) AttachProgram() error {
 	if err == nil {
 		for _, p := range progsToClean {
 			if matchedHash && ap.FileName() == p.object {
-				logCxt.Info("Programs already attached, skip re-attaching")
+				logCxt.Info("Program already attached, skip re-attaching")
 				return nil
 			}
 		}
 	} else {
 		logCxt.Info(err)
 	}
+	logCxt.Info("Program is not attached, continue to attach it")
 
 	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
 		"bpf", "da", "obj", tempBinary,
