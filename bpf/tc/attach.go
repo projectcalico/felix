@@ -517,7 +517,6 @@ func (ap *AttachPoint) ProgramID(tcOpts *libbpf.TCOpts) (string, error) {
 		return "", errors.New("failed to find TC program")
 	}
 	return strconv.Itoa(progId), nil
-	return "", errors.New("failed to find TC program")
 }
 
 // Return a key that uniquely identifies this attach point, amongst all of the possible attach
