@@ -99,7 +99,6 @@ var _ = Describe("_HEALTH_ _BPF-SAFE_ health tests", func() {
 				Eventually(felixLiveness, "5s", "100ms").Should(BeGood())
 				Consistently(felixLiveness, "10s", "1s").Should(BeGood())
 			})
-
 		})
 
 		createLocalPod := func() {
