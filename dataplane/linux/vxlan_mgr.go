@@ -24,18 +24,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/projectcalico/felix/ethtool"
-	"github.com/projectcalico/felix/ipsets"
-	"github.com/projectcalico/felix/logutils"
-	"github.com/projectcalico/felix/rules"
-
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
+	"github.com/projectcalico/felix/dataplane/common"
+	"github.com/projectcalico/felix/ethtool"
 	"github.com/projectcalico/felix/ip"
+	"github.com/projectcalico/felix/ipsets"
+	"github.com/projectcalico/felix/logutils"
 	"github.com/projectcalico/felix/proto"
 	"github.com/projectcalico/felix/routetable"
+	"github.com/projectcalico/felix/rules"
 )
 
 // added so that we can shim netlink for tests
@@ -75,7 +75,7 @@ type vxlanManager struct {
 
 	// Indicates if configuration has changed since the last apply.
 	routesDirty       bool
-	ipsetsDataplane   ipsetsDataplane
+	ipsetsDataplane   common.IPSetsDataplane
 	ipSetMetadata     ipsets.IPSetMetadata
 	externalNodeCIDRs []string
 	vtepsDirty        bool
@@ -92,7 +92,7 @@ const (
 )
 
 func newVXLANManager(
-	ipsetsDataplane ipsetsDataplane,
+	ipsetsDataplane common.IPSetsDataplane,
 	rt routeTable,
 	deviceName string,
 	dpConfig Config,
@@ -115,6 +115,8 @@ func newVXLANManager(
 		false,
 		0,
 		opRecorder,
+		routetable.WithAdditionalLogFields(log.Fields{"route_table": "vxlan_blackhole"}),
+		routetable.WithAdditionalRouteFilter(&netlink.Route{Type: syscall.RTN_BLACKHOLE}),
 	)
 
 	return newVXLANManagerWithShims(
@@ -127,13 +129,16 @@ func newVXLANManager(
 			deviceRouteSourceAddress net.IP, deviceRouteProtocol netlink.RouteProtocol, removeExternalRoutes bool) routeTable {
 			return routetable.New(interfaceRegexes, ipVersion, vxlan, netlinkTimeout,
 				deviceRouteSourceAddress, deviceRouteProtocol, removeExternalRoutes, 0,
-				opRecorder)
+				opRecorder,
+				routetable.WithAdditionalLogFields(log.Fields{"route_table": "vxlan_noencap"}),
+				routetable.WithAdditionalRouteFilter(&netlink.Route{Type: syscall.RTN_UNICAST}),
+			)
 		},
 	)
 }
 
 func newVXLANManagerWithShims(
-	ipsetsDataplane ipsetsDataplane,
+	ipsetsDataplane common.IPSetsDataplane,
 	rt, brt routeTable,
 	deviceName string,
 	dpConfig Config,

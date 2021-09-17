@@ -132,7 +132,7 @@ var retvalToStrXDP = map[int]string{
 }
 
 func TestCompileTemplateRun(t *testing.T) {
-	runBpfTest(t, "calico_to_workload_ep", false, &polprog.Rules{}, func(bpfrun bpfProgRunFn) {
+	runBpfTest(t, "calico_to_workload_ep", &polprog.Rules{}, func(bpfrun bpfProgRunFn) {
 		_, _, _, _, pktBytes, err := testPacketUDPDefault()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -158,12 +158,14 @@ type testLogger interface {
 	Logf(format string, args ...interface{})
 }
 
-func setupAndRun(logger testLogger, loglevel, section string, forXDP bool, rules *polprog.Rules,
+func setupAndRun(logger testLogger, loglevel, section string, rules *polprog.Rules,
 	runFn func(progName string), opts ...testOption) {
 
 	topts := testOpts{
-		subtests: true,
-		logLevel: log.DebugLevel,
+		subtests:  true,
+		logLevel:  log.DebugLevel,
+		psnaStart: 20000,
+		psnatEnd:  30000,
 	}
 
 	for _, o := range opts {
@@ -196,7 +198,7 @@ outter:
 
 	obj := "../../bpf-gpl/bin/test_xdp_debug"
 	progLog := ""
-	if !forXDP {
+	if !topts.xdp {
 		obj = "../../bpf-gpl/bin/test_"
 		if strings.Contains(section, "from") {
 			obj += "from_"
@@ -235,11 +237,12 @@ outter:
 	Expect(err).NotTo(HaveOccurred())
 	bin.PatchTunnelMTU(natTunnelMTU)
 	bin.PatchVXLANPort(testVxlanPort)
+	bin.PatchPSNATPorts(topts.psnaStart, topts.psnatEnd)
 	tempObj := tempDir + "bpf.o"
 	err = bin.WriteToFile(tempObj)
 	Expect(err).NotTo(HaveOccurred())
 
-	err = bpftoolProgLoadAll(tempObj, bpfFsDir, forXDP, rules != nil, maps...)
+	err = bpftoolProgLoadAll(tempObj, bpfFsDir, topts.xdp, rules != nil, maps...)
 	Expect(err).NotTo(HaveOccurred())
 
 	if err != nil {
@@ -248,7 +251,7 @@ outter:
 	Expect(err).NotTo(HaveOccurred())
 
 	jumpMap := tcJumpMap
-	if forXDP {
+	if topts.xdp {
 		jumpMap = xdpJumpMap
 	}
 
@@ -258,7 +261,7 @@ outter:
 		insns, err := pg.Instructions(*rules)
 		Expect(err).NotTo(HaveOccurred())
 		polProgFD, err := bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", unix.BPF_PROG_TYPE_SCHED_CLS)
-		if forXDP {
+		if topts.xdp {
 			polProgFD, err = bpf.LoadBPFProgramFromInsns(insns, "Apache-2.0", unix.BPF_PROG_TYPE_XDP)
 		}
 		Expect(err).NotTo(HaveOccurred())
@@ -273,12 +276,12 @@ outter:
 }
 
 // runBpfTest runs a specific section of the entire bpf program in isolation
-func runBpfTest(t *testing.T, section string, forXDP bool, rules *polprog.Rules, testFn func(bpfProgRunFn), opts ...testOption) {
+func runBpfTest(t *testing.T, section string, rules *polprog.Rules, testFn func(bpfProgRunFn), opts ...testOption) {
 	RegisterTestingT(t)
-	if !forXDP {
+	if strings.Contains(section, "xdp") == false {
 		section = "classifier_" + section
 	}
-	setupAndRun(t, "debug", section, forXDP, rules, func(progName string) {
+	setupAndRun(t, "debug", section, rules, func(progName string) {
 		t.Run(section, func(_ *testing.T) {
 			testFn(func(dataIn []byte) (bpfRunResult, error) {
 				res, err := bpftoolProgRun(progName, dataIn)
@@ -605,6 +608,9 @@ type testOpts struct {
 	subtests  bool
 	logLevel  log.Level
 	extraMaps []bpf.Map
+	xdp       bool
+	psnaStart uint32
+	psnatEnd  uint32
 }
 
 type testOption func(opts *testOpts)
@@ -628,6 +634,19 @@ var _ = withLogLevel
 func withExtraMap(m bpf.Map) testOption {
 	return func(o *testOpts) {
 		o.extraMaps = append(o.extraMaps, m)
+	}
+}
+
+func withXDP() testOption {
+	return func(o *testOpts) {
+		o.xdp = true
+	}
+}
+
+func withPSNATPorts(start, end uint16) testOption {
+	return func(o *testOpts) {
+		o.psnaStart = uint32(start)
+		o.psnatEnd = uint32(end)
 	}
 }
 
@@ -660,7 +679,7 @@ func layersMatchFields(l gopacket.Layer, ignore ...string) GomegaMatcher {
 	return PointTo(MatchFields(IgnoreMissing|IgnoreExtras, f))
 }
 
-func udpResposeRaw(in []byte) []byte {
+func udpResponseRaw(in []byte) []byte {
 	pkt := gopacket.NewPacket(in, layers.LayerTypeEthernet, gopacket.Default)
 	ethL := pkt.Layer(layers.LayerTypeEthernet)
 	ethR := ethL.(*layers.Ethernet)
@@ -679,6 +698,34 @@ func udpResposeRaw(in []byte) []byte {
 	out := gopacket.NewSerializeBuffer()
 	err := gopacket.SerializeLayers(out, gopacket.SerializeOptions{ComputeChecksums: true},
 		ethR, ipv4R, udpR, gopacket.Payload(pkt.ApplicationLayer().Payload()))
+	Expect(err).NotTo(HaveOccurred())
+
+	return out.Bytes()
+}
+
+func tcpResponseRaw(in []byte) []byte {
+	pkt := gopacket.NewPacket(in, layers.LayerTypeEthernet, gopacket.Default)
+	ethL := pkt.Layer(layers.LayerTypeEthernet)
+	ethR := ethL.(*layers.Ethernet)
+	ethR.SrcMAC, ethR.DstMAC = ethR.DstMAC, ethR.SrcMAC
+
+	ipv4L := pkt.Layer(layers.LayerTypeIPv4)
+	ipv4R := ipv4L.(*layers.IPv4)
+	ipv4R.SrcIP, ipv4R.DstIP = ipv4R.DstIP, ipv4R.SrcIP
+
+	tcpL := pkt.Layer(layers.LayerTypeTCP)
+	tcpR := tcpL.(*layers.TCP)
+	tcpR.SrcPort, tcpR.DstPort = tcpR.DstPort, tcpR.SrcPort
+
+	if tcpR.SYN {
+		tcpR.ACK = true
+	}
+
+	_ = tcpR.SetNetworkLayerForChecksum(ipv4R)
+
+	out := gopacket.NewSerializeBuffer()
+	err := gopacket.SerializeLayers(out, gopacket.SerializeOptions{ComputeChecksums: true},
+		ethR, ipv4R, tcpR, gopacket.Payload(pkt.ApplicationLayer().Payload()))
 	Expect(err).NotTo(HaveOccurred())
 
 	return out.Bytes()

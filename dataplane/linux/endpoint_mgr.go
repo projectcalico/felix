@@ -25,6 +25,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/projectcalico/felix/dataplane/common"
 	"github.com/projectcalico/felix/ifacemonitor"
 	"github.com/projectcalico/felix/ip"
 	"github.com/projectcalico/felix/iptables"
@@ -54,16 +55,16 @@ type hepListener interface {
 }
 
 type endpointManagerCallbacks struct {
-	addInterface           *AddInterfaceFuncs
-	removeInterface        *RemoveInterfaceFuncs
-	updateInterface        *UpdateInterfaceFuncs
-	updateHostEndpoint     *UpdateHostEndpointFuncs
-	removeHostEndpoint     *RemoveHostEndpointFuncs
-	updateWorkloadEndpoint *UpdateWorkloadEndpointFuncs
-	removeWorkloadEndpoint *RemoveWorkloadEndpointFuncs
+	addInterface           *common.AddInterfaceFuncs
+	removeInterface        *common.RemoveInterfaceFuncs
+	updateInterface        *common.UpdateInterfaceFuncs
+	updateHostEndpoint     *common.UpdateHostEndpointFuncs
+	removeHostEndpoint     *common.RemoveHostEndpointFuncs
+	updateWorkloadEndpoint *common.UpdateWorkloadEndpointFuncs
+	removeWorkloadEndpoint *common.RemoveWorkloadEndpointFuncs
 }
 
-func newEndpointManagerCallbacks(callbacks *callbacks, ipVersion uint8) endpointManagerCallbacks {
+func newEndpointManagerCallbacks(callbacks *common.Callbacks, ipVersion uint8) endpointManagerCallbacks {
 	if ipVersion == 4 {
 		return endpointManagerCallbacks{
 			addInterface:           callbacks.AddInterfaceV4,
@@ -76,13 +77,13 @@ func newEndpointManagerCallbacks(callbacks *callbacks, ipVersion uint8) endpoint
 		}
 	} else {
 		return endpointManagerCallbacks{
-			addInterface:           &AddInterfaceFuncs{},
-			removeInterface:        &RemoveInterfaceFuncs{},
-			updateInterface:        &UpdateInterfaceFuncs{},
-			updateHostEndpoint:     &UpdateHostEndpointFuncs{},
-			removeHostEndpoint:     &RemoveHostEndpointFuncs{},
-			updateWorkloadEndpoint: &UpdateWorkloadEndpointFuncs{},
-			removeWorkloadEndpoint: &RemoveWorkloadEndpointFuncs{},
+			addInterface:           &common.AddInterfaceFuncs{},
+			removeInterface:        &common.RemoveInterfaceFuncs{},
+			updateInterface:        &common.UpdateInterfaceFuncs{},
+			updateHostEndpoint:     &common.UpdateHostEndpointFuncs{},
+			removeHostEndpoint:     &common.RemoveHostEndpointFuncs{},
+			updateWorkloadEndpoint: &common.UpdateWorkloadEndpointFuncs{},
+			removeWorkloadEndpoint: &common.RemoveWorkloadEndpointFuncs{},
 		}
 	}
 }
@@ -220,7 +221,7 @@ func newEndpointManager(
 	onWorkloadEndpointStatusUpdate EndpointStatusUpdateCallback,
 	bpfEnabled bool,
 	bpfEndpointManager hepListener,
-	callbacks *callbacks,
+	callbacks *common.Callbacks,
 ) *endpointManager {
 	return newEndpointManagerWithShims(
 		rawTable,
@@ -256,7 +257,7 @@ func newEndpointManagerWithShims(
 	osStat func(name string) (os.FileInfo, error),
 	bpfEnabled bool,
 	bpfEndpointManager hepListener,
-	callbacks *callbacks,
+	callbacks *common.Callbacks,
 ) *endpointManager {
 	wlIfacesPattern := "^(" + strings.Join(wlInterfacePrefixes, "|") + ").*"
 	wlIfacesRegexp := regexp.MustCompile(wlIfacesPattern)
@@ -877,12 +878,19 @@ func (m *endpointManager) updateHostEndpoints() {
 		logCxt := log.WithField("id", id).WithField("ifaceName", ifaceName)
 		ep := m.rawHostEndpoints[id]
 		if len(ep.UntrackedTiers) > 0 {
-			// Optimisation: only add the endpoint chains to the raw (untracked)
-			// table if there's some untracked policy to apply.  This reduces
-			// per-packet latency since every packet has to traverse the raw
-			// table.
-			logCxt.Debug("Endpoint has untracked policies.")
-			newUntrackedIfaceNameToHostEpID[ifaceName] = id
+			if ifaceName == allInterfaces {
+				// GlobalNetworkPolicy with `doNotTrack: True` has been configured
+				// to apply to a host-* endpoint, which is not currently supported.
+				// Log and warning and ignore it.
+				logCxt.Warning("DoNotTrack policy is not supported for a HEP with `interfaceName: *`; ignoring it")
+			} else {
+				// Optimisation: only add the endpoint chains to the raw (untracked)
+				// table if there's some untracked policy to apply.  This reduces
+				// per-packet latency since every packet has to traverse the raw
+				// table.
+				logCxt.Debug("Endpoint has untracked policies.")
+				newUntrackedIfaceNameToHostEpID[ifaceName] = id
+			}
 		}
 		if len(ep.PreDnatTiers) > 0 {
 			// Similar optimisation (or neatness) for pre-DNAT policy.

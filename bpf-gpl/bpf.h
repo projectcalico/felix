@@ -143,20 +143,17 @@ static CALI_BPF_INLINE void __compile_asserts(void) {
 #pragma clang diagnostic pop
 }
 
-/* Calico BPF mode assumes it can use the top 3 nibbles of the 32-bit packet mark,
- * i.e. 0xFFF00000.  To run successfully in BPF mode, Felix's IptablesMarkMask must be
- * configured to _include_ those top 3 nibbles _and_ to have some bits over for use by the
+/* Calico BPF mode uses bits in the top 3 nibbles of the 32-bit packet mark, specifically
+ * within 0x1FF00000.  To run successfully in BPF mode, Felix's IptablesMarkMask must be
+ * configured to _include_ that mask _and_ to have some bits over for use by the
  * remaining iptables rules that do not interact with the BPF C code.  (Felix golang code
  * checks this at start of day and will shutdown and restart if IptablesMarkMask is
  * insufficient.)
  *
  * Bits used only by C code, or for interaction between C and golang code, must come out
- * of the 0xFFF00000, and must be defined compatibly here and in bpf/tc/tc_defs.go.
+ * of the 0x1FF00000, and must be defined compatibly here and in bpf/tc/tc_defs.go.
  *
  * The internal structure of the top 3 nibbles is as follows:
-
-     . 1 0 .  . . . .  . . . .       indicates any packet that has been marked in
-                                     some way by the Calico BPF C code
 
      . . . .  . . . 1  . . . .       packet SEEN by at least one TC program
 
@@ -175,14 +172,11 @@ static CALI_BPF_INLINE void __compile_asserts(void) {
  */
 
 enum calico_skb_mark {
-	/* Bits that we set in all _our_ mark patterns. */
-	CALI_MARK_CALICO                     = 0x40000000,
-	CALI_MARK_CALICO_MASK                = 0x60000000,
 	/* The "SEEN" bit is set by any BPF program that allows a packet through.  It allows
 	 * a second BPF program that handles the same packet to determine that another program
 	 * handled it first. */
-	CALI_SKB_MARK_SEEN                   = CALI_MARK_CALICO      | 0x01000000,
-	CALI_SKB_MARK_SEEN_MASK              = CALI_MARK_CALICO_MASK | CALI_SKB_MARK_SEEN,
+	CALI_SKB_MARK_SEEN                   = 0x01000000,
+	CALI_SKB_MARK_SEEN_MASK              = CALI_SKB_MARK_SEEN,
 	/* The "BYPASS" bit is an even stronger indication than "SEEN". It is set by BPF programs
 	 * that have determined that the packet is approved and any downstream programs do not need
 	 * to further validate the packet. */
@@ -214,8 +208,8 @@ enum calico_skb_mark {
 	/* CT_ESTABLISHED is used by iptables to tell the BPF programs that the packet is part of an
 	 * established Linux conntrack flow. This allows the BPF program to let through pre-existing
 	 * flows at start of day. */
-	CALI_SKB_MARK_CT_ESTABLISHED         = CALI_MARK_CALICO      | 0x08000000,
-	CALI_SKB_MARK_CT_ESTABLISHED_MASK    = CALI_MARK_CALICO      | 0x08000000,
+	CALI_SKB_MARK_CT_ESTABLISHED         = 0x08000000,
+	CALI_SKB_MARK_CT_ESTABLISHED_MASK    = 0x08000000,
 };
 
 /* bpf_exit inserts a BPF exit instruction with the given return value. In a fully-inlined
@@ -267,12 +261,16 @@ CALI_CONFIGURABLE_DEFINE(tunnel_mtu, 0x55544d54) /* be 0x55544d54 = ASCII(TMTU) 
 CALI_CONFIGURABLE_DEFINE(vxlan_port, 0x52505856) /* be 0x52505856 = ASCII(VXPR) */
 CALI_CONFIGURABLE_DEFINE(intf_ip, 0x46544e49) /*be 0x46544e49 = ASCII(INTF) */
 CALI_CONFIGURABLE_DEFINE(ext_to_svc_mark, 0x4b52414d) /*be 0x4b52414d = ASCII(MARK) */
+CALI_CONFIGURABLE_DEFINE(psnat_start, 0x53545250) /* be 0x53545250 = ACSII(PRTS) */
+CALI_CONFIGURABLE_DEFINE(psnat_len, 0x4c545250) /* be 0x4c545250 = ACSII(PRTL) */
 
 #define HOST_IP		CALI_CONFIGURABLE(host_ip)
 #define TUNNEL_MTU 	CALI_CONFIGURABLE(tunnel_mtu)
 #define VXLAN_PORT 	CALI_CONFIGURABLE(vxlan_port)
 #define INTF_IP		CALI_CONFIGURABLE(intf_ip)
 #define EXT_TO_SVC_MARK	CALI_CONFIGURABLE(ext_to_svc_mark)
+#define PSNAT_START	CALI_CONFIGURABLE(psnat_start)
+#define PSNAT_LEN	CALI_CONFIGURABLE(psnat_len)
 
 #define MAP_PIN_GLOBAL	2
 
