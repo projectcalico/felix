@@ -56,12 +56,7 @@ type AttachPoint struct {
 	ExtToServiceConnmark uint32
 }
 
-// struct bpf_tc_opts that is used for attaching a program is required
-// to get the prog id attached to the ingress/egress hook of the interface.
-// Hence libbpf.TCOPts needs to be stored.
-var optsMap = map[string]*libbpf.TCOpts{}
 var tcLock sync.RWMutex
-var optsLock sync.RWMutex
 var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
 var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
@@ -75,12 +70,12 @@ func (ap AttachPoint) Log() *log.Entry {
 }
 
 // AttachProgram attaches a BPF program from a file to the TC attach point
-func (ap AttachPoint) AttachProgram() error {
+func (ap AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
 	logCxt := log.WithField("attachPoint", ap)
 
 	tempDir, err := ioutil.TempDir("", "calico-tc")
 	if err != nil {
-		return fmt.Errorf("failed to create temporary directory: %w", err)
+		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
 	}
 	defer func() {
 		_ = os.RemoveAll(tempDir)
@@ -93,7 +88,7 @@ func (ap AttachPoint) AttachProgram() error {
 	err = ap.patchBinary(logCxt, preCompiledBinary, tempBinary)
 	if err != nil {
 		logCxt.WithError(err).Error("Failed to patch binary")
-		return err
+		return nil, err
 	}
 
 	// Using the RLock allows multiple attach calls to proceed in parallel unless
@@ -106,12 +101,13 @@ func (ap AttachPoint) AttachProgram() error {
 	//nolint
 	progsToClean, err := ap.listAttachedPrograms()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	obj, err := libbpf.OpenObject(tempBinary)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	defer obj.Close()
 
 	baseDir := "/sys/fs/bpf/tc/"
 	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap() {
@@ -126,13 +122,13 @@ func (ap AttachPoint) AttachProgram() error {
 		pinPath := path.Join(baseDir, subDir, m.Name())
 		perr := m.SetPinPath(pinPath)
 		if perr != nil {
-			return fmt.Errorf("error pinning map %v errno %v", m.Name(), perr)
+			return nil, fmt.Errorf("error pinning map %v errno %v", m.Name(), perr)
 		}
 	}
 
 	err = obj.Load()
 	if err != nil {
-		return fmt.Errorf("error loading program %v", err)
+		return nil, fmt.Errorf("error loading program %v", err)
 	}
 
 	isHost := false
@@ -142,20 +138,17 @@ func (ap AttachPoint) AttachProgram() error {
 
 	err = updateJumpMap(obj, isHost)
 	if err != nil {
-		return fmt.Errorf("error updating jump map %v", err)
+		return nil, fmt.Errorf("error updating jump map %v", err)
 	}
 
 	opts, err := obj.AttachClassifier(SectionName(ap.Type, ap.ToOrFrom), ap.Iface, string(ap.Hook))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if opts == nil {
-		return fmt.Errorf("error attaching classifier to %v", ap.Iface)
+		return nil, fmt.Errorf("error attaching classifier to %v", ap.Iface)
 	}
 
-	key := ap.Iface + "_" + string(ap.Hook)
-	updateTCOpts(key, opts)
-	// Success: clean up the old programs.
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
@@ -179,13 +172,9 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	if len(progErrs) != 0 {
-		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
+		return nil, fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
-	err = obj.Close()
-	if err != nil {
-		return err
-	}
-	return nil
+	return opts, nil
 }
 
 func (ap AttachPoint) DetachProgram() error {
@@ -518,29 +507,14 @@ func RemoveQdisc(ifaceName string) error {
 	return libbpf.RemoveQDisc(ifaceName)
 }
 
-func RemoveTCOpts(ifaceName string) {
-	optsLock.Lock()
-	defer optsLock.Unlock()
-	key := ifaceName + "_" + "ingress"
-	delete(optsMap, key)
-	key = ifaceName + "_" + "egress"
-	delete(optsMap, key)
-}
-
-func (ap *AttachPoint) ProgramID() (string, error) {
+func (ap *AttachPoint) ProgramID(tcOpts *libbpf.TCOpts) (string, error) {
 	logCtx := log.WithField("iface", ap.Iface)
 	logCtx.Info("Finding TC program ID")
-	key := ap.Iface + "_" + string(ap.Hook)
-	if optsMap != nil {
-		val, ok := GetTCOpts(key)
-		if ok {
-			progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), val)
-			if err != nil {
-				return "", errors.New("failed to find TC program")
-			}
-			return strconv.Itoa(progId), nil
-		}
+	progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), tcOpts)
+	if err != nil {
+		return "", errors.New("failed to find TC program")
 	}
+	return strconv.Itoa(progId), nil
 	return "", errors.New("failed to find TC program")
 }
 
@@ -552,20 +526,6 @@ func (ap *AttachPoint) JumpMapFDMapKey() string {
 
 func (ap *AttachPoint) IfaceName() string {
 	return ap.Iface
-}
-
-func GetTCOpts(key string) (*libbpf.TCOpts, bool) {
-	optsLock.RLock()
-	defer optsLock.RUnlock()
-	val, ok := optsMap[key]
-	return val, ok
-}
-
-// nolint
-func updateTCOpts(key string, opts *libbpf.TCOpts) {
-	optsLock.Lock()
-	defer optsLock.Unlock()
-	optsMap[key] = opts
 }
 
 // nolint

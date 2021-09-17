@@ -97,11 +97,9 @@ func TestPrecompiledBinariesAreLoadable(t *testing.T) {
 								ap.Iface = vethName
 								err := tc.EnsureQdisc(ap.Iface)
 								Expect(err).NotTo(HaveOccurred())
-								err = ap.AttachProgram()
+								opts, err := ap.AttachProgram()
 								Expect(err).NotTo(HaveOccurred())
-								val, ok := tc.GetTCOpts(ap.Iface + "_" + string(ap.Hook))
-								Expect(ok).To(Equal(true))
-								Expect(val).NotTo(Equal(nil))
+								Expect(opts).NotTo(Equal(nil))
 							})
 						}
 					}

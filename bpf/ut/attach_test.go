@@ -63,11 +63,9 @@ func TestJumpMapCleanup(t *testing.T) {
 		ap.IntfIP = net.ParseIP("10.0.0.2")
 		err := tc.EnsureQdisc(ap.Iface)
 		Expect(err).NotTo(HaveOccurred())
-		err = ap.AttachProgram()
+		opts, err := ap.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
-		val, ok := tc.GetTCOpts(ap.Iface + "_" + string(ap.Hook))
-		Expect(ok).To(Equal(true))
-		Expect(val).NotTo(Equal(nil))
+		Expect(opts).NotTo(Equal(nil))
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
 
