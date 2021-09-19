@@ -31,17 +31,24 @@ type AttachedProgInfo struct {
 }
 
 func IsAlreadyAttached(iface, hook, object string) (bool, string, error) {
-	var progInfo AttachedProgInfo
-	var bytesToRead []byte
+	var (
+		progInfo       AttachedProgInfo
+		bytesToRead    []byte
+		calculatedHash string
+		err            error
+	)
 
-	calculatedHash, err := sha256OfFile(object)
+	if calculatedHash, err = sha256OfFile(object); err != nil {
+		return false, "", err
+	}
+
 	name := iface + "_" + hook + ".json"
 	filename := path.Join(RuntimeDir, name)
 	if bytesToRead, err = ioutil.ReadFile(filename); err != nil {
 		return false, calculatedHash, err
 	}
 
-	if err := json.Unmarshal(bytesToRead, &progInfo); err != nil {
+	if err = json.Unmarshal(bytesToRead, &progInfo); err != nil {
 		return false, calculatedHash, err
 	}
 
