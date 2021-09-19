@@ -105,6 +105,20 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
+	hook := "tc_ingress"
+	if ap.ToOrFrom == "to" {
+		hook = "tc_egress"
+	}
+
+	maybeAttached, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), hook, preCompiledBinary)
+	if err == nil && maybeAttached && len(progsToClean) == 1 {
+		logCxt.Info("Program already attached, skip reattaching")
+		return nil
+	}
+	// TODO: check
+	//logCxt.WithError(err).Warn("Failed to check if BPF program was already attached. Reattaching it to make sure.")
+	log.Info("Failed to check if BPF program was already attached. Reattaching it to make sure.")
+
 	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
 		"bpf", "da", "obj", tempBinary,
 		"sec", SectionName(ap.Type, ap.ToOrFrom),
@@ -140,6 +154,9 @@ func (ap AttachPoint) AttachProgram() error {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
+	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, objHash); err != nil {
+		log.Error(err)
+	}
 	return nil
 }
 
