@@ -61,7 +61,7 @@ var tcLock sync.RWMutex
 
 var ErrDeviceNotFound = errors.New("device not found")
 var ErrInterrupted = errors.New("dump interrupted")
-var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+) ([^ ]+)`)
+var prefHandleRe = regexp.MustCompile(`pref ([^ ]+) .* handle ([^ ]+)`)
 
 func (ap AttachPoint) Log() *log.Entry {
 	return log.WithFields(log.Fields{
@@ -105,18 +105,19 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	matchedHash, objHash, err := bpf.CheckAttachedProgs(ap.IfaceName(), ap.FileName())
-	if err == nil {
-		for _, p := range progsToClean {
-			if matchedHash && ap.FileName() == p.object {
-				logCxt.Info("Program already attached, skip re-attaching")
-				return nil
-			}
-		}
-	} else {
-		logCxt.Info(err)
+	hook := "tc_ingress"
+	if ap.ToOrFrom == "to" {
+		hook = "tc_egress"
 	}
-	logCxt.Info("Program is not attached, continue to attach it")
+
+	maybeAttached, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), hook, preCompiledBinary)
+	if err == nil && maybeAttached && len(progsToClean) == 1 {
+		logCxt.Info("Program already attached, skip reattaching")
+		return nil
+	}
+	// TODO: check
+	//logCxt.WithError(err).Warn("Failed to check if BPF program was already attached. Reattaching it to make sure.")
+	log.Info("Failed to check if BPF program was already attached. Reattaching it to make sure.")
 
 	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
 		"bpf", "da", "obj", tempBinary,
@@ -153,7 +154,7 @@ func (ap AttachPoint) AttachProgram() error {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
-	if err = bpf.RememberAttachedProgs(ap.IfaceName(), ap.FileName(), objHash); err != nil {
+	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, objHash); err != nil {
 		log.Error(err)
 	}
 	return nil
@@ -214,7 +215,6 @@ func isDumpInterrupted(err error) bool {
 type attachedProg struct {
 	pref   string
 	handle string
-	object string
 }
 
 func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
@@ -234,7 +234,6 @@ func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
 			p := attachedProg{
 				pref:   sm[1],
 				handle: sm[2],
-				object: strings.Split(sm[3], ":")[0],
 			}
 			log.WithField("prog", p).Debug("Found old calico program")
 			progsToClean = append(progsToClean, p)

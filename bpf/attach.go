@@ -15,38 +15,28 @@
 package bpf
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path"
-	"strings"
-)
-
-const (
-	BPF_PROG_BINARY_DIR    = "/usr/lib/calico/bpf"
-	ATTACHED_PROG_HASH_DIR = "/var/run/calico/bpf"
 )
 
 type AttachedProgInfo struct {
-	Name string `json:"name"`
-	Hash string `json:"hash"`
+	Object string `json:"object"`
+	Hash   string `json:"hash"`
 }
 
-func CheckAttachedProgs(iface, progName string) (bool, string, error) {
+func IsAlreadyAttached(iface, hook, object string) (bool, string, error) {
 	var progInfo AttachedProgInfo
 	var bytesToRead []byte
 
-	binaryName := path.Join(BPF_PROG_BINARY_DIR, progName)
-	hashCmd := exec.Command("sha256sum", binaryName)
-	outBytes, err := hashCmd.Output()
-	if err != nil {
-		return false, "", err
-	}
-	calculatedHash := strings.Split(string(outBytes), " ")[0]
-
-	name := iface + "_" + strings.TrimSuffix(progName, path.Ext(progName)) + ".json"
-	filename := path.Join(ATTACHED_PROG_HASH_DIR, name)
+	calculatedHash, err := sha256OfFile(object)
+	name := iface + "_" + hook + ".json"
+	filename := path.Join(RuntimeDir, name)
 	if bytesToRead, err = ioutil.ReadFile(filename); err != nil {
 		return false, calculatedHash, err
 	}
@@ -55,20 +45,20 @@ func CheckAttachedProgs(iface, progName string) (bool, string, error) {
 		return false, calculatedHash, err
 	}
 
-	if progInfo.Hash == calculatedHash {
+	if progInfo.Hash == calculatedHash && progInfo.Object == object {
 		return true, calculatedHash, nil
 	}
 
 	return false, calculatedHash, nil
 }
 
-func RememberAttachedProgs(iface, progName, csum string) error {
+func RememberAttachedProg(iface, hook, object, hash string) error {
 	var progInfo = AttachedProgInfo{
-		Name: progName,
-		Hash: csum,
+		Object: object,
+		Hash:   hash,
 	}
 
-	if err := os.MkdirAll(ATTACHED_PROG_HASH_DIR, 0600); err != nil {
+	if err := os.MkdirAll(RuntimeDir, 0600); err != nil {
 		return err
 	}
 
@@ -77,11 +67,24 @@ func RememberAttachedProgs(iface, progName, csum string) error {
 		return err
 	}
 
-	name := iface + "_" + strings.TrimSuffix(progName, path.Ext(progName)) + ".json"
-	filename := path.Join(ATTACHED_PROG_HASH_DIR, name)
+	name := iface + "_" + hook + ".json"
+	filename := path.Join(RuntimeDir, name)
 	if err = ioutil.WriteFile(filename, bytesToWrite, 0400); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func sha256OfFile(name string) (string, error) {
+	f, err := os.Open(name)
+	if err != nil {
+		return "", fmt.Errorf("failed to open BPF object to calculate its hash: %w", err)
+	}
+	hasher := sha256.New()
+	_, err = io.Copy(hasher, f)
+	if err != nil {
+		return "", fmt.Errorf("failed to read BPF object to calculate its hash: %w", err)
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }

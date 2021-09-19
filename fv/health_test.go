@@ -463,11 +463,12 @@ var _ = infrastructure.DatastoreDescribe("Felix startup speed", []apiconfig.Data
 	It("should not re-attach bpf programs", func() {
 		for _, felix := range felixes {
 			log.Info("Felix is started")
-			<-felix.WatchStdoutFor(regexp.MustCompile("Program is not attached, continue to attach it"))
+			<-felix.WatchStdoutFor(regexp.MustCompile("Reattaching it to make sure"))
 			time.Sleep(3 * time.Second)
 			felix.Restart()
 			log.Info("Felix is restarted")
-			<-felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip re-attaching"))
+			<-felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching"))
+			//time.Sleep(time.Minute * 60)
 		}
 	})
 
