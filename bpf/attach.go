@@ -83,6 +83,22 @@ func RememberAttachedProg(iface, hook, object, hash string) error {
 	return nil
 }
 
+func ForgetAttachedProg(iface, hook string) error {
+	name := iface + "_" + hook + ".json"
+	filename := path.Join(RuntimeDir, name)
+	if err := os.Remove(filename); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ForgetAllAttachedProg() error {
+	if err := os.Remove(RuntimeDir); err != nil {
+		return err
+	}
+	return nil
+}
+
 func sha256OfFile(name string) (string, error) {
 	f, err := os.Open(name)
 	if err != nil {

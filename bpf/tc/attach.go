@@ -105,11 +105,7 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	hook := "tc_ingress"
-	if ap.ToOrFrom == "to" {
-		hook = "tc_egress"
-	}
-
+	hook := "tc_" + string(ap.Hook)
 	maybeAttached, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), hook, preCompiledBinary)
 	if err == nil && maybeAttached && len(progsToClean) == 1 {
 		logCxt.Info("Program already attached, skip reattaching")
@@ -131,6 +127,11 @@ func (ap AttachPoint) AttachProgram() error {
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
+		err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook))
+		if err != nil {
+			log.Debug("Cannot remove info file: ", err)
+		}
+
 		attemptCleanup := func() error {
 			_, err := ExecTC("filter", "del", "dev", ap.Iface, string(ap.Hook), "pref", p.pref, "handle", p.handle, "bpf")
 			return err
@@ -495,6 +496,7 @@ func RemoveQdisc(ifaceName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to remove qdisc from interface '%s': %w", ifaceName, err)
 	}
+
 	return nil
 }
 

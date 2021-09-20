@@ -82,8 +82,7 @@ func (ap *AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	hook := "xdp"
-	maybeAttached, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), hook, preCompiledBinary)
+	maybeAttached, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), "xdp", preCompiledBinary)
 	if err == nil {
 		isAttached, err := ap.IsAttached()
 		if err != nil {
@@ -157,7 +156,7 @@ func (ap *AttachPoint) AttachProgram() error {
 	}
 
 	// program is now attached. Now we should store this in addition to some extra information to prevent unncessary reloads in future
-	if err = bpf.RememberAttachedProg(ap.FileName(), hook, ap.FileName(), objHash); err != nil {
+	if err = bpf.RememberAttachedProg(ap.FileName(), "xdp", ap.FileName(), objHash); err != nil {
 		ap.Log().Error(err)
 	}
 	return nil
@@ -227,6 +226,9 @@ func (ap AttachPoint) DetachProgram() error {
 		}
 	}
 
+	if err = bpf.ForgetAttachedProg(ap.IfaceName(), "xdp"); err != nil {
+		ap.Log().Warn(err)
+	}
 	return nil
 }
 
