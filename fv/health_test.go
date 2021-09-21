@@ -1,4 +1,3 @@
-//go:build fvtests
 // +build fvtests
 
 // Copyright (c) 2017-2019,2021 Tigera, Inc. All rights reserved.
@@ -40,8 +39,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
-	"regexp"
-	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -52,10 +49,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"time"
+
 	"github.com/projectcalico/felix/fv/containers"
 	"github.com/projectcalico/felix/fv/infrastructure"
 	"github.com/projectcalico/felix/fv/utils"
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/libcalico-go/lib/health"
 	"github.com/projectcalico/libcalico-go/lib/options"
 )
@@ -436,52 +435,6 @@ var _ = Describe("_HEALTH_ _BPF-SAFE_ health tests", func() {
 			Consistently(felixContainer.Stopped, "20s").Should(BeFalse()) // Should stay up for 20+s
 			Eventually(felixContainer.Stopped, "15s").Should(BeTrue())    // Should die at roughly 30s.
 		})
-	})
-})
-
-var _ = infrastructure.DatastoreDescribe("Felix startup speed", []apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
-	var (
-		infra   infrastructure.DatastoreInfra
-		felixes []*infrastructure.Felix
-		//felixReady, felixLiveness func() int
-	)
-
-	BeforeEach(func() {
-		infra = getInfra()
-		opts := infrastructure.DefaultTopologyOptions()
-
-		opts.ExtraEnvVars = map[string]string{
-			"FELIX_BPFENABLED":              "true",
-			"FELIX_DEBUGDISABLELOGDROPPING": "true",
-		}
-		felixes, _ = infrastructure.StartNNodeTopology(1, opts, infra)
-
-		err := infra.AddAllowToDatastore("host-endpoint=='true'")
-		Expect(err).NotTo(HaveOccurred())
-	})
-
-	It("should not re-attach bpf programs", func() {
-		for _, felix := range felixes {
-			log.Info("Felix is started")
-			<-felix.WatchStdoutFor(regexp.MustCompile("Reattaching it to make sure"))
-			time.Sleep(3 * time.Second)
-			felix.Restart()
-			log.Info("Felix is restarted")
-			<-felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching"))
-			//time.Sleep(time.Minute * 60)
-		}
-	})
-
-	AfterEach(func() {
-		if CurrentGinkgoTestDescription().Failed {
-			infra.DumpErrorData()
-		}
-
-		for _, felix := range felixes {
-			felix.Stop()
-		}
-
-		infra.Stop()
 	})
 })
 
