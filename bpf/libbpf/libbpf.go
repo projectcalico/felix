@@ -17,7 +17,6 @@ package libbpf
 import (
 	"fmt"
 	"unsafe"
-	"syscall"
 
 	"github.com/projectcalico/felix/bpf"
 )
@@ -73,21 +72,15 @@ func (m *Map) SetPinPath(path string) error {
 	return nil
 }
 
-// bpf_obj__open does not set errno. Errno is returned in the obj.
 func OpenObject(filename string) (*Obj, error) {
 	bpf.IncreaseLockedMemoryQuota()
 	cFilename := C.CString(filename)
 	defer C.free(unsafe.Pointer(cFilename))
-	obj := C.bpf_obj_open_load(cFilename)
-	if obj.obj == nil {
-		msg := "error opening program"
-		if obj.errno != 0 {
-			errno := syscall.Errno(-int64(obj.errno))
-			msg = fmt.Sprintf("error opening program: %v", errno.Error())
-		}
-		return nil, fmt.Errorf(msg)
+	obj, err := C.bpf_obj_open_load(cFilename)
+	if obj == nil || err != nil {
+		return nil, fmt.Errorf("error opening libbpf object %v", err)
 	}
-	return &Obj{obj: obj.obj}, nil
+	return &Obj{obj: obj}, nil
 }
 
 func (o *Obj) Load() error {
@@ -132,11 +125,11 @@ func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
 		isIngress = 1
 	}
 
-	opts := C.bpf_tc_program_attach(o.obj, cSecName, C.int(ifIndex), C.int(isIngress))
-	if opts.opts.prog_fd < 0 || opts.errno != 0 {
-		return nil, fmt.Errorf("Error attaching tc program ")
+	opts,err := C.bpf_tc_program_attach(o.obj, cSecName, C.int(ifIndex), C.int(isIngress))
+	if err != nil {
+		return nil, fmt.Errorf("Error attaching tc program %v", err)
 	}
-	return &TCOpts{opts: opts.opts}, nil
+	return &TCOpts{opts: opts}, nil
 }
 
 func CreateQDisc(ifName string) error {
@@ -190,8 +183,8 @@ func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
 	if hook == "ingress" {
 		isIngress = 1
 	}
-	progId := C.bpf_tc_query_iface(C.int(ifIndex), opts.opts, C.int(isIngress))
-	if int(progId) < 0 {
+	progId,err := C.bpf_tc_query_iface(C.int(ifIndex), opts.opts, C.int(isIngress))
+	if err != nil {
 		return -1, fmt.Errorf("Error querying interface %s", ifaceName)
 	}
 	return int(progId), nil
