@@ -486,6 +486,43 @@ func TestIpPortRuleRenderingMultiPort(t *testing.T) {
 	}), "unexpected rules returned for IP+port policy")
 }
 
+func TestIpPortRuleRenderingEmptyIPSet(t *testing.T) {
+	RegisterTestingT(t)
+
+	h := mockHNS{}
+
+	// Windows 1803/RS4
+	h.SupportedFeatures.Acl.AclRuleId = true
+	h.SupportedFeatures.Acl.AclNoHostRulePriority = true
+
+	log.SetLevel(log.DebugLevel)
+
+	ipsc := mockIPSetCache{
+		IPSets: map[string][]string{"ip-set-id": {}},
+	}
+
+	ps := NewPolicySets(&h, []IPSetCache{&ipsc}, mockReader(""))
+
+	ps.AddOrReplacePolicySet("basic", &proto.Policy{
+		OutboundRules: []*proto.Rule{
+			{
+				Action:          "Allow",
+				RuleId:          "rule-1",
+				DstIpPortSetIds: []string{"ip-set-id"},
+			},
+		},
+		InboundRules: []*proto.Rule{},
+	})
+
+	// Should only have the default rules.
+	Expect(ps.GetPolicySetRules([]string{"basic"}, false)).To(Equal([]*hns.ACLPolicy{
+		// Default deny rule.
+		{Type: hns.ACL, Protocol: 256, Action: hns.Block, Direction: hns.Out, RuleType: hns.Switch, Priority: 1001},
+		// Default host/pod rule.
+		{Type: hns.ACL, Protocol: 256, Action: hns.Allow, Direction: hns.Out, RuleType: hns.Host},
+	}), "unexpected rules returned for IP+port policy")
+}
+
 func TestNegativeTestCases(t *testing.T) {
 
 	RegisterTestingT(t)

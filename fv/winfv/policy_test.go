@@ -117,5 +117,13 @@ var _ = Describe("Windows policy test", func() {
 			err := kubectlExec(`-t porter -- powershell -Command 'Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 www.google.com'`)
 			Expect(err).To(HaveOccurred())
 		})
+		It("porter pod cannot connect to kube apiserver", func() {
+			err := kubectlExec(`-t porter -- powershell -Command 'Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 https://kubernetes.default'`)
+			Expect(err).To(HaveOccurred())
+		})
+		It("porter pod can connect to kube apiserver after creating service egress policy", func() {
+			err := kubectlExec(`-t porter -- powershell -Command 'Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 https://kubernetes.default'`)
+			Expect(err).To(HaveOccurred())
+		})
 	})
 })

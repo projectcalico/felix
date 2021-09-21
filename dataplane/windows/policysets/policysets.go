@@ -375,9 +375,10 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 			// Split out address.
 			splits := strings.Split(m, ",")
 			addr := splits[0]
+			protoPort := splits[1]
 
 			// Split port and protocol.
-			splits = strings.Split(splits[1], ":")
+			splits = strings.Split(protoPort, ":")
 			protocol := protocolNameToNumber(splits[0])
 			port := splits[1]
 			return addr, protocol, port
@@ -385,31 +386,31 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 
 		// Each member includes both an address and a port.
 		// However, we can combine all addresses across all members that share the same proto+port into a single rule.
-		type members struct {
+		type policyMembers struct {
 			proto uint16
 			port  string
 			addrs []string
 		}
 
 		// We need to consolidate addrs based on ports/protocols, so use a map to lookup.
-		membersByPort := map[string]*members{}
+		membersByPort := map[string]*policyMembers{}
 
 		// We need to ensure the ordering of generated rules is deterministic, so use a slice.
-		orderedMembers := []*members{}
+		orderedPolicyMembers := []*policyMembers{}
 		for _, m := range ipsetMembers {
 			// The member should be of the format <IP>,(tcp|udp):<port number>
 			addr, proto, port := parseIPPortMember(m)
-			var m *members
-			m = membersByPort[fmt.Sprintf("%d/%s", proto, port)]
-			if m == nil {
-				m = &members{proto: proto, port: port}
-				membersByPort[fmt.Sprintf("%d/%s", proto, port)] = m
-				orderedMembers = append(orderedMembers, m)
+			var pm *policyMembers
+			pm = membersByPort[fmt.Sprintf("%d/%s", proto, port)]
+			if pm == nil {
+				pm = &policyMembers{proto: proto, port: port}
+				membersByPort[fmt.Sprintf("%d/%s", proto, port)] = pm
+				orderedPolicyMembers = append(orderedPolicyMembers, pm)
 			}
-			m.addrs = append(m.addrs, addr)
+			pm.addrs = append(pm.addrs, addr)
 		}
 
-		for i, m := range orderedMembers {
+		for i, m := range orderedPolicyMembers {
 			newPolicy := *aclPolicy
 			newPolicy.RemoteAddresses = strings.Join(m.addrs, ",")
 			newPolicy.RemotePorts = m.port
