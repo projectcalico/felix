@@ -105,6 +105,16 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
+	hook := "tc_" + string(ap.Hook)
+	maybeAttached, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), hook, preCompiledBinary)
+	if err == nil && maybeAttached && len(progsToClean) == 1 {
+		logCxt.Info("Program already attached, skip reattaching")
+		return nil
+	}
+	// TODO: check
+	//logCxt.WithError(err).Warn("Failed to check if BPF program was already attached. Reattaching it to make sure.")
+	log.Info("Failed to check if BPF program was already attached. Reattaching it to make sure.")
+
 	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
 		"bpf", "da", "obj", tempBinary,
 		"sec", SectionName(ap.Type, ap.ToOrFrom),
@@ -117,6 +127,11 @@ func (ap AttachPoint) AttachProgram() error {
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
+		err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook))
+		if err != nil {
+			log.Debug("Cannot remove info file: ", err)
+		}
+
 		attemptCleanup := func() error {
 			_, err := ExecTC("filter", "del", "dev", ap.Iface, string(ap.Hook), "pref", p.pref, "handle", p.handle, "bpf")
 			return err
@@ -140,6 +155,9 @@ func (ap AttachPoint) AttachProgram() error {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
+	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, objHash); err != nil {
+		log.Error(err)
+	}
 	return nil
 }
 
@@ -478,6 +496,7 @@ func RemoveQdisc(ifaceName string) error {
 	if err != nil {
 		return fmt.Errorf("failed to remove qdisc from interface '%s': %w", ifaceName, err)
 	}
+
 	return nil
 }
 
