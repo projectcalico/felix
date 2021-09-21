@@ -154,10 +154,10 @@ var _ = Describe("Windows policy test", func() {
 				},
 			}
 			_, err = client.NetworkPolicies().Create(context.Background(), &p, options.SetOptions{})
-			Expect(err).To(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 
 			// Assert that it's now reachable.
-			err = kubectlExec(`-t porter -- powershell -Command 'Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 https://kubernetes.default'`)
+			err = kubectlExec(`-t porter -- powershell -Command 'Invoke-WebRequest -UseBasicParsing -SkipCertificateCheck -TimeoutSec 5 https://kubernetes.default.svc.cluster.local'`)
 			Expect(err).To(HaveOccurred())
 		})
 	})
