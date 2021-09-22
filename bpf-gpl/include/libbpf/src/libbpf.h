@@ -18,6 +18,7 @@
 #include <linux/bpf.h>
 
 #include "libbpf_common.h"
+#include "libbpf_legacy.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -93,8 +94,15 @@ struct bpf_object_open_opts {
 	 * system Kconfig for CONFIG_xxx externs.
 	 */
 	const char *kconfig;
+	/* Path to the custom BTF to be used for BPF CO-RE relocations.
+	 * This custom BTF completely replaces the use of vmlinux BTF
+	 * for the purpose of CO-RE relocations.
+	 * NOTE: any other BPF feature (e.g., fentry/fexit programs,
+	 * struct_ops, etc) will need actual kernel BTF at /sys/kernel/btf/vmlinux.
+	 */
+	const char *btf_custom_path;
 };
-#define bpf_object_open_opts__last_field kconfig
+#define bpf_object_open_opts__last_field btf_custom_path
 
 LIBBPF_API struct bpf_object *bpf_object__open(const char *path);
 LIBBPF_API struct bpf_object *
@@ -236,19 +244,85 @@ LIBBPF_API int bpf_link__destroy(struct bpf_link *link);
 
 LIBBPF_API struct bpf_link *
 bpf_program__attach(struct bpf_program *prog);
+
+struct bpf_perf_event_opts {
+	/* size of this struct, for forward/backward compatiblity */
+	size_t sz;
+	/* custom user-provided value fetchable through bpf_get_attach_cookie() */
+	__u64 bpf_cookie;
+};
+#define bpf_perf_event_opts__last_field bpf_cookie
+
 LIBBPF_API struct bpf_link *
 bpf_program__attach_perf_event(struct bpf_program *prog, int pfd);
+
+LIBBPF_API struct bpf_link *
+bpf_program__attach_perf_event_opts(struct bpf_program *prog, int pfd,
+				    const struct bpf_perf_event_opts *opts);
+
+struct bpf_kprobe_opts {
+	/* size of this struct, for forward/backward compatiblity */
+	size_t sz;
+	/* custom user-provided value fetchable through bpf_get_attach_cookie() */
+	__u64 bpf_cookie;
+	/* function's offset to install kprobe to */
+	unsigned long offset;
+	/* kprobe is return probe */
+	bool retprobe;
+	size_t :0;
+};
+#define bpf_kprobe_opts__last_field retprobe
+
 LIBBPF_API struct bpf_link *
 bpf_program__attach_kprobe(struct bpf_program *prog, bool retprobe,
 			   const char *func_name);
+LIBBPF_API struct bpf_link *
+bpf_program__attach_kprobe_opts(struct bpf_program *prog,
+                                const char *func_name,
+                                const struct bpf_kprobe_opts *opts);
+
+struct bpf_uprobe_opts {
+	/* size of this struct, for forward/backward compatiblity */
+	size_t sz;
+	/* offset of kernel reference counted USDT semaphore, added in
+	 * a6ca88b241d5 ("trace_uprobe: support reference counter in fd-based uprobe")
+	 */
+	size_t ref_ctr_offset;
+	/* custom user-provided value fetchable through bpf_get_attach_cookie() */
+	__u64 bpf_cookie;
+	/* uprobe is return probe, invoked at function return time */
+	bool retprobe;
+	size_t :0;
+};
+#define bpf_uprobe_opts__last_field retprobe
+
 LIBBPF_API struct bpf_link *
 bpf_program__attach_uprobe(struct bpf_program *prog, bool retprobe,
 			   pid_t pid, const char *binary_path,
 			   size_t func_offset);
 LIBBPF_API struct bpf_link *
+bpf_program__attach_uprobe_opts(struct bpf_program *prog, pid_t pid,
+				const char *binary_path, size_t func_offset,
+				const struct bpf_uprobe_opts *opts);
+
+struct bpf_tracepoint_opts {
+	/* size of this struct, for forward/backward compatiblity */
+	size_t sz;
+	/* custom user-provided value fetchable through bpf_get_attach_cookie() */
+	__u64 bpf_cookie;
+};
+#define bpf_tracepoint_opts__last_field bpf_cookie
+
+LIBBPF_API struct bpf_link *
 bpf_program__attach_tracepoint(struct bpf_program *prog,
 			       const char *tp_category,
 			       const char *tp_name);
+LIBBPF_API struct bpf_link *
+bpf_program__attach_tracepoint_opts(struct bpf_program *prog,
+				    const char *tp_category,
+				    const char *tp_name,
+				    const struct bpf_tracepoint_opts *opts);
+
 LIBBPF_API struct bpf_link *
 bpf_program__attach_raw_tracepoint(struct bpf_program *prog,
 				   const char *tp_name);
@@ -471,10 +545,12 @@ LIBBPF_API int bpf_map__set_priv(struct bpf_map *map, void *priv,
 LIBBPF_API void *bpf_map__priv(const struct bpf_map *map);
 LIBBPF_API int bpf_map__set_initial_value(struct bpf_map *map,
 					  const void *data, size_t size);
+LIBBPF_API const void *bpf_map__initial_value(struct bpf_map *map, size_t *psize);
 LIBBPF_API bool bpf_map__is_offload_neutral(const struct bpf_map *map);
 LIBBPF_API bool bpf_map__is_internal(const struct bpf_map *map);
 LIBBPF_API int bpf_map__set_pin_path(struct bpf_map *map, const char *path);
 LIBBPF_API const char *bpf_map__get_pin_path(const struct bpf_map *map);
+LIBBPF_API const char *bpf_map__pin_path(const struct bpf_map *map);
 LIBBPF_API bool bpf_map__is_pinned(const struct bpf_map *map);
 LIBBPF_API int bpf_map__pin(struct bpf_map *map, const char *path);
 LIBBPF_API int bpf_map__unpin(struct bpf_map *map, const char *path);
@@ -778,7 +854,7 @@ struct bpf_object_skeleton {
 	size_t sz; /* size of this struct, for forward/backward compatibility */
 
 	const char *name;
-	void *data;
+	const void *data;
 	size_t data_sz;
 
 	struct bpf_object **obj;
@@ -799,6 +875,18 @@ LIBBPF_API int bpf_object__load_skeleton(struct bpf_object_skeleton *s);
 LIBBPF_API int bpf_object__attach_skeleton(struct bpf_object_skeleton *s);
 LIBBPF_API void bpf_object__detach_skeleton(struct bpf_object_skeleton *s);
 LIBBPF_API void bpf_object__destroy_skeleton(struct bpf_object_skeleton *s);
+
+struct gen_loader_opts {
+	size_t sz; /* size of this struct, for forward/backward compatiblity */
+	const char *data;
+	const char *insns;
+	__u32 data_sz;
+	__u32 insns_sz;
+};
+
+#define gen_loader_opts__last_field insns_sz
+LIBBPF_API int bpf_object__gen_loader(struct bpf_object *obj,
+				      struct gen_loader_opts *opts);
 
 enum libbpf_tristate {
 	TRI_NO = 0,

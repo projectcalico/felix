@@ -36,6 +36,7 @@ struct btf_ptr;
 struct inode;
 struct socket;
 struct file;
+struct bpf_timer;
 
 /*
  * bpf_map_lookup_elem
@@ -1277,8 +1278,12 @@ static long (*bpf_skb_adjust_room)(struct __sk_buff *skb, __s32 len_diff, __u32 
  * 	The lower two bits of *flags* are used as the return code if
  * 	the map lookup fails. This is so that the return value can be
  * 	one of the XDP program return codes up to **XDP_TX**, as chosen
- * 	by the caller. Any higher bits in the *flags* argument must be
- * 	unset.
+ * 	by the caller. The higher bits of *flags* can be set to
+ * 	BPF_F_BROADCAST or BPF_F_EXCLUDE_INGRESS as defined below.
+ *
+ * 	With BPF_F_BROADCAST the packet will be broadcasted to all the
+ * 	interfaces in the map, with BPF_F_EXCLUDE_INGRESS the ingress
+ * 	interface will be excluded when do broadcasting.
  *
  * 	See also **bpf_redirect**\ (), which only supports redirecting
  * 	to an ifindex, but doesn't require a map to do so.
@@ -2090,7 +2095,7 @@ static void *(*bpf_get_local_storage)(void *map, __u64 flags) = (void *) 81;
  * bpf_sk_select_reuseport
  *
  * 	Select a **SO_REUSEPORT** socket from a
- * 	**BPF_MAP_TYPE_REUSEPORT_ARRAY** *map*.
+ * 	**BPF_MAP_TYPE_REUSEPORT_SOCKARRAY** *map*.
  * 	It checks the selected socket is matching the incoming
  * 	request in the socket buffer.
  *
@@ -3888,5 +3893,154 @@ static long (*bpf_for_each_map_elem)(void *map, void *callback_fn, void *callbac
  * 	Or **-EBUSY** if the per-CPU memory copy buffer is busy.
  */
 static long (*bpf_snprintf)(char *str, __u32 str_size, const char *fmt, __u64 *data, __u32 data_len) = (void *) 165;
+
+/*
+ * bpf_sys_bpf
+ *
+ * 	Execute bpf syscall with given arguments.
+ *
+ * Returns
+ * 	A syscall result.
+ */
+static long (*bpf_sys_bpf)(__u32 cmd, void *attr, __u32 attr_size) = (void *) 166;
+
+/*
+ * bpf_btf_find_by_name_kind
+ *
+ * 	Find BTF type with given name and kind in vmlinux BTF or in module's BTFs.
+ *
+ * Returns
+ * 	Returns btf_id and btf_obj_fd in lower and upper 32 bits.
+ */
+static long (*bpf_btf_find_by_name_kind)(char *name, int name_sz, __u32 kind, int flags) = (void *) 167;
+
+/*
+ * bpf_sys_close
+ *
+ * 	Execute close syscall for given FD.
+ *
+ * Returns
+ * 	A syscall result.
+ */
+static long (*bpf_sys_close)(__u32 fd) = (void *) 168;
+
+/*
+ * bpf_timer_init
+ *
+ * 	Initialize the timer.
+ * 	First 4 bits of *flags* specify clockid.
+ * 	Only CLOCK_MONOTONIC, CLOCK_REALTIME, CLOCK_BOOTTIME are allowed.
+ * 	All other bits of *flags* are reserved.
+ * 	The verifier will reject the program if *timer* is not from
+ * 	the same *map*.
+ *
+ * Returns
+ * 	0 on success.
+ * 	**-EBUSY** if *timer* is already initialized.
+ * 	**-EINVAL** if invalid *flags* are passed.
+ * 	**-EPERM** if *timer* is in a map that doesn't have any user references.
+ * 	The user space should either hold a file descriptor to a map with timers
+ * 	or pin such map in bpffs. When map is unpinned or file descriptor is
+ * 	closed all timers in the map will be cancelled and freed.
+ */
+static long (*bpf_timer_init)(struct bpf_timer *timer, void *map, __u64 flags) = (void *) 169;
+
+/*
+ * bpf_timer_set_callback
+ *
+ * 	Configure the timer to call *callback_fn* static function.
+ *
+ * Returns
+ * 	0 on success.
+ * 	**-EINVAL** if *timer* was not initialized with bpf_timer_init() earlier.
+ * 	**-EPERM** if *timer* is in a map that doesn't have any user references.
+ * 	The user space should either hold a file descriptor to a map with timers
+ * 	or pin such map in bpffs. When map is unpinned or file descriptor is
+ * 	closed all timers in the map will be cancelled and freed.
+ */
+static long (*bpf_timer_set_callback)(struct bpf_timer *timer, void *callback_fn) = (void *) 170;
+
+/*
+ * bpf_timer_start
+ *
+ * 	Set timer expiration N nanoseconds from the current time. The
+ * 	configured callback will be invoked in soft irq context on some cpu
+ * 	and will not repeat unless another bpf_timer_start() is made.
+ * 	In such case the next invocation can migrate to a different cpu.
+ * 	Since struct bpf_timer is a field inside map element the map
+ * 	owns the timer. The bpf_timer_set_callback() will increment refcnt
+ * 	of BPF program to make sure that callback_fn code stays valid.
+ * 	When user space reference to a map reaches zero all timers
+ * 	in a map are cancelled and corresponding program's refcnts are
+ * 	decremented. This is done to make sure that Ctrl-C of a user
+ * 	process doesn't leave any timers running. If map is pinned in
+ * 	bpffs the callback_fn can re-arm itself indefinitely.
+ * 	bpf_map_update/delete_elem() helpers and user space sys_bpf commands
+ * 	cancel and free the timer in the given map element.
+ * 	The map can contain timers that invoke callback_fn-s from different
+ * 	programs. The same callback_fn can serve different timers from
+ * 	different maps if key/value layout matches across maps.
+ * 	Every bpf_timer_set_callback() can have different callback_fn.
+ *
+ *
+ * Returns
+ * 	0 on success.
+ * 	**-EINVAL** if *timer* was not initialized with bpf_timer_init() earlier
+ * 	or invalid *flags* are passed.
+ */
+static long (*bpf_timer_start)(struct bpf_timer *timer, __u64 nsecs, __u64 flags) = (void *) 171;
+
+/*
+ * bpf_timer_cancel
+ *
+ * 	Cancel the timer and wait for callback_fn to finish if it was running.
+ *
+ * Returns
+ * 	0 if the timer was not active.
+ * 	1 if the timer was active.
+ * 	**-EINVAL** if *timer* was not initialized with bpf_timer_init() earlier.
+ * 	**-EDEADLK** if callback_fn tried to call bpf_timer_cancel() on its
+ * 	own timer which would have led to a deadlock otherwise.
+ */
+static long (*bpf_timer_cancel)(struct bpf_timer *timer) = (void *) 172;
+
+/*
+ * bpf_get_func_ip
+ *
+ * 	Get address of the traced function (for tracing and kprobe programs).
+ *
+ * Returns
+ * 	Address of the traced function.
+ */
+static __u64 (*bpf_get_func_ip)(void *ctx) = (void *) 173;
+
+/*
+ * bpf_get_attach_cookie
+ *
+ * 	Get bpf_cookie value provided (optionally) during the program
+ * 	attachment. It might be different for each individual
+ * 	attachment, even if BPF program itself is the same.
+ * 	Expects BPF program context *ctx* as a first argument.
+ *
+ * 	Supported for the following program types:
+ * 		- kprobe/uprobe;
+ * 		- tracepoint;
+ * 		- perf_event.
+ *
+ * Returns
+ * 	Value specified by user at BPF link creation/attachment time
+ * 	or 0, if it was not specified.
+ */
+static __u64 (*bpf_get_attach_cookie)(void *ctx) = (void *) 174;
+
+/*
+ * bpf_task_pt_regs
+ *
+ * 	Get the struct pt_regs associated with **task**.
+ *
+ * Returns
+ * 	A pointer to struct pt_regs.
+ */
+static long (*bpf_task_pt_regs)(struct task_struct *task) = (void *) 175;
 
 
