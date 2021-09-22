@@ -1140,7 +1140,7 @@ func (r *RouteTable) filterErrorByIfaceState(ifaceName string, currentErr, defau
 	if ifaceName == InterfaceNone {
 		// Short circuit the no-OIF interface name.
 		logCxt.Info("No interface on route.")
-		return defaultErr
+		return nil
 	}
 
 	if strings.Contains(currentErr.Error(), "not found") {
