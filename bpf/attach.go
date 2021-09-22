@@ -76,7 +76,7 @@ func RememberAttachedProg(iface, hook, object, hash string) error {
 
 	name := iface + "_" + hook + ".json"
 	filename := path.Join(RuntimeDir, name)
-	if err = ioutil.WriteFile(filename, bytesToWrite, 0400); err != nil {
+	if err = ioutil.WriteFile(filename, bytesToWrite, 0600); err != nil {
 		return err
 	}
 

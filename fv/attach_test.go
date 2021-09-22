@@ -28,9 +28,8 @@ import (
 
 var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Felix bpf attachment", []apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
 	var (
-		infra               infrastructure.DatastoreInfra
-		felixes             []*infrastructure.Felix
-		firstRun, secondRun chan struct{}
+		infra   infrastructure.DatastoreInfra
+		felixes []*infrastructure.Felix
 	)
 
 	BeforeEach(func() {
@@ -60,15 +59,19 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Felix bpf attachment", []ap
 	})
 
 	It("should not reattach bpf programs", func() {
-		for _, felix := range felixes {
-			firstRun = felix.WatchStdoutFor(regexp.MustCompile("Reattaching it to make sure"))
-			secondRun = felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching"))
-			log.Info("Felix is started")
-			Eventually(firstRun, "10s", "100ms").Should(BeClosed())
-			time.Sleep(3 * time.Second)
-			felix.Restart()
-			log.Info("Felix is restarted")
-			Eventually(secondRun, "10s", "100ms").Should(BeClosed())
-		}
+		felix := felixes[0]
+		log.Info("Felix is started")
+		// This should not happen at initial execution of felix, since there is no program attached
+		base := felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching"))
+		Eventually(base, "10s", "100ms").ShouldNot(BeClosed())
+		// This should happen at first execution of felix, since there is no program attached
+		firstRun := felix.WatchStdoutFor(regexp.MustCompile("Continue with attaching BPF program"))
+		Eventually(firstRun, "10s", "100ms").Should(BeClosed())
+		time.Sleep(3 * time.Second)
+		felix.Restart()
+		log.Info("Felix is restarted")
+		// This should happen after restart of felix, since BPF programs are already attached
+		secondRun := felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching"))
+		Eventually(secondRun, "10s", "100ms").Should(BeClosed())
 	})
 })

@@ -240,7 +240,7 @@ func newBPFEndpointManager(
 	// Clean all the files under /var/run/calico/bpf/ to remove any information from the
 	// previous execution of the bpf dataplane
 	if err := bpf.ForgetAllAttachedProg(); err != nil {
-		log.Warn(err)
+		log.Error("Failed to remove dirty hash files from %s: %v", bpf.RuntimeDir, err)
 	}
 
 	// Normally this endpoint manager uses its own dataplane implementation, but we have an

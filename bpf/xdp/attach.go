@@ -82,19 +82,20 @@ func (ap *AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	maybeAttached, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), "xdp", preCompiledBinary)
-	if err != nil {
-		ap.Log().Warn("Failed to check if BPF program was already attached. Reattaching it to make sure")
-	} else {
+	hashMatched, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), "xdp", preCompiledBinary)
+	if err == nil {
 		somethingAttached, err := ap.IsAttached()
 		if err != nil {
-			ap.Log().Warn("Failed to verify if any program is attached to interface: %v", err)
+			ap.Log().Warn("Failed to verify if any program is attached to interface: %w", err)
 		}
-		if maybeAttached && somethingAttached {
+		if hashMatched && somethingAttached {
 			ap.Log().Info("Programs already attached, skip reattaching")
 			return nil
 		}
+	} else {
+		ap.Log().Warn("Failed to check if BPF program was already attached: %w", err)
 	}
+	ap.Log().Info("Continue with attaching BPF program")
 
 	// Note that there are a few considerations here.
 	//
@@ -157,7 +158,7 @@ func (ap *AttachPoint) AttachProgram() error {
 
 	// program is now attached. Now we should store this in addition to some extra information to prevent unncessary reloads in future
 	if err = bpf.RememberAttachedProg(ap.FileName(), "xdp", ap.FileName(), objHash); err != nil {
-		ap.Log().Error("Failed to record hash of BPF program on disk: %v. Ignoring.", err)
+		ap.Log().Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
 	}
 	return nil
 }
@@ -227,7 +228,7 @@ func (ap AttachPoint) DetachProgram() error {
 	}
 
 	if err = bpf.ForgetAttachedProg(ap.IfaceName(), "xdp"); err != nil {
-		ap.Log().Error("Failed to remove hash of BPF program from disk: %v", err)
+		ap.Log().Error("Failed to remove hash of BPF program from disk: %w", err)
 	}
 	return nil
 }
