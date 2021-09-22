@@ -76,7 +76,7 @@ func OpenObject(filename string) (*Obj, error) {
 	bpf.IncreaseLockedMemoryQuota()
 	cFilename := C.CString(filename)
 	defer C.free(unsafe.Pointer(cFilename))
-	obj, err := C.bpf_obj_open_load(cFilename)
+	obj, err := C.bpf_obj_open(cFilename)
 	if obj == nil || err != nil {
 		return nil, fmt.Errorf("error opening libbpf object %v", err)
 	}
@@ -84,8 +84,8 @@ func OpenObject(filename string) (*Obj, error) {
 }
 
 func (o *Obj) Load() error {
-	err := C.bpf_object__load(o.obj)
-	if err != 0 {
+	_, err := C.bpf_obj_load(o.obj)
+	if err != nil {
 		return fmt.Errorf("error loading object %v", err)
 	}
 	return nil
@@ -104,7 +104,7 @@ func (m *Map) NextMap() (*Map, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error getting next map %v", err)
 	}
-	if bpfMap == nil && err == nil {
+	if bpfMap == nil {
 		return nil, nil
 	}
 	return &Map{bpfMap: bpfMap, bpfObj: m.bpfObj}, nil
@@ -125,7 +125,7 @@ func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
 		isIngress = 1
 	}
 
-	opts,err := C.bpf_tc_program_attach(o.obj, cSecName, C.int(ifIndex), C.int(isIngress))
+	opts, err := C.bpf_tc_program_attach(o.obj, cSecName, C.int(ifIndex), C.int(isIngress))
 	if err != nil {
 		return nil, fmt.Errorf("Error attaching tc program %v", err)
 	}
@@ -141,7 +141,7 @@ func CreateQDisc(ifName string) error {
 	}
 	_, err = C.bpf_tc_create_qdisc(C.int(ifIndex))
 	if err != nil {
-		return fmt.Errorf("Error creating qdisc")
+		return fmt.Errorf("Error creating qdisc %w", err)
 	}
 	return nil
 }
@@ -165,8 +165,8 @@ func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
 	cProgName := C.CString(progName)
 	defer C.free(unsafe.Pointer(cMapName))
 	defer C.free(unsafe.Pointer(cProgName))
-	err := C.bpf_tc_update_jump_map(o.obj, cMapName, cProgName, C.int(mapIndex))
-	if err != 0 {
+	_, err := C.bpf_tc_update_jump_map(o.obj, cMapName, cProgName, C.int(mapIndex))
+	if err != nil {
 		return fmt.Errorf("Error updating %s at index %d", mapName, mapIndex)
 	}
 	return nil
@@ -183,7 +183,7 @@ func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
 	if hook == "ingress" {
 		isIngress = 1
 	}
-	progId,err := C.bpf_tc_query_iface(C.int(ifIndex), opts.opts, C.int(isIngress))
+	progId, err := C.bpf_tc_query_iface(C.int(ifIndex), opts.opts, C.int(isIngress))
 	if err != nil {
 		return -1, fmt.Errorf("Error querying interface %s", ifaceName)
 	}
