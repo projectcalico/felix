@@ -105,6 +105,18 @@ func (ap AttachPoint) AttachProgram() error {
 		return err
 	}
 
+	hook := "tc_" + string(ap.Hook)
+	hashMatched, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), hook, preCompiledBinary)
+	if err == nil {
+		if hashMatched && len(progsToClean) == 1 {
+			logCxt.Info("Program already attached, skip reattaching")
+			return nil
+		}
+	} else {
+		logCxt.WithError(err).Warn("Failed to check if BPF program was already attached: %w", err)
+	}
+	logCxt.Info("Continue with attaching BPF program")
+
 	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
 		"bpf", "da", "obj", tempBinary,
 		"sec", SectionName(ap.Type, ap.ToOrFrom),
@@ -117,6 +129,10 @@ func (ap AttachPoint) AttachProgram() error {
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
+		if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
+			logCxt.WithError(err).Error("Failed to remove hash of BPF program from disk")
+		}
+
 		attemptCleanup := func() error {
 			_, err := ExecTC("filter", "del", "dev", ap.Iface, string(ap.Hook), "pref", p.pref, "handle", p.handle, "bpf")
 			return err
@@ -140,6 +156,9 @@ func (ap AttachPoint) AttachProgram() error {
 		return fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
+	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, objHash); err != nil {
+		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
+	}
 	return nil
 }
 
