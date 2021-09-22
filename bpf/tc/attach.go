@@ -107,13 +107,14 @@ func (ap AttachPoint) AttachProgram() error {
 
 	hook := "tc_" + string(ap.Hook)
 	maybeAttached, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), hook, preCompiledBinary)
-	if err == nil && maybeAttached && len(progsToClean) == 1 {
-		logCxt.Info("Program already attached, skip reattaching")
-		return nil
+	if err != nil {
+		logCxt.WithError(err).Warn("Failed to check if BPF program was already attached. Reattaching it to make sure.")
+	} else {
+		if maybeAttached && len(progsToClean) == 1 {
+			logCxt.Info("Program already attached, skip reattaching")
+			return nil
+		}
 	}
-	// TODO: check
-	//logCxt.WithError(err).Warn("Failed to check if BPF program was already attached. Reattaching it to make sure.")
-	log.Info("Failed to check if BPF program was already attached. Reattaching it to make sure.")
 
 	_, err = ExecTC("filter", "add", "dev", ap.Iface, string(ap.Hook),
 		"bpf", "da", "obj", tempBinary,
@@ -127,9 +128,8 @@ func (ap AttachPoint) AttachProgram() error {
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
-		err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook))
-		if err != nil {
-			log.Debug("Cannot remove info file: ", err)
+		if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
+			log.WithError(err).Error("Failed to remove hash of BPF program from disk")
 		}
 
 		attemptCleanup := func() error {
@@ -156,7 +156,7 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, objHash); err != nil {
-		log.Error(err)
+		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk: %v. Ignoring.", err)
 	}
 	return nil
 }
