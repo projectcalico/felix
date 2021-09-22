@@ -1,3 +1,15 @@
+This is a mirror of [bpf-next Linux source
+tree](https://kernel.googlesource.com/pub/scm/linux/kernel/git/bpf/bpf-next)'s
+`tools/lib/bpf` directory plus its supporting header files.
+
+All the gory details of syncing can be found in `scripts/sync-kernel.sh`
+script.
+
+Some header files in this repo (`include/linux/*.h`) are reduced versions of
+their counterpart files at
+[bpf-next](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/)'s
+`tools/include/linux/*.h` to make compilation successful.
+
 BPF/libbpf usage and questions
 ==============================
 
@@ -20,7 +32,7 @@ should be opened only for dealing with issues pertaining to specific way this
 libbpf mirror repo is set up and organized.
 
 Build
-[![Build Status](https://travis-ci.com/libbpf/libbpf.svg?branch=master)](https://travis-ci.com/github/libbpf/libbpf)
+[![Github Actions Builds & Tests](https://github.com/libbpf/libbpf/actions/workflows/test.yml/badge.svg)](https://github.com/libbpf/libbpf/actions/workflows/test.yml)
 [![Total alerts](https://img.shields.io/lgtm/alerts/g/libbpf/libbpf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/libbpf/libbpf/alerts/)
 [![Coverity](https://img.shields.io/coverity/scan/18195.svg)](https://scan.coverity.com/projects/libbpf)
 =====
@@ -98,6 +110,7 @@ Some major Linux distributions come with kernel BTF already built in:
   - RHEL 8.2+
   - OpenSUSE Tumbleweed (in the next release, as of 2020-06-04)
   - Arch Linux (from kernel 5.7.1.arch1-1)
+  - Manjaro (from kernel 5.4 if compiled after 2021-06-18)
   - Ubuntu 20.10
   - Debian 11 (amd64/arm64)
 
@@ -133,20 +146,6 @@ use it:
   contain lots of real-world tools converted from BCC to BPF CO-RE. Consider
   converting some more to both contribute to the BPF community and gain some
   more experience with it.
-  
-Details
-=======
-This is a mirror of [bpf-next Linux source
-tree](https://kernel.googlesource.com/pub/scm/linux/kernel/git/bpf/bpf-next)'s
-`tools/lib/bpf` directory plus its supporting header files.
-
-All the gory details of syncing can be found in `scripts/sync-kernel.sh`
-script.
-
-Some header files in this repo (`include/linux/*.h`) are reduced versions of
-their counterpart files at
-[bpf-next](https://git.kernel.org/pub/scm/linux/kernel/git/bpf/bpf-next.git/)'s
-`tools/include/linux/*.h` to make compilation successful.
 
 License
 =======

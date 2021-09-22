@@ -45,11 +45,14 @@ PATH_MAP=(									\
 	[tools/include/uapi/linux/if_link.h]=include/uapi/linux/if_link.h	\
 	[tools/include/uapi/linux/if_xdp.h]=include/uapi/linux/if_xdp.h		\
 	[tools/include/uapi/linux/netlink.h]=include/uapi/linux/netlink.h	\
+	[tools/include/uapi/linux/pkt_cls.h]=include/uapi/linux/pkt_cls.h	\
+	[tools/include/uapi/linux/pkt_sched.h]=include/uapi/linux/pkt_sched.h	\
+	[Documentation/bpf/libbpf]=docs						\
 )
 
 LIBBPF_PATHS="${!PATH_MAP[@]} :^tools/lib/bpf/Makefile :^tools/lib/bpf/Build :^tools/lib/bpf/.gitignore :^tools/include/tools/libc_compat.h"
 LIBBPF_VIEW_PATHS="${PATH_MAP[@]}"
-LIBBPF_VIEW_EXCLUDE_REGEX='^src/(Makefile|Build|test_libbpf\.c|bpf_helper_defs\.h|\.gitignore)$'
+LIBBPF_VIEW_EXCLUDE_REGEX='^src/(Makefile|Build|test_libbpf\.c|bpf_helper_defs\.h|\.gitignore)$|^docs/(\.gitignore|api\.rst|conf\.py)$|^docs/sphinx/.*'
 LINUX_VIEW_EXCLUDE_REGEX='^include/tools/libc_compat.h$'
 
 LIBBPF_TREE_FILTER="mkdir -p __libbpf/include/uapi/linux __libbpf/include/tools && "$'\\\n'
