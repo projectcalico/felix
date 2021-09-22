@@ -155,7 +155,7 @@ func RemoveQDisc(ifName string) error {
 	}
 	_, err = C.bpf_tc_remove_qdisc(C.int(ifIndex))
 	if err != nil {
-		return fmt.Errorf("Error removing qdisc")
+		return fmt.Errorf("Error removing qdisc %w", err)
 	}
 	return nil
 }
@@ -167,7 +167,7 @@ func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
 	defer C.free(unsafe.Pointer(cProgName))
 	_, err := C.bpf_tc_update_jump_map(o.obj, cMapName, cProgName, C.int(mapIndex))
 	if err != nil {
-		return fmt.Errorf("Error updating %s at index %d", mapName, mapIndex)
+		return fmt.Errorf("Error updating %s at index %d: %w", mapName, mapIndex, err)
 	}
 	return nil
 }
@@ -185,7 +185,7 @@ func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
 	}
 	progId, err := C.bpf_tc_query_iface(C.int(ifIndex), opts.opts, C.int(isIngress))
 	if err != nil {
-		return -1, fmt.Errorf("Error querying interface %s", ifaceName)
+		return -1, fmt.Errorf("Error querying interface %s: %w", ifaceName, err)
 	}
 	return int(progId), nil
 }
