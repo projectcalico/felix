@@ -188,7 +188,7 @@ type RouteTable struct {
 	conntrack         conntrackIface
 	time              timeshim.Interface
 
-	additionalRouteFilter *netlink.Route
+	additionalRouteFilter netlink.Route
 
 	opReporter logutils.OpRecorder
 }
@@ -206,7 +206,7 @@ func WithAdditionalLogFields(fields log.Fields) RouteTableOption {
 // WithAdditionalRouteFilter - add additional route filters used in fullResyncRoutesForLink.
 //  this causes the aforementioned function to only touch specified programmed routes that match the filter.
 //  netlink.Route fields Table and LinkIndex will be ignored!
-func WithAdditionalRouteFilter(filter *netlink.Route) RouteTableOption {
+func WithAdditionalRouteFilter(filter netlink.Route) RouteTableOption {
 	return func(rt *RouteTable) {
 		rt.additionalRouteFilter = filter
 	}
@@ -798,13 +798,7 @@ func (r *RouteTable) createL3Route(linkAttrs *netlink.LinkAttrs, target Target) 
 }
 
 func (r *RouteTable) routeListFilterParams(linkAttrs *netlink.LinkAttrs) (*netlink.Route, uint64) {
-	var routeFilter *netlink.Route
-
-	if r.additionalRouteFilter == nil {
-		routeFilter = &netlink.Route{}
-	} else {
-		routeFilter = r.additionalRouteFilter
-	}
+	routeFilter := r.additionalRouteFilter
 
 	routeFilter.Table = r.tableIndex
 
@@ -823,7 +817,7 @@ func (r *RouteTable) routeListFilterParams(linkAttrs *netlink.LinkAttrs) (*netli
 		routeFilter.LinkIndex = linkAttrs.Index
 	}
 
-	return routeFilter, routeFilterFlags
+	return &routeFilter, routeFilterFlags
 }
 
 // fullResyncRoutesForLink performs a full resync of the routes by first listing current routes and correlating against
@@ -1140,7 +1134,7 @@ func (r *RouteTable) filterErrorByIfaceState(ifaceName string, currentErr, defau
 	if ifaceName == InterfaceNone {
 		// Short circuit the no-OIF interface name.
 		logCxt.Info("No interface on route.")
-		return defaultErr
+		return nil
 	}
 
 	if strings.Contains(currentErr.Error(), "not found") {
