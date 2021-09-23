@@ -23,6 +23,8 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+
+	log "github.com/sirupsen/logrus"
 )
 
 type AttachedProgInfo struct {
@@ -30,7 +32,7 @@ type AttachedProgInfo struct {
 	Hash   string `json:"hash"`
 }
 
-func IsAlreadyAttached(iface, hook, object string) (bool, string, error) {
+func VerifyProgHash(iface, hook, object string) (bool, string, error) {
 	var (
 		progInfo       AttachedProgInfo
 		bytesToRead    []byte
@@ -59,7 +61,7 @@ func IsAlreadyAttached(iface, hook, object string) (bool, string, error) {
 	return false, calculatedHash, nil
 }
 
-func RememberAttachedProg(iface, hook, object, hash string) error {
+func SaveProgHash(iface, hook, object, hash string) error {
 	var progInfo = AttachedProgInfo{
 		Object: object,
 		Hash:   hash,
@@ -83,7 +85,7 @@ func RememberAttachedProg(iface, hook, object, hash string) error {
 	return nil
 }
 
-func ForgetAttachedProg(iface, hook string) error {
+func RemoveProgHash(iface, hook string) error {
 	name := iface + "_" + hook + ".json"
 	filename := path.Join(RuntimeDir, name)
 	if err := os.Remove(filename); err != nil {
@@ -92,11 +94,13 @@ func ForgetAttachedProg(iface, hook string) error {
 	return nil
 }
 
-func ForgetAllAttachedProg() error {
+func CleanAndSetupHashDir() {
 	if err := os.Remove(RuntimeDir); err != nil {
-		return err
+		log.Warn("Failed to remove BPF hash directory: ", err)
 	}
-	return nil
+	if err := os.MkdirAll(RuntimeDir, 0600); err != nil {
+		log.Warn("Failed to create BPF hash directory: ", err)
+	}
 }
 
 func sha256OfFile(name string) (string, error) {

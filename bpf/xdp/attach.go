@@ -82,7 +82,7 @@ func (ap *AttachPoint) AttachProgram() error {
 		return err
 	}
 
-	hashMatched, objHash, err := bpf.IsAlreadyAttached(ap.IfaceName(), "xdp", preCompiledBinary)
+	hashMatched, objHash, err := bpf.VerifyProgHash(ap.IfaceName(), "xdp", preCompiledBinary)
 	if err == nil {
 		somethingAttached, err := ap.IsAttached()
 		if err != nil {
@@ -157,7 +157,7 @@ func (ap *AttachPoint) AttachProgram() error {
 	}
 
 	// program is now attached. Now we should store this in addition to some extra information to prevent unncessary reloads in future
-	if err = bpf.RememberAttachedProg(ap.FileName(), "xdp", ap.FileName(), objHash); err != nil {
+	if err = bpf.SaveProgHash(ap.IfaceName(), "xdp", preCompiledBinary, objHash); err != nil {
 		ap.Log().Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
 	}
 	return nil
@@ -227,7 +227,7 @@ func (ap AttachPoint) DetachProgram() error {
 		}
 	}
 
-	if err = bpf.ForgetAttachedProg(ap.IfaceName(), "xdp"); err != nil {
+	if err = bpf.RemoveProgHash(ap.IfaceName(), "xdp"); err != nil {
 		ap.Log().Error("Failed to remove hash of BPF program from disk: %w", err)
 	}
 	return nil
