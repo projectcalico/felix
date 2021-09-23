@@ -237,6 +237,10 @@ func newBPFEndpointManager(
 		bpf.XDPGeneric,
 	}
 
+	// Clean all the files under /var/run/calico/bpf/ to remove any information from the
+	// previous execution of the bpf dataplane, and make sure the directory exists.
+	bpf.CleanAndSetupHashDir()
+
 	// Normally this endpoint manager uses its own dataplane implementation, but we have an
 	// indirection here so that UT can simulate the dataplane and test how it's called.
 	m.dp = m
