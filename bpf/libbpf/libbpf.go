@@ -67,7 +67,7 @@ func (m *Map) SetPinPath(path string) error {
 	defer C.free(unsafe.Pointer(cPath))
 	err := C.bpf_map__set_pin_path(m.bpfMap, cPath)
 	if err != 0 {
-		return fmt.Errorf("pinning map failed %v", err)
+		return fmt.Errorf("pinning map failed %w", err)
 	}
 	return nil
 }
@@ -78,7 +78,7 @@ func OpenObject(filename string) (*Obj, error) {
 	defer C.free(unsafe.Pointer(cFilename))
 	obj, err := C.bpf_obj_open(cFilename)
 	if obj == nil || err != nil {
-		return nil, fmt.Errorf("error opening libbpf object %v", err)
+		return nil, fmt.Errorf("error opening libbpf object %w", err)
 	}
 	return &Obj{obj: obj}, nil
 }
@@ -86,7 +86,7 @@ func OpenObject(filename string) (*Obj, error) {
 func (o *Obj) Load() error {
 	_, err := C.bpf_obj_load(o.obj)
 	if err != nil {
-		return fmt.Errorf("error loading object %v", err)
+		return fmt.Errorf("error loading object %w", err)
 	}
 	return nil
 }
@@ -94,7 +94,7 @@ func (o *Obj) Load() error {
 func (o *Obj) FirstMap() (*Map, error) {
 	bpfMap, err := C.bpf_map__next(nil, o.obj)
 	if bpfMap == nil || err != nil {
-		return nil, fmt.Errorf("error getting first map %v", err)
+		return nil, fmt.Errorf("error getting first map %w", err)
 	}
 	return &Map{bpfMap: bpfMap, bpfObj: o.obj}, nil
 }
@@ -102,7 +102,7 @@ func (o *Obj) FirstMap() (*Map, error) {
 func (m *Map) NextMap() (*Map, error) {
 	bpfMap, err := C.bpf_map__next(m.bpfMap, m.bpfObj)
 	if err != nil {
-		return nil, fmt.Errorf("error getting next map %v", err)
+		return nil, fmt.Errorf("error getting next map %w", err)
 	}
 	if bpfMap == nil {
 		return nil, nil
@@ -127,7 +127,7 @@ func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
 
 	opts, err := C.bpf_tc_program_attach(o.obj, cSecName, C.int(ifIndex), C.int(isIngress))
 	if err != nil {
-		return nil, fmt.Errorf("Error attaching tc program %v", err)
+		return nil, fmt.Errorf("Error attaching tc program %w", err)
 	}
 	return &TCOpts{opts: opts}, nil
 }
