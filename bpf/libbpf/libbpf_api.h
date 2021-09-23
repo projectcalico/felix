@@ -20,7 +20,7 @@
 #include <errno.h>
 
 static void set_errno(int ret) {
-	errno = ret >=0 ? 0 : -ret;
+	errno = ret >= 0 ? ret : -ret;
 }
 
 struct bpf_object* bpf_obj_open(char *filename) {
