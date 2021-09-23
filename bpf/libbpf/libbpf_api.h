@@ -19,36 +19,20 @@
 #include <stdlib.h>
 #include <errno.h>
 
-#define MAX_ERRNO 4095
-bool IS_ERR(const void *ptr) {
-	if((long)ptr >= -MAX_ERRNO && (long)ptr < 0) {
-		return true;
-	}
-	return false;
-}
-
-long ERR_VAL(const void *ptr) {
-	return (long) ptr;
-}
-
 struct bpf_object* bpf_obj_open(char *filename) {
-	errno = 0;
 	struct bpf_object *obj;
 	obj = bpf_object__open(filename);
-	if (IS_ERR(obj)) {
-		errno = ERR_VAL(obj);
-		obj = NULL;
-	}
+	int ret = libbpf_get_error(obj);
+	errno = -ret;
 	return obj;
 }
 
 void bpf_obj_load(struct bpf_object *obj) {
-	errno = bpf_object__load(obj);
-	return;
+	int ret = bpf_object__load(obj);
+	errno = -ret;
 }
 
 struct bpf_tc_opts bpf_tc_program_attach (struct bpf_object *obj, char *secName, int ifIndex, int isIngress) {
-	errno = 0;
 	struct bpf_tc_opts opts;
 
 	DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_EGRESS);
@@ -64,13 +48,13 @@ struct bpf_tc_opts bpf_tc_program_attach (struct bpf_object *obj, char *secName,
 		return opts;
 	}
 	hook.ifindex = ifIndex;
-	errno = bpf_tc_attach(&hook, &attach);
+	int ret = bpf_tc_attach(&hook, &attach);
+	errno = -ret;
 	memcpy (&opts, &attach, sizeof(struct bpf_tc_opts));
 	return opts;
 }
 
 int bpf_tc_query_iface (int ifIndex, struct bpf_tc_opts opts, int isIngress) {
-	errno = 0;
 
 	DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_EGRESS);
 	if (isIngress) {
@@ -78,28 +62,28 @@ int bpf_tc_query_iface (int ifIndex, struct bpf_tc_opts opts, int isIngress) {
 	}
 	hook.ifindex = ifIndex;
 	opts.prog_fd = opts.prog_id = opts.flags = 0;
-	errno = bpf_tc_query(&hook, &opts);
+	int ret = bpf_tc_query(&hook, &opts);
+	errno = -ret;
 	return opts.prog_id;
 }
 
 void bpf_tc_create_qdisc (int ifIndex) {
-	errno = 0;
 	DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_INGRESS);
 	hook.ifindex = ifIndex;
-	errno = bpf_tc_hook_create(&hook);
+	int ret = bpf_tc_hook_create(&hook);
+	errno = -ret;
 	return;
 }
 
 void bpf_tc_remove_qdisc (int ifIndex) {
-        errno = 0;
         DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_EGRESS | BPF_TC_INGRESS);
         hook.ifindex = ifIndex;
-        errno = bpf_tc_hook_destroy(&hook);
+        int ret = bpf_tc_hook_destroy(&hook);
+        errno = -ret;
         return;
 }
 
 int bpf_tc_update_jump_map(struct bpf_object *obj, char* mapName, char *progName, int progIndex) {
-	errno = 0;
 	int prog_fd = bpf_program__fd(bpf_object__find_program_by_name(obj, progName));
 	if (prog_fd < 0) {
 		errno = prog_fd;
