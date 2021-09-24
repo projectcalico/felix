@@ -32,6 +32,8 @@ type AttachedProgInfo struct {
 	Hash   string `json:"hash"`
 }
 
+// Check if a hash file exists for an Attach Point and the content matches
+// the Attach Point's fields
 func VerifyProgHash(iface, hook, object string) (bool, string, error) {
 	var (
 		progInfo       AttachedProgInfo
@@ -61,6 +63,9 @@ func VerifyProgHash(iface, hook, object string) (bool, string, error) {
 	return false, calculatedHash, nil
 }
 
+// Store an Attach Point's object name and its hash in a file
+// to skip reattaching it in future. The file name is
+// [iface name]_[hook name]. For example, eth0_tc_egress.json
 func SaveProgHash(iface, hook, object, hash string) error {
 	var progInfo = AttachedProgInfo{
 		Object: object,
@@ -85,6 +90,7 @@ func SaveProgHash(iface, hook, object, hash string) error {
 	return nil
 }
 
+// Remove the hash file of an Attach Point from disk
 func RemoveProgHash(iface, hook string) error {
 	name := iface + "_" + hook + ".json"
 	filename := path.Join(RuntimeDir, name)
@@ -94,6 +100,8 @@ func RemoveProgHash(iface, hook string) error {
 	return nil
 }
 
+// Delete /var/run/calico/bpf and its content. Then create the same
+// directory to start with a clean state
 func CleanAndSetupHashDir() {
 	if err := os.Remove(RuntimeDir); err != nil {
 		log.Warn("Failed to remove BPF hash directory: ", err)

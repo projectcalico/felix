@@ -82,6 +82,9 @@ func (ap *AttachPoint) AttachProgram() error {
 		return err
 	}
 
+	// Check if a hash file exists for the Attach Point. If the object name and
+	// its hash matches the content of interface's hash file, and something is attached
+	// to the interface, then the program was attached before. So we skip reattaching it
 	hashMatched, objHash, err := bpf.VerifyProgHash(ap.IfaceName(), "xdp", preCompiledBinary)
 	if err == nil {
 		somethingAttached, err := ap.IsAttached()
@@ -156,7 +159,7 @@ func (ap *AttachPoint) AttachProgram() error {
 		return fmt.Errorf("Couldn't attach XDP program %v section %v to iface %v; modes=%v errs=%v", tempBinary, sectionName, ap.Iface, ap.Modes, errs)
 	}
 
-	// program is now attached. Now we should store this in addition to some extra information to prevent unncessary reloads in future
+	// program is now attached. Now we should store its hash to prevent unncessary reloads in future
 	if err = bpf.SaveProgHash(ap.IfaceName(), "xdp", preCompiledBinary, objHash); err != nil {
 		ap.Log().Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
 	}
@@ -227,6 +230,7 @@ func (ap AttachPoint) DetachProgram() error {
 		}
 	}
 
+	// Program is detached, now remove its hash file too
 	if err = bpf.RemoveProgHash(ap.IfaceName(), "xdp"); err != nil {
 		ap.Log().Error("Failed to remove hash of BPF program from disk: %w", err)
 	}
