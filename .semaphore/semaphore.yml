@@ -160,7 +160,7 @@ blocks:
         minutes: 120
       commands:
       - make check-wireguard
-      - make fv FV_BATCHES_TO_RUN="${SEMAPHORE_JOB_INDEX}" FV_NUM_BATCHES=${SEMAPHORE_JOB_COUNT}
+      - make fv FV_BATCHES_TO_RUN="${SEMAPHORE_JOB_INDEX}" FV_NUM_BATCHES=${SEMAPHORE_JOB_COUNT} 2>&1 | tee fv-${SEMAPHORE_JOB_INDEX}.log
       parallelism: 3
     epilogue:
       always:
