@@ -44,8 +44,8 @@ for batch in ${FV_BATCHES_TO_RUN}; do
                -ginkgo.noisySkippings=false \
                -ginkgo.slowSpecThreshold ${FV_SLOW_SPEC_THRESH} \
                -ginkgo.focus="${GINKGO_FOCUS}" \
-               ${GINKGO_ARGS}
-     status=$?
+               ${GINKGO_ARGS} 2>&1 | tee fv-${batch}.log
+     status=${PIPESTATUS[0]}
      echo "Test batch $batch completed with status $status"
      exit $status
   ) &
