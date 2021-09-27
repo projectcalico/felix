@@ -44,6 +44,9 @@ if [ -s fv/data-races.log ]; then
   # Only save the log if it's non-empty.
   xz < fv/data-races.log > artifacts/data-races.log.xz
 fi
+for file in fv/fv-*.log; do
+  xz < $file > artifacts/$file.xz
+done
 if ! $skip_binaries; then
   tar -cJf artifacts/binaries.tar.xz bin/calico-felix-amd64 bin/calico-bpf bin/test-*
 fi
