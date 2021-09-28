@@ -47,18 +47,15 @@ const (
 )
 
 func (m *Map) Name() string {
-	name, err := C.bpf_map__name(m.bpfMap)
-	if err != nil {
+	name := C.bpf_map__name(m.bpfMap)
+	if name == nil {
 		return ""
 	}
 	return C.GoString(name)
 }
 
 func (m *Map) Type() int {
-	mapType, err := C.bpf_map__type(m.bpfMap)
-	if err != nil {
-		return -1
-	}
+	mapType := C.bpf_map__type(m.bpfMap)
 	return int(mapType)
 }
 
@@ -110,7 +107,7 @@ func (m *Map) NextMap() (*Map, error) {
 	return &Map{bpfMap: bpfMap, bpfObj: m.bpfObj}, nil
 }
 
-func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
+func (o *Obj) AttachClassifier(secName, ifName, hook string) (int, error) {
 	isIngress := 0
 	cSecName := C.CString(secName)
 	cIfName := C.CString(ifName)
@@ -118,7 +115,7 @@ func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
 	defer C.free(unsafe.Pointer(cIfName))
 	ifIndex, err := C.if_nametoindex(cIfName)
 	if err != nil {
-		return nil, err
+		return -1, err
 	}
 
 	if hook == string(QdiskIngress) {
@@ -127,9 +124,14 @@ func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
 
 	opts, err := C.bpf_tc_program_attach(o.obj, cSecName, C.int(ifIndex), C.int(isIngress))
 	if err != nil {
-		return nil, fmt.Errorf("Error attaching tc program %w", err)
+		return -1, fmt.Errorf("Error attaching tc program %w", err)
 	}
-	return &TCOpts{opts: opts}, nil
+
+	progId, err := C.bpf_tc_query_iface(C.int(ifIndex), opts, C.int(isIngress))
+	if err != nil {
+		return -1, fmt.Errorf("Error querying interface %s: %w", ifName, err)
+	}
+	return int(progId), nil
 }
 
 func CreateQDisc(ifName string) error {

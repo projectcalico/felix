@@ -26,7 +26,11 @@ static void set_errno(int ret) {
 struct bpf_object* bpf_obj_open(char *filename) {
 	struct bpf_object *obj;
 	obj = bpf_object__open(filename);
-	set_errno(libbpf_get_error(obj));
+	int err = libbpf_get_error(obj);
+	if (err) {
+		obj = NULL;
+	}
+	set_errno(err);
 	return obj;
 }
 
@@ -35,7 +39,6 @@ void bpf_obj_load(struct bpf_object *obj) {
 }
 
 struct bpf_tc_opts bpf_tc_program_attach (struct bpf_object *obj, char *secName, int ifIndex, int isIngress) {
-	struct bpf_tc_opts opts;
 
 	DECLARE_LIBBPF_OPTS(bpf_tc_hook, hook, .attach_point = BPF_TC_EGRESS);
 	DECLARE_LIBBPF_OPTS(bpf_tc_opts, attach);
@@ -47,12 +50,11 @@ struct bpf_tc_opts bpf_tc_program_attach (struct bpf_object *obj, char *secName,
 	attach.prog_fd = bpf_program__fd(bpf_object__find_program_by_name(obj, secName));
 	if (attach.prog_fd < 0) {
 		errno = -attach.prog_fd;
-		return opts;
+		return attach;
 	}
 	hook.ifindex = ifIndex;
 	set_errno(bpf_tc_attach(&hook, &attach));
-	memcpy (&opts, &attach, sizeof(struct bpf_tc_opts));
-	return opts;
+	return attach;
 }
 
 int bpf_tc_query_iface (int ifIndex, struct bpf_tc_opts opts, int isIngress) {
@@ -81,7 +83,12 @@ void bpf_tc_remove_qdisc (int ifIndex) {
 }
 
 int bpf_tc_update_jump_map(struct bpf_object *obj, char* mapName, char *progName, int progIndex) {
-	int prog_fd = bpf_program__fd(bpf_object__find_program_by_name(obj, progName));
+	struct bpf_program *prog_name = bpf_object__find_program_by_name(obj, progName);
+	if (prog_name == NULL) {
+		errno = ENOENT;
+		return -1;
+	}
+	int prog_fd = bpf_program__fd(prog_name);
 	if (prog_fd < 0) {
 		errno = -prog_fd;
 		return prog_fd;

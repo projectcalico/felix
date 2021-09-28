@@ -25,9 +25,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/projectcalico/felix/bpf"
-	"github.com/projectcalico/felix/bpf/libbpf"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/projectcalico/felix/bpf"
 )
 
 type AttachPoint struct {
@@ -64,14 +64,14 @@ func (ap *AttachPoint) Log() *log.Entry {
 	})
 }
 
-func (ap *AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
+func (ap *AttachPoint) AttachProgram() (string, error) {
 	preCompiledBinary := path.Join(bpf.ObjectDir, ap.FileName())
 	sectionName := ap.SectionName()
 
 	// Patch the binary so that its log prefix is like "eth0------X".
 	tempDir, err := ioutil.TempDir("", "calico-xdp")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+		return "", fmt.Errorf("failed to create temporary directory: %w", err)
 	}
 	defer func() {
 		_ = os.RemoveAll(tempDir)
@@ -80,7 +80,7 @@ func (ap *AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
 	err = ap.patchBinary(preCompiledBinary, tempBinary)
 	if err != nil {
 		ap.Log().WithError(err).Error("Failed to patch binary")
-		return nil, err
+		return "", err
 	}
 
 	// Note that there are a few considerations here.
@@ -139,14 +139,18 @@ func (ap *AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
 		}
 	}
 	if !attachmentSucceeded {
-		return nil, fmt.Errorf("Couldn't attach XDP program %v section %v to iface %v; modes=%v errs=%v", tempBinary, sectionName, ap.Iface, ap.Modes, errs)
+		return "", fmt.Errorf("Couldn't attach XDP program %v section %v to iface %v; modes=%v errs=%v", tempBinary, sectionName, ap.Iface, ap.Modes, errs)
 	}
-	return nil, nil
+	progID, err := ap.ProgramID()
+	if err != nil {
+		return "", fmt.Errorf("couldn't get the attached XDP program ID err=%v", err)
+	}
+	return progID, nil
 }
 
 func (ap AttachPoint) DetachProgram() error {
 	// Get the current XDP program ID, if any.
-	progID, err := ap.ProgramID(nil)
+	progID, err := ap.ProgramID()
 	if err != nil {
 		if errors.Is(err, ErrNoXDP) {
 			// Interface has no XDP attached - that's what we want.
@@ -228,13 +232,13 @@ func (ap *AttachPoint) patchBinary(ifile, ofile string) error {
 }
 
 func (ap *AttachPoint) IsAttached() (bool, error) {
-	_, err := ap.ProgramID(nil)
+	_, err := ap.ProgramID()
 	return err == nil, err
 }
 
 var ErrNoXDP = errors.New("no XDP program attached")
 
-func (ap *AttachPoint) ProgramID(tcOpts *libbpf.TCOpts) (string, error) {
+func (ap *AttachPoint) ProgramID() (string, error) {
 	cmd := exec.Command("ip", "link", "show", "dev", ap.Iface)
 	ap.Log().Debugf("Running: %v %v", cmd.Path, cmd.Args)
 	out, err := cmd.CombinedOutput()

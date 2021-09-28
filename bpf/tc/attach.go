@@ -72,12 +72,12 @@ func (ap AttachPoint) Log() *log.Entry {
 }
 
 // AttachProgram attaches a BPF program from a file to the TC attach point
-func (ap AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
+func (ap AttachPoint) AttachProgram() (string, error) {
 	logCxt := log.WithField("attachPoint", ap)
 
 	tempDir, err := ioutil.TempDir("", "calico-tc")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+		return "", fmt.Errorf("failed to create temporary directory: %w", err)
 	}
 	defer func() {
 		_ = os.RemoveAll(tempDir)
@@ -90,7 +90,7 @@ func (ap AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
 	err = ap.patchBinary(logCxt, preCompiledBinary, tempBinary)
 	if err != nil {
 		logCxt.WithError(err).Error("Failed to patch binary")
-		return nil, err
+		return "", err
 	}
 
 	// Using the RLock allows multiple attach calls to proceed in parallel unless
@@ -103,11 +103,11 @@ func (ap AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
 	//nolint
 	progsToClean, err := ap.listAttachedPrograms()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	obj, err := libbpf.OpenObject(tempBinary)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer obj.Close()
 
@@ -124,13 +124,13 @@ func (ap AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
 		pinPath := path.Join(baseDir, subDir, m.Name())
 		perr := m.SetPinPath(pinPath)
 		if perr != nil {
-			return nil, fmt.Errorf("error pinning map %v errno %v", m.Name(), perr)
+			return "", fmt.Errorf("error pinning map %v errno %v", m.Name(), perr)
 		}
 	}
 
 	err = obj.Load()
 	if err != nil {
-		return nil, fmt.Errorf("error loading program %v", err)
+		return "", fmt.Errorf("error loading program %v", err)
 	}
 
 	isHost := false
@@ -140,15 +140,12 @@ func (ap AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
 
 	err = updateJumpMap(obj, isHost)
 	if err != nil {
-		return nil, fmt.Errorf("error updating jump map %v", err)
+		return "", fmt.Errorf("error updating jump map %v", err)
 	}
 
-	opts, err := obj.AttachClassifier(SectionName(ap.Type, ap.ToOrFrom), ap.Iface, string(ap.Hook))
+	progId, err := obj.AttachClassifier(SectionName(ap.Type, ap.ToOrFrom), ap.Iface, string(ap.Hook))
 	if err != nil {
-		return nil, err
-	}
-	if opts == nil {
-		return nil, fmt.Errorf("error attaching classifier to %v", ap.Iface)
+		return "", err
 	}
 
 	var progErrs []error
@@ -174,9 +171,9 @@ func (ap AttachPoint) AttachProgram() (*libbpf.TCOpts, error) {
 	}
 
 	if len(progErrs) != 0 {
-		return nil, fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
+		return "", fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
-	return opts, nil
+	return strconv.Itoa(progId), nil
 }
 
 func (ap AttachPoint) DetachProgram() error {
@@ -320,10 +317,6 @@ func (ap AttachPoint) IsAttached() (bool, error) {
 	return len(progs) > 0, nil
 }
 
-// tcDirRegex matches tc's auto-created directory names so we can clean them up when removing maps without accidentally
-// removing other user-created dirs..
-var tcDirRegex = regexp.MustCompile(`[0-9a-f]`)
-
 // CleanUpJumpMaps scans for cali_jump maps that are still pinned to the filesystem but no longer referenced by
 // our BPF programs.
 func CleanUpJumpMaps() {
@@ -441,7 +434,7 @@ func CleanUpJumpMaps() {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() && tcDirRegex.MatchString(info.Name()) {
+		if info.IsDir() && info.Name() != "globals" {
 			p := path.Clean(p)
 			log.WithField("path", p).Debug("Found tc auto-created dir.")
 			emptyAutoDirs.Add(p)
@@ -509,14 +502,8 @@ func RemoveQdisc(ifaceName string) error {
 	return libbpf.RemoveQDisc(ifaceName)
 }
 
-func (ap *AttachPoint) ProgramID(tcOpts *libbpf.TCOpts) (string, error) {
-	logCtx := log.WithField("iface", ap.Iface)
-	logCtx.Info("Finding TC program ID")
-	progId, err := libbpf.GetProgID(ap.Iface, string(ap.Hook), tcOpts)
-	if err != nil {
-		return "", errors.New("failed to find TC program")
-	}
-	return strconv.Itoa(progId), nil
+func (ap *AttachPoint) ProgramID() (string, error) {
+	return "", nil
 }
 
 // Return a key that uniquely identifies this attach point, amongst all of the possible attach
@@ -532,16 +519,16 @@ func (ap *AttachPoint) IfaceName() string {
 // nolint
 func updateJumpMap(obj *libbpf.Obj, isHost bool) error {
 	if !isHost {
-		err := obj.UpdateJumpMap("cali_jump", string(policyProgram), POLICY_PROGRAM_INDEX)
+		err := obj.UpdateJumpMap("cali_jump", string(policyProgram), PolicyProgramIndex)
 		if err != nil {
 			return fmt.Errorf("error updating policy program %v", err)
 		}
 	}
-	err := obj.UpdateJumpMap("cali_jump", string(allowProgram), ALLOW_PROGRAM_INDEX)
+	err := obj.UpdateJumpMap("cali_jump", string(allowProgram), AllowProgramIndex)
 	if err != nil {
 		return fmt.Errorf("error updating epilogue program %v", err)
 	}
-	err = obj.UpdateJumpMap("cali_jump", string(icmpProgram), ICMP_PROGRAM_INDEX)
+	err = obj.UpdateJumpMap("cali_jump", string(icmpProgram), IcmpProgramIndex)
 	if err != nil {
 		return fmt.Errorf("error updating icmp program %v", err)
 	}

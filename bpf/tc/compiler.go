@@ -57,9 +57,9 @@ const (
 )
 
 const (
-	POLICY_PROGRAM_INDEX = iota
-	ALLOW_PROGRAM_INDEX
-	ICMP_PROGRAM_INDEX
+	PolicyProgramIndex = iota
+	AllowProgramIndex
+	IcmpProgramIndex
 )
 
 func SectionName(endpointType EndpointType, fromOrTo ToOrFromEp) string {

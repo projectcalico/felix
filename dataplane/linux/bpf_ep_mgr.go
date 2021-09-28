@@ -43,7 +43,6 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/set"
 
 	"github.com/projectcalico/felix/bpf"
-	"github.com/projectcalico/felix/bpf/libbpf"
 	"github.com/projectcalico/felix/bpf/polprog"
 	"github.com/projectcalico/felix/bpf/tc"
 	"github.com/projectcalico/felix/bpf/xdp"
@@ -81,9 +80,9 @@ type attachPoint interface {
 	IfaceName() string
 	JumpMapFDMapKey() string
 	IsAttached() (bool, error)
-	AttachProgram() (*libbpf.TCOpts, error)
+	AttachProgram() (string, error)
 	DetachProgram() error
-	ProgramID(opts *libbpf.TCOpts) (string, error)
+	ProgramID() (string, error)
 	Log() *log.Entry
 }
 
@@ -1337,12 +1336,7 @@ func (m *bpfEndpointManager) ensureProgramAttached(ap attachPoint) (bpf.MapFD, e
 	if jumpMapFD == 0 {
 		ap.Log().Info("Need to attach program")
 		// We don't have a program attached to this interface yet, attach one now.
-		opts, err := ap.AttachProgram()
-		if err != nil {
-			return 0, err
-		}
-
-		progID, err := ap.ProgramID(opts)
+		progID, err := ap.AttachProgram()
 		if err != nil {
 			return 0, err
 		}
