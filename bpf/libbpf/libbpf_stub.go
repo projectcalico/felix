@@ -21,9 +21,6 @@ const MapTypeProgrArray = 3
 type Obj struct {
 }
 
-type TCOpts struct {
-}
-
 type Map struct {
 }
 
@@ -55,7 +52,7 @@ func (m *Map) NextMap() (*Map, error) {
 	panic("LIBBPF syscall stub")
 }
 
-func (o *Obj) AttachClassifier(secName, ifName, hook string) (*TCOpts, error) {
+func (o *Obj) AttachClassifier(secName, ifName, hook string) (int, error) {
 	panic("LIBBPF syscall stub")
 }
 
@@ -72,9 +69,5 @@ func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
 }
 
 func (o *Obj) Close() error {
-	panic("LIBBPF syscall stub")
-}
-
-func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
 	panic("LIBBPF syscall stub")
 }

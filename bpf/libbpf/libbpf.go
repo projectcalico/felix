@@ -28,10 +28,6 @@ type Obj struct {
 	obj *C.struct_bpf_object
 }
 
-type TCOpts struct {
-	opts C.struct_bpf_tc_opts
-}
-
 type Map struct {
 	bpfMap *C.struct_bpf_map
 	bpfObj *C.struct_bpf_object
@@ -88,6 +84,8 @@ func (o *Obj) Load() error {
 	return nil
 }
 
+// FirstMap returns first bpf map of the object.
+// Returns error if the map is nil.
 func (o *Obj) FirstMap() (*Map, error) {
 	bpfMap, err := C.bpf_map__next(nil, o.obj)
 	if bpfMap == nil || err != nil {
@@ -96,6 +94,8 @@ func (o *Obj) FirstMap() (*Map, error) {
 	return &Map{bpfMap: bpfMap, bpfObj: o.obj}, nil
 }
 
+// NextMap returns the successive maps given the first map.
+// Returns nil if the map is nil, no error as this is the last map.
 func (m *Map) NextMap() (*Map, error) {
 	bpfMap, err := C.bpf_map__next(m.bpfMap, m.bpfObj)
 	if err != nil {
@@ -172,24 +172,6 @@ func (o *Obj) UpdateJumpMap(mapName, progName string, mapIndex int) error {
 		return fmt.Errorf("Error updating %s at index %d: %w", mapName, mapIndex, err)
 	}
 	return nil
-}
-
-func GetProgID(ifaceName, hook string, opts *TCOpts) (int, error) {
-	isIngress := 0
-	cIfName := C.CString(ifaceName)
-	defer C.free(unsafe.Pointer(cIfName))
-	ifIndex, err := C.if_nametoindex(cIfName)
-	if err != nil {
-		return -1, err
-	}
-	if hook == "ingress" {
-		isIngress = 1
-	}
-	progId, err := C.bpf_tc_query_iface(C.int(ifIndex), opts.opts, C.int(isIngress))
-	if err != nil {
-		return -1, fmt.Errorf("Error querying interface %s: %w", ifaceName, err)
-	}
-	return int(progId), nil
 }
 
 func (o *Obj) Close() error {
