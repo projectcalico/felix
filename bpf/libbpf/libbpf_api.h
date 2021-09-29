@@ -28,6 +28,7 @@ struct bpf_object* bpf_obj_open(char *filename) {
 	obj = bpf_object__open(filename);
 	int err = libbpf_get_error(obj);
 	if (err) {
+		free(obj);
 		obj = NULL;
 	}
 	set_errno(err);
