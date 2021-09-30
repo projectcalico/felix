@@ -82,18 +82,16 @@ Makefile.common.$(MAKE_BRANCH):
 include Makefile.common
 
 FV_ETCDIMAGE?=quay.io/coreos/etcd:$(ETCD_VERSION)-$(BUILDARCH)
-FV_K8SIMAGE?=gcr.io/google_containers/hyperkube-$(BUILDARCH):$(K8S_VERSION)
 FV_TYPHAIMAGE?=calico/typha:master-$(BUILDARCH)
+FV_K8SIMAGE=calico/go-build:$(GO_BUILD_VER)
 FV_FELIXIMAGE?=$(FELIX_IMAGE)-test:latest-$(BUILDARCH)
 
 # If building on amd64 omit the arch in the container name.  Fixme!
 ifeq ($(BUILDARCH),amd64)
 	FV_ETCDIMAGE=quay.io/coreos/etcd:$(ETCD_VERSION)
-	FV_K8SIMAGE=gcr.io/google_containers/hyperkube:$(K8S_VERSION)
 	FV_TYPHAIMAGE=calico/typha:master
 endif
 
-FV_K8SIMAGE=calico/go-build:hyper
 
 # Total number of batches to split the tests into.  In CI we set this to say 5 batches,
 # and run a single batch on each test VM.
@@ -332,10 +330,6 @@ fv/infrastructure/crds: go.mod go.sum $(LOCAL_BUILD_DEP)
 	go list all; \
 	cp -r `go list -m -f "{{.Dir}}" github.com/projectcalico/libcalico-go`/config/crd fv/infrastructure/crds; \
 	chmod +w fv/infrastructure/crds/'
-
-fv/certs:
-	openssl req -x509 -newkey rsa:4096 -keyout fv/certs/key.pem -out fv/certs/cert.pem -days 365
-
 
 .PHONY: fv
 # runs all of the fv tests

@@ -175,7 +175,7 @@ func runK8sApiserver(etcdIp string) *containers.Container {
 			AutoRemove: true,
 			StopSignal: "SIGKILL",
 		},
-		"-v", os.Getenv("PWD")+"/certs/thw:/home/user/certs", // Mount in location of certificates.
+		"-v", os.Getenv("PWD")+"/certs:/home/user/certs", // Mount in location of certificates.
 		utils.Config.K8sImage,
 		"kube-apiserver",
 		"--v=0",
@@ -202,7 +202,7 @@ func runK8sControllerManager(apiserverIp string) *containers.Container {
 			AutoRemove: true,
 			StopSignal: "SIGKILL",
 		},
-		"-v", os.Getenv("PWD")+"/certs/thw:/home/user/certs", // Mount in location of certificates.
+		"-v", os.Getenv("PWD")+"/certs:/home/user/certs", // Mount in location of certificates.
 		utils.Config.K8sImage,
 		"kube-controller-manager",
 		fmt.Sprintf("--master=https://%v:6443", apiserverIp),
@@ -301,7 +301,7 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 			// also added by the controller manager.  It doesn't matter who wins.
 			break
 		}
-		if time.Since(start) > 15*time.Second {
+		if time.Since(start) > 90*time.Second {
 			log.WithError(err).Error("Failed to install role binding")
 			TearDownK8sInfra(kds)
 			return nil, err
