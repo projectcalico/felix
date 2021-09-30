@@ -93,6 +93,8 @@ ifeq ($(BUILDARCH),amd64)
 	FV_TYPHAIMAGE=calico/typha:master
 endif
 
+FV_K8SIMAGE=calico/go-build:hyper
+
 # Total number of batches to split the tests into.  In CI we set this to say 5 batches,
 # and run a single batch on each test VM.
 FV_NUM_BATCHES?=1
@@ -330,6 +332,10 @@ fv/infrastructure/crds: go.mod go.sum $(LOCAL_BUILD_DEP)
 	go list all; \
 	cp -r `go list -m -f "{{.Dir}}" github.com/projectcalico/libcalico-go`/config/crd fv/infrastructure/crds; \
 	chmod +w fv/infrastructure/crds/'
+
+fv/certs:
+	openssl req -x509 -newkey rsa:4096 -keyout fv/certs/key.pem -out fv/certs/cert.pem -days 365
+
 
 .PHONY: fv
 # runs all of the fv tests
