@@ -82,7 +82,6 @@ type attachPoint interface {
 	IsAttached() (bool, error)
 	AttachProgram() (string, error)
 	DetachProgram() error
-	ProgramID() (string, error)
 	Log() *log.Entry
 }
 
