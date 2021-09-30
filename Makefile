@@ -28,7 +28,7 @@
 #
 ###############################################################################
 PACKAGE_NAME?=github.com/projectcalico/felix
-GO_BUILD_VER?=v0.54
+GO_BUILD_VER?=v0.56
 
 ORGANIZATION=projectcalico
 SEMAPHORE_PROJECT_ID?=$(SEMAPHORE_FELIX_PROJECT_ID)
@@ -91,7 +91,6 @@ ifeq ($(BUILDARCH),amd64)
 	FV_ETCDIMAGE=quay.io/coreos/etcd:$(ETCD_VERSION)
 	FV_TYPHAIMAGE=calico/typha:master
 endif
-
 
 # Total number of batches to split the tests into.  In CI we set this to say 5 batches,
 # and run a single batch on each test VM.

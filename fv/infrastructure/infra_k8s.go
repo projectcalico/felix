@@ -247,7 +247,6 @@ func setupK8sDatastoreInfra() (*K8sDatastoreInfra, error) {
 	// authorization mode.  So we specify the "RBAC" authorization mode instead, and create a
 	// ClusterRoleBinding that gives the "system:anonymous" user unlimited power (aka the
 	// "cluster-admin" role).
-
 	log.Info("Starting API server")
 	kds.k8sApiContainer = runK8sApiserver(kds.etcdContainer.IP)
 
