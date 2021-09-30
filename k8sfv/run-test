@@ -210,7 +210,6 @@ if ${USE_TYPHA}; then
        -e TYPHA_DATASTORETYPE=kubernetes \
        -e K8S_API_ENDPOINT=${k8s_api_endpoint} \
        -e K8S_INSECURE_SKIP_TLS_VERIFY=true \
-       -e K8S_CA_FILE=/testcode/k8sfv/output/kubernetes.pem \
        -v ${PWD}:/testcode \
        -w /testcode/k8sfv/output \
        --restart=on-failure:2 \
@@ -238,7 +237,6 @@ docker run --detach --privileged --name ${prefix}-felix \
        -e FELIX_DEBUGMEMORYPROFILEPATH="heap-<timestamp>" \
        -e K8S_API_ENDPOINT=${k8s_api_endpoint} \
        -e K8S_INSECURE_SKIP_TLS_VERIFY=true \
-       -e K8S_CA_FILE=/testcode/k8sfv/output/kubernetes.pem \
        -e K8SFV_LOG_LEVEL=${K8SFV_LOG_LEVEL} \
        -v ${PWD}:/testcode \
        -w /testcode/k8sfv/output \
