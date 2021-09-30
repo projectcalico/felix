@@ -179,7 +179,6 @@ func runK8sApiserver(etcdIp string) *containers.Container {
 		utils.Config.K8sImage,
 		"kube-apiserver",
 		"--v=0",
-		"--cert-dir=/home/user",
 		"--service-cluster-ip-range=10.101.0.0/16",
 		"--authorization-mode=RBAC",
 		fmt.Sprintf("--etcd-servers=http://%s:2379", etcdIp),
