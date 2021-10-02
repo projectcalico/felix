@@ -29,9 +29,9 @@ require (
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
 	github.com/projectcalico/api v0.0.0-20210908204226-36fbcf68f1c8
-	github.com/projectcalico/libcalico-go v1.7.2-0.20210908214348-194a10ce7182
+	github.com/projectcalico/libcalico-go v1.7.2-0.20210924171343-658c80ee8a34
 	github.com/projectcalico/pod2daemon v0.0.0-20210818162850-fa9ba6fd57c4
-	github.com/projectcalico/typha v0.7.3-0.20210909183203-9920216f72c7
+	github.com/projectcalico/typha v0.7.3-0.20211001220121-8de9006f572f
 	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/common v0.10.0
 	github.com/sirupsen/logrus v1.7.0
@@ -56,7 +56,7 @@ replace (
 	github.com/sirupsen/logrus => github.com/projectcalico/logrus v0.0.0-20180701205716-fc9bbf2f5799
 
 	// Need replacements for all the k8s subsidiary projects that are pulled in indirectly because
-	// the kubernets repo pulls them in via a replacement to its own vendored copies, which doesn't work for
+	// the Kubernetes repo pulls them in via a replacement to its own vendored copies, which doesn't work for
 	// transient imports.
 	k8s.io/api => k8s.io/api v0.21.0-rc.0
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.21.0-rc.0

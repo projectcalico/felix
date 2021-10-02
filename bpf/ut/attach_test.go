@@ -80,16 +80,17 @@ func TestReattachPrograms(t *testing.T) {
 		tc.CleanUpJumpMaps()
 		bpf.CleanAndSetupHashDir()
 
-		// Attach the first TC program
-		t.Log("Adding program, should add one dir and one map")
 		startingJumpMaps := countJumpMaps()
 		startingTCDirs := countTCDirs()
 		startingHashFiles := countHashFiles()
+
+		// Attach the first TC program
+		t.Log("Adding program, should add one dir and one map")
 		ap1.HostIP = net.ParseIP("10.0.0.1")
 		ap1.IntfIP = net.ParseIP("10.0.0.2")
 		err = tc.EnsureQdisc(ap1.Iface)
 		Expect(err).NotTo(HaveOccurred())
-		err = ap1.AttachProgram()
+		_, err = ap1.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
@@ -97,8 +98,9 @@ func TestReattachPrograms(t *testing.T) {
 
 		// Reattach the same TC program
 		t.Log("Replacing program should not add another map and dir")
-		ap1.HostIP = net.ParseIP("10.0.0.2")
-		err = ap1.AttachProgram()
+		ap1.HostIP = net.ParseIP("10.0.0.3")
+		ap1.IntfIP = net.ParseIP("10.0.0.4")
+		_, err = ap1.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
@@ -110,7 +112,7 @@ func TestReattachPrograms(t *testing.T) {
 		ap2.IntfIP = net.ParseIP("10.0.1.2")
 		err = tc.EnsureQdisc(ap2.Iface)
 		Expect(err).NotTo(HaveOccurred())
-		err = ap2.AttachProgram()
+		_, err = ap2.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+2), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+2), "unexpected number of TC dirs")
@@ -120,7 +122,7 @@ func TestReattachPrograms(t *testing.T) {
 		t.Log("Adding another program (XDP), should add one dir and one map")
 		ap2.HostIP = net.ParseIP("10.0.3.1")
 		ap2.IntfIP = net.ParseIP("10.0.3.2")
-		err = ap3.AttachProgram()
+		_, err = ap3.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+3), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+3), "unexpected number of TC dirs")
@@ -148,7 +150,7 @@ func TestReattachPrograms(t *testing.T) {
 		t.Log("Reattaching the same XDP program, should not add any dir or map")
 		ap2.HostIP = net.ParseIP("10.0.3.3")
 		ap2.IntfIP = net.ParseIP("10.0.3.4")
-		err = ap3.AttachProgram()
+		_, err = ap3.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
@@ -190,7 +192,7 @@ func countTCDirs() int {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() && len(info.Name()) == 40 {
+		if info.IsDir() {
 			log.Debugf("TC dir: %s", p)
 			count++
 		}
