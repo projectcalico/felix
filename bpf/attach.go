@@ -149,8 +149,6 @@ func CleanAndSetupHashDir() {
 		if _, exists := expectedHashFiles[p]; !exists {
 			log.Info("Hash file: ", p)
 			if err := os.Remove(p); err != nil {
-				// If the hash file does not exist, just ignore the err code, and return false
-				// TODO: maybe it is better to log here and clear return pathes
 				if os.IsNotExist(err) {
 					return nil
 				}
