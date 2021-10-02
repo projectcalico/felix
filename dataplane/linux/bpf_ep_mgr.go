@@ -236,6 +236,10 @@ func newBPFEndpointManager(
 		bpf.XDPGeneric,
 	}
 
+	// Clean all the files under /var/run/calico/bpf/ to remove any information from the
+	// previous execution of the bpf dataplane, and make sure the directory exists.
+	bpf.CleanAndSetupHashDir()
+
 	// Normally this endpoint manager uses its own dataplane implementation, but we have an
 	// indirection here so that UT can simulate the dataplane and test how it's called.
 	m.dp = m
@@ -360,6 +364,10 @@ func (m *bpfEndpointManager) onInterfaceUpdate(update *ifaceUpdate) {
 	// but taking it now makes us robust to refactoring.
 	m.ifacesLock.Lock()
 	defer m.ifacesLock.Unlock()
+
+	if update.State == ifacemonitor.StateUnknown {
+		bpf.RemoveInterfaceHashes(update.Name)
+	}
 
 	if !m.isDataIface(update.Name) && !m.isWorkloadIface(update.Name) {
 		log.WithField("update", update).Debug("Ignoring interface that's neither data nor workload.")
