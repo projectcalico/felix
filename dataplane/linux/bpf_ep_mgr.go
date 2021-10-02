@@ -366,6 +366,10 @@ func (m *bpfEndpointManager) onInterfaceUpdate(update *ifaceUpdate) {
 	m.ifacesLock.Lock()
 	defer m.ifacesLock.Unlock()
 
+	if update.State == ifacemonitor.StateUnknown {
+		bpf.RemoveInterfaceHashes(update.Name)
+	}
+
 	if !m.isDataIface(update.Name) && !m.isWorkloadIface(update.Name) {
 		log.WithField("update", update).Debug("Ignoring interface that's neither data nor workload.")
 		return

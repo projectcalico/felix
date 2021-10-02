@@ -25,8 +25,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/projectcalico/felix/bpf"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/projectcalico/felix/bpf"
 )
 
 type AttachPoint struct {
@@ -85,7 +86,7 @@ func (ap *AttachPoint) AttachProgram() error {
 	// Check if a hash file exists for the Attach Point. If the object name and
 	// its hash matches the content of interface's hash file, and something is attached
 	// to the interface, then the program was attached before. So we skip reattaching it
-	hashMatched, objHash, err := bpf.VerifyProgHash(ap.IfaceName(), "xdp", preCompiledBinary)
+	hashMatched, err := bpf.VerifyProgHash(ap.IfaceName(), "xdp", preCompiledBinary)
 	if err == nil {
 		somethingAttached, err := ap.IsAttached()
 		if err != nil {
@@ -160,7 +161,7 @@ func (ap *AttachPoint) AttachProgram() error {
 	}
 
 	// program is now attached. Now we should store its hash to prevent unncessary reloads in future
-	if err = bpf.SaveProgHash(ap.IfaceName(), "xdp", preCompiledBinary, objHash); err != nil {
+	if err = bpf.SaveProgHash(ap.IfaceName(), "xdp", preCompiledBinary); err != nil {
 		ap.Log().Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
 	}
 	return nil

@@ -109,7 +109,7 @@ func (ap AttachPoint) AttachProgram() error {
 	// its hash matches the content of interface's hash file, and exactly 1 program is
 	// attached to the interface, then the program was attached before. So we skip reattaching it
 	hook := "tc_" + string(ap.Hook)
-	hashMatched, objHash, err := bpf.VerifyProgHash(ap.IfaceName(), hook, preCompiledBinary)
+	hashMatched, err := bpf.VerifyProgHash(ap.IfaceName(), hook, preCompiledBinary)
 	if err == nil {
 		if hashMatched && len(progsToClean) == 1 {
 			logCxt.Info("Program already attached, skip reattaching")
@@ -161,7 +161,7 @@ func (ap AttachPoint) AttachProgram() error {
 	}
 
 	// Store a hash file for the AP so in future we can skip reattaching it
-	if err = bpf.SaveProgHash(ap.IfaceName(), hook, preCompiledBinary, objHash); err != nil {
+	if err = bpf.SaveProgHash(ap.IfaceName(), hook, preCompiledBinary); err != nil {
 		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
 	}
 	return nil
