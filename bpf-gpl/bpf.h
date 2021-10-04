@@ -31,11 +31,11 @@
 #define BPF_REDIR_INGRESS 1
 
 struct bpf_map_def_extended {
-        __u32 type;
-        __u32 key_size;
-        __u32 value_size;
-        __u32 max_entries;
-        __u32 map_flags;
+	__u32 type;
+	__u32 key_size;
+	__u32 value_size;
+	__u32 max_entries;
+	__u32 map_flags;
 };
 
 /* These constants must be kept in sync with the calculate-flags script. */
