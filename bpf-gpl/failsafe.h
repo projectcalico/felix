@@ -37,7 +37,8 @@ CALI_MAP(cali_v4_fsafes, 2,
 		BPF_MAP_TYPE_LPM_TRIE,
 		struct failsafe_key, struct failsafe_val,
 		65536,
-		BPF_F_NO_PREALLOC)
+		BPF_F_NO_PREALLOC,
+		MAP_PIN_GLOBAL)
 
 #define CALI_FSAFE_OUT 1
 

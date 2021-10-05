@@ -24,7 +24,7 @@
 CALI_MAP(cali_v4_state, 3,
 		BPF_MAP_TYPE_PERCPU_ARRAY,
 		__u32, struct cali_tc_state,
-		1, 0)
+		1, 0, MAP_PIN_GLOBAL)
 
 static CALI_BPF_INLINE struct cali_tc_state *state_get(void)
 {
