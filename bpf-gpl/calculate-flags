@@ -94,7 +94,7 @@ elif [[ "${filename}" =~ .*xdp.* ]]; then
   # XDP, so host endpoint.
   ((flags |= CALI_TC_HOST_EP))
   ((flags |= CALI_XDP_PROG))
-  args+=("-DCALI_NO_DEFAULT_POLICY_PROG" "-DCALI_LOG_PFX=CALICOLO")
+  args+=("-DCALI_NO_DEFAULT_POLICY_PROG" "-DCALI_LOG_PFX=CALICOLO" "-D__IPTOOL_LOADER__")
   ep_type="host"
 else
   echo "Can't recognise endpoint type"

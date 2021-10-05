@@ -275,7 +275,7 @@ static CALI_BPF_INLINE int name##_delete_elem(const void* key)	\
 	return bpf_map_delete_elem(&map_symbol(name, ver), key);	\
 }
 
-#ifdef __BPFTOOL_LOADER__
+#if defined(__BPFTOOL_LOADER__) || defined (__IPTOOL_LOADER__)
 #define CALI_MAP(name, ver,  map_type, key_type, val_type, size, flags)                 \
 struct bpf_map_def_extended __attribute__((section("maps"))) map_symbol(name, ver) = {  \
 	.type = map_type,                                                               \
