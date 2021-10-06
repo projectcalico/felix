@@ -86,7 +86,3 @@ replace (
 	k8s.io/pod-security-admission => k8s.io/pod-security-admission v0.22.0
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.22.0
 )
-
-replace github.com/projectcalico/libcalico-go => github.com/caseydavenport/libcalico-go v0.0.0-20210923224334-7621d99f9aea
-
-replace github.com/projectcalico/typha => github.com/caseydavenport/typha v0.1.4-0.20210922222504-360d2f5cf169

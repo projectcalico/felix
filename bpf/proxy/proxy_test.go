@@ -685,7 +685,7 @@ func epsToSlice(eps *v1.Endpoints) *discovery.EndpointSlice {
 	slice := &discovery.EndpointSlice{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "EndpointSlice",
-			APIVersion: "discovery.k8s.io/v1beta1",
+			APIVersion: "discovery.k8s.io/v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      eps.ObjectMeta.Name,
