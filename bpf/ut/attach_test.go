@@ -78,7 +78,7 @@ func TestReattachPrograms(t *testing.T) {
 		// Start with a clean base state in case another test left something behind.
 		t.Log("Doing initial clean up")
 		tc.CleanUpJumpMaps()
-		bpf.CleanAndSetupHashDir()
+		bpf.CleanAttachedProgDir()
 
 		startingJumpMaps := countJumpMaps()
 		startingTCDirs := countTCDirs()
@@ -207,7 +207,7 @@ func countTCDirs() int {
 
 func countHashFiles() int {
 	var count int
-	err := filepath.Walk(bpf.RuntimeDir, func(p string, info os.FileInfo, err error) error {
+	err := filepath.Walk(bpf.RuntimeProgDir, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}

@@ -26,7 +26,7 @@ import (
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 )
 
-var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Felix bpf attachment", []apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
+var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Felix bpf reattach object", []apiconfig.DatastoreType{apiconfig.EtcdV3 /*, apiconfig.Kubernetes*/}, func(getInfra infrastructure.InfraFactory) {
 	var (
 		infra   infrastructure.DatastoreInfra
 		felixes []*infrastructure.Felix

@@ -35,9 +35,10 @@ type AttachedProgInfo struct {
 	ID     string `json:"id"`
 }
 
-// Check if a hash file exists for an Attach Point and the content matches
-// the Attach Point's fields
-func VerifyProgHash(iface, hook, object, id string) (bool, error) {
+// Compute a sha265 hash of the bpf object we are going to attach to an interface and
+// match it against the hash we potentially stored before in a hash file. Also verify that
+// the content of hash file matches the Attach Point's fields including program ID, object name
+func VerifyAttachedProg(iface, hook, object, id string) (bool, error) {
 	hash, err := sha256OfFile(object)
 	if err != nil {
 		return false, err
@@ -49,7 +50,6 @@ func VerifyProgHash(iface, hook, object, id string) (bool, error) {
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-
 		return false, err
 	}
 
@@ -69,7 +69,7 @@ func VerifyProgHash(iface, hook, object, id string) (bool, error) {
 
 // Store an Attach Point's object name and its hash in a file
 // to skip reattaching it in future.
-func SaveProgHash(iface, hook, object, id string) error {
+func RememberAttachedProg(iface, hook, object, id string) error {
 	hash, err := sha256OfFile(object)
 	if err != nil {
 		return err
@@ -81,7 +81,7 @@ func SaveProgHash(iface, hook, object, id string) error {
 		ID:     id,
 	}
 
-	if err := os.MkdirAll(RuntimeDir, 0600); err != nil {
+	if err := os.MkdirAll(RuntimeProgDir, 0600); err != nil {
 		return err
 	}
 
@@ -98,34 +98,30 @@ func SaveProgHash(iface, hook, object, id string) error {
 }
 
 // Remove the hash file of an Attach Point from disk
-func RemoveProgHash(iface, hook string) error {
-	if err := os.Remove(hashFileName(iface, hook)); err != nil {
-		// If the hash file does not exist, just ignore the err code, and return false
-		// TODO: maybe it is better to log here and clear return pathes
-		if os.IsNotExist(err) {
-			return nil
-		}
-
+func ForgetAttachedProg(iface, hook string) error {
+	err := os.Remove(hashFileName(iface, hook))
+	// If the hash file does not exist, just ignore the err code, and return false
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
 }
 
 // Remove any hash file related to an interface
-func RemoveInterfaceHashes(iface string) {
+func ForgetIfaceAttachedProg(iface string) {
 	hooks := []string{"tc_ingress", "tc_egress", "xdp"}
 	for _, hook := range hooks {
-		err := RemoveProgHash(iface, hook)
+		err := ForgetAttachedProg(iface, hook)
 		if err != nil {
 			log.Warn(fmt.Sprintf("Error in removing %s hash file", iface), err)
 		}
 	}
 }
 
-// Delete /var/run/calico/bpf and its content. Then create the same
-// directory to start with a clean state
-func CleanAndSetupHashDir() {
-	if err := os.MkdirAll(RuntimeDir, 0600); err != nil {
+// Make sure /var/run/calico/bpf/prog exists. Then remove the
+// json files related to interfaces that do not exist
+func CleanAttachedProgDir() {
+	if err := os.MkdirAll(RuntimeProgDir, 0600); err != nil {
 		log.Warn("Failed to create BPF hash directory: ", err)
 	}
 
@@ -142,19 +138,16 @@ func CleanAndSetupHashDir() {
 		}
 	}
 
-	err = filepath.Walk(RuntimeDir, func(p string, info os.FileInfo, err error) error {
+	err = filepath.Walk(RuntimeProgDir, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if p == RuntimeDir {
+		if p == RuntimeProgDir {
 			return nil
 		}
 		if _, exists := expectedHashFiles[p]; !exists {
-			log.Info("Hash file: ", p)
-			if err := os.Remove(p); err != nil {
-				if os.IsNotExist(err) {
-					return nil
-				}
+			err := os.Remove(p)
+			if err != nil && !os.IsNotExist(err) {
 				return err
 			}
 		}
@@ -163,13 +156,13 @@ func CleanAndSetupHashDir() {
 	})
 
 	if err != nil {
-		log.Warn(fmt.Sprintf("Error in traversing %s", RuntimeDir), err)
+		log.Warn(fmt.Sprintf("Error in traversing %s", RuntimeProgDir), err)
 	}
 }
 
 // The file name is [iface name]_[hook name]. For example, eth0_tc_egress.json
 func hashFileName(iface, hook string) string {
-	return path.Join(RuntimeDir, iface+"_"+hook+".json")
+	return path.Join(RuntimeProgDir, iface+"_"+hook+".json")
 }
 
 func sha256OfFile(name string) (string, error) {

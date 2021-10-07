@@ -128,21 +128,19 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		}
 	}
 
-	// Check if a hash file exists for the Attach Point. If the object name and
-	// its hash matches the content of interface's hash file, and exactly 1 program is
-	// attached to the interface, then the program was attached before. So we skip reattaching it
+	// Check if the bpf object is already attached, and we should skip re-attaching it
 	hook := "tc_" + string(ap.Hook)
 	progID, err := ap.ProgramID()
 	if err != nil {
 		logCxt.WithError(err).Warn("Couldn't get the attached TC program ID err=%w", err)
 	}
 
-	hashMatched, err := bpf.VerifyProgHash(ap.IfaceName(), hook, preCompiledBinary, progID)
+	progMatched, err := bpf.VerifyAttachedProg(ap.IfaceName(), hook, preCompiledBinary, progID)
 	if err != nil {
 		logCxt.WithError(err).Warn("Failed to check if BPF program was already attached: %w", err)
 	}
 
-	if hashMatched && len(progsToClean) == 1 {
+	if progMatched && len(progsToClean) == 1 {
 		logCxt.Info("Program already attached, skip reattaching")
 		return progID, nil
 	}
@@ -172,7 +170,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
 		// Remove hash files of old programs
-		if err = bpf.RemoveProgHash(ap.IfaceName(), string(ap.Hook)); err != nil {
+		if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
 			logCxt.WithError(err).Error("Failed to remove hash of BPF program from disk")
 		}
 
@@ -200,7 +198,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	}
 
 	// Store a hash file for the AP so in future we can skip reattaching it
-	if err = bpf.SaveProgHash(ap.IfaceName(), hook, preCompiledBinary, fmt.Sprintf("%d", progId)); err != nil {
+	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, fmt.Sprintf("%d", progId)); err != nil {
 		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
 	}
 	return strconv.Itoa(progId), nil
@@ -329,7 +327,7 @@ func (ap AttachPoint) ProgramName() string {
 
 var ErrNoTC = errors.New("no TC program attached")
 
-// Mazdak: we should try to not get the prgoram ID via 'tc' binary and rather
+// TODO: we should try to not get the prgoram ID via 'tc' binary and rather
 // we should use libbpf to obtain it.
 func (ap *AttachPoint) ProgramID() (string, error) {
 	out, err := ExecTC("filter", "show", "dev", ap.IfaceName(), string(ap.Hook))
@@ -562,7 +560,7 @@ func RemoveQdisc(ifaceName, hook string) error {
 	}
 
 	// Remove the hash file of the program attached to the interface
-	if err = bpf.RemoveProgHash(ifaceName, "tc_"+hook); err != nil {
+	if err = bpf.ForgetAttachedProg(ifaceName, "tc_"+hook); err != nil {
 		return fmt.Errorf("Failed to remove hash file: %w", err)
 	}
 
