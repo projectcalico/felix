@@ -313,6 +313,8 @@ type ParsedRule struct {
 	OriginalSrcServiceAccountSelector string
 	OriginalDstServiceAccountNames    []string
 	OriginalDstServiceAccountSelector string
+	OriginalSrcService                string
+	OriginalSrcServiceNamespace       string
 	OriginalDstService                string
 	OriginalDstServiceNamespace       string
 
@@ -386,6 +388,11 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		dstIPPortSets = append(dstIPPortSets, &IPSetData{Service: svc})
 	}
 
+	if rule.SrcService != "" {
+		src := fmt.Sprintf("%s/%s", rule.SrcServiceNamespace, rule.SrcService)
+		srcSelIPSets = append(srcSelIPSets, &IPSetData{Service: svc})
+	}
+
 	notSrcSelIPSets := selectorsToIPSets(notSrcSels)
 	notDstSelIPSets := selectorsToIPSets(notDstSels)
 
@@ -436,6 +443,8 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		OriginalSrcServiceAccountSelector: rule.OriginalSrcServiceAccountSelector,
 		OriginalDstServiceAccountNames:    rule.OriginalDstServiceAccountNames,
 		OriginalDstServiceAccountSelector: rule.OriginalDstServiceAccountSelector,
+		OriginalSrcService:                rule.SrcService,
+		OriginalSrcServiceNamespace:       rule.SrcServiceNamespace,
 		OriginalDstService:                rule.DstService,
 		OriginalDstServiceNamespace:       rule.DstServiceNamespace,
 		HTTPMatch:                         rule.HTTPMatch,
