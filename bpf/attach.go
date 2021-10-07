@@ -32,11 +32,12 @@ import (
 type AttachedProgInfo struct {
 	Object string `json:"object"`
 	Hash   string `json:"hash"`
+	ID     string `json:"id"`
 }
 
 // Check if a hash file exists for an Attach Point and the content matches
 // the Attach Point's fields
-func VerifyProgHash(iface, hook, object string) (bool, error) {
+func VerifyProgHash(iface, hook, object, id string) (bool, error) {
 	hash, err := sha256OfFile(object)
 	if err != nil {
 		return false, err
@@ -45,7 +46,6 @@ func VerifyProgHash(iface, hook, object string) (bool, error) {
 	bytesToRead, err := ioutil.ReadFile(hashFileName(iface, hook))
 	if err != nil {
 		// If the hash file does not exist, just ignore the err code, and return false
-		//TODO: maybe it is better to log here and simplify the return pathes
 		if os.IsNotExist(err) {
 			return false, nil
 		}
@@ -58,7 +58,9 @@ func VerifyProgHash(iface, hook, object string) (bool, error) {
 		return false, err
 	}
 
-	if progInfo.Hash == hash && progInfo.Object == object {
+	if progInfo.Hash != "" && progInfo.Hash == hash &&
+		progInfo.Object != "" && progInfo.Object == object &&
+		progInfo.ID != "" && progInfo.ID == id {
 		return true, nil
 	}
 
@@ -67,7 +69,7 @@ func VerifyProgHash(iface, hook, object string) (bool, error) {
 
 // Store an Attach Point's object name and its hash in a file
 // to skip reattaching it in future.
-func SaveProgHash(iface, hook, object string) error {
+func SaveProgHash(iface, hook, object, id string) error {
 	hash, err := sha256OfFile(object)
 	if err != nil {
 		return err
@@ -76,6 +78,7 @@ func SaveProgHash(iface, hook, object string) error {
 	var progInfo = AttachedProgInfo{
 		Object: object,
 		Hash:   hash,
+		ID:     id,
 	}
 
 	if err := os.MkdirAll(RuntimeDir, 0600); err != nil {

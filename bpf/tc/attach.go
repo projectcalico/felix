@@ -132,15 +132,19 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	// its hash matches the content of interface's hash file, and exactly 1 program is
 	// attached to the interface, then the program was attached before. So we skip reattaching it
 	hook := "tc_" + string(ap.Hook)
-	hashMatched, err := bpf.VerifyProgHash(ap.IfaceName(), hook, preCompiledBinary)
-	if err == nil {
-		if hashMatched && len(progsToClean) == 1 {
-			//TODO: compare with XDP, do we need to return progID?
-			logCxt.Info("Program already attached, skip reattaching")
-			return "", nil
-		}
-	} else {
+	progID, err := ap.ProgramID()
+	if err != nil {
+		logCxt.WithError(err).Warn("Couldn't get the attached TC program ID err=%w", err)
+	}
+
+	hashMatched, err := bpf.VerifyProgHash(ap.IfaceName(), hook, preCompiledBinary, progID)
+	if err != nil {
 		logCxt.WithError(err).Warn("Failed to check if BPF program was already attached: %w", err)
+	}
+
+	if hashMatched && len(progsToClean) == 1 {
+		logCxt.Info("Program already attached, skip reattaching")
+		return progID, nil
 	}
 	logCxt.Info("Continue with attaching BPF program")
 
@@ -196,7 +200,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	}
 
 	// Store a hash file for the AP so in future we can skip reattaching it
-	if err = bpf.SaveProgHash(ap.IfaceName(), hook, preCompiledBinary); err != nil {
+	if err = bpf.SaveProgHash(ap.IfaceName(), hook, preCompiledBinary, fmt.Sprintf("%d", progId)); err != nil {
 		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
 	}
 	return strconv.Itoa(progId), nil
@@ -321,6 +325,33 @@ func (ap AttachPoint) patchBinary(logCtx *log.Entry, ifile, ofile string) error 
 // ProgramName returns the name of the program associated with this AttachPoint
 func (ap AttachPoint) ProgramName() string {
 	return SectionName(ap.Type, ap.ToOrFrom)
+}
+
+var ErrNoTC = errors.New("no TC program attached")
+
+// Mazdak: we should try to not get the prgoram ID via 'tc' binary and rather
+// we should use libbpf to obtain it.
+func (ap *AttachPoint) ProgramID() (string, error) {
+	out, err := ExecTC("filter", "show", "dev", ap.IfaceName(), string(ap.Hook))
+	if err != nil {
+		return "", fmt.Errorf("Failed to check interface %s program ID: %w", ap.Iface, err)
+	}
+
+	s := strings.Fields(string(out))
+	for i := range s {
+		// Example of output:
+		//
+		// filter protocol all pref 49152 bpf chain 0
+		// filter protocol all pref 49152 bpf chain 0 handle 0x1 calico_from_hos:[61] direct-action not_in_hw id 61 tag 4add0302745d594c jited
+		if s[i] == "id" && len(s) > i+1 {
+			_, err := strconv.Atoi(s[i+1])
+			if err != nil {
+				return "", fmt.Errorf("Couldn't parse ID in 'tc filter' command err=%w out=\n%v", err, string(out))
+			}
+			return s[i+1], nil
+		}
+	}
+	return "", fmt.Errorf("Couldn't find 'id <ID> in 'tc filter' command out=\n%v err=%w", string(out), ErrNoTC)
 }
 
 // FileName return the file the AttachPoint will load the program from
