@@ -21,7 +21,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	v1 "k8s.io/api/core/v1"
-	discovery "k8s.io/api/discovery/v1beta1"
+	discovery "k8s.io/api/discovery/v1"
 
 	"github.com/projectcalico/felix/dispatcher"
 	"github.com/projectcalico/felix/ip"
