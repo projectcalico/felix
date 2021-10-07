@@ -86,20 +86,20 @@ func (ap *AttachPoint) AttachProgram() (string, error) {
 	// Check if the bpf object is already attached, and we should skip re-attaching it
 	progID, err := ap.ProgramID()
 	if err != nil {
-		ap.Log().Warn("Couldn't get the attached XDP program ID err=%w", err)
+		ap.Log().Debug("Couldn't get the attached XDP program ID. err=", err)
 	}
 
-	progMatched, err := bpf.VerifyAttachedProg(ap.IfaceName(), "xdp", preCompiledBinary, progID)
+	alreadyAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), "xdp", preCompiledBinary, progID)
 	if err != nil {
-		ap.Log().Warn("Failed to check if BPF program was already attached: %w", err)
+		ap.Log().Debug("Failed to check if BPF program was already attached. err=", err)
 	}
 
 	somethingAttached, err := ap.IsAttached()
 	if err != nil {
-		ap.Log().Warn("Failed to verify if any program is attached to interface: %w", err)
+		ap.Log().Debug("Failed to verify if any program is attached to interface. err=", err)
 	}
 
-	if progMatched && somethingAttached {
+	if alreadyAttached && somethingAttached {
 		ap.Log().Info("Programs already attached, skip reattaching")
 		return progID, nil
 	}
@@ -169,9 +169,9 @@ func (ap *AttachPoint) AttachProgram() (string, error) {
 		return "", fmt.Errorf("couldn't get the attached XDP program ID err=%v", err)
 	}
 
-	// program is now attached. Now we should store its hash to prevent unncessary reloads in future
+	// program is now attached. Now we should store its information to prevent unncessary reloads in future
 	if err = bpf.RememberAttachedProg(ap.IfaceName(), "xdp", preCompiledBinary, progID); err != nil {
-		ap.Log().Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
+		ap.Log().Error("Failed to record hash of BPF program on disk; Ignoring. err=", err)
 	}
 
 	return progID, nil
@@ -241,9 +241,9 @@ func (ap AttachPoint) DetachProgram() error {
 		}
 	}
 
-	// Program is detached, now remove its hash file too
+	// Program is detached, now remove the json file we saved for it
 	if err = bpf.ForgetAttachedProg(ap.IfaceName(), "xdp"); err != nil {
-		return fmt.Errorf("Failed to delete hash of BPF program from disk: %w", err)
+		return fmt.Errorf("Failed to delete hash of BPF program from disk. err=%w", err)
 	}
 	return nil
 }

@@ -36,9 +36,9 @@ type AttachedProgInfo struct {
 }
 
 // Compute a sha265 hash of the bpf object we are going to attach to an interface and
-// match it against the hash we potentially stored before in a hash file. Also verify that
-// the content of hash file matches the Attach Point's fields including program ID, object name
-func VerifyAttachedProg(iface, hook, object, id string) (bool, error) {
+// match it against the hash we potentially stored before in a json file. Also verify that
+// the content of the file matches the Attach Point's fields including program ID, object name
+func AlreadyAttachedProg(iface, hook, object, id string) (bool, error) {
 	hash, err := sha256OfFile(object)
 	if err != nil {
 		return false, err
@@ -46,7 +46,7 @@ func VerifyAttachedProg(iface, hook, object, id string) (bool, error) {
 
 	bytesToRead, err := ioutil.ReadFile(hashFileName(iface, hook))
 	if err != nil {
-		// If the hash file does not exist, just ignore the err code, and return false
+		// If file does not exist, just ignore the err code, and return false
 		if os.IsNotExist(err) {
 			return false, nil
 		}
@@ -58,6 +58,8 @@ func VerifyAttachedProg(iface, hook, object, id string) (bool, error) {
 		return false, err
 	}
 
+	// Check the hash and other information we stored before, matches
+	// the object we are going to attach now
 	if progInfo.Hash != "" && progInfo.Hash == hash &&
 		progInfo.Object != "" && progInfo.Object == object &&
 		progInfo.ID != "" && progInfo.ID == id {
@@ -108,33 +110,34 @@ func ForgetAttachedProg(iface, hook string) error {
 }
 
 // Remove any hash file related to an interface
-func ForgetIfaceAttachedProg(iface string) {
+func ForgetIfaceAttachedProg(iface string) error {
 	hooks := []string{"tc_ingress", "tc_egress", "xdp"}
 	for _, hook := range hooks {
 		err := ForgetAttachedProg(iface, hook)
 		if err != nil {
-			log.Warn(fmt.Sprintf("Error in removing %s hash file", iface), err)
+			return err
 		}
 	}
+	return nil
 }
 
 // Make sure /var/run/calico/bpf/prog exists. Then remove the
 // json files related to interfaces that do not exist
 func CleanAttachedProgDir() {
 	if err := os.MkdirAll(RuntimeProgDir, 0600); err != nil {
-		log.Warn("Failed to create BPF hash directory: ", err)
+		log.Errorf("Failed to create BPF hash directory. err=%v", err)
 	}
 
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		log.Warn("Failed to get list of interfaces: ", err)
+		log.Errorf("Failed to get list of interfaces. err=%v", err)
 	}
 
 	suffixes := []string{"tc_ingress", "tc_egress", "xdp"}
-	expectedHashFiles := make(map[string]interface{})
+	expectedJSONFiles := make(map[string]interface{})
 	for _, iface := range interfaces {
 		for _, suffix := range suffixes {
-			expectedHashFiles[hashFileName(iface.Name, suffix)] = nil
+			expectedJSONFiles[hashFileName(iface.Name, suffix)] = nil
 		}
 	}
 
@@ -145,7 +148,7 @@ func CleanAttachedProgDir() {
 		if p == RuntimeProgDir {
 			return nil
 		}
-		if _, exists := expectedHashFiles[p]; !exists {
+		if _, exists := expectedJSONFiles[p]; !exists {
 			err := os.Remove(p)
 			if err != nil && !os.IsNotExist(err) {
 				return err
@@ -156,7 +159,7 @@ func CleanAttachedProgDir() {
 	})
 
 	if err != nil {
-		log.Warn(fmt.Sprintf("Error in traversing %s", RuntimeProgDir), err)
+		log.Debugf("Error in traversing %s. err=%v", RuntimeProgDir, err)
 	}
 }
 

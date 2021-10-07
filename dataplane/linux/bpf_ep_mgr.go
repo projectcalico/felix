@@ -366,7 +366,9 @@ func (m *bpfEndpointManager) onInterfaceUpdate(update *ifaceUpdate) {
 	defer m.ifacesLock.Unlock()
 
 	if update.State == ifacemonitor.StateUnknown {
-		bpf.ForgetIfaceAttachedProg(update.Name)
+		if err := bpf.ForgetIfaceAttachedProg(update.Name); err != nil {
+			log.WithError(err).Errorf("Error in removing interface %s json file. err=%v", update.Name, err)
+		}
 	}
 
 	if !m.isDataIface(update.Name) && !m.isWorkloadIface(update.Name) {

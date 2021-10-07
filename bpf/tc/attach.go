@@ -132,15 +132,15 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	hook := "tc_" + string(ap.Hook)
 	progID, err := ap.ProgramID()
 	if err != nil {
-		logCxt.WithError(err).Warn("Couldn't get the attached TC program ID err=%w", err)
+		logCxt.WithError(err).Debug("Couldn't get the attached TC program ID. err=", err)
 	}
 
-	progMatched, err := bpf.VerifyAttachedProg(ap.IfaceName(), hook, preCompiledBinary, progID)
+	alreadyAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), hook, preCompiledBinary, progID)
 	if err != nil {
-		logCxt.WithError(err).Warn("Failed to check if BPF program was already attached: %w", err)
+		logCxt.WithError(err).Debug("Failed to check if BPF program was already attached. err=", err)
 	}
 
-	if progMatched && len(progsToClean) == 1 {
+	if alreadyAttached && len(progsToClean) == 1 {
 		logCxt.Info("Program already attached, skip reattaching")
 		return progID, nil
 	}
@@ -169,9 +169,9 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
-		// Remove hash files of old programs
+		// Remove json files of old programs that contains program information
 		if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
-			logCxt.WithError(err).Error("Failed to remove hash of BPF program from disk")
+			logCxt.WithError(err).Error("Failed to remove hash of BPF program from disk.")
 		}
 
 		attemptCleanup := func() error {
@@ -197,9 +197,9 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		return "", fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
-	// Store a hash file for the AP so in future we can skip reattaching it
-	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, fmt.Sprintf("%d", progId)); err != nil {
-		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk: %w. Ignoring.", err)
+	// Store information of object in a json file so in future we can skip reattaching it
+	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, strconv.Itoa(progId)); err != nil {
+		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk; ignoring. err=", err)
 	}
 	return strconv.Itoa(progId), nil
 }
