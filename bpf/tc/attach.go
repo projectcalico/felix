@@ -166,13 +166,14 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		return "", err
 	}
 
+	// Remove json file of old program that contains program information
+	if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
+		logCxt.WithError(err).Error("Failed to remove runtime information of old bpf program from disk. err=", err)
+	}
+
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
-		// Remove json files of old programs that contains program information
-		if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
-			logCxt.WithError(err).Error("Failed to remove hash of BPF program from disk.")
-		}
 
 		attemptCleanup := func() error {
 			_, err := ExecTC("filter", "del", "dev", ap.Iface, string(ap.Hook), "pref", p.pref, "handle", p.handle, "bpf")
@@ -327,7 +328,7 @@ func (ap AttachPoint) ProgramName() string {
 
 var ErrNoTC = errors.New("no TC program attached")
 
-// TODO: we should try to not get the prgoram ID via 'tc' binary and rather
+// TODO: we should try to not get the program ID via 'tc' binary and rather
 // we should use libbpf to obtain it.
 func (ap *AttachPoint) ProgramID() (string, error) {
 	out, err := ExecTC("filter", "show", "dev", ap.IfaceName(), string(ap.Hook))

@@ -271,7 +271,7 @@ func (ap *AttachPoint) IsAttached() (bool, error) {
 
 var ErrNoXDP = errors.New("no XDP program attached")
 
-// TODO: we should try to not get the prgoram ID via 'ip' binary and rather
+// TODO: we should try to not get the program ID via 'ip' binary and rather
 // we should use libbpf to obtain it.
 func (ap *AttachPoint) ProgramID() (string, error) {
 	cmd := exec.Command("ip", "link", "show", "dev", ap.Iface)
