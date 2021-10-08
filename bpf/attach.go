@@ -44,7 +44,7 @@ func AlreadyAttachedProg(iface, hook, object, id string) (bool, error) {
 		return false, err
 	}
 
-	bytesToRead, err := ioutil.ReadFile(hashFileName(iface, hook))
+	bytesToRead, err := ioutil.ReadFile(runtimeFilename(iface, hook))
 	if err != nil {
 		// If file does not exist, just ignore the err code, and return false
 		if os.IsNotExist(err) {
@@ -91,7 +91,7 @@ func RememberAttachedProg(iface, hook, object, id string) error {
 		return err
 	}
 
-	if err = ioutil.WriteFile(hashFileName(iface, hook), bytesToWrite, 0600); err != nil {
+	if err = ioutil.WriteFile(runtimeFilename(iface, hook), bytesToWrite, 0600); err != nil {
 		return err
 	}
 
@@ -100,7 +100,7 @@ func RememberAttachedProg(iface, hook, object, id string) error {
 
 // Remove the hash file of an Attach Point from disk
 func ForgetAttachedProg(iface, hook string) error {
-	err := os.Remove(hashFileName(iface, hook))
+	err := os.Remove(runtimeFilename(iface, hook))
 	// If the hash file does not exist, just ignore the err code, and return false
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -136,7 +136,7 @@ func CleanAttachedProgDir() {
 	expectedJSONFiles := make(map[string]interface{})
 	for _, iface := range interfaces {
 		for _, suffix := range suffixes {
-			expectedJSONFiles[hashFileName(iface.Name, suffix)] = nil
+			expectedJSONFiles[runtimeFilename(iface.Name, suffix)] = nil
 		}
 	}
 
@@ -158,12 +158,12 @@ func CleanAttachedProgDir() {
 	})
 
 	if err != nil {
-		log.Debugf("Error in traversing %s. err=%v", RuntimeProgDir, err)
+		log.Debugf("Error in cleaning up %s. err=%v", RuntimeProgDir, err)
 	}
 }
 
-// The file name is [iface name]_[hook name]. For example, eth0_tc_egress.json
-func hashFileName(iface, hook string) string {
+// The file name is [iface name]_[hook name].json, for example, eth0_tc_egress.json
+func runtimeFilename(iface, hook string) string {
 	return path.Join(RuntimeProgDir, iface+"_"+hook+".json")
 }
 
