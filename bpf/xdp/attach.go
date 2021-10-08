@@ -163,7 +163,6 @@ func (ap *AttachPoint) AttachProgram() (string, error) {
 	if !attachmentSucceeded {
 		return "", fmt.Errorf("Couldn't attach XDP program %v section %v to iface %v; modes=%v errs=%v", tempBinary, sectionName, ap.Iface, ap.Modes, errs)
 	}
-
 	progID, err = ap.ProgramID()
 	if err != nil {
 		return "", fmt.Errorf("couldn't get the attached XDP program ID err=%v", err)
