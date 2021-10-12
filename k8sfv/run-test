@@ -280,6 +280,9 @@ STATUS=$?
 # successful status (0) if Felix dies prematurely.
 if docker ps | grep ${prefix}-felix; then
     # Good, still running.
+    if [ "$STATUS" != "0" ]; then
+	docker logs ${prefix}-felix
+    fi
     exit ${STATUS}
 else
     # No, it has died.  Dump logs and exit with a failure status.
