@@ -19,6 +19,7 @@ package fv_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -47,6 +48,7 @@ import (
 	"github.com/projectcalico/felix/fv/utils"
 	"github.com/projectcalico/felix/fv/workload"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
+	v3 "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
 	"github.com/projectcalico/libcalico-go/lib/net"
@@ -262,10 +264,22 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 
 		It("v3 node resource annotations should automatically heal", func() {
 			for _, felix := range felixes {
+				var wgPubKeyOrig string
+				var node *v3.Node
+				var err error
+
 				// Get the original public-key.
-				node, err := client.Nodes().Get(context.Background(), felix.Hostname, options.GetOptions{})
-				Expect(err).NotTo(HaveOccurred())
-				wgPubKeyOrig := node.Status.WireguardPublicKey
+				Eventually(func() error {
+					node, err = client.Nodes().Get(context.Background(), felix.Hostname, options.GetOptions{})
+					if err != nil {
+						return err
+					}
+					wgPubKeyOrig = node.Status.WireguardPublicKey
+					if wgPubKeyOrig == "" {
+						return errors.New("node.Status.WireguardPublicKey not set yet")
+					}
+					return nil
+				}, "5s", "300ms").ShouldNot(HaveOccurred())
 
 				// overwrite public-key by fake but valid Wireguard key.
 				node.Status.WireguardPublicKey = fakeWireguardPubKey
@@ -273,7 +287,7 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ WireGuard-Supported", []api
 				Expect(err).NotTo(HaveOccurred())
 
 				Eventually(func() string {
-					node, err := client.Nodes().Get(context.Background(), felix.Hostname, options.GetOptions{})
+					node, err = client.Nodes().Get(context.Background(), felix.Hostname, options.GetOptions{})
 					Expect(err).NotTo(HaveOccurred())
 					return node.Status.WireguardPublicKey
 				}, "5s", "100ms").Should(Equal(wgPubKeyOrig))
