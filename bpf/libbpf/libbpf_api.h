@@ -18,6 +18,7 @@
 #include <bpf.h>
 #include <stdlib.h>
 #include <errno.h>
+#include "globals.h"
 
 static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
 {
@@ -107,10 +108,14 @@ int bpf_tc_update_jump_map(struct bpf_object *obj, char* mapName, char *progName
 	return bpf_map_update_elem(map_fd, &progIndex, &prog_fd, 0);
 }
 
-void bpf_set_global_vars(struct bpf_map *map, int hostIP) {
-	int value[] = {4,5,6};
-	value[0] = hostIP;
-	set_errno(bpf_map__set_initial_value(map, (void*)value, sizeof(value)));
+void bpf_set_global_vars(struct bpf_map *map, int hostIP, int tmtu, int vxlanPort, int intfIP, int ext_to_svc_mark) {
+	struct cali_global_data data = {};
+	data.host_ip = hostIP;
+	data.tunnel_mtu = tmtu;
+	data.vxlan_port = vxlanPort;
+	data.intf_ip = intfIP;
+	data.ext_to_svc_mark = ext_to_svc_mark;
+	set_errno(bpf_map__set_initial_value(map, (void*)(&data), sizeof(struct cali_global_data)));
 	return;
 }
 

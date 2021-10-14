@@ -86,13 +86,14 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 
 	filename := ap.FileName()
 	preCompiledBinary := path.Join(bpf.ObjectDir, filename)
+	/*
 	tempBinary := path.Join(tempDir, filename)
 
 	err = ap.patchBinary(logCxt, preCompiledBinary, tempBinary)
 	if err != nil {
 		logCxt.WithError(err).Error("Failed to patch binary")
 		return "", err
-	}
+	}*/
 
 	// Using the RLock allows multiple attach calls to proceed in parallel unless
 	// CleanUpJumpMaps() (which takes the writer lock) is running.
@@ -106,7 +107,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	obj, err := libbpf.OpenObject(tempBinary)
+	obj, err := libbpf.OpenObject(preCompiledBinary)
 	if err != nil {
 		return "", err
 	}
@@ -125,7 +126,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 			vxlan_port := uint32(vxlanPort)
 			intfIP := binary.BigEndian.Uint32([]byte(ap.IntfIP.To4()))
 			ext_to_svc_mark := uint32(ap.ExtToServiceConnmark)
-			gerr := m.SetGlobalVars(int(hostIP), )
+			gerr := m.SetGlobalVars(int(hostIP), int(tmtu), int(vxlan_port), int(intfIP), int(ext_to_svc_mark))
 			if gerr != nil {
 				fmt.Println(m.Name(), gerr)
 			}

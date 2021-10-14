@@ -67,7 +67,7 @@ func TestJumpMapCleanup(t *testing.T) {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = ap.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
-		time.Sleep(100 * time.Second)
+		time.Sleep(1 * time.Second)
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
 
