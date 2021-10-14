@@ -31,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"encoding/binary"
 
 	log "github.com/sirupsen/logrus"
 
@@ -113,6 +114,23 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 
 	baseDir := "/sys/fs/bpf/tc/"
 	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap() {
+		if m.IsMapInternal() {
+			hostIP := binary.BigEndian.Uint32([]byte(ap.HostIP.To4()))
+			tmtu := uint32(ap.TunnelMTU)
+			vxlanPort := ap.VXLANPort
+			if vxlanPort == 0 {
+                		vxlanPort = 4789
+        		}
+
+			vxlan_port := uint32(vxlanPort)
+			intfIP := binary.BigEndian.Uint32([]byte(ap.IntfIP.To4()))
+			ext_to_svc_mark := uint32(ap.ExtToServiceConnmark)
+			gerr := m.SetGlobalVars(int(hostIP), )
+			if gerr != nil {
+				fmt.Println(m.Name(), gerr)
+			}
+			continue
+		}
 		subDir := "globals"
 		if m.Type() == libbpf.MapTypeProgrArray && strings.Contains(m.Name(), "cali_jump") {
 			if ap.Hook == HookIngress {
@@ -263,7 +281,6 @@ func (ap AttachPoint) patchBinary(logCtx *log.Entry, ifile, ofile string) error 
 	if err != nil {
 		return fmt.Errorf("failed to read pre-compiled BPF binary: %w", err)
 	}
-
 	logCtx.WithField("ip", ap.HostIP).Debug("Patching in IP")
 	err = b.PatchIPv4(ap.HostIP)
 	if err != nil {

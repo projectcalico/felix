@@ -19,12 +19,18 @@
 #include <stdlib.h>
 #include <errno.h>
 
+static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
+{
+        return vfprintf(stderr, format, args);
+}
+
 static void set_errno(int ret) {
 	errno = ret >= 0 ? ret : -ret;
 }
 
 struct bpf_object* bpf_obj_open(char *filename) {
 	struct bpf_object *obj;
+	//libbpf_set_print(libbpf_print_fn);
 	obj = bpf_object__open(filename);
 	int err = libbpf_get_error(obj);
 	if (err) {
@@ -101,3 +107,11 @@ int bpf_tc_update_jump_map(struct bpf_object *obj, char* mapName, char *progName
 	return bpf_map_update_elem(map_fd, &progIndex, &prog_fd, 0);
 }
 
+void bpf_set_global_vars(struct bpf_map *map, int hostIP) {
+	int value[] = {4,5,6};
+	value[0] = hostIP;
+	set_errno(bpf_map__set_initial_value(map, (void*)value, sizeof(value)));
+	return;
+}
+
+	
