@@ -191,4 +191,3 @@ func (m *Map) SetGlobalVars(hostIP, tmtu, vxlanPort, intfIP, ext_to_svc_mark int
 	_, err := C.bpf_set_global_vars(m.bpfMap, C.int(hostIP), C.int(tmtu), C.int(vxlanPort), C.int(intfIP), C.int(ext_to_svc_mark))
 	return err
 }
-

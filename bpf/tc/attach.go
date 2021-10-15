@@ -18,6 +18,7 @@ package tc
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +32,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"encoding/binary"
 
 	log "github.com/sirupsen/logrus"
 
@@ -72,6 +72,14 @@ func (ap AttachPoint) Log() *log.Entry {
 	})
 }
 
+func convertIPToUint32(ip net.IP) (uint32) {
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return 0
+	}
+	return  binary.BigEndian.Uint32([]byte(ipv4))
+}
+
 // AttachProgram attaches a BPF program from a file to the TC attach point
 func (ap AttachPoint) AttachProgram() (string, error) {
 	logCxt := log.WithField("attachPoint", ap)
@@ -86,14 +94,6 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 
 	filename := ap.FileName()
 	preCompiledBinary := path.Join(bpf.ObjectDir, filename)
-	/*
-	tempBinary := path.Join(tempDir, filename)
-
-	err = ap.patchBinary(logCxt, preCompiledBinary, tempBinary)
-	if err != nil {
-		logCxt.WithError(err).Error("Failed to patch binary")
-		return "", err
-	}*/
 
 	// Using the RLock allows multiple attach calls to proceed in parallel unless
 	// CleanUpJumpMaps() (which takes the writer lock) is running.
@@ -116,15 +116,15 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	baseDir := "/sys/fs/bpf/tc/"
 	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap() {
 		if m.IsMapInternal() {
-			hostIP := binary.BigEndian.Uint32([]byte(ap.HostIP.To4()))
+			hostIP := convertIPToUint32(ap.HostIP)
 			tmtu := uint32(ap.TunnelMTU)
 			vxlanPort := ap.VXLANPort
 			if vxlanPort == 0 {
-                		vxlanPort = 4789
-        		}
+				vxlanPort = 4789
+			}
 
 			vxlan_port := uint32(vxlanPort)
-			intfIP := binary.BigEndian.Uint32([]byte(ap.IntfIP.To4()))
+			intfIP := convertIPToUint32(ap.IntfIP)
 			ext_to_svc_mark := uint32(ap.ExtToServiceConnmark)
 			gerr := m.SetGlobalVars(int(hostIP), int(tmtu), int(vxlan_port), int(intfIP), int(ext_to_svc_mark))
 			if gerr != nil {
