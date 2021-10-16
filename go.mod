@@ -83,4 +83,6 @@ replace (
 	k8s.io/metrics => k8s.io/metrics v0.21.0-rc.0
 	k8s.io/mount-utils => k8s.io/mount-utils v0.21.0-rc.0
 	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.21.0-rc.0
+
+	github.com/projectcalico/api => github.com/tomastigera/project-calico-api v0.0.0-20210910204046-adb857127cd5
 )
