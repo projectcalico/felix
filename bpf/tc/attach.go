@@ -94,6 +94,13 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 
 	filename := ap.FileName()
 	preCompiledBinary := path.Join(bpf.ObjectDir, filename)
+	tempBinary := path.Join(tempDir, filename)
+
+	err = ap.patchLogPrefix(logCxt, preCompiledBinary, tempBinary)
+	if err != nil {
+		logCxt.WithError(err).Error("Failed to patch binary")
+		return "", err
+	}
 
 	// Using the RLock allows multiple attach calls to proceed in parallel unless
 	// CleanUpJumpMaps() (which takes the writer lock) is running.
@@ -107,7 +114,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	obj, err := libbpf.OpenObject(preCompiledBinary)
+	obj, err := libbpf.OpenObject(tempBinary)
 	if err != nil {
 		return "", err
 	}
@@ -193,6 +200,20 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		return "", fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 	return strconv.Itoa(progId), nil
+}
+
+func (ap AttachPoint) patchLogPrefix(logCtx *log.Entry, ifile, ofile string) error {
+	b, err := bpf.BinaryFromFile(ifile)
+        if err != nil {
+                return fmt.Errorf("failed to read pre-compiled BPF binary: %w", err)
+        }
+	b.PatchLogPrefix(ap.Iface)
+
+	err = b.WriteToFile(ofile)
+	if err != nil {
+		return fmt.Errorf("failed to write pre-compiled BPF binary: %w", err)
+	}
+	return nil
 }
 
 func (ap AttachPoint) DetachProgram() error {
