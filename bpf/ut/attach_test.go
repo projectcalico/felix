@@ -24,8 +24,6 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"time"
-
 	"github.com/projectcalico/felix/bpf"
 	"github.com/projectcalico/felix/bpf/tc"
 )
@@ -67,7 +65,6 @@ func TestJumpMapCleanup(t *testing.T) {
 		Expect(err).NotTo(HaveOccurred())
 		_, err = ap.AttachProgram()
 		Expect(err).NotTo(HaveOccurred())
-		time.Sleep(1 * time.Second)
 		Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")
 		Expect(countTCDirs()).To(BeNumerically("==", startingTCDirs+1), "unexpected number of TC dirs")
 

@@ -1467,8 +1467,6 @@ static int bpf_object__init_global_data_maps(struct bpf_object *obj)
 			return err;
 	}
 	if (obj->efile.rodata_shndx >= 0) {
-		int *tmp = (int*)obj->efile.rodata->d_buf;
-		pr_debug("update rodata %d %d %d %d\n",(int)obj->efile.rodata->d_size, tmp[0], tmp[1], tmp[2]);
 		err = bpf_object__init_internal_map(obj, LIBBPF_MAP_RODATA,
 						    obj->efile.rodata_shndx,
 						    obj->efile.rodata->d_buf,
