@@ -20,18 +20,12 @@
 #include <errno.h>
 #include "globals.h"
 
-static int libbpf_print_fn(enum libbpf_print_level level, const char *format, va_list args)
-{
-        return vfprintf(stderr, format, args);
-}
-
 static void set_errno(int ret) {
 	errno = ret >= 0 ? ret : -ret;
 }
 
 struct bpf_object* bpf_obj_open(char *filename) {
 	struct bpf_object *obj;
-	//libbpf_set_print(libbpf_print_fn);
 	obj = bpf_object__open(filename);
 	int err = libbpf_get_error(obj);
 	if (err) {
