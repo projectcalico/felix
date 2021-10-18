@@ -71,7 +71,7 @@ func (ap AttachPoint) Log() *log.Entry {
 		"hook":  ap.Hook,
 	})
 }
-
+// nolint
 func convertIPToUint32(ip net.IP) (uint32) {
 	ipv4 := ip.To4()
 	if ipv4 == nil {
@@ -201,7 +201,6 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	}
 	return strconv.Itoa(progId), nil
 }
-
 func (ap AttachPoint) patchLogPrefix(logCtx *log.Entry, ifile, ofile string) error {
 	b, err := bpf.BinaryFromFile(ifile)
         if err != nil {
@@ -298,6 +297,7 @@ func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
 	return progsToClean, nil
 }
 
+// nolint
 func (ap AttachPoint) patchBinary(logCtx *log.Entry, ifile, ofile string) error {
 	b, err := bpf.BinaryFromFile(ifile)
 	if err != nil {
