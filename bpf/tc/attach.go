@@ -18,6 +18,7 @@ package tc
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,6 +71,14 @@ func (ap AttachPoint) Log() *log.Entry {
 		"hook":  ap.Hook,
 	})
 }
+// nolint
+func convertIPToUint32(ip net.IP) (uint32, error) {
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return 0, fmt.Errorf("ip addr nil")
+	}
+	return  binary.LittleEndian.Uint32([]byte(ipv4)), nil
+}
 
 // AttachProgram attaches a BPF program from a file to the TC attach point
 func (ap AttachPoint) AttachProgram() (string, error) {
@@ -87,7 +96,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	preCompiledBinary := path.Join(bpf.ObjectDir, filename)
 	tempBinary := path.Join(tempDir, filename)
 
-	err = ap.patchBinary(logCxt, preCompiledBinary, tempBinary)
+	err = ap.patchLogPrefix(logCxt, preCompiledBinary, tempBinary)
 	if err != nil {
 		logCxt.WithError(err).Error("Failed to patch binary")
 		return "", err
@@ -113,6 +122,29 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 
 	baseDir := "/sys/fs/bpf/tc/"
 	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap() {
+		if m.IsMapInternal() {
+			hostIP, err := convertIPToUint32(ap.HostIP)
+			if err != nil {
+				return "", err
+			}
+			tmtu := uint32(ap.TunnelMTU)
+			vxlanPort := ap.VXLANPort
+			if vxlanPort == 0 {
+				vxlanPort = 4789
+			}
+
+			vxlan_port := uint32(vxlanPort)
+			intfIP, err := convertIPToUint32(ap.IntfIP)
+			if err != nil {
+				return "", err
+			}
+			ext_to_svc_mark := uint32(ap.ExtToServiceConnmark)
+			gerr := m.SetGlobalVars(int(hostIP), int(tmtu), int(vxlan_port), int(intfIP), int(ext_to_svc_mark), int(ap.PSNATStart), int(ap.PSNATEnd))
+			if gerr != nil {
+				fmt.Println(m.Name(), gerr)
+			}
+			continue
+		}
 		subDir := "globals"
 		if m.Type() == libbpf.MapTypeProgrArray && strings.Contains(m.Name(), "cali_jump") {
 			if ap.Hook == HookIngress {
@@ -174,6 +206,20 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		return "", fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 	return strconv.Itoa(progId), nil
+}
+func (ap AttachPoint) patchLogPrefix(logCtx *log.Entry, ifile, ofile string) error {
+	b, err := bpf.BinaryFromFile(ifile)
+        if err != nil {
+                return fmt.Errorf("failed to read pre-compiled BPF binary: %w", err)
+        }
+
+	b.PatchLogPrefix(ap.Iface)
+
+	err = b.WriteToFile(ofile)
+	if err != nil {
+		return fmt.Errorf("failed to write pre-compiled BPF binary: %w", err)
+	}
+	return nil
 }
 
 func (ap AttachPoint) DetachProgram() error {
@@ -258,12 +304,12 @@ func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
 	return progsToClean, nil
 }
 
+// nolint
 func (ap AttachPoint) patchBinary(logCtx *log.Entry, ifile, ofile string) error {
 	b, err := bpf.BinaryFromFile(ifile)
 	if err != nil {
 		return fmt.Errorf("failed to read pre-compiled BPF binary: %w", err)
 	}
-
 	logCtx.WithField("ip", ap.HostIP).Debug("Patching in IP")
 	err = b.PatchIPv4(ap.HostIP)
 	if err != nil {
