@@ -102,13 +102,15 @@ int bpf_tc_update_jump_map(struct bpf_object *obj, char* mapName, char *progName
 	return bpf_map_update_elem(map_fd, &progIndex, &prog_fd, 0);
 }
 
-void bpf_set_global_vars(struct bpf_map *map, int hostIP, int tmtu, int vxlanPort, int intfIP, int ext_to_svc_mark) {
+void bpf_set_global_vars(struct bpf_map *map, int hostIP, int tmtu, int vxlanPort, int intfIP, int ext_to_svc_mark, int psnat_start, int psnat_len) {
 	struct cali_global_data data = {};
 	data.host_ip = hostIP;
 	data.tunnel_mtu = tmtu;
 	data.vxlan_port = vxlanPort;
 	data.intf_ip = intfIP;
 	data.ext_to_svc_mark = ext_to_svc_mark;
+	data.psnat_start = psnat_start;
+	data.psnat_len = psnat_len;
 	set_errno(bpf_map__set_initial_value(map, (void*)(&data), sizeof(struct cali_global_data)));
 	return;
 }
