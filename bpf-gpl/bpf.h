@@ -242,12 +242,12 @@ extern const volatile struct cali_global_data global_data;
 #define CALI_CONFIGURABLE_DEFINE(name, pattern)
 #define CALI_CONFIGURABLE(name)  global_data.name
 #else
-#define CALI_CONFIGURABLE_DEFINE(name, pattern)                                                 \
-static CALI_BPF_INLINE __be32 cali_configurable_##name()                                        \
-{                                                                                               \
-	__u32 ret;                                                                              \
+#define CALI_CONFIGURABLE_DEFINE(name, pattern)							\
+static CALI_BPF_INLINE __be32 cali_configurable_##name()					\
+{												\
+	__u32 ret;										\
 	asm("%0 = " #pattern ";" : "=r"(ret) /* output */ : /* no inputs */ : /* no clobber */);\
-	return ret;                                                                             \
+	return ret;										\
 }
 #define CALI_CONFIGURABLE(name)	cali_configurable_##name()
 #endif
