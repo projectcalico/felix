@@ -71,14 +71,6 @@ func (ap AttachPoint) Log() *log.Entry {
 		"hook":  ap.Hook,
 	})
 }
-// nolint
-func convertIPToUint32(ip net.IP) (uint32, error) {
-	ipv4 := ip.To4()
-	if ipv4 == nil {
-		return 0, fmt.Errorf("ip addr nil")
-	}
-	return  binary.LittleEndian.Uint32([]byte(ipv4)), nil
-}
 
 // AttachProgram attaches a BPF program from a file to the TC attach point
 func (ap AttachPoint) AttachProgram() (string, error) {
@@ -123,25 +115,9 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	baseDir := "/sys/fs/bpf/tc/"
 	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap() {
 		if m.IsMapInternal() {
-			hostIP, err := convertIPToUint32(ap.HostIP)
-			if err != nil {
-				return "", err
-			}
-			tmtu := uint32(ap.TunnelMTU)
-			vxlanPort := ap.VXLANPort
-			if vxlanPort == 0 {
-				vxlanPort = 4789
-			}
-
-			vxlan_port := uint32(vxlanPort)
-			intfIP, err := convertIPToUint32(ap.IntfIP)
-			if err != nil {
-				return "", err
-			}
-			ext_to_svc_mark := uint32(ap.ExtToServiceConnmark)
-			gerr := m.SetGlobalVars(int(hostIP), int(tmtu), int(vxlan_port), int(intfIP), int(ext_to_svc_mark), int(ap.PSNATStart), int(ap.PSNATEnd))
-			if gerr != nil {
-				fmt.Println(m.Name(), gerr)
+			perr := ap.SetProgramData(m)
+			if perr != nil {
+				return "", perr
 			}
 			continue
 		}
@@ -302,40 +278,6 @@ func (ap AttachPoint) listAttachedPrograms() ([]attachedProg, error) {
 		}
 	}
 	return progsToClean, nil
-}
-
-// nolint
-func (ap AttachPoint) patchBinary(logCtx *log.Entry, ifile, ofile string) error {
-	b, err := bpf.BinaryFromFile(ifile)
-	if err != nil {
-		return fmt.Errorf("failed to read pre-compiled BPF binary: %w", err)
-	}
-	logCtx.WithField("ip", ap.HostIP).Debug("Patching in IP")
-	err = b.PatchIPv4(ap.HostIP)
-	if err != nil {
-		return fmt.Errorf("failed to patch IPv4 into BPF binary: %w", err)
-	}
-
-	b.PatchLogPrefix(ap.Iface)
-	b.PatchTunnelMTU(ap.TunnelMTU)
-	vxlanPort := ap.VXLANPort
-	if vxlanPort == 0 {
-		vxlanPort = 4789
-	}
-	b.PatchVXLANPort(vxlanPort)
-	b.PatchExtToServiceConnmark(uint32(ap.ExtToServiceConnmark))
-
-	err = b.PatchIntfAddr(ap.IntfIP)
-	if err != nil {
-		return fmt.Errorf("failed to patch interface IPv4 into BPF binary: %w", err)
-	}
-
-	err = b.WriteToFile(ofile)
-	if err != nil {
-		return fmt.Errorf("failed to write pre-compiled BPF binary: %w", err)
-	}
-
-	return nil
 }
 
 // ProgramName returns the name of the program associated with this AttachPoint
@@ -562,6 +504,22 @@ func (ap *AttachPoint) IfaceName() string {
 	return ap.Iface
 }
 
+func (ap *AttachPoint) SetProgramData(m *libbpf.Map) error {
+	hostIP, err := convertIPToUint32(ap.HostIP)
+	if err != nil {
+		return err
+	}
+	vxlanPort := ap.VXLANPort
+	if vxlanPort == 0 {
+		vxlanPort = 4789
+	}
+
+	intfIP, err := convertIPToUint32(ap.IntfIP)
+	if err != nil {
+		return err
+	}
+	return m.SetGlobalVars(hostIP, intfIP, ap.ExtToServiceConnmark, ap.TunnelMTU, vxlanPort, ap.PSNATStart, ap.PSNATEnd)
+}
 // nolint
 func updateJumpMap(obj *libbpf.Obj, isHost bool) error {
 	if !isHost {
@@ -579,4 +537,13 @@ func updateJumpMap(obj *libbpf.Obj, isHost bool) error {
 		return fmt.Errorf("error updating icmp program %v", err)
 	}
 	return nil
+}
+
+// nolint
+func convertIPToUint32(ip net.IP) (uint32, error) {
+	ipv4 := ip.To4()
+	if ipv4 == nil {
+		return 0, fmt.Errorf("ip addr nil")
+	}
+	return  binary.LittleEndian.Uint32([]byte(ipv4)), nil
 }
