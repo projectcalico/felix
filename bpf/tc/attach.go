@@ -128,6 +128,24 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		}
 	}
 
+	// Check if the bpf object is already attached, and we should skip re-attaching it
+	hook := "tc_" + string(ap.Hook)
+	progID, err := ap.ProgramID()
+	if err != nil {
+		logCxt.WithError(err).Debug("Couldn't get the attached TC program ID. err=", err)
+	}
+
+	alreadyAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), hook, preCompiledBinary, progID)
+	if err != nil {
+		logCxt.WithError(err).Debug("Failed to check if BPF program was already attached. err=", err)
+	}
+
+	if alreadyAttached && len(progsToClean) == 1 {
+		logCxt.Info("Program already attached, skip reattaching")
+		return progID, nil
+	}
+	logCxt.Info("Continue with attaching BPF program")
+
 	err = obj.Load()
 	if err != nil {
 		return "", fmt.Errorf("error loading program %v", err)
@@ -148,9 +166,15 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		return "", err
 	}
 
+	// Remove json file of old program that contains program information
+	if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
+		logCxt.WithError(err).Error("Failed to remove runtime information of old bpf program from disk. err=", err)
+	}
+
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
+
 		attemptCleanup := func() error {
 			_, err := ExecTC("filter", "del", "dev", ap.Iface, string(ap.Hook), "pref", p.pref, "handle", p.handle, "bpf")
 			return err
@@ -172,6 +196,11 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 
 	if len(progErrs) != 0 {
 		return "", fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
+	}
+
+	// Store information of object in a json file so in future we can skip reattaching it
+	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, strconv.Itoa(progId)); err != nil {
+		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk; ignoring. err=", err)
 	}
 	return strconv.Itoa(progId), nil
 }
@@ -296,6 +325,33 @@ func (ap AttachPoint) patchBinary(logCtx *log.Entry, ifile, ofile string) error 
 // ProgramName returns the name of the program associated with this AttachPoint
 func (ap AttachPoint) ProgramName() string {
 	return SectionName(ap.Type, ap.ToOrFrom)
+}
+
+var ErrNoTC = errors.New("no TC program attached")
+
+// TODO: we should try to not get the program ID via 'tc' binary and rather
+// we should use libbpf to obtain it.
+func (ap *AttachPoint) ProgramID() (string, error) {
+	out, err := ExecTC("filter", "show", "dev", ap.IfaceName(), string(ap.Hook))
+	if err != nil {
+		return "", fmt.Errorf("Failed to check interface %s program ID: %w", ap.Iface, err)
+	}
+
+	s := strings.Fields(string(out))
+	for i := range s {
+		// Example of output:
+		//
+		// filter protocol all pref 49152 bpf chain 0
+		// filter protocol all pref 49152 bpf chain 0 handle 0x1 calico_from_hos:[61] direct-action not_in_hw id 61 tag 4add0302745d594c jited
+		if s[i] == "id" && len(s) > i+1 {
+			_, err := strconv.Atoi(s[i+1])
+			if err != nil {
+				return "", fmt.Errorf("Couldn't parse ID in 'tc filter' command err=%w out=\n%v", err, string(out))
+			}
+			return s[i+1], nil
+		}
+	}
+	return "", fmt.Errorf("Couldn't find 'id <ID> in 'tc filter' command out=\n%v err=%w", string(out), ErrNoTC)
 }
 
 // FileName return the file the AttachPoint will load the program from
@@ -496,7 +552,7 @@ func HasQdisc(ifaceName string) (bool, error) {
 }
 
 // RemoveQdisc makes sure that there is no qdisc attached to the given interface
-func RemoveQdisc(ifaceName string) error {
+func RemoveQdisc(ifaceName, hook string) error {
 	hasQdisc, err := HasQdisc(ifaceName)
 	if err != nil {
 		return err
@@ -504,6 +560,12 @@ func RemoveQdisc(ifaceName string) error {
 	if !hasQdisc {
 		return nil
 	}
+
+	// Remove the hash file of the program attached to the interface
+	if err = bpf.ForgetAttachedProg(ifaceName, "tc_"+hook); err != nil {
+		return fmt.Errorf("Failed to remove hash file: %w", err)
+	}
+
 	return libbpf.RemoveQDisc(ifaceName)
 }
 
