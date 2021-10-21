@@ -191,34 +191,38 @@ func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) [
 	members := []labelindex.IPSetMember{}
 	for _, ep := range es.Endpoints {
 		for _, port := range es.Ports {
-			// If the port number is nil, ports are not restricted and left
-			// to be interpreted by the context of the consumer. In our case, we will consider
-			// a lack of port to mean no IP set membership.
-			if port.Port != nil {
-				for _, addr := range ep.Addresses {
-					cidr, err := ip.ParseCIDROrIP(addr)
-					if err != nil {
-						log.WithError(err).Warn("Failed to parse endpoint address, skipping")
-						continue
-					}
-
-					// Determine the protocol for the member. Assume TCP
-					// unless the protocol is specified to be something else.
-					proto := labelindex.ProtocolTCP
-					if port.Protocol != nil {
-						switch *port.Protocol {
-						case v1.ProtocolUDP:
-							proto = labelindex.ProtocolUDP
-						case v1.ProtocolSCTP:
-							proto = labelindex.ProtocolSCTP
-						}
-					}
-					members = append(members, labelindex.IPSetMember{
-						CIDR:       cidr,
-						Protocol:   proto,
-						PortNumber: uint16(*port.Port),
-					})
+			for _, addr := range ep.Addresses {
+				cidr, err := ip.ParseCIDROrIP(addr)
+				if err != nil {
+					log.WithError(err).Warn("Failed to parse endpoint address, skipping")
+					continue
 				}
+
+				// Determine the protocol for the member. Assume TCP
+				// unless the protocol is specified to be something else.
+				proto := labelindex.ProtocolTCP
+				if port.Protocol != nil {
+					switch *port.Protocol {
+					case v1.ProtocolUDP:
+						proto = labelindex.ProtocolUDP
+					case v1.ProtocolSCTP:
+						proto = labelindex.ProtocolSCTP
+					}
+				}
+			}
+			// If the port number is nil, ports are not restricted and left
+			// to be interpreted by the context of the consumer.
+			if port.Port != nil {
+				members = append(members, labelindex.IPSetMember{
+					CIDR:       cidr,
+					Protocol:   proto,
+					PortNumber: uint16(*port.Port),
+				})
+			} else {
+				members = append(members, labelindex.IPSetMember{
+					CIDR:     cidr,
+					Protocol: proto,
+				})
 			}
 		}
 	}
