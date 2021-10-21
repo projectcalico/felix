@@ -76,7 +76,7 @@ var _ = Describe("ServiceIndex", func() {
 		idx.UpdateIPSet("identifier", "default/svc1")
 		set, ok := recorder.ipsets["identifier"]
 		Expect(ok).To(BeTrue())
-		Expect(set).To(HaveLen(1))
+		Expect(set).To(HaveLen(2))
 
 		// Service is no longer active.
 		idx.DeleteIPSet("identifier")
@@ -125,7 +125,7 @@ var _ = Describe("ServiceIndex", func() {
 		// We should now get IP set members added.
 		set, ok = recorder.ipsets["identifier"]
 		Expect(ok).To(BeTrue())
-		Expect(set).To(HaveLen(1))
+		Expect(set).To(HaveLen(2))
 
 		// Remove the EndpointSlice, thus removing the IP set members.
 		idx.OnUpdate(api.Update{
@@ -196,7 +196,7 @@ var _ = Describe("ServiceIndex", func() {
 		idx.UpdateIPSet("identifier", "default/svc1")
 		set, ok := recorder.ipsets["identifier"]
 		Expect(ok).To(BeTrue())
-		Expect(set).To(HaveLen(6))
+		Expect(set).To(HaveLen(8))
 
 		// Service is no longer active.
 		idx.DeleteIPSet("identifier")
@@ -250,7 +250,7 @@ var _ = Describe("ServiceIndex", func() {
 		// We should now get IP set members added.
 		set, ok = recorder.ipsets["identifier"]
 		Expect(ok).To(BeTrue())
-		Expect(set).To(HaveLen(2))
+		Expect(set).To(HaveLen(4))
 
 		// Send an EndpointSlice that overlaps with the first one. It shares one endpoint, and also includes
 		// an additional endpoint not in the original.
@@ -286,7 +286,7 @@ var _ = Describe("ServiceIndex", func() {
 		// We should get one more IP set member added for the non-overlapping endpoint.
 		set, ok = recorder.ipsets["identifier"]
 		Expect(ok).To(BeTrue())
-		Expect(set).To(HaveLen(3))
+		Expect(set).To(HaveLen(6))
 
 		// Remove the overlapping endpoint from the first endpoint slice, completing the move.
 		idx.OnUpdate(api.Update{
@@ -318,7 +318,7 @@ var _ = Describe("ServiceIndex", func() {
 		// Should be no change in the number of IP set members.
 		set, ok = recorder.ipsets["identifier"]
 		Expect(ok).To(BeTrue())
-		Expect(set).To(HaveLen(3))
+		Expect(set).To(HaveLen(6))
 
 		// Remove the endpoint from the second slice as well, which should decref to zero and thus
 		// remove it from IP set membership.
@@ -352,7 +352,7 @@ var _ = Describe("ServiceIndex", func() {
 		// removed from both slices.
 		set, ok = recorder.ipsets["identifier"]
 		Expect(ok).To(BeTrue())
-		Expect(set).To(HaveLen(2))
+		Expect(set).To(HaveLen(4))
 	})
 
 })
