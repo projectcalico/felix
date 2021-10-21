@@ -274,4 +274,170 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Service network policy test
 		cc.ExpectSome(w[1], w[0].Port(81))
 		cc.CheckConnectivity()
 	})
+
+	It("should allow ingress from a service", func() {
+		// Expect basic connectivity to work.
+		cc.ExpectSome(w[0], w[1].Port(80))
+		cc.ExpectSome(w[0], w[1].Port(81))
+		cc.ExpectSome(w[1], w[0].Port(80))
+		cc.ExpectSome(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Create a default-deny ingress policy.
+		defaultDenyPolicy := api.NewNetworkPolicy()
+		defaultDenyPolicy.Namespace = "default"
+		defaultDenyPolicy.Name = "knp.default.default-deny"
+		thousand := 1000.0
+		defaultDenyPolicy.Spec.Order = &thousand
+		defaultDenyPolicy.Spec.Selector = "all()"
+		defaultDenyPolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
+		_, err := client.NetworkPolicies().Create(utils.Ctx, defaultDenyPolicy, utils.NoOptions)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect no traffic allowed.
+		cc.ResetExpectations()
+		cc.ExpectNone(w[0], w[1].Port(80))
+		cc.ExpectNone(w[1], w[0].Port(80))
+		cc.ExpectNone(w[0], w[1].Port(81))
+		cc.ExpectNone(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Create a Kubernetes EndpointSlice for a service named "w1-service" that includes
+		// the endpoint information for w1.
+		//
+		// A service isn't required, as Felix is driven entirely off of endpoint slices.
+		kc := infra.(*infrastructure.K8sDatastoreInfra).K8sClient
+		eighty := int32(80)
+		tcp := v1.ProtocolTCP
+		eps := &discovery.EndpointSlice{}
+		eps.Name = "w1-eps"
+		eps.Namespace = "default"
+		eps.Labels = map[string]string{"kubernetes.io/service-name": "w1-service"}
+		eps.AddressType = discovery.AddressTypeIPv4
+		eps.Endpoints = []discovery.Endpoint{
+			{Addresses: []string{w[1].IP}},
+		}
+		eps.Ports = []discovery.EndpointPort{
+			{Port: &eighty, Protocol: &tcp},
+		}
+		eps, err = kc.DiscoveryV1beta1().EndpointSlices("default").Create(utils.Ctx, eps, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure we clean up after ourselves.
+		defer func() {
+			err = kc.DiscoveryV1beta1().EndpointSlices("default").Delete(utils.Ctx, eps.Name, metav1.DeleteOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		}()
+
+		// Create a network policy which allows to the service.
+		allowServicePolicy := api.NewNetworkPolicy()
+		allowServicePolicy.Namespace = "default"
+		allowServicePolicy.Name = "allow-to-w1"
+		allowServicePolicy.Spec.Order = &thousand
+		allowServicePolicy.Spec.Selector = "all()"
+		allowServicePolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
+		allowServicePolicy.Spec.Ingress = []api.Rule{
+			{
+				Action: api.Allow,
+				Source: api.EntityRule{Services: &api.ServiceMatch{Name: "w1-service", Namespace: "default"}},
+			},
+		}
+		_, err = client.NetworkPolicies().Create(utils.Ctx, allowServicePolicy, utils.NoOptions)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect traffic is allowed from the endpoint specified in the service - w1, TCP 80
+		// Traffic in the other direction should not be allowed.
+		cc.ResetExpectations()
+		cc.ExpectNone(w[0], w[1].Port(80))
+		cc.ExpectNone(w[0], w[1].Port(81))
+		cc.ExpectSome(w[1], w[0].Port(80))
+		cc.ExpectSome(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Update the endpoint slice to include the address of w0. Traffic should then be allowed in the reverse direction.
+		eps.Endpoints = append(eps.Endpoints, discovery.Endpoint{Addresses: []string{w[0].IP}})
+		_, err = kc.DiscoveryV1beta1().EndpointSlices("default").Update(utils.Ctx, eps, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		cc.ResetExpectations()
+		cc.ExpectSome(w[0], w[1].Port(80))
+		cc.ExpectSome(w[0], w[1].Port(81))
+		cc.ExpectSome(w[1], w[0].Port(80))
+		cc.ExpectSome(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Delete the policy. Traffic should no longer be allowed.
+		_, err = client.NetworkPolicies().Delete(utils.Ctx, "default", allowServicePolicy.Name, options.DeleteOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		cc.ResetExpectations()
+		cc.ExpectNone(w[0], w[1].Port(80))
+		cc.ExpectNone(w[1], w[0].Port(80))
+		cc.ExpectNone(w[0], w[1].Port(81))
+		cc.ExpectNone(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+	})
+
+	It("should deny ingress from a service", func() {
+		// Expect basic connectivity to work.
+		cc.ExpectSome(w[0], w[1].Port(80))
+		cc.ExpectSome(w[0], w[1].Port(81))
+		cc.ExpectSome(w[1], w[0].Port(80))
+		cc.ExpectSome(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Create a Kubernetes EndpointSlice for a service named "w1-service" that includes
+		// the endpoint information for w1.
+		//
+		// A service isn't required, as Felix is driven entirely off of endpoint slices.
+		kc := infra.(*infrastructure.K8sDatastoreInfra).K8sClient
+		eighty := int32(80)
+		tcp := v1.ProtocolTCP
+		eps := &discovery.EndpointSlice{}
+		eps.Name = "w1-eps"
+		eps.Namespace = "default"
+		eps.Labels = map[string]string{"kubernetes.io/service-name": "w1-service"}
+		eps.AddressType = discovery.AddressTypeIPv4
+		eps.Endpoints = []discovery.Endpoint{
+			{Addresses: []string{w[1].IP}},
+		}
+		eps.Ports = []discovery.EndpointPort{
+			{Port: &eighty, Protocol: &tcp},
+		}
+		_, err := kc.DiscoveryV1beta1().EndpointSlices("default").Create(utils.Ctx, eps, metav1.CreateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+
+		// Make sure we clean up after ourselves.
+		defer func() {
+			err = kc.DiscoveryV1beta1().EndpointSlices("default").Delete(utils.Ctx, eps.Name, metav1.DeleteOptions{})
+			Expect(err).NotTo(HaveOccurred())
+		}()
+
+		// Create a network policy which denies to the service, but allows elsewhere.
+		thousand := 1000.0
+		allowServicePolicy := api.NewNetworkPolicy()
+		allowServicePolicy.Namespace = "default"
+		allowServicePolicy.Name = "allow-to-w1"
+		allowServicePolicy.Spec.Order = &thousand
+		allowServicePolicy.Spec.Selector = "all()"
+		allowServicePolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
+		allowServicePolicy.Spec.Ingress = []api.Rule{
+			{
+				Action: api.Deny,
+				Source: api.EntityRule{Services: &api.ServiceMatch{Name: "w1-service", Namespace: "default"}},
+			},
+			{
+				Action: api.Allow,
+			},
+		}
+		_, err = client.NetworkPolicies().Create(utils.Ctx, allowServicePolicy, utils.NoOptions)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect traffic is denied to the endpoint specified in the service - w1, TCP 80
+		// Traffic in the other direction should be allowed.
+		cc.ResetExpectations()
+		cc.ExpectSome(w[0], w[1].Port(80))
+		cc.ExpectSome(w[0], w[1].Port(81))
+		cc.ExpectNone(w[1], w[0].Port(80))
+		cc.ExpectNone(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+	})
 })
