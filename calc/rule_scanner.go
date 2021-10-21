@@ -389,7 +389,7 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 	}
 
 	if rule.SrcService != "" {
-		src := fmt.Sprintf("%s/%s", rule.SrcServiceNamespace, rule.SrcService)
+		svc := fmt.Sprintf("%s/%s", rule.SrcServiceNamespace, rule.SrcService)
 		srcSelIPSets = append(srcSelIPSets, &IPSetData{Service: svc})
 	}
 
