@@ -185,11 +185,11 @@ func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) [
 		return nil
 	}
 
-	// Create a member for each endpoint + port combination. If there
-	// are no ports specified, it means no ports (thus, no IP set membership). If nil is specified,
-	// it means ALL ports.
 	members := []labelindex.IPSetMember{}
 	for _, ep := range es.Endpoints {
+		// Create a member for each endpoint + port combination. If there
+		// are no ports specified, it means no ports (thus, no IP set membership). If nil is specified,
+		// it means ALL ports.
 		for _, port := range es.Ports {
 			// If the port number is nil, ports are not restricted and left
 			// to be interpreted by the context of the consumer. In our case, we will consider
@@ -220,6 +220,18 @@ func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) [
 					})
 				}
 			}
+		}
+
+		// Create members for each endpoint with just the cidr. These
+		// are used in rules where the protocol and port are already set.
+		for _, addr := range ep.Addresses {
+			cidr, err := ip.ParseCIDROrIP(addr)
+			if err != nil {
+				log.WithError(err).Warn("Failed to parse endpoint address, skipping")
+				continue
+			}
+
+			members = append(members, labelindex.IPSetMember{CIDR: cidr})
 		}
 	}
 	return members
