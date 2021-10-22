@@ -16,6 +16,7 @@ package serviceindex
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
@@ -39,7 +40,7 @@ type ServiceIndex struct {
 
 	// Track active services, indexed by corresponding IP set UID and contributing service.
 	activeIPSetsByID      map[string]*ipSetData
-	activeIPSetsByService map[string]*ipSetData
+	activeIPSetsByService map[string]map[string]*ipSetData
 
 	// Callback functions
 	OnMemberAdded   ServiceMatchCallback
@@ -51,7 +52,7 @@ func NewServiceIndex() *ServiceIndex {
 		endpointSlices:          make(map[string]*discovery.EndpointSlice),
 		endpointSlicesByService: make(map[string]map[string]*discovery.EndpointSlice),
 		activeIPSetsByID:        make(map[string]*ipSetData),
-		activeIPSetsByService:   make(map[string]*ipSetData),
+		activeIPSetsByService:   make(map[string]map[string]*ipSetData),
 
 		// Callback functions
 		OnMemberAdded:   func(ipSetID string, member labelindex.IPSetMember) {},
@@ -91,39 +92,49 @@ func (idx *ServiceIndex) UpdateEndpointSlice(es *discovery.EndpointSlice) {
 	k := fmt.Sprintf("%s/%s", es.Namespace, es.Name)
 	logc := log.WithFields(log.Fields{"slice": k, "svc": svc})
 
-	if ipSet, ok := idx.activeIPSetsByService[svc]; ok {
+	logc.Debug("EndpointSlice belongs to an active service")
+	cached := idx.endpointSlices[k]
+	if ipSets, ok := idx.activeIPSetsByService[svc]; ok {
 		logc.Debug("EndpointSlice belongs to an active service")
-
-		cached := idx.endpointSlices[k]
-		oldIPSetContributions := idx.membersFromEndpointSlice(cached)
 
 		// Service contributing these endpoints is active. We need to determine
 		// if any endpoints have changed, and if so send through membership updates.
-		newIPSetContribution := idx.membersFromEndpointSlice(es)
-		logc.Debugf("EndpointSlice Update contributed members: %+v", newIPSetContribution)
-		for _, member := range newIPSetContribution {
-			// Incref all the new members.  If any of them go from 0 to 1 reference then we
-			// know that they're new.  We'll temporarily double-count members that were already
-			// present, then decref them below.
-			//
-			// This reference counting also allows us to tolerate duplicate members in the
-			// input data.
-			refCount := ipSet.memberToRefCount[member] + 1
-			if refCount == 1 {
-				idx.OnMemberAdded(ipSet.ID, member)
-			}
-			ipSet.memberToRefCount[member] = refCount
-		}
-
-		// Decref all the old members.  If they hit 0 references, then the member has been
-		// removed so we emit an event.
-		for _, oldMember := range oldIPSetContributions {
-			newRefCount := ipSet.memberToRefCount[oldMember] - 1
-			if newRefCount == 0 {
-				idx.OnMemberRemoved(ipSet.ID, oldMember)
-				delete(ipSet.memberToRefCount, oldMember)
+		for _, ipSet := range ipSets {
+			var newIPSetContribution []labelindex.IPSetMember
+			var oldIPSetContributions []labelindex.IPSetMember
+			if ipSet.IncludePorts() {
+				newIPSetContribution = idx.membersFromEndpointSlice(es)
+				oldIPSetContributions = idx.membersFromEndpointSlice(cached)
 			} else {
-				ipSet.memberToRefCount[oldMember] = newRefCount
+				newIPSetContribution = idx.membersFromEndpointSliceNoPorts(es)
+				oldIPSetContributions = idx.membersFromEndpointSliceNoPorts(cached)
+			}
+
+			logc.Debugf("EndpointSlice Update contributed members: %+v", newIPSetContribution)
+			for _, member := range newIPSetContribution {
+				// Incref all the new members.  If any of them go from 0 to 1 reference then we
+				// know that they're new.  We'll temporarily double-count members that were already
+				// present, then decref them below.
+				//
+				// This reference counting also allows us to tolerate duplicate members in the
+				// input data.
+				refCount := ipSet.memberToRefCount[member] + 1
+				if refCount == 1 {
+					idx.OnMemberAdded(ipSet.ID, member)
+				}
+				ipSet.memberToRefCount[member] = refCount
+			}
+
+			// Decref all the old members.  If they hit 0 references, then the member has been
+			// removed so we emit an event.
+			for _, oldMember := range oldIPSetContributions {
+				newRefCount := ipSet.memberToRefCount[oldMember] - 1
+				if newRefCount == 0 {
+					idx.OnMemberRemoved(ipSet.ID, oldMember)
+					delete(ipSet.memberToRefCount, oldMember)
+				} else {
+					ipSet.memberToRefCount[oldMember] = newRefCount
+				}
 			}
 		}
 	} else {
@@ -147,19 +158,27 @@ func (idx *ServiceIndex) DeleteEndpointSlice(key model.ResourceKey) {
 
 	// Determine the service that contributed this endpoint slice.
 	svc := serviceName(es)
-	if ipSet, ok := idx.activeIPSetsByService[svc]; ok {
-		// Active service has had an EndpointSlice deleted. Iterate all the ip set members
-		// contributed by this endpoint slice and decref them. For those which go from 1 to 0,
-		// we should send a membership removal from the data plane.
-		oldContributions := idx.membersFromEndpointSlice(es)
-		log.Debugf("EndpointSlice Delete contributed members: %+v", oldContributions)
-		for _, oldMember := range oldContributions {
-			newRefCount := ipSet.memberToRefCount[oldMember] - 1
-			if newRefCount == 0 {
-				idx.OnMemberRemoved(ipSet.ID, oldMember)
-				delete(ipSet.memberToRefCount, oldMember)
+	if ipSets, ok := idx.activeIPSetsByService[svc]; ok {
+		var oldContributions []labelindex.IPSetMember
+		for _, ipSet := range ipSets {
+			if ipSet.IncludePorts() {
+				oldContributions = idx.membersFromEndpointSlice(es)
 			} else {
-				ipSet.memberToRefCount[oldMember] = newRefCount
+				oldContributions = idx.membersFromEndpointSliceNoPorts(es)
+			}
+
+			// Active service has had an EndpointSlice deleted. Iterate all the ip set members
+			// contributed by this endpoint slice and decref them. For those which go from 1 to 0,
+			// we should send a membership removal from the data plane.
+			log.Debugf("EndpointSlice Delete contributed members: %+v", oldContributions)
+			for _, oldMember := range oldContributions {
+				newRefCount := ipSet.memberToRefCount[oldMember] - 1
+				if newRefCount == 0 {
+					idx.OnMemberRemoved(ipSet.ID, oldMember)
+					delete(ipSet.memberToRefCount, oldMember)
+				} else {
+					ipSet.memberToRefCount[oldMember] = newRefCount
+				}
 			}
 		}
 	}
@@ -185,11 +204,11 @@ func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) [
 		return nil
 	}
 
-	// Create a member for each endpoint + port combination. If there
-	// are no ports specified, it means no ports (thus, no IP set membership). If nil is specified,
-	// it means ALL ports.
 	members := []labelindex.IPSetMember{}
 	for _, ep := range es.Endpoints {
+		// Create a member for each endpoint + port combination. If there
+		// are no ports specified, it means no ports (thus, no IP set membership). If nil is specified,
+		// it means ALL ports.
 		for _, port := range es.Ports {
 			// If the port number is nil, ports are not restricted and left
 			// to be interpreted by the context of the consumer. In our case, we will consider
@@ -225,6 +244,29 @@ func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) [
 	return members
 }
 
+func (idx *ServiceIndex) membersFromEndpointSliceNoPorts(es *discovery.EndpointSlice) []labelindex.IPSetMember {
+	if es == nil {
+		// A nil endpoint slice produces no IP set members.
+		return nil
+	}
+
+	members := []labelindex.IPSetMember{}
+	for _, ep := range es.Endpoints {
+		// Create members for each endpoint with just the cidr. These
+		// are used in rules where the protocol and port are already set.
+		for _, addr := range ep.Addresses {
+			cidr, err := ip.ParseCIDROrIP(addr)
+			if err != nil {
+				log.WithError(err).Warn("Failed to parse endpoint address, skipping")
+				continue
+			}
+
+			members = append(members, labelindex.IPSetMember{CIDR: cidr})
+		}
+	}
+	return members
+}
+
 func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
 	logc := log.WithFields(log.Fields{"id": id, "service": serviceName})
 	if curr, ok := idx.activeIPSetsByID[id]; !ok {
@@ -248,13 +290,21 @@ func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
 		memberToRefCount: map[labelindex.IPSetMember]uint64{},
 	}
 	idx.activeIPSetsByID[id] = as
-	idx.activeIPSetsByService[serviceName] = as
+	if _, ok := idx.activeIPSetsByService[serviceName]; !ok {
+		idx.activeIPSetsByService[serviceName] = make(map[string]*ipSetData)
+	}
+	idx.activeIPSetsByService[serviceName][id] = as
 	logc.Debugf("Active service IP set")
 
 	// We need to scan for possible updates to the IP set membership. Check endpoint slices for this
 	// service to determine endpoints to contribute.
 	for _, eps := range idx.endpointSlicesByService[serviceName] {
-		members := idx.membersFromEndpointSlice(eps)
+		var members []labelindex.IPSetMember
+		if as.IncludePorts() {
+			members = idx.membersFromEndpointSlice(eps)
+		} else {
+			members = idx.membersFromEndpointSliceNoPorts(eps)
+		}
 		log.Debugf("New active service IP set, EndpointSlices contributed members: %+v", members)
 		for _, m := range members {
 			refCount := as.memberToRefCount[m]
@@ -297,4 +347,8 @@ type ipSetData struct {
 	// it's possible for a given IP set member may exist in more than one EndpointSlice. The reference
 	// count lets us properly detect when a member is new or has been deleted.
 	memberToRefCount map[labelindex.IPSetMember]uint64
+}
+
+func (isd *ipSetData) IncludePorts() bool {
+	return !strings.HasPrefix(isd.ID, "svcnoport")
 }
