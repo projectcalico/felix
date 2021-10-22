@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
 	"github.com/projectcalico/libcalico-go/lib/apiconfig"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/ipam"
@@ -329,10 +330,10 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Service network policy test
 			Expect(err).NotTo(HaveOccurred())
 		}()
 
-		// Create a network policy which allows to the service.
+		// Create a network policy which allows from the service.
 		allowServicePolicy := api.NewNetworkPolicy()
 		allowServicePolicy.Namespace = "default"
-		allowServicePolicy.Name = "allow-to-w1"
+		allowServicePolicy.Name = "allow-from-w1"
 		allowServicePolicy.Spec.Order = &thousand
 		allowServicePolicy.Spec.Selector = "all()"
 		allowServicePolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
@@ -345,22 +346,11 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Service network policy test
 		_, err = client.NetworkPolicies().Create(utils.Ctx, allowServicePolicy, utils.NoOptions)
 		Expect(err).NotTo(HaveOccurred())
 
-		// Expect traffic is allowed from the endpoint specified in the service - w1, TCP 80
+		// Expect traffic is allowed from the endpoint specified in the service - w1
 		// Traffic in the other direction should not be allowed.
 		cc.ResetExpectations()
 		cc.ExpectNone(w[0], w[1].Port(80))
 		cc.ExpectNone(w[0], w[1].Port(81))
-		cc.ExpectSome(w[1], w[0].Port(80))
-		cc.ExpectSome(w[1], w[0].Port(81))
-		cc.CheckConnectivity()
-
-		// Update the endpoint slice to include the address of w0. Traffic should then be allowed in the reverse direction.
-		eps.Endpoints = append(eps.Endpoints, discovery.Endpoint{Addresses: []string{w[0].IP}})
-		_, err = kc.DiscoveryV1beta1().EndpointSlices("default").Update(utils.Ctx, eps, metav1.UpdateOptions{})
-		Expect(err).NotTo(HaveOccurred())
-		cc.ResetExpectations()
-		cc.ExpectSome(w[0], w[1].Port(80))
-		cc.ExpectSome(w[0], w[1].Port(81))
 		cc.ExpectSome(w[1], w[0].Port(80))
 		cc.ExpectSome(w[1], w[0].Port(81))
 		cc.CheckConnectivity()
@@ -373,6 +363,67 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Service network policy test
 		cc.ExpectNone(w[1], w[0].Port(80))
 		cc.ExpectNone(w[0], w[1].Port(81))
 		cc.ExpectNone(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Create a network policy which allows from the service only on port 80.
+		protoTCP := numorstring.ProtocolFromString(numorstring.ProtocolTCP)
+		allowServiceOnPortPolicy := api.NewNetworkPolicy()
+		allowServiceOnPortPolicy.Namespace = "default"
+		allowServiceOnPortPolicy.Name = "allow-from-w1-and-port-80"
+		allowServiceOnPortPolicy.Spec.Order = &thousand
+		allowServiceOnPortPolicy.Spec.Selector = "all()"
+		allowServiceOnPortPolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
+		allowServiceOnPortPolicy.Spec.Ingress = []api.Rule{
+			{
+				Action:      api.Allow,
+				Protocol:    &protoTCP,
+				Source:      api.EntityRule{Services: &api.ServiceMatch{Name: "w1-service", Namespace: "default"}},
+				Destination: api.EntityRule{Ports: []numorstring.Port{numorstring.SinglePort(uint16(80))}},
+			},
+		}
+		_, err = client.NetworkPolicies().Create(utils.Ctx, allowServiceOnPortPolicy, utils.NoOptions)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect traffic is allowed from the endpoint specified in the service - w1, TCP 80
+		// Traffic in the other direction and on other ports should not be allowed.
+		cc.ResetExpectations()
+		cc.ExpectNone(w[0], w[1].Port(80))
+		cc.ExpectNone(w[0], w[1].Port(81))
+		cc.ExpectSome(w[1], w[0].Port(80))
+		cc.ExpectNone(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Update the endpoint slice to include the address of w0. Traffic should then be allowed in the reverse direction on port 80.
+		eps.Endpoints = append(eps.Endpoints, discovery.Endpoint{Addresses: []string{w[0].IP}})
+		_, err = kc.DiscoveryV1beta1().EndpointSlices("default").Update(utils.Ctx, eps, metav1.UpdateOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		cc.ResetExpectations()
+		cc.ExpectSome(w[0], w[1].Port(80))
+		cc.ExpectNone(w[0], w[1].Port(81))
+		cc.ExpectSome(w[1], w[0].Port(80))
+		cc.ExpectNone(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Delete the policy. Traffic should no longer be allowed.
+		_, err = client.NetworkPolicies().Delete(utils.Ctx, "default", allowServiceOnPortPolicy.Name, options.DeleteOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		cc.ResetExpectations()
+		cc.ExpectNone(w[0], w[1].Port(80))
+		cc.ExpectNone(w[1], w[0].Port(80))
+		cc.ExpectNone(w[0], w[1].Port(81))
+		cc.ExpectNone(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Recreate the network policy which allows from the service
+		_, err = client.NetworkPolicies().Create(utils.Ctx, allowServicePolicy, utils.NoOptions)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect traffic is allowed in both directions
+		cc.ResetExpectations()
+		cc.ExpectSome(w[0], w[1].Port(80))
+		cc.ExpectSome(w[0], w[1].Port(81))
+		cc.ExpectSome(w[1], w[0].Port(80))
+		cc.ExpectSome(w[1], w[0].Port(81))
 		cc.CheckConnectivity()
 	})
 
@@ -411,15 +462,15 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Service network policy test
 			Expect(err).NotTo(HaveOccurred())
 		}()
 
-		// Create a network policy which denies to the service, but allows elsewhere.
+		// Create a network policy which denies from the service, but allows from elsewhere.
 		thousand := 1000.0
-		allowServicePolicy := api.NewNetworkPolicy()
-		allowServicePolicy.Namespace = "default"
-		allowServicePolicy.Name = "allow-to-w1"
-		allowServicePolicy.Spec.Order = &thousand
-		allowServicePolicy.Spec.Selector = "all()"
-		allowServicePolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
-		allowServicePolicy.Spec.Ingress = []api.Rule{
+		denyServicePolicy := api.NewNetworkPolicy()
+		denyServicePolicy.Namespace = "default"
+		denyServicePolicy.Name = "deny-from-w1"
+		denyServicePolicy.Spec.Order = &thousand
+		denyServicePolicy.Spec.Selector = "all()"
+		denyServicePolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
+		denyServicePolicy.Spec.Ingress = []api.Rule{
 			{
 				Action: api.Deny,
 				Source: api.EntityRule{Services: &api.ServiceMatch{Name: "w1-service", Namespace: "default"}},
@@ -428,16 +479,57 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Service network policy test
 				Action: api.Allow,
 			},
 		}
-		_, err = client.NetworkPolicies().Create(utils.Ctx, allowServicePolicy, utils.NoOptions)
+		_, err = client.NetworkPolicies().Create(utils.Ctx, denyServicePolicy, utils.NoOptions)
 		Expect(err).NotTo(HaveOccurred())
 
-		// Expect traffic is denied to the endpoint specified in the service - w1, TCP 80
+		// Expect traffic is denied to the endpoint specified in the service - w1
 		// Traffic in the other direction should be allowed.
 		cc.ResetExpectations()
 		cc.ExpectSome(w[0], w[1].Port(80))
 		cc.ExpectSome(w[0], w[1].Port(81))
 		cc.ExpectNone(w[1], w[0].Port(80))
 		cc.ExpectNone(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Delete the policy. Traffic should be allowed.
+		_, err = client.NetworkPolicies().Delete(utils.Ctx, "default", denyServicePolicy.Name, options.DeleteOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		cc.ResetExpectations()
+		cc.ExpectSome(w[0], w[1].Port(80))
+		cc.ExpectSome(w[0], w[1].Port(81))
+		cc.ExpectSome(w[1], w[0].Port(80))
+		cc.ExpectSome(w[1], w[0].Port(81))
+		cc.CheckConnectivity()
+
+		// Create a network policy which denies from the service on port 80, but allows from elsewhere.
+		protoTCP := numorstring.ProtocolFromString(numorstring.ProtocolTCP)
+		denyServiceOnPortPolicy := api.NewNetworkPolicy()
+		denyServiceOnPortPolicy.Namespace = "default"
+		denyServiceOnPortPolicy.Name = "deny-from-w1"
+		denyServiceOnPortPolicy.Spec.Order = &thousand
+		denyServiceOnPortPolicy.Spec.Selector = "all()"
+		denyServiceOnPortPolicy.Spec.Types = []api.PolicyType{api.PolicyTypeIngress}
+		denyServiceOnPortPolicy.Spec.Ingress = []api.Rule{
+			{
+				Action:      api.Deny,
+				Protocol:    &protoTCP,
+				Source:      api.EntityRule{Services: &api.ServiceMatch{Name: "w1-service", Namespace: "default"}},
+				Destination: api.EntityRule{Ports: []numorstring.Port{numorstring.SinglePort(uint16(80))}},
+			},
+			{
+				Action: api.Allow,
+			},
+		}
+		_, err = client.NetworkPolicies().Create(utils.Ctx, denyServiceOnPortPolicy, utils.NoOptions)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Expect traffic is denied to the endpoint specified in the service - w1, TCP 80
+		// Traffic in the other direction and on other ports should be allowed.
+		cc.ResetExpectations()
+		cc.ExpectSome(w[0], w[1].Port(80))
+		cc.ExpectSome(w[0], w[1].Port(81))
+		cc.ExpectNone(w[1], w[0].Port(80))
+		cc.ExpectSome(w[1], w[0].Port(81))
 		cc.CheckConnectivity()
 	})
 })

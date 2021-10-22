@@ -280,8 +280,8 @@ message Rule {
   string original_not_dst_selector = 119;
 
   // Original source service match criteria.
-  string original_src_service = 128;
-  string original_src_service_namespace = 129;
+  string original_src_service = 132;
+  string original_src_service_namespace = 133;
 
   // Original destination service match criteria.
   string original_dst_service = 130;
