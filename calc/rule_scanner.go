@@ -95,6 +95,9 @@ type IPSetData struct {
 	NamedPort string
 	// The service that this IP set represents, in namespace/name format.
 	Service string
+	// Type of the ip set to represent for this service. This allows us to create service
+	// IP sets with and without port information.
+	ServiceIncludePorts bool
 	// cachedUID holds the calculated unique ID of this IP set, or "" if it hasn't been calculated
 	// yet.
 	cachedUID string
@@ -126,7 +129,9 @@ func (d *IPSetData) DataplaneProtocolType() proto.IPSetUpdate_IPSetType {
 		return proto.IPSetUpdate_IP_AND_PORT
 	}
 	if d.Service != "" {
-		return proto.IPSetUpdate_IP_AND_PORT
+		if d.ServiceIncludePorts {
+			return proto.IPSetUpdate_IP_AND_PORT
+		}
 	}
 	return proto.IPSetUpdate_NET
 }
@@ -385,12 +390,12 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 	var dstIPPortSets []*IPSetData
 	if rule.DstService != "" {
 		svc := fmt.Sprintf("%s/%s", rule.DstServiceNamespace, rule.DstService)
-		dstIPPortSets = append(dstIPPortSets, &IPSetData{Service: svc})
+		dstIPPortSets = append(dstIPPortSets, &IPSetData{Service: svc, ServiceIncludePorts: true})
 	}
 
 	if rule.SrcService != "" {
 		svc := fmt.Sprintf("%s/%s", rule.SrcServiceNamespace, rule.SrcService)
-		srcSelIPSets = append(srcSelIPSets, &IPSetData{Service: svc})
+		srcSelIPSets = append(srcSelIPSets, &IPSetData{Service: svc, ServiceIncludePorts: false})
 	}
 
 	notSrcSelIPSets := selectorsToIPSets(notSrcSels)

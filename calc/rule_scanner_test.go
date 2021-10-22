@@ -307,7 +307,7 @@ var _ = Describe("ParsedRule", func() {
 			}
 			if name == "DstService" || name == "DstServiceNamespace" || name == "SrcService" || name == "SrcServiceNamespace" {
 				// Service name and namespace are rendered on the ParsedRule
-				// as IPPortIPSetIDs.
+				// as either IPPortIPSetIDs or IPSetIDs.
 				continue
 			}
 			if strings.HasSuffix(name, "Net") {
