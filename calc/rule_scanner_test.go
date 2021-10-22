@@ -170,7 +170,7 @@ var _ = DescribeTable("RuleScanner rule conversion should generate correct Parse
 	Entry("src service",
 		model.Rule{SrcService: "svc", SrcServiceNamespace: "default"},
 		ParsedRule{
-			SrcIPSetIDs:                 []string{"svc:Jhwii46PCMT5NlhWsUqZmv7al8TeHFbNQMhoVg"},
+			SrcIPSetIDs:                 []string{"svcnoport:T03S_6hogdrGKrNFBcbKTFsH_uKwDHEo8JddOg"},
 			OriginalSrcService:          "svc",
 			OriginalSrcServiceNamespace: "default",
 		}),

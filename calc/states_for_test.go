@@ -1861,7 +1861,6 @@ var endpointSliceAndLocalWorkload = empty.withKVUpdates(
 var endpointSliceActive = endpointSliceAndLocalWorkload.withKVUpdates(
 	KVPair{Key: servicePolicyKey, Value: &servicePolicy},
 ).withName("EndpointSliceActive").withIPSet("svc:Jhwii46PCMT5NlhWsUqZmv7al8TeHFbNQMhoVg", []string{
-	"10.0.0.1/32",
 	"10.0.0.1,tcp:80",
 }).withActivePolicies(
 	proto.PolicyID{Tier: "default", Name: "svc-policy"},
