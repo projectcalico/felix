@@ -127,9 +127,8 @@ int cali_ctlb_v4(struct bpf_sock_addr *ctx)
 		ip_proto = IPPROTO_TCP;
 		break;
 	case SOCK_DGRAM:
-		CALI_DEBUG("SOCK_DGRAM -> assuming UDP\n");
-		ip_proto = IPPROTO_UDP;
-		break;
+		CALI_DEBUG("SOCK_DGRAM -> assuming UDP - not supported\n");
+		goto out;
 	default:
 		CALI_DEBUG("Unknown socket type: %d\n", (int)ctx->type);
 		goto out;
