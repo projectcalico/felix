@@ -393,6 +393,11 @@ var baseTests = []StateList{
 		endpointSliceAndLocalWorkload,
 		endpointSliceActive,
 	},
+	{
+		// Service NetworkPolicy ingress case.
+		endpointSliceAndLocalWorkload,
+		endpointSliceActiveIngress,
+	},
 }
 
 var logOnce sync.Once
