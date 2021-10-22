@@ -1871,6 +1871,20 @@ var endpointSliceActive = endpointSliceAndLocalWorkload.withKVUpdates(
 	},
 )
 
+// Add a network policy that makes the endpoint slice active.
+var endpointSliceActiveIngress = endpointSliceAndLocalWorkload.withKVUpdates(
+	KVPair{Key: servicePolicyKey, Value: &servicePolicy},
+).withName("EndpointSliceActive").withIPSet("svcnoport:Jhwii46PCMT5NlhWsUqZmv7al8TeHFbNQMhoVg", []string{
+	"10.0.0.1/32",
+}).withActivePolicies(
+	proto.PolicyID{Tier: "default", Name: "svc-policy"},
+).withEndpoint(
+	localWlEp1Id,
+	[]mock.TierInfo{
+		{Name: "default", IngressPolicyNames: []string{"svc-policy"}},
+	},
+)
+
 type StateList []State
 
 func (l StateList) String() string {
