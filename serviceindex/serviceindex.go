@@ -92,7 +92,6 @@ func (idx *ServiceIndex) UpdateEndpointSlice(es *discovery.EndpointSlice) {
 	k := fmt.Sprintf("%s/%s", es.Namespace, es.Name)
 	logc := log.WithFields(log.Fields{"slice": k, "svc": svc})
 
-	logc.Debug("EndpointSlice belongs to an active service")
 	cached := idx.endpointSlices[k]
 	if ipSets, ok := idx.activeIPSetsByService[svc]; ok {
 		logc.Debug("EndpointSlice belongs to an active service")
@@ -100,15 +99,8 @@ func (idx *ServiceIndex) UpdateEndpointSlice(es *discovery.EndpointSlice) {
 		// Service contributing these endpoints is active. We need to determine
 		// if any endpoints have changed, and if so send through membership updates.
 		for _, ipSet := range ipSets {
-			var newIPSetContribution []labelindex.IPSetMember
-			var oldIPSetContributions []labelindex.IPSetMember
-			if ipSet.IncludePorts() {
-				newIPSetContribution = idx.membersFromEndpointSlice(es)
-				oldIPSetContributions = idx.membersFromEndpointSlice(cached)
-			} else {
-				newIPSetContribution = idx.membersFromEndpointSliceNoPorts(es)
-				oldIPSetContributions = idx.membersFromEndpointSliceNoPorts(cached)
-			}
+			newIPSetContribution := idx.membersFromEndpointSlice(es, ipSet.IncludePorts())
+			oldIPSetContributions := idx.membersFromEndpointSlice(cached, ipSet.IncludePorts())
 
 			logc.Debugf("EndpointSlice Update contributed members: %+v", newIPSetContribution)
 			for _, member := range newIPSetContribution {
@@ -159,17 +151,11 @@ func (idx *ServiceIndex) DeleteEndpointSlice(key model.ResourceKey) {
 	// Determine the service that contributed this endpoint slice.
 	svc := serviceName(es)
 	if ipSets, ok := idx.activeIPSetsByService[svc]; ok {
-		var oldContributions []labelindex.IPSetMember
 		for _, ipSet := range ipSets {
-			if ipSet.IncludePorts() {
-				oldContributions = idx.membersFromEndpointSlice(es)
-			} else {
-				oldContributions = idx.membersFromEndpointSliceNoPorts(es)
-			}
-
 			// Active service has had an EndpointSlice deleted. Iterate all the ip set members
 			// contributed by this endpoint slice and decref them. For those which go from 1 to 0,
 			// we should send a membership removal from the data plane.
+			oldContributions := idx.membersFromEndpointSlice(es, ipSet.IncludePorts())
 			log.Debugf("EndpointSlice Delete contributed members: %+v", oldContributions)
 			for _, oldMember := range oldContributions {
 				newRefCount := ipSet.memberToRefCount[oldMember] - 1
@@ -198,70 +184,63 @@ func serviceName(es *discovery.EndpointSlice) string {
 	return name
 }
 
-func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice) []labelindex.IPSetMember {
+func (idx *ServiceIndex) membersFromEndpointSlice(es *discovery.EndpointSlice, includePorts bool) []labelindex.IPSetMember {
 	if es == nil {
 		// A nil endpoint slice produces no IP set members.
 		return nil
 	}
 
 	members := []labelindex.IPSetMember{}
-	for _, ep := range es.Endpoints {
-		// Create a member for each endpoint + port combination. If there
-		// are no ports specified, it means no ports (thus, no IP set membership). If nil is specified,
-		// it means ALL ports.
-		for _, port := range es.Ports {
-			// If the port number is nil, ports are not restricted and left
-			// to be interpreted by the context of the consumer. In our case, we will consider
-			// a lack of port to mean no IP set membership.
-			if port.Port != nil {
-				for _, addr := range ep.Addresses {
-					cidr, err := ip.ParseCIDROrIP(addr)
-					if err != nil {
-						log.WithError(err).Warn("Failed to parse endpoint address, skipping")
-						continue
-					}
-
-					// Determine the protocol for the member. Assume TCP
-					// unless the protocol is specified to be something else.
-					proto := labelindex.ProtocolTCP
-					if port.Protocol != nil {
-						switch *port.Protocol {
-						case v1.ProtocolUDP:
-							proto = labelindex.ProtocolUDP
-						case v1.ProtocolSCTP:
-							proto = labelindex.ProtocolSCTP
+	if includePorts {
+		for _, ep := range es.Endpoints {
+			// Create a member for each endpoint + port combination. If there
+			// are no ports specified, it means no ports (thus, no IP set membership). If nil is specified,
+			// it means ALL ports.
+			for _, port := range es.Ports {
+				// If the port number is nil, ports are not restricted and left
+				// to be interpreted by the context of the consumer. In our case, we will consider
+				// a lack of port to mean no IP set membership.
+				if port.Port != nil {
+					for _, addr := range ep.Addresses {
+						cidr, err := ip.ParseCIDROrIP(addr)
+						if err != nil {
+							log.WithError(err).Warn("Failed to parse endpoint address, skipping")
+							continue
 						}
+
+						// Determine the protocol for the member. Assume TCP
+						// unless the protocol is specified to be something else.
+						proto := labelindex.ProtocolTCP
+						if port.Protocol != nil {
+							switch *port.Protocol {
+							case v1.ProtocolUDP:
+								proto = labelindex.ProtocolUDP
+							case v1.ProtocolSCTP:
+								proto = labelindex.ProtocolSCTP
+							}
+						}
+						members = append(members, labelindex.IPSetMember{
+							CIDR:       cidr,
+							Protocol:   proto,
+							PortNumber: uint16(*port.Port),
+						})
 					}
-					members = append(members, labelindex.IPSetMember{
-						CIDR:       cidr,
-						Protocol:   proto,
-						PortNumber: uint16(*port.Port),
-					})
 				}
 			}
 		}
-	}
-	return members
-}
+	} else {
+		for _, ep := range es.Endpoints {
+			// Create members for each endpoint with just the cidr. These
+			// are used in rules where the protocol and port are already set.
+			for _, addr := range ep.Addresses {
+				cidr, err := ip.ParseCIDROrIP(addr)
+				if err != nil {
+					log.WithError(err).Warn("Failed to parse endpoint address, skipping")
+					continue
+				}
 
-func (idx *ServiceIndex) membersFromEndpointSliceNoPorts(es *discovery.EndpointSlice) []labelindex.IPSetMember {
-	if es == nil {
-		// A nil endpoint slice produces no IP set members.
-		return nil
-	}
-
-	members := []labelindex.IPSetMember{}
-	for _, ep := range es.Endpoints {
-		// Create members for each endpoint with just the cidr. These
-		// are used in rules where the protocol and port are already set.
-		for _, addr := range ep.Addresses {
-			cidr, err := ip.ParseCIDROrIP(addr)
-			if err != nil {
-				log.WithError(err).Warn("Failed to parse endpoint address, skipping")
-				continue
+				members = append(members, labelindex.IPSetMember{CIDR: cidr})
 			}
-
-			members = append(members, labelindex.IPSetMember{CIDR: cidr})
 		}
 	}
 	return members
@@ -299,12 +278,7 @@ func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
 	// We need to scan for possible updates to the IP set membership. Check endpoint slices for this
 	// service to determine endpoints to contribute.
 	for _, eps := range idx.endpointSlicesByService[serviceName] {
-		var members []labelindex.IPSetMember
-		if as.IncludePorts() {
-			members = idx.membersFromEndpointSlice(eps)
-		} else {
-			members = idx.membersFromEndpointSliceNoPorts(eps)
-		}
+		members := idx.membersFromEndpointSlice(eps, as.IncludePorts())
 		log.Debugf("New active service IP set, EndpointSlices contributed members: %+v", members)
 		for _, m := range members {
 			refCount := as.memberToRefCount[m]
