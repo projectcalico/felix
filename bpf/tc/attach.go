@@ -114,8 +114,11 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 
 	baseDir := "/sys/fs/bpf/tc/"
 	for m, err := obj.FirstMap(); m != nil && err == nil; m, err = m.NextMap() {
+		// In case of global variables, libbpf creates an internal map <prog_name>.rodata
+		// The values are read only for the BPF programs, but can be set to a value from
+		// userspace before the program is loaded.
 		if m.IsMapInternal() {
-			perr := ap.SetProgramData(m)
+			perr := ap.ConfigureProgram(m)
 			if perr != nil {
 				return "", perr
 			}
@@ -185,9 +188,9 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 }
 func (ap AttachPoint) patchLogPrefix(logCtx *log.Entry, ifile, ofile string) error {
 	b, err := bpf.BinaryFromFile(ifile)
-        if err != nil {
-                return fmt.Errorf("failed to read pre-compiled BPF binary: %w", err)
-        }
+	if err != nil {
+		return fmt.Errorf("failed to read pre-compiled BPF binary: %w", err)
+	}
 
 	b.PatchLogPrefix(ap.Iface)
 
@@ -504,7 +507,7 @@ func (ap *AttachPoint) IfaceName() string {
 	return ap.Iface
 }
 
-func (ap *AttachPoint) SetProgramData(m *libbpf.Map) error {
+func (ap *AttachPoint) ConfigureProgram(m *libbpf.Map) error {
 	hostIP, err := convertIPToUint32(ap.HostIP)
 	if err != nil {
 		return err
@@ -518,8 +521,9 @@ func (ap *AttachPoint) SetProgramData(m *libbpf.Map) error {
 	if err != nil {
 		return err
 	}
-	return m.SetGlobalVars(hostIP, intfIP, ap.ExtToServiceConnmark, ap.TunnelMTU, vxlanPort, ap.PSNATStart, ap.PSNATEnd)
+	return libbpf.SetGlobalVars(m, hostIP, intfIP, ap.ExtToServiceConnmark, ap.TunnelMTU, vxlanPort, ap.PSNATStart, ap.PSNATEnd)
 }
+
 // nolint
 func updateJumpMap(obj *libbpf.Obj, isHost bool) error {
 	if !isHost {
@@ -545,5 +549,5 @@ func convertIPToUint32(ip net.IP) (uint32, error) {
 	if ipv4 == nil {
 		return 0, fmt.Errorf("ip addr nil")
 	}
-	return  binary.LittleEndian.Uint32([]byte(ipv4)), nil
+	return binary.LittleEndian.Uint32([]byte(ipv4)), nil
 }

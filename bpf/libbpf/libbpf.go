@@ -187,7 +187,7 @@ func (o *Obj) Close() error {
 	return fmt.Errorf("error: libbpf obj nil")
 }
 
-func (m *Map) SetGlobalVars(hostIP, intfIP, extToSvcMark uint32, tmtu, vxlanPort, psNatStart, psNatLen uint16) error {
+func SetGlobalVars(m *Map, hostIP, intfIP, extToSvcMark uint32, tmtu, vxlanPort, psNatStart, psNatLen uint16) error {
 	_, err := C.bpf_set_global_vars(m.bpfMap, C.uint(hostIP), C.uint(intfIP), C.uint(extToSvcMark),
 		C.ushort(tmtu), C.ushort(vxlanPort), C.ushort(psNatStart), C.ushort(psNatLen))
 	return err
