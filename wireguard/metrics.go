@@ -146,7 +146,7 @@ func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (ne
 	}
 }
 
-func (collector *Metrics) getWireGuardClient() (netlinkshim.Wireguard, error) {
+func (collector *Metrics) getWireguardClient() (netlinkshim.Wireguard, error) {
 	// lazily create wireguard client and cache it for future use
 	if collector.wireguardClient == nil {
 		wgClient, err := collector.newWireguardClient()
@@ -159,7 +159,7 @@ func (collector *Metrics) getWireGuardClient() (netlinkshim.Wireguard, error) {
 }
 
 func (collector *Metrics) getDevices() []*wgtypes.Device {
-	wgClient, err := collector.getWireGuardClient()
+	wgClient, err := collector.getWireguardClient()
 	if err != nil {
 		collector.logCtx.WithError(err).Debug("something went wrong initializing wireguard rpc client")
 		return nil
