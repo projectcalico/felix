@@ -147,7 +147,7 @@ func NewWireguardMetricsWithShims(hostname string, newWireguardClient func() (ne
 }
 
 func (collector *Metrics) getWireGuardClient() (netlinkshim.Wireguard, error) {
-	// lazily create wiregaurd client and cache it for future use
+	// lazily create wireguard client and cache it for future use
 	if collector.wireguardClient == nil {
 		wgClient, err := collector.newWireguardClient()
 		if err != nil {
