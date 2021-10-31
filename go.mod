@@ -29,20 +29,20 @@ require (
 	github.com/onsi/ginkgo v1.14.1
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
-	github.com/projectcalico/api v0.0.0-20211018181539-356e1052869a
-	github.com/projectcalico/libcalico-go v1.7.2-0.20211018200233-b533a742a142
-	github.com/projectcalico/pod2daemon v0.0.0-20211012221525-ebb83b8c009a
-	github.com/projectcalico/typha v0.7.3-0.20211018210905-a1a1818fa7bd
+	github.com/projectcalico/api v0.0.0-20211027233830-6b11a0f525e1
+	github.com/projectcalico/libcalico-go v1.7.2-0.20211028190301-9b43eae22410
+	github.com/projectcalico/pod2daemon v0.0.0-20211020230039-cbd1482bd13b
+	github.com/projectcalico/typha v0.7.3-0.20211028192208-eae8120e135a
 	github.com/prometheus/client_golang v1.7.1
 	github.com/prometheus/common v0.10.0
 	github.com/sirupsen/logrus v1.7.0
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/viper v1.7.0
 	github.com/vishvananda/netlink v1.1.1-0.20210703095558-21f2c55a7727
-	golang.org/x/net v0.0.0-20210520170846-37e1c6afe023
+	golang.org/x/net v0.0.0-20210927181540-4e4d966f7476
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
-	golang.org/x/sys v0.0.0-20210510120138-977fb7262007
-	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20200324154536-ceff61240acf
+	golang.org/x/sys v0.0.0-20210927094055-39ccf1dd6fa6
+	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20211027115401-c9b1ec1aa6d8
 	google.golang.org/grpc v1.27.1
 	gopkg.in/go-playground/validator.v9 v9.28.0 // indirect
 	k8s.io/api v0.22.0
