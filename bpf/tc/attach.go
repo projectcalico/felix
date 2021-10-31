@@ -72,6 +72,34 @@ func (ap AttachPoint) Log() *log.Entry {
 	})
 }
 
+func (ap AttachPoint) alreadyAttached(object string) (string, bool) {
+	logCxt := log.WithField("attachPoint", ap)
+	hook := "tc_" + string(ap.Hook)
+	progID, err := ap.ProgramID()
+	if err != nil {
+		logCxt.WithError(err).Debugf("Couldn't get the attached TC program ID. err=%w", err)
+		return "", false
+	}
+
+	progsToClean, err := ap.listAttachedPrograms()
+	if err != nil {
+		logCxt.WithError(err).Debugf("Couldn't get the list of already attached TC programs. err=%w", err)
+		return "", false
+	}
+
+	alreadyAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), hook, object, progID)
+	if err != nil {
+		logCxt.WithError(err).Debugf("Failed to check if BPF program was already attached. err=%w", err)
+		return "", false
+	}
+
+	if alreadyAttached && len(progsToClean) == 1 {
+		return progID, true
+	} else {
+		return "", false
+	}
+}
+
 // AttachProgram attaches a BPF program from a file to the TC attach point
 func (ap AttachPoint) AttachProgram() (string, error) {
 	logCxt := log.WithField("attachPoint", ap)
@@ -140,22 +168,12 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	}
 
 	// Check if the bpf object is already attached, and we should skip re-attaching it
-	hook := "tc_" + string(ap.Hook)
-	progID, err := ap.ProgramID()
-	if err != nil {
-		logCxt.WithError(err).Debug("Couldn't get the attached TC program ID. err=", err)
-	}
-
-	alreadyAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), hook, preCompiledBinary, progID)
-	if err != nil {
-		logCxt.WithError(err).Debug("Failed to check if BPF program was already attached. err=", err)
-	}
-
-	if alreadyAttached && len(progsToClean) == 1 {
-		logCxt.Info("Program already attached, skip reattaching")
+	progID, alreadyAttached := ap.alreadyAttached(preCompiledBinary)
+	if alreadyAttached {
+		logCxt.Debugf("Program already attached, skip reattaching %s", ap.FileName())
 		return progID, nil
 	}
-	logCxt.Info("Continue with attaching BPF program")
+	logCxt.Debugf("Continue with attaching BPF program %s", ap.FileName())
 
 	err = obj.Load()
 	if err != nil {
@@ -178,9 +196,9 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	}
 
 	// Remove json file of old program that contains program information
-	if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
+	/*if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
 		logCxt.WithError(err).Error("Failed to remove runtime information of old bpf program from disk. err=", err)
-	}
+	}*/
 
 	var progErrs []error
 	for _, p := range progsToClean {
@@ -209,6 +227,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		return "", fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
+	hook := "tc_" + string(ap.Hook)
 	// Store information of object in a json file so in future we can skip reattaching it
 	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, strconv.Itoa(progId)); err != nil {
 		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk; ignoring. err=", err)

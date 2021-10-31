@@ -64,6 +64,32 @@ func (ap *AttachPoint) Log() *log.Entry {
 	})
 }
 
+func (ap *AttachPoint) alreadyAttached(object string) (string, bool) {
+	progID, err := ap.ProgramID()
+	if err != nil {
+		ap.Log().Debugf("Couldn't get the attached XDP program ID. err=%w", err)
+		return "", false
+	}
+
+	somethingAttached, err := ap.IsAttached()
+	if err != nil {
+		ap.Log().Debugf("Failed to verify if any program is attached to interface. err=%w", err)
+		return "", false
+	}
+
+	alreadyAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), "xdp", object, progID)
+	if err != nil {
+		ap.Log().Debugf("Failed to check if BPF program was already attached. err=%w", err)
+		return "", false
+	}
+
+	if alreadyAttached && somethingAttached {
+		return progID, true
+	} else {
+		return "", false
+	}
+}
+
 func (ap *AttachPoint) AttachProgram() (string, error) {
 	preCompiledBinary := path.Join(bpf.ObjectDir, ap.FileName())
 	sectionName := ap.SectionName()
@@ -84,26 +110,12 @@ func (ap *AttachPoint) AttachProgram() (string, error) {
 	}
 
 	// Check if the bpf object is already attached, and we should skip re-attaching it
-	progID, err := ap.ProgramID()
-	if err != nil {
-		ap.Log().Debug("Couldn't get the attached XDP program ID. err=", err)
-	}
-
-	alreadyAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), "xdp", preCompiledBinary, progID)
-	if err != nil {
-		ap.Log().Debug("Failed to check if BPF program was already attached. err=", err)
-	}
-
-	somethingAttached, err := ap.IsAttached()
-	if err != nil {
-		ap.Log().Debug("Failed to verify if any program is attached to interface. err=", err)
-	}
-
-	if alreadyAttached && somethingAttached {
-		ap.Log().Info("Programs already attached, skip reattaching")
+	progID, alreadyAttached := ap.alreadyAttached(preCompiledBinary)
+	if alreadyAttached {
+		ap.Log().Debugf("Programs already attached, skip reattaching %s", ap.FileName())
 		return progID, nil
 	}
-	ap.Log().Info("Continue with attaching BPF program")
+	ap.Log().Debugf("Continue with attaching BPF program %s", ap.FileName())
 
 	// Note that there are a few considerations here.
 	//

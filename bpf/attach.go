@@ -39,11 +39,6 @@ type AttachedProgInfo struct {
 // match it against the hash we potentially stored before in a json file. Also verify that
 // the content of the file matches the Attach Point's fields including program ID, object name
 func AlreadyAttachedProg(iface, hook, object, id string) (bool, error) {
-	hash, err := sha256OfFile(object)
-	if err != nil {
-		return false, err
-	}
-
 	bytesToRead, err := ioutil.ReadFile(runtimeFilename(iface, hook))
 	if err != nil {
 		// If file does not exist, just ignore the err code, and return false
@@ -55,6 +50,11 @@ func AlreadyAttachedProg(iface, hook, object, id string) (bool, error) {
 
 	var progInfo AttachedProgInfo
 	if err = json.Unmarshal(bytesToRead, &progInfo); err != nil {
+		return false, err
+	}
+
+	hash, err := sha256OfFile(object)
+	if err != nil {
 		return false, err
 	}
 
