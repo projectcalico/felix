@@ -166,6 +166,7 @@ func (s *PolicySets) GetPolicySetRules(setIds []string, isInbound bool) (rules [
 			memberCopy := *member
 			memberCopy.Priority = currentPriority
 			rules = append(rules, &memberCopy)
+			log.WithField("member", memberCopy).Info("Adding policy set rule")
 
 			lastRule = &memberCopy
 		}
@@ -400,14 +401,17 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 		for _, m := range ipsetMembers {
 			// The member should be of the format <IP>,(tcp|udp):<port number>
 			addr, proto, port := parseIPPortMember(m)
+			logCtx := log.WithFields(log.Fields{"proto": proto, "port": port})
 			var pm *policyMembers
 			pm = membersByPort[fmt.Sprintf("%d/%s", proto, port)]
 			if pm == nil {
+				logCtx.Info("Making a new policyMembers")
 				pm = &policyMembers{proto: proto, port: port}
 				membersByPort[fmt.Sprintf("%d/%s", proto, port)] = pm
 				orderedPolicyMembers = append(orderedPolicyMembers, pm)
 			}
 			pm.addrs = append(pm.addrs, addr)
+			logCtx.WithField("addrs", addr).Info("Including addr in policyMembers")
 		}
 
 		for i, m := range orderedPolicyMembers {
@@ -418,8 +422,10 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 			if s.supportedFeatures.Acl.AclRuleId {
 				newPolicy.Id = fmt.Sprintf("%s-%s-%d", policyId, ruleCopy.RuleId, i)
 			}
+			log.WithField("newPolicy", newPolicy).Info("Adding new policy")
 			aclPolicies = append(aclPolicies, &newPolicy)
 		}
+		log.WithField("aclPolicies", aclPolicies).Info("Generated a policy for IPPortSetIDs")
 
 		// DstIpPortSetIds are mutually exclusive with other fields - if specified, then no other rule match criteria can be.
 		// The API validates against this, so simply return here.
@@ -661,11 +667,14 @@ func (s *PolicySets) getIPSetAddresses(setIds []string) ([]string, error) {
 	for _, ipsetId := range setIds {
 		found = false
 		for _, ipSets := range s.IpSets {
+			log.WithField("ipsetId", ipsetId).Info("Checking cached IPSet")
 			ipSet := ipSets.GetIPSetMembers(ipsetId)
 			if ipSet == nil {
+				log.WithField("ipsetId", ipsetId).Info("ipSet is nil")
 				continue
 			}
 			addresses = append(addresses, ipSet...)
+			log.WithField("ipsetId", ipsetId).WithField("members", addresses).Info("IP set found")
 			found = true
 			break
 		}
