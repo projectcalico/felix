@@ -148,6 +148,7 @@ func (s *IPSets) filterMembers(members []string) set.Set {
 	for _, member := range members {
 		isIPV6 := strings.Contains(member, ":")
 		if wantIPV6 != isIPV6 {
+			log.WithField("member", member).Info("Filtering member")
 			continue
 		}
 		filtered.Add(member)
