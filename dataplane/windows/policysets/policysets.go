@@ -661,11 +661,14 @@ func (s *PolicySets) getIPSetAddresses(setIds []string) ([]string, error) {
 	for _, ipsetId := range setIds {
 		found = false
 		for _, ipSets := range s.IpSets {
+			log.WithField("ipsetId", ipsetId).Info("Checking cached IPSet")
 			ipSet := ipSets.GetIPSetMembers(ipsetId)
 			if ipSet == nil {
+				log.WithField("ipsetId", ipsetId).Info("ipSet is nil")
 				continue
 			}
 			addresses = append(addresses, ipSet...)
+			log.WithField("ipsetId", ipsetId).Info("ipSet is nil")
 			found = true
 			break
 		}
