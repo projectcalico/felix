@@ -180,9 +180,9 @@ func (ap *AttachPoint) AttachProgram() (string, error) {
 		return "", fmt.Errorf("couldn't get the attached XDP program ID err=%v", err)
 	}
 
-	// program is now attached. Now we should store its information to prevent unncessary reloads in future
+	// program is now attached. Now we should store its information to prevent unnecessary reloads in future
 	if err = bpf.RememberAttachedProg(ap.IfaceName(), "xdp", preCompiledBinary, progID); err != nil {
-		ap.Log().Error("Failed to record hash of BPF program on disk; Ignoring. err=", err)
+		ap.Log().Errorf("Failed to record hash of BPF program on disk; Ignoring. err=%v", err)
 	}
 
 	return progID, nil

@@ -229,6 +229,9 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 
 	hook := "tc_" + string(ap.Hook)
 	// Store information of object in a json file so in future we can skip reattaching it
+	// If the process fails, the json file with the correct name and program details
+	// is not stored on disk, and during Felix restarts the same program will be reattached
+	// which leads to an unnecessary load time
 	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, strconv.Itoa(progId)); err != nil {
 		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk; ignoring. err=", err)
 	}
