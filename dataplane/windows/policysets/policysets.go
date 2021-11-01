@@ -166,6 +166,7 @@ func (s *PolicySets) GetPolicySetRules(setIds []string, isInbound bool) (rules [
 			memberCopy := *member
 			memberCopy.Priority = currentPriority
 			rules = append(rules, &memberCopy)
+			log.WithField("member", memberCopy).Info("Adding policy set rule")
 
 			lastRule = &memberCopy
 		}
@@ -421,6 +422,7 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 			if s.supportedFeatures.Acl.AclRuleId {
 				newPolicy.Id = fmt.Sprintf("%s-%s-%d", policyId, ruleCopy.RuleId, i)
 			}
+			log.WithField("newPolicy", newPolicy).Info("Adding new policy")
 			aclPolicies = append(aclPolicies, &newPolicy)
 		}
 		log.WithField("aclPolicies", aclPolicies).Info("Generated a policy for IPPortSetIDs")
