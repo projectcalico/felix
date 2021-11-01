@@ -47,7 +47,7 @@ var (
 // match it against the hash we potentially stored before in a json file. Also verify that
 // the content of the file matches the Attach Point's fields including program ID, object name
 func AlreadyAttachedProg(iface, hook, object, id string) (bool, error) {
-	bytesToRead, err := ioutil.ReadFile(runtimeFilename(iface, hook))
+	bytesToRead, err := ioutil.ReadFile(RuntimeJSONFilename(iface, hook))
 	if err != nil {
 		// If file does not exist, just ignore the err code, and return false
 		if os.IsNotExist(err) {
@@ -99,7 +99,7 @@ func RememberAttachedProg(iface, hook, object, id string) error {
 		return err
 	}
 
-	if err = ioutil.WriteFile(runtimeFilename(iface, hook), bytesToWrite, 0600); err != nil {
+	if err = ioutil.WriteFile(RuntimeJSONFilename(iface, hook), bytesToWrite, 0600); err != nil {
 		return err
 	}
 
@@ -108,7 +108,7 @@ func RememberAttachedProg(iface, hook, object, id string) error {
 
 // Remove the hash file of an Attach Point from disk
 func ForgetAttachedProg(iface, hook string) error {
-	err := os.Remove(runtimeFilename(iface, hook))
+	err := os.Remove(RuntimeJSONFilename(iface, hook))
 	// If the hash file does not exist, just ignore the err code, and return false
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -142,7 +142,7 @@ func CleanAttachedProgDir() {
 	expectedJSONFiles := set.New()
 	for _, iface := range interfaces {
 		for _, hook := range runtimeJSONsuffixes {
-			expectedJSONFiles.Add(runtimeFilename(iface.Name, hook))
+			expectedJSONFiles.Add(RuntimeJSONFilename(iface.Name, hook))
 		}
 	}
 
@@ -172,8 +172,8 @@ func CleanAttachedProgDir() {
 	}
 }
 
-// The file name is [iface name]_[hook name].json, for example, eth0_tc_egress.json
-func runtimeFilename(iface, hook string) string {
+// The file name is [iface name]_[tc_hook name | xdp].json, for example, eth0_tc_egress.json
+func RuntimeJSONFilename(iface, hook string) string {
 	filename := path.Join(RuntimeProgDir, iface+"_tc_"+hook+".json")
 	if strings.ToLower(hook) == "xdp" {
 		return path.Join(RuntimeProgDir, iface+"_xdp.json")
