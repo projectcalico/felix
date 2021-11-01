@@ -85,9 +85,8 @@ func (ap *AttachPoint) AlreadyAttached(object string) (string, bool) {
 
 	if isAttached && somethingAttached {
 		return progID, true
-	} else {
-		return "", false
 	}
+	return "", false
 }
 
 func (ap *AttachPoint) AttachProgram() (string, error) {

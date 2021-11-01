@@ -94,9 +94,8 @@ func (ap AttachPoint) AlreadyAttached(object string) (string, bool) {
 
 	if isAttached && len(progsToClean) == 1 {
 		return progID, true
-	} else {
-		return "", false
 	}
+	return "", false
 }
 
 // AttachProgram attaches a BPF program from a file to the TC attach point
@@ -197,7 +196,6 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
-
 		attemptCleanup := func() error {
 			_, err := ExecTC("filter", "del", "dev", ap.Iface, string(ap.Hook), "pref", p.pref, "handle", p.handle, "bpf")
 			return err

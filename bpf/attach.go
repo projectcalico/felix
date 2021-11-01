@@ -146,10 +146,6 @@ func CleanAttachedProgDir() {
 		}
 	}
 
-	expectedJSONFiles.Iter(func(item interface{}) error {
-		return nil
-	})
-
 	err = filepath.Walk(RuntimeProgDir, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
