@@ -78,7 +78,7 @@ func ConfigureEarlyLogging() {
 			log.WithError(err).Error("Failed to parse early log level, defaulting to error.")
 		}
 	}
-	log.SetLevel(logLevelScreen)
+	log.SetLevel(log.DebugLevel)
 	log.Infof("Early screen log level set to %v", logLevelScreen)
 }
 
@@ -101,7 +101,7 @@ func ConfigureLogging(configParams *config.Config) {
 	}
 	// Disable all more-verbose levels using the global setting, this ensures that debug logs
 	// are filtered out as early as possible.
-	log.SetLevel(mostVerboseLevel)
+	log.SetLevel(log.DebugLevel)
 
 	// Screen target.
 	var dests []*logutils.Destination
