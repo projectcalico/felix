@@ -64,7 +64,7 @@ func (ap *AttachPoint) Log() *log.Entry {
 	})
 }
 
-func (ap *AttachPoint) alreadyAttached(object string) (string, bool) {
+func (ap *AttachPoint) AlreadyAttached(object string) (string, bool) {
 	progID, err := ap.ProgramID()
 	if err != nil {
 		ap.Log().Debugf("Couldn't get the attached XDP program ID. err=%v", err)
@@ -110,7 +110,7 @@ func (ap *AttachPoint) AttachProgram() (string, error) {
 	}
 
 	// Check if the bpf object is already attached, and we should skip re-attaching it
-	progID, isAttached := ap.alreadyAttached(preCompiledBinary)
+	progID, isAttached := ap.AlreadyAttached(preCompiledBinary)
 	if isAttached {
 		ap.Log().Debugf("Programs already attached, skip reattaching %s", ap.FileName())
 		return progID, nil
