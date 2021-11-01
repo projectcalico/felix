@@ -168,6 +168,7 @@ func (s *IPSets) filterMembers(members []string, setType ipsets.IPSetType) set.S
 		}
 		filtered.Add(member)
 	}
+	log.WithField("members", filtered).Info("Members after filtering")
 	return filtered
 }
 
