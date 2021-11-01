@@ -112,6 +112,7 @@ func (idx *ServiceIndex) UpdateEndpointSlice(es *discovery.EndpointSlice) {
 				// input data.
 				refCount := ipSet.memberToRefCount[member] + 1
 				if refCount == 1 {
+					log.WithField("member", member).Info("CASEY: Member added")
 					idx.OnMemberAdded(ipSet.ID, member)
 				}
 				ipSet.memberToRefCount[member] = refCount
@@ -284,6 +285,7 @@ func (idx *ServiceIndex) UpdateIPSet(id string, serviceName string) {
 			refCount := as.memberToRefCount[m]
 			if refCount == 0 {
 				// This member hasn't been sent to the data plane yet. Send it.
+				log.WithField("member", m).Info("CASEY: Member added")
 				idx.OnMemberAdded(id, m)
 			}
 			as.memberToRefCount[m] = refCount + 1

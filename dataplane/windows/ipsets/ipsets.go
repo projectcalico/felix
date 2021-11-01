@@ -90,7 +90,7 @@ func (s *IPSets) AddMembers(setID string, newMembers []string) {
 	s.logCxt.WithFields(log.Fields{
 		"setID":           setID,
 		"filteredMembers": filteredMembers,
-	}).Debug("Adding new members to IP set")
+	}).Info("Adding new members to IP set")
 	filteredMembers.Iter(func(m interface{}) error {
 		ipSet.Members.Add(m)
 		return nil
