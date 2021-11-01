@@ -194,11 +194,6 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		return "", err
 	}
 
-	// Remove json file of old program that contains program information
-	/*if err = bpf.ForgetAttachedProg(ap.IfaceName(), string(ap.Hook)); err != nil {
-		logCxt.WithError(err).Error("Failed to remove runtime information of old bpf program from disk. err=", err)
-	}*/
-
 	var progErrs []error
 	for _, p := range progsToClean {
 		log.WithField("prog", p).Debug("Cleaning up old calico program")
