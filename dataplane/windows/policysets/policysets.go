@@ -382,7 +382,7 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 			splits = strings.Split(protoPort, ":")
 			protocol := protocolNameToNumber(splits[0])
 			port := splits[1]
-			return addr, protocol, port
+			return fmt.Sprintf("%s/32", addr), protocol, port
 		}
 
 		// Each member includes both an address and a port.

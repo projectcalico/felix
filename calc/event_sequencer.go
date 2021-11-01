@@ -179,7 +179,7 @@ func (buf *EventSequencer) OnIPSetRemoved(setID string) {
 }
 
 func (buf *EventSequencer) OnIPSetMemberAdded(setID string, member labelindex.IPSetMember) {
-	log.Debugf("IP set %v now contains %v", setID, member)
+	log.Infof("IP set %v now contains %v", setID, member)
 	_, updatePending := buf.pendingAddedIPSets[setID]
 	if !buf.sentIPSets.Contains(setID) && !updatePending {
 		log.WithField("setID", setID).Panic("Member added to unknown IP set")
