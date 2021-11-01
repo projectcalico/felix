@@ -221,7 +221,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		return "", fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
-	// Store information of object in a json file so in future we can skip reattaching it
+	// Store information of object in a json file so in future we can skip reattaching it.
 	// If the process fails, the json file with the correct name and program details
 	// is not stored on disk, and during Felix restarts the same program will be reattached
 	// which leads to an unnecessary load time

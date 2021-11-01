@@ -38,6 +38,8 @@ type AttachedProgInfo struct {
 }
 
 var (
+	// These are possible hooks for a bpf program. "ingress" and "egress" imply TC program
+	// and each one reflects traffic direction. "xdp" implies xdp programs.
 	runtimeJSONsuffixes = []string{"ingress", "egress", "xdp"}
 )
 
