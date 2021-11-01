@@ -25,7 +25,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
+	"github.com/projectcalico/libcalico-go/lib/set"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -34,6 +36,10 @@ type AttachedProgInfo struct {
 	Hash   string `json:"hash"`
 	ID     string `json:"id"`
 }
+
+var (
+	runtimeJSONsuffixes = []string{"ingress", "egress", "xdp"}
+)
 
 // Compute a sha265 hash of the bpf object we are going to attach to an interface and
 // match it against the hash we potentially stored before in a json file. Also verify that
@@ -110,8 +116,7 @@ func ForgetAttachedProg(iface, hook string) error {
 
 // Remove any hash file related to an interface
 func ForgetIfaceAttachedProg(iface string) error {
-	hooks := []string{"tc_ingress", "tc_egress", "xdp"}
-	for _, hook := range hooks {
+	for _, hook := range runtimeJSONsuffixes {
 		err := ForgetAttachedProg(iface, hook)
 		if err != nil {
 			return err
@@ -132,13 +137,16 @@ func CleanAttachedProgDir() {
 		log.Errorf("Failed to get list of interfaces. err=%v", err)
 	}
 
-	suffixes := []string{"tc_ingress", "tc_egress", "xdp"}
-	expectedJSONFiles := make(map[string]interface{})
+	expectedJSONFiles := set.New()
 	for _, iface := range interfaces {
-		for _, suffix := range suffixes {
-			expectedJSONFiles[runtimeFilename(iface.Name, suffix)] = nil
+		for _, hook := range runtimeJSONsuffixes {
+			expectedJSONFiles.Add(runtimeFilename(iface.Name, hook))
 		}
 	}
+
+	expectedJSONFiles.Iter(func(item interface{}) error {
+		return nil
+	})
 
 	err = filepath.Walk(RuntimeProgDir, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -147,7 +155,7 @@ func CleanAttachedProgDir() {
 		if p == RuntimeProgDir {
 			return nil
 		}
-		if _, exists := expectedJSONFiles[p]; !exists {
+		if !expectedJSONFiles.Contains(p) {
 			err := os.Remove(p)
 			if err != nil && !os.IsNotExist(err) {
 				return err
@@ -164,7 +172,11 @@ func CleanAttachedProgDir() {
 
 // The file name is [iface name]_[hook name].json, for example, eth0_tc_egress.json
 func runtimeFilename(iface, hook string) string {
-	return path.Join(RuntimeProgDir, iface+"_"+hook+".json")
+	filename := path.Join(RuntimeProgDir, iface+"_tc_"+hook+".json")
+	if strings.ToLower(hook) == "xdp" {
+		return path.Join(RuntimeProgDir, iface+"_xdp.json")
+	}
+	return filename
 }
 
 func sha256OfFile(name string) (string, error) {

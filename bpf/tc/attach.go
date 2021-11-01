@@ -74,7 +74,6 @@ func (ap AttachPoint) Log() *log.Entry {
 
 func (ap AttachPoint) AlreadyAttached(object string) (string, bool) {
 	logCxt := log.WithField("attachPoint", ap)
-	hook := "tc_" + string(ap.Hook)
 	progID, err := ap.ProgramID()
 	if err != nil {
 		logCxt.WithError(err).Debugf("Couldn't get the attached TC program ID. err=%v", err)
@@ -87,7 +86,7 @@ func (ap AttachPoint) AlreadyAttached(object string) (string, bool) {
 		return "", false
 	}
 
-	isAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), hook, object, progID)
+	isAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), string(ap.Hook), object, progID)
 	if err != nil {
 		logCxt.WithError(err).Debugf("Failed to check if BPF program was already attached. err=%v", err)
 		return "", false
@@ -227,12 +226,11 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 		return "", fmt.Errorf("failed to clean up one or more old calico programs: %v", progErrs)
 	}
 
-	hook := "tc_" + string(ap.Hook)
 	// Store information of object in a json file so in future we can skip reattaching it
 	// If the process fails, the json file with the correct name and program details
 	// is not stored on disk, and during Felix restarts the same program will be reattached
 	// which leads to an unnecessary load time
-	if err = bpf.RememberAttachedProg(ap.IfaceName(), hook, preCompiledBinary, strconv.Itoa(progId)); err != nil {
+	if err = bpf.RememberAttachedProg(ap.IfaceName(), string(ap.Hook), preCompiledBinary, strconv.Itoa(progId)); err != nil {
 		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk; ignoring. err=", err)
 	}
 	return strconv.Itoa(progId), nil
@@ -574,7 +572,7 @@ func RemoveQdisc(ifaceName, hook string) error {
 	}
 
 	// Remove the hash file of the program attached to the interface
-	if err = bpf.ForgetAttachedProg(ifaceName, "tc_"+hook); err != nil {
+	if err = bpf.ForgetAttachedProg(ifaceName, hook); err != nil {
 		return fmt.Errorf("Failed to remove hash file: %w", err)
 	}
 
