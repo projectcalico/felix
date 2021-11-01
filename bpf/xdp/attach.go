@@ -67,19 +67,19 @@ func (ap *AttachPoint) Log() *log.Entry {
 func (ap *AttachPoint) alreadyAttached(object string) (string, bool) {
 	progID, err := ap.ProgramID()
 	if err != nil {
-		ap.Log().Debugf("Couldn't get the attached XDP program ID. err=%w", err)
+		ap.Log().Debugf("Couldn't get the attached XDP program ID. err=%v", err)
 		return "", false
 	}
 
 	somethingAttached, err := ap.IsAttached()
 	if err != nil {
-		ap.Log().Debugf("Failed to verify if any program is attached to interface. err=%w", err)
+		ap.Log().Debugf("Failed to verify if any program is attached to interface. err=%v", err)
 		return "", false
 	}
 
 	alreadyAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), "xdp", object, progID)
 	if err != nil {
-		ap.Log().Debugf("Failed to check if BPF program was already attached. err=%w", err)
+		ap.Log().Debugf("Failed to check if BPF program was already attached. err=%v", err)
 		return "", false
 	}
 
