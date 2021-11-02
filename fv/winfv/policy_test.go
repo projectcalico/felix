@@ -64,8 +64,12 @@ func getPodIP(name, namespace string) string {
 
 func kubectlExec(command string) error {
 	cmd := fmt.Sprintf(`c:\k\kubectl.exe --kubeconfig=c:\k\config -n demo exec %v`, command)
-	_, _, err := powershell(cmd)
-	return err
+	stdout, stderr, err := powershell(cmd)
+	if err != nil {
+		log.WithFields(log.Fields{"stderr": stderr, "stdout": stdout}).WithError(err).Error("Error running kubectl command")
+		return err
+	}
+	return nil
 }
 
 func newClient() clientv3.Interface {
@@ -159,7 +163,7 @@ var _ = Describe("Windows policy test", func() {
 
 			// Assert that it's now reachable.
 			err = kubectlExec(`-t porter -- powershell -Command 'Invoke-WebRequest -UseBasicParsing -SkipCertificateCheck -TimeoutSec 5 https://kubernetes.default.svc.cluster.local'`)
-			Expect(err).To(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })
