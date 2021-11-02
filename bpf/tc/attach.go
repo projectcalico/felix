@@ -76,19 +76,19 @@ func (ap AttachPoint) AlreadyAttached(object string) (string, bool) {
 	logCxt := log.WithField("attachPoint", ap)
 	progID, err := ap.ProgramID()
 	if err != nil {
-		logCxt.WithError(err).Debugf("Couldn't get the attached TC program ID. err=%v", err)
+		logCxt.WithError(err).Debugf("Couldn't get the attached TC program ID.")
 		return "", false
 	}
 
 	progsToClean, err := ap.listAttachedPrograms()
 	if err != nil {
-		logCxt.WithError(err).Debugf("Couldn't get the list of already attached TC programs. err=%v", err)
+		logCxt.WithError(err).Debugf("Couldn't get the list of already attached TC programs")
 		return "", false
 	}
 
 	isAttached, err := bpf.AlreadyAttachedProg(ap.IfaceName(), string(ap.Hook), object, progID)
 	if err != nil {
-		logCxt.WithError(err).Debugf("Failed to check if BPF program was already attached. err=%v", err)
+		logCxt.WithError(err).Debugf("Failed to check if BPF program was already attached.")
 		return "", false
 	}
 
