@@ -115,7 +115,7 @@ void bpf_tc_set_globals(struct bpf_map *map,
 			ushort psnat_start,
 			ushort psnat_len)
 {
-	struct cali_global_data data = {
+	struct cali_tc_globals data = {
 	    .host_ip = hostIP,
 	    .tunnel_mtu = tmtu,
 	    .vxlan_port = vxlanPort,
@@ -124,7 +124,7 @@ void bpf_tc_set_globals(struct bpf_map *map,
 	    .psnat_start = psnat_start,
 	    .psnat_len = psnat_len,
 	};
-	set_errno(bpf_map__set_initial_value(map, (void*)(&data), sizeof(struct cali_global_data)));
+	set_errno(bpf_map__set_initial_value(map, (void*)(&data), sizeof(data)));
 	return;
 }
 

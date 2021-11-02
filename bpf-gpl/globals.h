@@ -18,7 +18,7 @@
 #ifndef __CALI_GLOBALS_H__
 #define __CALI_GLOBALS_H__
 
-struct cali_global_data {
+struct cali_tc_globals {
 	__be32 host_ip;
 	__be16 tunnel_mtu;
 	__be16 vxlan_port;
