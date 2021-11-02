@@ -16,7 +16,6 @@ package fv
 
 import (
 	"regexp"
-	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -34,12 +33,16 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Felix bpf reattach object",
 
 	BeforeEach(func() {
 		infra = getInfra()
-		opts := infrastructure.DefaultTopologyOptions()
-
-		opts.ExtraEnvVars = map[string]string{
-			"FELIX_BPFENABLED":              "true",
-			"FELIX_DEBUGDISABLELOGDROPPING": "true",
+		//opts := infrastructure.DefaultTopologyOptions()
+		opts := infrastructure.TopologyOptions{
+			FelixLogSeverity: "debug",
+			DelayFelixStart:  true,
+			ExtraEnvVars: map[string]string{
+				"FELIX_BPFENABLED":              "true",
+				"FELIX_DEBUGDISABLELOGDROPPING": "true",
+			},
 		}
+
 		felixes, _ = infrastructure.StartNNodeTopology(1, opts, infra)
 
 		err := infra.AddAllowToDatastore("host-endpoint=='true'")
@@ -60,18 +63,27 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Felix bpf reattach object",
 
 	It("should not reattach bpf programs", func() {
 		felix := felixes[0]
-		log.Info("Felix is started")
+
 		// This should not happen at initial execution of felix, since there is no program attached
-		base := felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching"))
-		Eventually(base, "10s", "100ms").ShouldNot(BeClosed())
-		// This should happen at first execution of felix, since there is no program attached
-		firstRun := felix.WatchStdoutFor(regexp.MustCompile("Continue with attaching BPF program"))
-		Eventually(firstRun, "10s", "100ms").Should(BeClosed())
-		time.Sleep(3 * time.Second)
+		firstRunBase := felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching"))
+		// These should happen at first execution of felix, since there is no program attached
+		firstRunProg1 := felix.WatchStdoutFor(regexp.MustCompile("Continue with attaching BPF program to_hep_debug.o"))
+		firstRunProg2 := felix.WatchStdoutFor(regexp.MustCompile("Continue with attaching BPF program from_hep_fib_debug.o"))
+		log.Info("Starting Felix")
+		felix.TriggerDelayedStart()
+		Eventually(firstRunBase, "10s", "100ms").ShouldNot(BeClosed())
+		Eventually(firstRunProg1, "10s", "100ms").Should(BeClosed())
+		Eventually(firstRunProg2, "10s", "100ms").Should(BeClosed())
+
+		// This should not happen at initial execution of felix, since there is no program attached
+		secondRunBase := felix.WatchStdoutFor(regexp.MustCompile("Continue with attaching BPF program"))
+		// These should happen after restart of felix, since BPF programs are already attached
+		secondRunProg1 := felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching to_hep_debug.o"))
+		secondRunProg2 := felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching from_hep_fib_debug.o"))
+		log.Info("Restartin Felix")
 		felix.Restart()
-		log.Info("Felix is restarted")
-		// This should happen after restart of felix, since BPF programs are already attached
-		secondRun := felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching"))
-		Eventually(secondRun, "10s", "100ms").Should(BeClosed())
+		Eventually(secondRunBase, "10s", "100ms").ShouldNot(BeClosed())
+		Eventually(secondRunProg1, "10s", "100ms").Should(BeClosed())
+		Eventually(secondRunProg2, "10s", "100ms").Should(BeClosed())
 	})
 })

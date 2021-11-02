@@ -168,10 +168,10 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	// Check if the bpf object is already attached, and we should skip re-attaching it
 	progID, isAttached := ap.AlreadyAttached(preCompiledBinary)
 	if isAttached {
-		logCxt.Infof("Program already attached, skip reattaching %s", ap.FileName())
+		logCxt.Debugf("Program already attached, skip reattaching %s", ap.FileName())
 		return progID, nil
 	}
-	logCxt.Infof("Continue with attaching BPF program %s", ap.FileName())
+	logCxt.Debugf("Continue with attaching BPF program %s", ap.FileName())
 
 	err = obj.Load()
 	if err != nil {
@@ -224,7 +224,7 @@ func (ap AttachPoint) AttachProgram() (string, error) {
 	// is not stored on disk, and during Felix restarts the same program will be reattached
 	// which leads to an unnecessary load time
 	if err = bpf.RememberAttachedProg(ap.IfaceName(), string(ap.Hook), preCompiledBinary, strconv.Itoa(progId)); err != nil {
-		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk; ignoring. err=", err)
+		logCxt.WithError(err).Error("Failed to record hash of BPF program on disk; ignoring.")
 	}
 	return strconv.Itoa(progId), nil
 }
@@ -555,7 +555,7 @@ func HasQdisc(ifaceName string) (bool, error) {
 }
 
 // RemoveQdisc makes sure that there is no qdisc attached to the given interface
-func RemoveQdisc(ifaceName, hook string) error {
+func RemoveQdisc(ifaceName string) error {
 	hasQdisc, err := HasQdisc(ifaceName)
 	if err != nil {
 		return err
@@ -564,9 +564,12 @@ func RemoveQdisc(ifaceName, hook string) error {
 		return nil
 	}
 
-	// Remove the hash file of the program attached to the interface
-	if err = bpf.ForgetAttachedProg(ifaceName, hook); err != nil {
-		return fmt.Errorf("Failed to remove hash file: %w", err)
+	// Remove the json files of the programs attached to the interface for both directions
+	if err = bpf.ForgetAttachedProg(ifaceName, "ingress"); err != nil {
+		return fmt.Errorf("Failed to remove runtime json file of ingress direction: %w", err)
+	}
+	if err = bpf.ForgetAttachedProg(ifaceName, "egress"); err != nil {
+		return fmt.Errorf("Failed to remove runtime json file of egress direction: %w", err)
 	}
 
 	return libbpf.RemoveQDisc(ifaceName)

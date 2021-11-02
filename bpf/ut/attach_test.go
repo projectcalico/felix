@@ -144,9 +144,9 @@ func TestReattachPrograms(t *testing.T) {
 
 	// Remove both TC programs
 	t.Log("Removing all TC programs and cleaning up their jump maps, should keep only one jump map and hash file")
-	err = tc.RemoveQdisc(vethName1, string(ap1.Hook))
+	err = tc.RemoveQdisc(vethName1)
 	Expect(err).NotTo(HaveOccurred())
-	err = tc.RemoveQdisc(vethName2, string(ap2.Hook))
+	err = tc.RemoveQdisc(vethName2)
 	Expect(err).NotTo(HaveOccurred())
 	tc.CleanUpJumpMaps()
 	Expect(countJumpMaps()).To(BeNumerically("==", startingJumpMaps+1), "unexpected number of jump maps")

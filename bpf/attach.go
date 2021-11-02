@@ -68,8 +68,7 @@ func AlreadyAttachedProg(iface, hook, object, id string) (bool, error) {
 
 	// Check the hash and other information we stored before, matches
 	// the object we are going to attach now
-	if progInfo.Hash == hash && progInfo.Object != "" && progInfo.Object == object &&
-		progInfo.ID != "" && progInfo.ID == id {
+	if progInfo.Hash == hash && progInfo.Object == object && progInfo.ID == id {
 		return true, nil
 	}
 
