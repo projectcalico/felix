@@ -71,9 +71,9 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Felix bpf reattach object",
 		firstRunProg2 := felix.WatchStdoutFor(regexp.MustCompile("Continue with attaching BPF program from_hep_fib_debug.o"))
 		log.Info("Starting Felix")
 		felix.TriggerDelayedStart()
-		Eventually(firstRunBase, "10s", "100ms").ShouldNot(BeClosed())
 		Eventually(firstRunProg1, "10s", "100ms").Should(BeClosed())
 		Eventually(firstRunProg2, "10s", "100ms").Should(BeClosed())
+		Expect(firstRunBase).NotTo(BeClosed())
 
 		// This should not happen at initial execution of felix, since there is no program attached
 		secondRunBase := felix.WatchStdoutFor(regexp.MustCompile("Continue with attaching BPF program"))
@@ -82,8 +82,8 @@ var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Felix bpf reattach object",
 		secondRunProg2 := felix.WatchStdoutFor(regexp.MustCompile("Program already attached, skip reattaching from_hep_fib_debug.o"))
 		log.Info("Restartin Felix")
 		felix.Restart()
-		Eventually(secondRunBase, "10s", "100ms").ShouldNot(BeClosed())
 		Eventually(secondRunProg1, "10s", "100ms").Should(BeClosed())
 		Eventually(secondRunProg2, "10s", "100ms").Should(BeClosed())
+		Expect(secondRunBase).NotTo(BeClosed())
 	})
 })
