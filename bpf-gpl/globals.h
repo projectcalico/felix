@@ -27,4 +27,9 @@ struct cali_tc_globals {
 	__be16 psnat_start;
 	__be16 psnat_len;
 };
+
+struct cali_ctl_globals {
+	__be32 udp_connect_disabled;
+};
+
 #endif /* __CALI_GLOBALS_H__ */

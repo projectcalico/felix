@@ -107,8 +107,8 @@ int bpf_link_destroy(struct bpf_link *link) {
 }
 
 void bpf_tc_set_globals(struct bpf_map *map,
-			uint hostIP,
-			uint intfIP,
+			uint host_ip,
+			uint intf_ip,
 			uint ext_to_svc_mark,
 			ushort tmtu,
 			ushort vxlanPort,
@@ -116,16 +116,16 @@ void bpf_tc_set_globals(struct bpf_map *map,
 			ushort psnat_len)
 {
 	struct cali_tc_globals data = {
-	    .host_ip = hostIP,
+	    .host_ip = host_ip,
 	    .tunnel_mtu = tmtu,
 	    .vxlan_port = vxlanPort,
-	    .intf_ip = intfIP,
+	    .intf_ip = intf_ip,
 	    .ext_to_svc_mark = ext_to_svc_mark,
 	    .psnat_start = psnat_start,
 	    .psnat_len = psnat_len,
 	};
+
 	set_errno(bpf_map__set_initial_value(map, (void*)(&data), sizeof(data)));
-	return;
 }
 
 struct bpf_link *bpf_program_attach_cgroup(struct bpf_object *obj, int cgroup_fd, char *name)
@@ -147,4 +147,13 @@ struct bpf_link *bpf_program_attach_cgroup(struct bpf_object *obj, int cgroup_fd
 out:
 	set_errno(err);
 	return link;
+}
+
+void bpf_ctlb_set_globals(struct bpf_map *map, bool udp_connect_disabled)
+{
+	struct cali_ctl_globals data = {
+	    .udp_connect_disabled = udp_connect_disabled,
+	};
+
+	set_errno(bpf_map__set_initial_value(map, (void*)(&data), sizeof(data)));
 }

@@ -25,11 +25,14 @@
 
 #include <stdbool.h>
 
+#include "globals.h"
 #include "bpf.h"
 #include "log.h"
 #include "nat.h"
 
 #include "sendrecv.h"
+
+const volatile struct cali_ctl_globals globals;
 
 static CALI_BPF_INLINE void do_nat_common(struct bpf_sock_addr *ctx, __u8 proto)
 {
@@ -120,8 +123,13 @@ int calico_connect_v4(struct bpf_sock_addr *ctx)
 		ip_proto = IPPROTO_TCP;
 		break;
 	case SOCK_DGRAM:
-		CALI_DEBUG("SOCK_DGRAM -> assuming UDP - not supported\n");
-		goto out;
+		if (globals.udp_connect_disabled) {
+			CALI_DEBUG("SOCK_DGRAM -> assuming UDP - not supported\n");
+			goto out;
+		}
+		CALI_DEBUG("SOCK_DGRAM -> assuming UDP\n");
+		ip_proto = IPPROTO_UDP;
+		break;
 	default:
 		CALI_DEBUG("Unknown socket type: %d\n", (int)ctx->type);
 		goto out;

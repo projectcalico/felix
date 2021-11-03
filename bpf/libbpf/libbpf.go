@@ -244,3 +244,9 @@ func TcSetGlobals(
 
 	return err
 }
+
+func CTLBSetGlobals(m *Map, udpConnectDisabled bool) error {
+	_, err := C.bpf_ctlb_set_globals(m.bpfMap, C.bool(udpConnectDisabled))
+
+	return err
+}

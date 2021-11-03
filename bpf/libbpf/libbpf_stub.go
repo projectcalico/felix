@@ -83,6 +83,10 @@ func (m *Map) IsMapInternal() bool {
 	panic("LIBBPF syscall stub")
 }
 
-func TcSetGlobals(m *Map, hostIP, intfIP, extToSvcMark uint32, tmtu, vxlanPort, psNatStart, psNatLen uint16) error {
+func TcSetGlobals(_ *Map, _, _, _ uint32, _, _, _, _ uint16) error {
+	panic("LIBBPF syscall stub")
+}
+
+func CTLBSetGlobals(_ *Map, _ bool) error {
 	panic("LIBBPF syscall stub")
 }
