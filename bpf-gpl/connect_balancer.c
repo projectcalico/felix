@@ -25,18 +25,14 @@
 
 #include <stdbool.h>
 
+#include "globals.h"
 #include "bpf.h"
 #include "log.h"
 #include "nat.h"
 
 #include "sendrecv.h"
 
-__attribute__((section("calico_connect_v4_noop")))
-int cali_noop_v4(struct bpf_sock_addr *ctx)
-{
-	CALI_INFO("Noop program executing\n");
-	return 1;
-}
+const volatile struct cali_ctl_globals globals;
 
 static CALI_BPF_INLINE void do_nat_common(struct bpf_sock_addr *ctx, __u8 proto)
 {
@@ -107,8 +103,8 @@ out:
 	return;
 }
 
-__attribute__((section("calico_connect_v4")))
-int cali_ctlb_v4(struct bpf_sock_addr *ctx)
+SEC("cgroup/connect4")
+int calico_connect_v4(struct bpf_sock_addr *ctx)
 {
 	CALI_DEBUG("calico_connect_v4\n");
 
@@ -127,6 +123,10 @@ int cali_ctlb_v4(struct bpf_sock_addr *ctx)
 		ip_proto = IPPROTO_TCP;
 		break;
 	case SOCK_DGRAM:
+		if (globals.udp_connect_disabled) {
+			CALI_DEBUG("SOCK_DGRAM -> assuming UDP - not supported\n");
+			goto out;
+		}
 		CALI_DEBUG("SOCK_DGRAM -> assuming UDP\n");
 		ip_proto = IPPROTO_UDP;
 		break;
@@ -141,8 +141,8 @@ out:
 	return 1;
 }
 
-__attribute__((section("calico_sendmsg_v4")))
-int cali_ctlb_sendmsg_v4(struct bpf_sock_addr *ctx)
+SEC("cgroup/sendmsg4")
+int calico_sendmsg_v4(struct bpf_sock_addr *ctx)
 {
 	CALI_DEBUG("sendmsg_v4 %x:%d\n",
 			bpf_ntohl(ctx->user_ip4), bpf_ntohl(ctx->user_port)>>16);
@@ -158,8 +158,8 @@ out:
 	return 1;
 }
 
-__attribute__((section("calico_recvmsg_v4")))
-int cali_ctlb_recvmsg_v4(struct bpf_sock_addr *ctx)
+SEC("cgroup/recvmsg4")
+int calico_recvmsg_v4(struct bpf_sock_addr *ctx)
 {
 	CALI_DEBUG("recvmsg_v4 %x:%d\n", bpf_ntohl(ctx->user_ip4), ctx_port_to_host(ctx->user_port));
 
