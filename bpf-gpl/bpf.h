@@ -238,7 +238,7 @@ static CALI_BPF_INLINE void ip_dec_ttl(struct iphdr *ip)
 
 #define ip_ttl_exceeded(ip) (CALI_F_TO_HOST && !CALI_F_TUNNEL && (ip)->ttl <= 1)
 #if !defined(__BPFTOOL_LOADER__) && !defined (__IPTOOL_LOADER__)
-extern const volatile struct cali_global_data global_data;
+extern const volatile struct cali_tc_globals global_data;
 #define CALI_CONFIGURABLE_DEFINE(name, pattern)
 #define CALI_CONFIGURABLE(name)  global_data.name
 #else
