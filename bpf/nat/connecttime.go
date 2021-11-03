@@ -113,7 +113,9 @@ func installProgram(name, ipver, bpfMount, cgroupPath, logLevel string) error {
 		// The values are read only for the BPF programs, but can be set to a value from
 		// userspace before the program is loaded.
 		if m.IsMapInternal() {
-			log.WithField("prog", progName).Warn("Load-time configuration not supported, using defaults.")
+			if err := libbpf.CTLBSetGlobals(m, false); err != nil {
+				return fmt.Errorf("error setting globals: %w", err)
+			}
 			continue
 		}
 
