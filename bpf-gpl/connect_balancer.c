@@ -18,8 +18,9 @@
 
 #include "sendrecv.h"
 
-static CALI_BPF_INLINE void do_nat_common(struct bpf_sock_addr *ctx, __u8 proto)
+static CALI_BPF_INLINE int do_nat_common(struct bpf_sock_addr *ctx, __u8 proto)
 {
+	int err = 0;
 	/* We do not know what the source address is yet, we only know that it
 	 * is the localhost, so we might just use 0.0.0.0. That would not
 	 * conflict with traffic from elsewhere.
@@ -34,6 +35,9 @@ static CALI_BPF_INLINE void do_nat_common(struct bpf_sock_addr *ctx, __u8 proto)
 	nat_dest = calico_v4_nat_lookup(0, ctx->user_ip4, proto, dport_he, &res);
 	if (!nat_dest) {
 		CALI_INFO("NAT miss.\n");
+		if (res == NAT_NO_BACKEND) {
+			err = -1;
+		}
 		goto out;
 	}
 
@@ -84,12 +88,14 @@ static CALI_BPF_INLINE void do_nat_common(struct bpf_sock_addr *ctx, __u8 proto)
 	ctx->user_port = dport_be;
 
 out:
-	return;
+	return err;
 }
 
 SEC("cgroup/connect4")
 int calico_connect_v4(struct bpf_sock_addr *ctx)
 {
+	int ret = 1; /* OK value */
+
 	CALI_DEBUG("calico_connect_v4\n");
 
 	/* do not process anything non-TCP or non-UDP, but do not block it, will be
@@ -115,10 +121,12 @@ int calico_connect_v4(struct bpf_sock_addr *ctx)
 		goto out;
 	}
 
-	do_nat_common(ctx, ip_proto);
+	if (do_nat_common(ctx, ip_proto) != 0) {
+		ret = 0; /* ret != 1 generates an error in pre-connect */
+	}
 
 out:
-	return 1;
+	return ret;
 }
 
 SEC("cgroup/sendmsg4")
