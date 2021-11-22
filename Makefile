@@ -52,7 +52,6 @@ $(LOCAL_BUILD_DEP):
 endif
 
 FELIX_IMAGE    ?=calico/felix
-BUILD_IMAGES   ?=$(FELIX_IMAGE)
 DEV_REGISTRIES ?=$(DOCKERHUB_REGISTRY) quay.io
 LIBBPF_PATH=/go/src/github.com/projectcalico/felix/bpf-gpl/include/libbpf/src
 BPFGPL_PATH=/go/src/github.com/projectcalico/felix/bpf-gpl
