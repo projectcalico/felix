@@ -578,14 +578,14 @@ github.com/projectcalico/go-yaml-wrapper v0.0.0-20191112210931-090425220c54 h1:J
 github.com/projectcalico/go-yaml-wrapper v0.0.0-20191112210931-090425220c54/go.mod h1:UgC0aTQ2KMDxlX3lU/stndk7DMUBJqzN40yFiILHgxc=
 github.com/projectcalico/hcsshim v0.8.9-calico h1:aRrOWouDTzKwaIoRGMV/I1QikR+ikwj1G9T9h3wD090=
 github.com/projectcalico/hcsshim v0.8.9-calico/go.mod h1:5692vkUqntj1idxauYlpoINNKeqCiG6Sg38RRsjT5y8=
-github.com/projectcalico/libcalico-go v1.7.2-0.20210728180906-a1e445240f99 h1:n89xz50uPXiTHWsVp3yKwmnREBEmKnaJ6CdNYLaUIu8=
-github.com/projectcalico/libcalico-go v1.7.2-0.20210728180906-a1e445240f99/go.mod h1:CA54aw5b1PXwBWsl4k98ovXcLg8lw2X7OxiEqjjexFM=
+github.com/projectcalico/libcalico-go v1.7.2-0.20211119233558-c653387d23cf h1:C+iDaLvxOX9ZtxYpEgeSzbs2EJICVnz7VUYp2Ozn7SM=
+github.com/projectcalico/libcalico-go v1.7.2-0.20211119233558-c653387d23cf/go.mod h1:YWoBAH3g+WDoZIP/gJKC8gOLqbCuTkIxuc3tDw9Zy/Q=
 github.com/projectcalico/logrus v0.0.0-20180701205716-fc9bbf2f5799 h1:9jp4YoHqZvEKDW3Z9464x/whSRCWEinIo4/JifaKR+g=
 github.com/projectcalico/logrus v0.0.0-20180701205716-fc9bbf2f5799/go.mod h1:DfgrchabbtEO9wjOz5lVae+XRvjFKKWEA9GTMme6A8g=
 github.com/projectcalico/pod2daemon v0.0.0-20210416195010-6f2d574230b3 h1:FI93O4ZOPDZTySj971ayBc0ygGF/7/lEX4qciQcNjcs=
 github.com/projectcalico/pod2daemon v0.0.0-20210416195010-6f2d574230b3/go.mod h1:96lk2GRh7Z5QdPGRmZMC6DRxEOToaAlS+emdl4WiMPM=
-github.com/projectcalico/typha v0.7.3-0.20210818152856-7b2e4b5609f1 h1:JIekGU2JxwHCqdBVRZIUUWCG89Hz6VJGjQpHglx26+0=
-github.com/projectcalico/typha v0.7.3-0.20210818152856-7b2e4b5609f1/go.mod h1:QphGM3APHauWRrNxzyLsHfw+opw0jKpx003sI2qwz8E=
+github.com/projectcalico/typha v0.7.3-0.20211122094626-762bdcf75ae6 h1:CP5xaakDWLqONa+bMpwC2GjzPcm3SLQ3RKSDcGdrJ5M=
+github.com/projectcalico/typha v0.7.3-0.20211122094626-762bdcf75ae6/go.mod h1:dTBwVWf1LnzBm8UEcgkhaxirCCEalp8/oXv9Q0reBWI=
 github.com/prometheus/client_golang v0.9.1/go.mod h1:7SWBe2y4D6OKWSNQJUaRYU/AaXPKyh/dDVn+NZz0KFw=
 github.com/prometheus/client_golang v0.9.3/go.mod h1:/TN21ttK/J9q6uSwhBd54HahCDft0ttaMvbicHlPoso=
 github.com/prometheus/client_golang v1.0.0/go.mod h1:db9x61etRT2tGnBNRi70OPL5FsnadC4Ky3P0J6CfImo=
@@ -675,6 +675,7 @@ github.com/stretchr/testify v1.6.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/
 github.com/subosito/gotenv v1.2.0 h1:Slr1R9HxAlEKefgq5jn9U+DnETlIUa6HfgEzj0g5d7s=
 github.com/subosito/gotenv v1.2.0/go.mod h1:N0PQaV/YGNqwC0u51sEeR/aUtSLEXKX9iv69rRypqCw=
 github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635/go.mod h1:hkRG7XYTFWNJGYcbNJQlaLq0fg1yr4J4t/NcTQtrfww=
+github.com/tchap/go-patricia/v2 v2.3.1/go.mod h1:VZRHKAb53DLaG+nA9EaYYiaEx6YztwDlLElMsnSHD4k=
 github.com/thecodeteam/goscaleio v0.1.0/go.mod h1:68sdkZAsK8bvEwBlbQnlLS+xU+hvLYM/iQ8KXej1AwM=
 github.com/tidwall/pretty v1.0.0/go.mod h1:XNkn88O1ChpSDQmQeStsy+sBenx6DDtFZJxhVysOjyk=
 github.com/tmc/grpc-websocket-proxy v0.0.0-20170815181823-89b8d40f7ca8/go.mod h1:ncp9v5uamzpCO7NfCPTXjqaC+bZgJeR0sMTm6dMHP7U=
@@ -1083,7 +1084,6 @@ gopkg.in/mgo.v2 v2.0.0-20180705113604-9856a29383ce/go.mod h1:yeKp02qBN3iKW1OzL3M
 gopkg.in/natefinch/lumberjack.v2 v2.0.0/go.mod h1:l0ndWWf7gzL7RNwBG7wST/UCcT4T24xpD6X8LsfU/+k=
 gopkg.in/resty.v1 v1.12.0/go.mod h1:mDo4pnntr5jdWRML875a/NmxYqAlA73dVijT2AXvQQo=
 gopkg.in/square/go-jose.v2 v2.2.2/go.mod h1:M9dMgbHiYLoDGQrXy7OpJDJWiKiU//h+vD76mk0e1AI=
-gopkg.in/tchap/go-patricia.v2 v2.2.6/go.mod h1:GjlIhdM7u6RWBtv58iEuqTR4NOShCtHo2EeySnNeNfs=
 gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 h1:uRGJdciOHaEIrze2W8Q3AKkepLTh2hOroT7a+7czfdQ=
 gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7/go.mod h1:dt/ZhP58zS4L8KSrWDmTeBkI65Dw0HsyUHuEVlX15mw=
 gopkg.in/warnings.v0 v0.1.1/go.mod h1:jksf8JmL6Qr/oQM2OXTHunEvvTAsrWBLb6OOjuVWRNI=
