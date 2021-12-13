@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/projectcalico/felix/fv/connectivity"
@@ -53,8 +52,9 @@ type Container struct {
 	stderrWatches []*watch
 	dataRaces     []string
 
-	logFinished sync.WaitGroup
-	dropAllLogs bool
+	logFinished  sync.WaitGroup
+	dropAllLogs  bool
+	trimLogSpace bool
 }
 
 type watch struct {
@@ -183,6 +183,7 @@ type RunOpts struct {
 	SameNamespace   *Container
 	StopTimeoutSecs int
 	StopSignal      string
+	TrimLogSpace    bool
 }
 
 func NextContainerIndex() int {
@@ -202,7 +203,10 @@ func UniqueName(namePrefix string) string {
 }
 
 func RunWithFixedName(name string, opts RunOpts, args ...string) (c *Container) {
-	c = &Container{Name: name}
+	c = &Container{
+		Name:         name,
+		trimLogSpace: opts.TrimLogSpace,
+	}
 
 	// Prep command to run the container.
 	log.WithField("container", c).Info("About to run container")
@@ -359,6 +363,14 @@ func (c *Container) copyOutputToLog(streamName string, stream io.Reader, done *s
 
 	for scanner.Scan() {
 		line := scanner.Text()
+
+		// Optionally, trim out whitespace and blank lines.
+		if c.trimLogSpace {
+			line = strings.TrimRight(line, " \n\r")
+			if line == "" {
+				continue
+			}
+		}
 
 		// Check if we're dropping logs (e.g. because we're tearing down the container at the end of the test).
 		c.mutex.Lock()
