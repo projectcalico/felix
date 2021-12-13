@@ -24,12 +24,11 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+	"github.com/projectcalico/felix/fv/containers"
+	"github.com/projectcalico/felix/fv/utils"
 	libapi "github.com/projectcalico/libcalico-go/lib/apis/v3"
 	client "github.com/projectcalico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/libcalico-go/lib/options"
-
-	"github.com/projectcalico/felix/fv/containers"
-	"github.com/projectcalico/felix/fv/utils"
 )
 
 type EtcdDatastoreInfra struct {
@@ -57,7 +56,7 @@ func GetEtcdDatastoreInfra() (*EtcdDatastoreInfra, error) {
 
 	// In BPF mode, start BPF logging.
 	if os.Getenv("FELIX_FV_ENABLE_BPF") == "true" {
-		eds.bpfLog = containers.Run("bpf-log", containers.RunOpts{AutoRemove: true}, "--privileged",
+		eds.bpfLog = containers.Run("bpf-log", containers.RunOpts{AutoRemove: true, TrimLogSpace: true}, "--privileged",
 			"calico/bpftool:v5.3-amd64", "/bpftool", "prog", "tracelog")
 	}
 
