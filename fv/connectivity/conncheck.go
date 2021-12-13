@@ -247,46 +247,77 @@ func (c *Checker) CheckConnectivityWithTimeout(timeout time.Duration, optionalDe
 	c.CheckConnectivityWithTimeoutOffset(2, timeout, optionalDescription...)
 }
 
+var extraTimeOnce sync.Once
+
 func (c *Checker) CheckConnectivityWithTimeoutOffset(callerSkip int, timeout time.Duration, optionalDescription ...interface{}) {
-	var expConnectivity []string
 	start := time.Now()
 
-	// Track the number of attempts. If the first connectivity check fails, we want to
-	// do at least one retry before we time out.  That covers the case where the first
-	// connectivity check takes longer than the timeout.
-	completedAttempts := 0
-	var actualConn []*Result
-	var actualConnPretty []string
-	for !c.RetriesDisabled && time.Since(start) < timeout || completedAttempts < 2 {
-		actualConn, actualConnPretty = c.ActualConnectivity()
-		failed := false
-		expConnectivity = c.ExpectedConnectivityPretty()
-		for i := range c.expectations {
-			exp := c.expectations[i]
-			act := actualConn[i]
-			if !exp.Matches(act, c.CheckSNAT) {
-				failed = true
-				actualConnPretty[i] += " <---- WRONG"
-				expConnectivity[i] += " <---- EXPECTED"
-			}
-		}
-		if !failed {
-			// Success!
-			return
-		}
-		completedAttempts++
+	// First attempt.
+	var problem string
+	if problem = c.doConnectivityCheck(); problem == "" {
+		return // Success!
 	}
 
-	message := fmt.Sprintf(
-		"Connectivity was incorrect:\n\nExpected\n    %s\nto match\n    %s",
-		strings.Join(actualConnPretty, "\n    "),
-		strings.Join(expConnectivity, "\n    "),
-	)
-	if c.OnFail != nil {
-		c.OnFail(message)
-	} else {
-		ginkgo.Fail(message, callerSkip)
+	if !c.RetriesDisabled {
+		// Always do a second attempt if we're allowed; in case the first attempt took a while and it raced
+		// with the timeout.
+		if problem = c.doConnectivityCheck(); problem == "" {
+			return // Success!
+		}
+
+		// Then, retry until the timeout.
+		for time.Since(start) < timeout {
+			problem = c.doConnectivityCheck()
+			if problem == "" {
+				// Success!
+				return
+			}
+		}
+
+		extraTimeOnce.Do(func() {
+			// If it's still failing, retry for another 30s to help to characterise flakes.
+			log.Error("First connectivity check to fail, giving it extra time to see if it would eventually converge:")
+			for time.Since(start) < timeout+60*time.Second {
+				postRetryProblem := c.doConnectivityCheck()
+				if postRetryProblem == "" {
+					// Success but after the expected timeout.
+					problem = "Connectivity *did* converge but only *after* the expected timeout passed.\n" +
+						fmt.Sprintf("Convergence time: %v; timeout: %v\n\n", time.Since(start), timeout) +
+						"At end of timeout: " + problem
+					break
+				}
+			}
+		})
 	}
+
+	if c.OnFail != nil {
+		c.OnFail(problem)
+	} else {
+		ginkgo.Fail(problem, callerSkip)
+	}
+}
+
+func (c *Checker) doConnectivityCheck() (problem string) {
+	failed := false
+	actualConn, actualConnPretty := c.ActualConnectivity()
+	expConnectivity := c.ExpectedConnectivityPretty()
+	for i := range c.expectations {
+		exp := c.expectations[i]
+		act := actualConn[i]
+		if !exp.Matches(act, c.CheckSNAT) {
+			failed = true
+			actualConnPretty[i] += " <---- WRONG"
+			expConnectivity[i] += " <---- EXPECTED"
+		}
+	}
+	if failed {
+		return fmt.Sprintf(
+			"Connectivity was incorrect:\n\nExpected\n    %s\nto match\n    %s",
+			strings.Join(actualConnPretty, "\n    "),
+			strings.Join(expConnectivity, "\n    "),
+		)
+	}
+	return ""
 }
 
 func NewRequest(payload string) Request {
