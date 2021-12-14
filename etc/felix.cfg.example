@@ -1,3 +1,0 @@
-[global]
-#EtcdAddr = localhost:4001
-#FelixHostname = hostname
