@@ -704,6 +704,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 				false,
 				hepListener,
 				newCallbacks(),
+				true,
 			)
 		})
 
@@ -1416,7 +1417,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 					}))
 				})
 			})
-
 		})
 
 		Context("with host endpoint configured before interface signaled", func() {
@@ -1470,7 +1470,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 		}
 
 		Describe("workload endpoints", func() {
-
 			Context("with a workload endpoint", func() {
 				wlEPID1 := proto.WorkloadEndpointID{
 					OrchestratorId: "k8s",
@@ -1514,7 +1513,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 					It("should have expected chains", expectWlChainsFor("cali12345-ab_policy1"))
 
 					Context("with another endpoint with the same interface name and earlier workload ID, and no policy", func() {
-
 						JustBeforeEach(func() {
 							epMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
 								Id: &proto.WorkloadEndpointID{
@@ -1541,7 +1539,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 						It("should have expected chains with no policy", expectWlChainsFor("cali12345-ab"))
 
 						Context("with the first endpoint removed", func() {
-
 							JustBeforeEach(func() {
 								epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
 									Id: &wlEPID1,
@@ -1555,7 +1552,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 							It("should have expected chains with no policy", expectWlChainsFor("cali12345-ab"))
 
 							Context("with the second endpoint removed", func() {
-
 								JustBeforeEach(func() {
 									epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
 										Id: &proto.WorkloadEndpointID{
@@ -1576,7 +1572,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 					})
 
 					Context("with another endpoint with the same interface name and later workload ID, and no policy", func() {
-
 						JustBeforeEach(func() {
 							epMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
 								Id: &proto.WorkloadEndpointID{
@@ -1603,7 +1598,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 						It("should have expected chains", expectWlChainsFor("cali12345-ab_policy1"))
 
 						Context("with the first endpoint removed", func() {
-
 							JustBeforeEach(func() {
 								epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
 									Id: &wlEPID1,
@@ -1617,7 +1611,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 							It("should have expected chains with no policy", expectWlChainsFor("cali12345-ab"))
 
 							Context("with the second endpoint removed", func() {
-
 								JustBeforeEach(func() {
 									epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
 										Id: &proto.WorkloadEndpointID{
@@ -1810,6 +1803,59 @@ func endpointManagerTests(ipVersion uint8) func() {
 						})
 					})
 
+					// Test that by disabling floatingIPs on the endpoint manager, even workload endpoints
+					// that have floating IP NAT addresses specified will not result in those routes being
+					// programmed.
+					Context("with floating IPs disasbled, but added to the endpoint", func() {
+						JustBeforeEach(func() {
+							epMgr.floatingIPsEnabled = false
+							epMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
+								Id: &wlEPID1,
+								Endpoint: &proto.WorkloadEndpoint{
+									State:      "active",
+									Mac:        "01:02:03:04:05:06",
+									Name:       "cali12345-ab",
+									ProfileIds: []string{},
+									Tiers:      []*proto.TierInfo{},
+									Ipv4Nets:   []string{"10.0.240.2/24"},
+									Ipv6Nets:   []string{"2001:db8:2::2/128"},
+									Ipv4Nat: []*proto.NatInfo{
+										{ExtIp: "172.16.1.3", IntIp: "10.0.240.2"},
+										{ExtIp: "172.18.1.4", IntIp: "10.0.240.2"},
+									},
+									Ipv6Nat: []*proto.NatInfo{
+										{ExtIp: "2001:db8:3::2", IntIp: "2001:db8:2::2"},
+										{ExtIp: "2001:db8:4::2", IntIp: "2001:db8:4::2"},
+									},
+								},
+							})
+							err := epMgr.ResolveUpdateBatch()
+							Expect(err).ToNot(HaveOccurred())
+							err = epMgr.CompleteDeferredWork()
+							Expect(err).ToNot(HaveOccurred())
+						})
+
+						It("should have expected chains", expectWlChainsFor("cali12345-ab"))
+
+						It("should set routes with no floating IPs", func() {
+							if ipVersion == 6 {
+								routeTable.checkRoutes("cali12345-ab", []routetable.Target{
+									{
+										CIDR:    ip.MustParseCIDROrIP("2001:db8:2::2/128"),
+										DestMAC: testutils.MustParseMAC("01:02:03:04:05:06"),
+									},
+								})
+							} else {
+								routeTable.checkRoutes("cali12345-ab", []routetable.Target{
+									{
+										CIDR:    ip.MustParseCIDROrIP("10.0.240.0/24"),
+										DestMAC: testutils.MustParseMAC("01:02:03:04:05:06"),
+									},
+								})
+							}
+						})
+					})
+
 					Context("with the endpoint removed", func() {
 						JustBeforeEach(func() {
 							epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
@@ -1961,9 +2007,7 @@ type testProcSys struct {
 	Fail           bool
 }
 
-var (
-	procSysFail = errors.New("mock proc sys failure")
-)
+var procSysFail = errors.New("mock proc sys failure")
 
 func (t *testProcSys) write(path, value string) error {
 	log.WithFields(log.Fields{
