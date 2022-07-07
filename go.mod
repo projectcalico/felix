@@ -33,7 +33,7 @@ require (
 	github.com/sirupsen/logrus v1.7.0
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/viper v1.7.0
-	github.com/vishvananda/netlink v1.1.0
+	github.com/vishvananda/netlink v1.2.1-beta.2.0.20220630165224-c591ada0fb2b
 	golang.org/x/net v0.0.0-20210927181540-4e4d966f7476
 	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
 	golang.org/x/sys v0.0.0-20210927094055-39ccf1dd6fa6
