@@ -19,7 +19,7 @@ import (
 	"os"
 	"time"
 
-	. "github.com/projectcalico/calico/felix/iptables"
+	. "github.com/alauda/felix/iptables"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

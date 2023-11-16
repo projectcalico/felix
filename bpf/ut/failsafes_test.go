@@ -23,12 +23,12 @@ import (
 	"github.com/google/gopacket/layers"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/bpf/failsafes"
-	"github.com/projectcalico/calico/felix/bpf/polprog"
-	"github.com/projectcalico/calico/felix/bpf/routes"
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/bpf/failsafes"
+	"github.com/alauda/felix/bpf/polprog"
+	"github.com/alauda/felix/bpf/routes"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/proto"
 )
 
 var fsafeDstIP = net.IPv4(3, 3, 3, 3)

@@ -26,9 +26,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/projectcalico/calico/felix/fv/cgroup"
-	"github.com/projectcalico/calico/felix/fv/connectivity"
-	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/alauda/felix/fv/cgroup"
+	"github.com/alauda/felix/fv/connectivity"
+	"github.com/alauda/felix/fv/utils"
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	nsutils "github.com/containernetworking/plugins/pkg/testutils"

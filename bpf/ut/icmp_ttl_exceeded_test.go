@@ -23,9 +23,9 @@ import (
 	"github.com/google/gopacket/layers"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/bpf/nat"
-	"github.com/projectcalico/calico/felix/bpf/routes"
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
+	"github.com/alauda/felix/bpf/nat"
+	"github.com/alauda/felix/bpf/routes"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
 )
 
 func TestICMPttlExceeded(t *testing.T) {

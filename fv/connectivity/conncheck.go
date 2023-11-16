@@ -33,7 +33,7 @@ import (
 	"github.com/onsi/gomega/types"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/alauda/felix/fv/utils"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

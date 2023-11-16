@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
-	"github.com/projectcalico/calico/felix/iptables"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
+	"github.com/alauda/felix/iptables"
 )
 
 func (r *DefaultRuleRenderer) MakeNatOutgoingRule(protocol string, action iptables.Action, ipVersion uint8) iptables.Rule {

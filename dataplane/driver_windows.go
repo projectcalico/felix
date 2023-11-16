@@ -29,9 +29,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/projectcalico/calico/felix/config"
-	windataplane "github.com/projectcalico/calico/felix/dataplane/windows"
-	"github.com/projectcalico/calico/felix/dataplane/windows/hns"
+	"github.com/alauda/felix/config"
+	windataplane "github.com/alauda/felix/dataplane/windows"
+	"github.com/alauda/felix/dataplane/windows/hns"
 	"github.com/projectcalico/calico/libcalico-go/lib/health"
 )
 

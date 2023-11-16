@@ -24,7 +24,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/timeshim"
+	"github.com/alauda/felix/timeshim"
 )
 
 const FlapDampingDelay = 100 * time.Millisecond

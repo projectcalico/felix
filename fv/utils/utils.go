@@ -37,9 +37,9 @@ import (
 	"github.com/projectcalico/calico/libcalico-go/lib/options"
 	"github.com/projectcalico/calico/libcalico-go/lib/selector"
 
-	"github.com/projectcalico/calico/felix/calc"
-	"github.com/projectcalico/calico/felix/ipsets"
-	"github.com/projectcalico/calico/felix/rules"
+	"github.com/alauda/felix/calc"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/rules"
 )
 
 type EnvConfig struct {

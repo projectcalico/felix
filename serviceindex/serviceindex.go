@@ -25,9 +25,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 	discovery "k8s.io/api/discovery/v1"
 
-	"github.com/projectcalico/calico/felix/dispatcher"
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/labelindex"
+	"github.com/alauda/felix/dispatcher"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/labelindex"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
 )

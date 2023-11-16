@@ -17,7 +17,7 @@ package calc_test
 import (
 	"testing"
 
-	. "github.com/projectcalico/calico/felix/calc"
+	. "github.com/alauda/felix/calc"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
 
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"

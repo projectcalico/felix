@@ -17,7 +17,7 @@ package iptables
 import (
 	"fmt"
 
-	"github.com/projectcalico/calico/felix/environment"
+	"github.com/alauda/felix/environment"
 )
 
 type Action interface {

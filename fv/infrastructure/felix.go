@@ -26,9 +26,9 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/fv/containers"
-	"github.com/projectcalico/calico/felix/fv/tcpdump"
-	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/alauda/felix/fv/containers"
+	"github.com/alauda/felix/fv/tcpdump"
+	"github.com/alauda/felix/fv/utils"
 )
 
 // FIXME: isolate individual Felix instances in their own cgroups.  Unfortunately, this doesn't work on systems that are using cgroupv1

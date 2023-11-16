@@ -17,10 +17,10 @@ package proxy_test
 import (
 	"net"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/bpf/nat"
-	"github.com/projectcalico/calico/felix/cachingmap"
-	"github.com/projectcalico/calico/felix/logutils"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/nat"
+	"github.com/alauda/felix/cachingmap"
+	"github.com/alauda/felix/logutils"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -29,8 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	k8sp "k8s.io/kubernetes/pkg/proxy"
 
-	"github.com/projectcalico/calico/felix/bpf/proxy"
-	"github.com/projectcalico/calico/felix/ip"
+	"github.com/alauda/felix/bpf/proxy"
+	"github.com/alauda/felix/ip"
 )
 
 func init() {

@@ -21,7 +21,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 
-	"github.com/projectcalico/calico/felix/bpf/polprog"
+	"github.com/alauda/felix/bpf/polprog"
 
 	. "github.com/onsi/gomega"
 )

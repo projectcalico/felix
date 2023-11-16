@@ -28,9 +28,9 @@ import (
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/netlinkshim"
-	"github.com/projectcalico/calico/felix/wireguard"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/netlinkshim"
+	"github.com/alauda/felix/wireguard"
 )
 
 var _ netlinkshim.Wireguard = (*wireguardDevicesOnly)(nil)

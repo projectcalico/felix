@@ -20,8 +20,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/dataplane/mock"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/dataplane/mock"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"

@@ -20,9 +20,9 @@ import (
 
 	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 
-	"github.com/projectcalico/calico/felix/calc"
-	"github.com/projectcalico/calico/felix/dispatcher"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/calc"
+	"github.com/alauda/felix/dispatcher"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/k8s/conversion"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"

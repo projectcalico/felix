@@ -22,8 +22,8 @@ import (
 
 	libv3 "github.com/projectcalico/calico/libcalico-go/lib/apis/v3"
 
-	"github.com/projectcalico/calico/felix/dispatcher"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/dispatcher"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/calico/libcalico-go/lib/net"

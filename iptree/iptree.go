@@ -5,7 +5,7 @@ package iptree
 import (
 	"net"
 
-	"github.com/projectcalico/calico/felix/ip"
+	"github.com/alauda/felix/ip"
 )
 
 type IPTree struct {

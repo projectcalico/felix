@@ -47,8 +47,8 @@ import (
 	"github.com/projectcalico/calico/libcalico-go/lib/names"
 	"github.com/projectcalico/calico/libcalico-go/lib/options"
 
-	"github.com/projectcalico/calico/felix/fv/containers"
-	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/alauda/felix/fv/containers"
+	"github.com/alauda/felix/fv/utils"
 )
 
 type K8sDatastoreInfra struct {

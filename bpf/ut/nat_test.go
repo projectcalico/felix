@@ -23,16 +23,16 @@ import (
 	"github.com/google/gopacket/layers"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/bpf/arp"
-	"github.com/projectcalico/calico/felix/bpf/conntrack"
-	conntrack3 "github.com/projectcalico/calico/felix/bpf/conntrack/v3"
-	v3 "github.com/projectcalico/calico/felix/bpf/conntrack/v3"
-	"github.com/projectcalico/calico/felix/bpf/nat"
-	"github.com/projectcalico/calico/felix/bpf/polprog"
-	"github.com/projectcalico/calico/felix/bpf/routes"
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/bpf/arp"
+	"github.com/alauda/felix/bpf/conntrack"
+	conntrack3 "github.com/alauda/felix/bpf/conntrack/v3"
+	v3 "github.com/alauda/felix/bpf/conntrack/v3"
+	"github.com/alauda/felix/bpf/nat"
+	"github.com/alauda/felix/bpf/polprog"
+	"github.com/alauda/felix/bpf/routes"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/proto"
 )
 
 func TestNATPodPodXNode(t *testing.T) {

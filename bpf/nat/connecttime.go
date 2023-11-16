@@ -27,12 +27,12 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/bpf"
-	"github.com/projectcalico/calico/felix/bpf/bpfdefs"
-	"github.com/projectcalico/calico/felix/bpf/bpfutils"
-	"github.com/projectcalico/calico/felix/bpf/libbpf"
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/bpf/utils"
+	"github.com/alauda/felix/bpf"
+	"github.com/alauda/felix/bpf/bpfdefs"
+	"github.com/alauda/felix/bpf/bpfutils"
+	"github.com/alauda/felix/bpf/libbpf"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/utils"
 )
 
 type cgroupProgs struct {

@@ -14,7 +14,7 @@
 
 package main
 
-import "github.com/projectcalico/calico/felix/cmd/calico-bpf/commands"
+import "github.com/alauda/felix/cmd/calico-bpf/commands"
 
 func main() {
 	commands.Execute()

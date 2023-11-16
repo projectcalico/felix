@@ -17,7 +17,7 @@ package stringutils_test
 import (
 	"time"
 
-	. "github.com/projectcalico/calico/felix/stringutils"
+	. "github.com/alauda/felix/stringutils"
 
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"

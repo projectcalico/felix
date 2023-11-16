@@ -30,8 +30,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/projectcalico/calico/felix/policysync"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/policysync"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/pod2daemon/binder"
 )
 

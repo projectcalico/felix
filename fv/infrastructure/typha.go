@@ -24,8 +24,8 @@ import (
 
 	"github.com/projectcalico/calico/typha/pkg/tlsutils"
 
-	"github.com/projectcalico/calico/felix/fv/containers"
-	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/alauda/felix/fv/containers"
+	"github.com/alauda/felix/fv/utils"
 )
 
 type Typha struct {

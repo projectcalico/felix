@@ -21,9 +21,9 @@ import (
 
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
-	"github.com/projectcalico/calico/felix/iptables"
-	"github.com/projectcalico/calico/felix/proto"
-	"github.com/projectcalico/calico/felix/rules"
+	"github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 )
 
 // policyManager simply renders policy/profile updates into iptables.Chain objects and sends

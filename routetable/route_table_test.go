@@ -17,8 +17,8 @@ package routetable_test
 import (
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/logutils"
-	. "github.com/projectcalico/calico/felix/routetable"
+	"github.com/alauda/felix/logutils"
+	. "github.com/alauda/felix/routetable"
 
 	"fmt"
 	"net"
@@ -30,11 +30,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
-	"github.com/projectcalico/calico/felix/ifacemonitor"
-	"github.com/projectcalico/calico/felix/ip"
-	mocknetlink "github.com/projectcalico/calico/felix/netlinkshim/mocknetlink"
-	"github.com/projectcalico/calico/felix/testutils"
-	"github.com/projectcalico/calico/felix/timeshim/mocktime"
+	"github.com/alauda/felix/ifacemonitor"
+	"github.com/alauda/felix/ip"
+	mocknetlink "github.com/alauda/felix/netlinkshim/mocknetlink"
+	"github.com/alauda/felix/testutils"
+	"github.com/alauda/felix/timeshim/mocktime"
 )
 
 var (

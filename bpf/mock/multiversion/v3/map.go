@@ -19,8 +19,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	v4 "github.com/projectcalico/calico/felix/bpf/mock/multiversion/v4"
+	"github.com/alauda/felix/bpf/maps"
+	v4 "github.com/alauda/felix/bpf/mock/multiversion/v4"
 )
 
 var MockMapParams = maps.MapParameters{

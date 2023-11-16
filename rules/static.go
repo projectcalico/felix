@@ -19,9 +19,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
-	. "github.com/projectcalico/calico/felix/iptables"
-	"github.com/projectcalico/calico/felix/proto"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
+	. "github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
 	cnet "github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 

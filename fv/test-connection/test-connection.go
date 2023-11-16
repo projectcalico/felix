@@ -39,9 +39,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/fv/cgroup"
-	"github.com/projectcalico/calico/felix/fv/connectivity"
-	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/alauda/felix/fv/cgroup"
+	"github.com/alauda/felix/fv/connectivity"
+	"github.com/alauda/felix/fv/utils"
 )
 
 const usage = `test-connection: test connection to some target, for Felix FV testing.

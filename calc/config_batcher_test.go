@@ -15,7 +15,7 @@
 package calc_test
 
 import (
-	. "github.com/projectcalico/calico/felix/calc"
+	. "github.com/alauda/felix/calc"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

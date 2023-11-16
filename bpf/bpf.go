@@ -38,12 +38,12 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/bpf/bpfdefs"
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/bpf/utils"
-	"github.com/projectcalico/calico/felix/environment"
-	"github.com/projectcalico/calico/felix/labelindex"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/bpf/bpfdefs"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/utils"
+	"github.com/alauda/felix/environment"
+	"github.com/alauda/felix/labelindex"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

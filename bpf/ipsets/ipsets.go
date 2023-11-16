@@ -21,10 +21,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/idalloc"
-	"github.com/projectcalico/calico/felix/ipsets"
-	"github.com/projectcalico/calico/felix/logutils"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/idalloc"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/logutils"
 
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )

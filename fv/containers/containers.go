@@ -31,9 +31,9 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/fv/connectivity"
-	"github.com/projectcalico/calico/felix/fv/tcpdump"
-	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/alauda/felix/fv/connectivity"
+	"github.com/alauda/felix/fv/tcpdump"
+	"github.com/alauda/felix/fv/utils"
 
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )

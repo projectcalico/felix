@@ -36,10 +36,10 @@ import (
 	"github.com/projectcalico/calico/libcalico-go/lib/net"
 	"github.com/projectcalico/calico/libcalico-go/lib/options"
 
-	"github.com/projectcalico/calico/felix/fv/connectivity"
-	"github.com/projectcalico/calico/felix/fv/infrastructure"
-	"github.com/projectcalico/calico/felix/fv/utils"
-	"github.com/projectcalico/calico/felix/fv/workload"
+	"github.com/alauda/felix/fv/connectivity"
+	"github.com/alauda/felix/fv/infrastructure"
+	"github.com/alauda/felix/fv/utils"
+	"github.com/alauda/felix/fv/workload"
 )
 
 var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ Service network policy tests", []apiconfig.DatastoreType{apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {

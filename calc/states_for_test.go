@@ -25,8 +25,8 @@ import (
 	apiv3 "github.com/projectcalico/calico/libcalico-go/lib/apis/v3"
 	. "github.com/projectcalico/calico/libcalico-go/lib/backend/model"
 
-	"github.com/projectcalico/calico/felix/dataplane/mock"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/dataplane/mock"
+	"github.com/alauda/felix/proto"
 )
 
 // Pre-defined datastore states.  Each State object wraps up the complete state

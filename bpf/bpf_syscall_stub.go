@@ -17,7 +17,7 @@
 package bpf
 
 import (
-	"github.com/projectcalico/calico/felix/bpf/asm"
+	"github.com/alauda/felix/bpf/asm"
 )
 
 const MapIteratorNumKeys = 16

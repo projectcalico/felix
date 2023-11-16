@@ -22,10 +22,10 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/calc"
-	"github.com/projectcalico/calico/felix/config"
-	extdataplane "github.com/projectcalico/calico/felix/dataplane/external"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/calc"
+	"github.com/alauda/felix/config"
+	extdataplane "github.com/alauda/felix/dataplane/external"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

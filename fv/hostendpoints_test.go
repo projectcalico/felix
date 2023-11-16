@@ -31,10 +31,10 @@ import (
 	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/calico/libcalico-go/lib/options"
 
-	"github.com/projectcalico/calico/felix/fv/connectivity"
-	"github.com/projectcalico/calico/felix/fv/infrastructure"
-	"github.com/projectcalico/calico/felix/fv/utils"
-	"github.com/projectcalico/calico/felix/fv/workload"
+	"github.com/alauda/felix/fv/connectivity"
+	"github.com/alauda/felix/fv/infrastructure"
+	"github.com/alauda/felix/fv/utils"
+	"github.com/alauda/felix/fv/workload"
 )
 
 var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ named host endpoints",

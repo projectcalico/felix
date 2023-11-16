@@ -20,11 +20,11 @@ import (
 	"github.com/google/gopacket/layers"
 	. "github.com/onsi/gomega"
 
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
 
-	"github.com/projectcalico/calico/felix/bpf/conntrack"
-	"github.com/projectcalico/calico/felix/bpf/routes"
-	"github.com/projectcalico/calico/felix/ip"
+	"github.com/alauda/felix/bpf/conntrack"
+	"github.com/alauda/felix/bpf/routes"
+	"github.com/alauda/felix/ip"
 )
 
 // Usually a packet passes through 2 programs, HEP->WEP, WEP->HEP or WEP->WEP. These test

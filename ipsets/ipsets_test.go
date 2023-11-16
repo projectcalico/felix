@@ -20,11 +20,11 @@ import (
 
 	"time"
 
-	"github.com/projectcalico/calico/felix/ip"
-	. "github.com/projectcalico/calico/felix/ipsets"
-	"github.com/projectcalico/calico/felix/labelindex"
-	"github.com/projectcalico/calico/felix/logutils"
-	"github.com/projectcalico/calico/felix/rules"
+	"github.com/alauda/felix/ip"
+	. "github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/labelindex"
+	"github.com/alauda/felix/logutils"
+	"github.com/alauda/felix/rules"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

@@ -26,8 +26,8 @@ import (
 
 	cprometheus "github.com/projectcalico/calico/libcalico-go/lib/prometheus"
 
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/labelindex"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/labelindex"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

@@ -21,12 +21,12 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/config"
-	intdataplane "github.com/projectcalico/calico/felix/dataplane/linux"
-	"github.com/projectcalico/calico/felix/ifacemonitor"
-	"github.com/projectcalico/calico/felix/ipsets"
-	"github.com/projectcalico/calico/felix/rules"
-	"github.com/projectcalico/calico/felix/wireguard"
+	"github.com/alauda/felix/config"
+	intdataplane "github.com/alauda/felix/dataplane/linux"
+	"github.com/alauda/felix/ifacemonitor"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/rules"
+	"github.com/alauda/felix/wireguard"
 	"github.com/projectcalico/calico/libcalico-go/lib/health"
 )
 

@@ -24,11 +24,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
-	"github.com/projectcalico/calico/felix/bpf"
-	"github.com/projectcalico/calico/felix/bpf/bpfutils"
-	"github.com/projectcalico/calico/felix/bpf/tc"
-	"github.com/projectcalico/calico/felix/bpf/utils"
-	"github.com/projectcalico/calico/felix/bpf/xdp"
+	"github.com/alauda/felix/bpf"
+	"github.com/alauda/felix/bpf/bpfutils"
+	"github.com/alauda/felix/bpf/tc"
+	"github.com/alauda/felix/bpf/utils"
+	"github.com/alauda/felix/bpf/xdp"
 )
 
 func checkBTFEnabled() []bool {

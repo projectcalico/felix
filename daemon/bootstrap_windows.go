@@ -15,7 +15,7 @@
 package daemon
 
 import (
-	"github.com/projectcalico/calico/felix/config"
+	"github.com/alauda/felix/config"
 	"github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/calico/typha/pkg/discovery"
 )

@@ -21,9 +21,9 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/bpf/mock"
-	"github.com/projectcalico/calico/felix/config"
-	"github.com/projectcalico/calico/felix/logutils"
+	"github.com/alauda/felix/bpf/mock"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/logutils"
 )
 
 const zeroValue = "\x00\x00\x00\x00"

@@ -25,9 +25,9 @@ import (
 	cnet "github.com/projectcalico/calico/libcalico-go/lib/net"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/config"
-	"github.com/projectcalico/calico/felix/logutils"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/logutils"
 )
 
 type Manager struct {

@@ -22,8 +22,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/projectcalico/calico/felix/config"
-	"github.com/projectcalico/calico/felix/testutils"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/testutils"
 	"github.com/projectcalico/calico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 

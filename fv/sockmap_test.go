@@ -31,9 +31,9 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/bpf"
-	"github.com/projectcalico/calico/felix/fv/infrastructure"
-	"github.com/projectcalico/calico/felix/fv/workload"
+	"github.com/alauda/felix/bpf"
+	"github.com/alauda/felix/fv/infrastructure"
+	"github.com/alauda/felix/fv/workload"
 	"github.com/projectcalico/calico/libcalico-go/lib/apiconfig"
 )
 

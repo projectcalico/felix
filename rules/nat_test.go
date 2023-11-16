@@ -20,13 +20,13 @@ import (
 
 	"github.com/projectcalico/api/pkg/lib/numorstring"
 
-	. "github.com/projectcalico/calico/felix/rules"
+	. "github.com/alauda/felix/rules"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/ipsets"
-	. "github.com/projectcalico/calico/felix/iptables"
+	"github.com/alauda/felix/ipsets"
+	. "github.com/alauda/felix/iptables"
 )
 
 var _ = Describe("NAT", func() {

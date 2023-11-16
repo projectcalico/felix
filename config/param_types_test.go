@@ -20,7 +20,7 @@ import (
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/config"
+	"github.com/alauda/felix/config"
 )
 
 var _ = DescribeTable("Endpoint list parameter parsing",

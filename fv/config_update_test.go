@@ -30,10 +30,10 @@ import (
 	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/calico/libcalico-go/lib/options"
 
-	"github.com/projectcalico/calico/felix/fv/containers"
-	"github.com/projectcalico/calico/felix/fv/infrastructure"
-	"github.com/projectcalico/calico/felix/fv/metrics"
-	"github.com/projectcalico/calico/felix/fv/workload"
+	"github.com/alauda/felix/fv/containers"
+	"github.com/alauda/felix/fv/infrastructure"
+	"github.com/alauda/felix/fv/metrics"
+	"github.com/alauda/felix/fv/workload"
 )
 
 const (

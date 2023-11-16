@@ -22,7 +22,7 @@ import (
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/ip"
+	"github.com/alauda/felix/ip"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

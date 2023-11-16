@@ -17,9 +17,9 @@ package intdataplane
 import (
 	"reflect"
 
-	"github.com/projectcalico/calico/felix/iptables"
-	"github.com/projectcalico/calico/felix/proto"
-	"github.com/projectcalico/calico/felix/rules"
+	"github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 )
 
 // The service loop manager maintains an iptables chain in the filter table whose purpose is to

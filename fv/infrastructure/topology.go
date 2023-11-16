@@ -34,7 +34,7 @@ import (
 	"github.com/projectcalico/calico/libcalico-go/lib/options"
 	"github.com/projectcalico/calico/libcalico-go/lib/resources"
 
-	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/alauda/felix/fv/containers"
 )
 
 type TopologyOptions struct {

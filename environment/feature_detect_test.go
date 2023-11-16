@@ -27,11 +27,11 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/netlinkshim/mocknetlink"
+	"github.com/alauda/felix/netlinkshim/mocknetlink"
 
-	. "github.com/projectcalico/calico/felix/environment"
-	"github.com/projectcalico/calico/felix/iptables/cmdshim"
-	"github.com/projectcalico/calico/felix/iptables/testutils"
+	. "github.com/alauda/felix/environment"
+	"github.com/alauda/felix/iptables/cmdshim"
+	"github.com/alauda/felix/iptables/testutils"
 )
 
 func init() {

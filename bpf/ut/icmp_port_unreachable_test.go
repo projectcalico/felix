@@ -22,8 +22,8 @@ import (
 	"github.com/google/gopacket/layers"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/bpf/nat"
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
+	"github.com/alauda/felix/bpf/nat"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
 )
 
 func TestICMPPortUnreachable(t *testing.T) {

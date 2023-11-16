@@ -23,10 +23,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/bpf"
-	"github.com/projectcalico/calico/felix/bpf/libbpf"
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
+	"github.com/alauda/felix/bpf"
+	"github.com/alauda/felix/bpf/libbpf"
+	"github.com/alauda/felix/bpf/maps"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
 )
 
 var JumpMapIndexes = map[string]map[int]string{

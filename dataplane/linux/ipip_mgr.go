@@ -21,10 +21,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
-	"github.com/projectcalico/calico/felix/dataplane/common"
-	"github.com/projectcalico/calico/felix/ipsets"
-	"github.com/projectcalico/calico/felix/proto"
-	"github.com/projectcalico/calico/felix/rules"
+	"github.com/alauda/felix/dataplane/common"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 )
 
 // ipipManager manages the all-hosts IP set, which is used by some rules in our static chains

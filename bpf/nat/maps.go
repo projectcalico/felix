@@ -24,8 +24,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/ip"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/ip"
 )
 
 func init() {

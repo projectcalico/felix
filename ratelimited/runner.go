@@ -19,7 +19,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/timeshim"
+	"github.com/alauda/felix/timeshim"
 )
 
 func NewRunner(minInterval timeshim.Duration, f func(ctx context.Context), opts ...RunnerOpt) *Runner {

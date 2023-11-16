@@ -18,9 +18,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/bpf/routes"
-	"github.com/projectcalico/calico/felix/ip"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/routes"
+	"github.com/alauda/felix/ip"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"

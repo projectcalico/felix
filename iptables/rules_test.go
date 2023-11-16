@@ -24,8 +24,8 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/environment"
-	"github.com/projectcalico/calico/felix/iptables/cmdshim"
+	"github.com/alauda/felix/environment"
+	"github.com/alauda/felix/iptables/cmdshim"
 )
 
 var (

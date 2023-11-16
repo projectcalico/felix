@@ -19,8 +19,8 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/fv/containers"
-	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/alauda/felix/fv/containers"
+	"github.com/alauda/felix/fv/utils"
 )
 
 func RunExtClient(namePrefix string) *containers.Container {

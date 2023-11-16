@@ -15,11 +15,11 @@
 package multiversion
 
 import (
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	v2 "github.com/projectcalico/calico/felix/bpf/mock/multiversion/v2"
-	v3 "github.com/projectcalico/calico/felix/bpf/mock/multiversion/v3"
-	v4 "github.com/projectcalico/calico/felix/bpf/mock/multiversion/v4"
-	v5 "github.com/projectcalico/calico/felix/bpf/mock/multiversion/v5"
+	"github.com/alauda/felix/bpf/maps"
+	v2 "github.com/alauda/felix/bpf/mock/multiversion/v2"
+	v3 "github.com/alauda/felix/bpf/mock/multiversion/v3"
+	v4 "github.com/alauda/felix/bpf/mock/multiversion/v4"
+	v5 "github.com/alauda/felix/bpf/mock/multiversion/v5"
 )
 
 func GetMapParams(version int) maps.MapParameters {

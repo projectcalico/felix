@@ -19,8 +19,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/environment"
-	"github.com/projectcalico/calico/felix/netlinkshim"
+	"github.com/alauda/felix/environment"
+	"github.com/alauda/felix/netlinkshim"
 )
 
 const (

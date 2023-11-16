@@ -28,15 +28,15 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/dataplane/common"
-	"github.com/projectcalico/calico/felix/environment"
-	"github.com/projectcalico/calico/felix/ethtool"
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/ipsets"
-	"github.com/projectcalico/calico/felix/logutils"
-	"github.com/projectcalico/calico/felix/proto"
-	"github.com/projectcalico/calico/felix/routetable"
-	"github.com/projectcalico/calico/felix/rules"
+	"github.com/alauda/felix/dataplane/common"
+	"github.com/alauda/felix/environment"
+	"github.com/alauda/felix/ethtool"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/logutils"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/routetable"
+	"github.com/alauda/felix/rules"
 )
 
 // added so that we can shim netlink for tests

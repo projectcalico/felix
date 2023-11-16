@@ -26,7 +26,7 @@ import (
 
 	. "github.com/onsi/ginkgo"
 
-	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/alauda/felix/fv/infrastructure"
 )
 
 var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ iptables cleanup tests", []apiconfig.DatastoreType{apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {

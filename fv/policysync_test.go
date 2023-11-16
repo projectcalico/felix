@@ -37,17 +37,17 @@ import (
 	"github.com/projectcalico/calico/libcalico-go/lib/options"
 	"github.com/projectcalico/calico/pod2daemon/binder"
 
-	"github.com/projectcalico/calico/felix/dataplane/mock"
+	"github.com/alauda/felix/dataplane/mock"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/proto"
 
 	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 
-	"github.com/projectcalico/calico/felix/fv/containers"
-	"github.com/projectcalico/calico/felix/fv/infrastructure"
-	"github.com/projectcalico/calico/felix/fv/utils"
-	"github.com/projectcalico/calico/felix/fv/workload"
+	"github.com/alauda/felix/fv/containers"
+	"github.com/alauda/felix/fv/infrastructure"
+	"github.com/alauda/felix/fv/utils"
+	"github.com/alauda/felix/fv/workload"
 	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 )
 

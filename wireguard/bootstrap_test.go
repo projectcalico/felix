@@ -23,9 +23,9 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/projectcalico/calico/felix/config"
-	mocknetlink "github.com/projectcalico/calico/felix/netlinkshim/mocknetlink"
-	. "github.com/projectcalico/calico/felix/wireguard"
+	"github.com/alauda/felix/config"
+	mocknetlink "github.com/alauda/felix/netlinkshim/mocknetlink"
+	. "github.com/alauda/felix/wireguard"
 	libapiv3 "github.com/projectcalico/calico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/calico/libcalico-go/lib/options"

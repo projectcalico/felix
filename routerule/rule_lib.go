@@ -17,7 +17,7 @@ package routerule
 import (
 	"net"
 
-	"github.com/projectcalico/calico/felix/ip"
+	"github.com/alauda/felix/ip"
 
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"

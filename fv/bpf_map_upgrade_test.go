@@ -25,10 +25,10 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/bpf/conntrack"
-	v2 "github.com/projectcalico/calico/felix/bpf/conntrack/v2"
-	"github.com/projectcalico/calico/felix/fv/infrastructure"
-	"github.com/projectcalico/calico/felix/timeshim"
+	"github.com/alauda/felix/bpf/conntrack"
+	v2 "github.com/alauda/felix/bpf/conntrack/v2"
+	"github.com/alauda/felix/fv/infrastructure"
+	"github.com/alauda/felix/timeshim"
 	"github.com/projectcalico/calico/libcalico-go/lib/apiconfig"
 )
 

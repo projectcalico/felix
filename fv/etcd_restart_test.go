@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/projectcalico/calico/felix/fv/connectivity"
+	"github.com/alauda/felix/fv/connectivity"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -33,11 +33,11 @@ import (
 
 	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 
-	"github.com/projectcalico/calico/felix/fv/containers"
-	"github.com/projectcalico/calico/felix/fv/infrastructure"
-	"github.com/projectcalico/calico/felix/fv/metrics"
-	"github.com/projectcalico/calico/felix/fv/utils"
-	"github.com/projectcalico/calico/felix/fv/workload"
+	"github.com/alauda/felix/fv/containers"
+	"github.com/alauda/felix/fv/infrastructure"
+	"github.com/alauda/felix/fv/metrics"
+	"github.com/alauda/felix/fv/utils"
+	"github.com/alauda/felix/fv/workload"
 	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 )
 

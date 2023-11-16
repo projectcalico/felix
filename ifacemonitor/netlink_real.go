@@ -22,8 +22,8 @@ import (
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/environment"
-	"github.com/projectcalico/calico/felix/netlinkshim/handlemgr"
+	"github.com/alauda/felix/environment"
+	"github.com/alauda/felix/netlinkshim/handlemgr"
 )
 
 type netlinkReal struct {

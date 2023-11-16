@@ -15,8 +15,8 @@
 package commands
 
 import (
-	"github.com/projectcalico/calico/felix/bpf/ifstate"
-	"github.com/projectcalico/calico/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/ifstate"
+	"github.com/alauda/felix/bpf/maps"
 
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"

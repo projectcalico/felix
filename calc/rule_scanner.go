@@ -25,9 +25,9 @@ import (
 	"github.com/projectcalico/calico/libcalico-go/lib/selector"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
-	"github.com/projectcalico/calico/felix/labelindex"
-	"github.com/projectcalico/calico/felix/multidict"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/labelindex"
+	"github.com/alauda/felix/multidict"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/hash"
 )
 

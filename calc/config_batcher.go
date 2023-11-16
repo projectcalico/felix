@@ -17,7 +17,7 @@ package calc
 import (
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/dispatcher"
+	"github.com/alauda/felix/dispatcher"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
 )

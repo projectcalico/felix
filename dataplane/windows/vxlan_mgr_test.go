@@ -22,8 +22,8 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/dataplane/windows/hcn"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/dataplane/windows/hcn"
+	"github.com/alauda/felix/proto"
 )
 
 var _ = Describe("VXLAN manager tests", func() {

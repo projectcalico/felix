@@ -15,8 +15,8 @@
 package calc_test
 
 import (
-	. "github.com/projectcalico/calico/felix/calc"
-	"github.com/projectcalico/calico/felix/config"
+	. "github.com/alauda/felix/calc"
+	"github.com/alauda/felix/config"
 
 	"reflect"
 
@@ -30,10 +30,10 @@ import (
 
 	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 
-	extdataplane "github.com/projectcalico/calico/felix/dataplane/external"
-	"github.com/projectcalico/calico/felix/dataplane/mock"
-	"github.com/projectcalico/calico/felix/dispatcher"
-	"github.com/projectcalico/calico/felix/proto"
+	extdataplane "github.com/alauda/felix/dataplane/external"
+	"github.com/alauda/felix/dataplane/mock"
+	"github.com/alauda/felix/dispatcher"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/calico/libcalico-go/lib/net"

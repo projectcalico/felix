@@ -31,7 +31,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/bpf/bpfdefs"
+	"github.com/alauda/felix/bpf/bpfdefs"
 )
 
 func MaybeMountBPFfs() (string, error) {

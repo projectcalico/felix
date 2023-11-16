@@ -24,18 +24,18 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/cachingmap"
+	"github.com/alauda/felix/cachingmap"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/bpf/nat"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/nat"
 
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/projectcalico/calico/felix/bpf/mock"
-	"github.com/projectcalico/calico/felix/bpf/proxy"
+	"github.com/alauda/felix/bpf/mock"
+	"github.com/alauda/felix/bpf/proxy"
 )
 
 func benchmarkProxyUpdates(b *testing.B, svcN, epsN int) {

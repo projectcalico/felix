@@ -30,7 +30,7 @@ import (
 
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
-	"github.com/projectcalico/calico/felix/ifacemonitor"
+	"github.com/alauda/felix/ifacemonitor"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

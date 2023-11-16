@@ -17,9 +17,9 @@ package daemon
 import (
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/config"
-	"github.com/projectcalico/calico/felix/netlinkshim"
-	"github.com/projectcalico/calico/felix/wireguard"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/netlinkshim"
+	"github.com/alauda/felix/wireguard"
 	"github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 	"github.com/projectcalico/calico/typha/pkg/discovery"
 )

@@ -19,9 +19,9 @@ import (
 	"net"
 	"os"
 
-	"github.com/projectcalico/calico/felix/bpf"
-	"github.com/projectcalico/calico/felix/bpf/counters"
-	"github.com/projectcalico/calico/felix/bpf/maps"
+	"github.com/alauda/felix/bpf"
+	"github.com/alauda/felix/bpf/counters"
+	"github.com/alauda/felix/bpf/maps"
 
 	"github.com/olekukonko/tablewriter"
 	log "github.com/sirupsen/logrus"

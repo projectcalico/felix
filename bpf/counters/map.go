@@ -17,7 +17,7 @@ package counters
 import (
 	"encoding/binary"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/maps"
 )
 
 const PolicyMapKeySize = 8

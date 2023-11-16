@@ -19,7 +19,7 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/alauda/felix/ipsets"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

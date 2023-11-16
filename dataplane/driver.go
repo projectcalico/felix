@@ -35,7 +35,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/clock"
 
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -43,20 +43,20 @@ import (
 
 	apiv3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 
-	"github.com/projectcalico/calico/felix/aws"
-	"github.com/projectcalico/calico/felix/bpf"
-	"github.com/projectcalico/calico/felix/bpf/conntrack"
-	"github.com/projectcalico/calico/felix/config"
-	extdataplane "github.com/projectcalico/calico/felix/dataplane/external"
-	"github.com/projectcalico/calico/felix/dataplane/inactive"
-	intdataplane "github.com/projectcalico/calico/felix/dataplane/linux"
-	"github.com/projectcalico/calico/felix/idalloc"
-	"github.com/projectcalico/calico/felix/ifacemonitor"
-	"github.com/projectcalico/calico/felix/ipsets"
-	"github.com/projectcalico/calico/felix/logutils"
-	"github.com/projectcalico/calico/felix/markbits"
-	"github.com/projectcalico/calico/felix/rules"
-	"github.com/projectcalico/calico/felix/wireguard"
+	"github.com/alauda/felix/aws"
+	"github.com/alauda/felix/bpf"
+	"github.com/alauda/felix/bpf/conntrack"
+	"github.com/alauda/felix/config"
+	extdataplane "github.com/alauda/felix/dataplane/external"
+	"github.com/alauda/felix/dataplane/inactive"
+	intdataplane "github.com/alauda/felix/dataplane/linux"
+	"github.com/alauda/felix/idalloc"
+	"github.com/alauda/felix/ifacemonitor"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/logutils"
+	"github.com/alauda/felix/markbits"
+	"github.com/alauda/felix/rules"
+	"github.com/alauda/felix/wireguard"
 	"github.com/projectcalico/calico/libcalico-go/lib/health"
 )
 

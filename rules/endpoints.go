@@ -19,9 +19,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/hashutils"
-	. "github.com/projectcalico/calico/felix/iptables"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/hashutils"
+	. "github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
 )
 
 const (

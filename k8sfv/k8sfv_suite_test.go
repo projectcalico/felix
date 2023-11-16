@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/logutils"
+	"github.com/alauda/felix/logutils"
 	"github.com/projectcalico/calico/libcalico-go/lib/testutils"
 )
 

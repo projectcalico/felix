@@ -29,13 +29,13 @@ import (
 	v1 "k8s.io/api/core/v1"
 	k8sp "k8s.io/kubernetes/pkg/proxy"
 
-	"github.com/projectcalico/calico/felix/cachingmap"
+	"github.com/alauda/felix/cachingmap"
 
-	"github.com/projectcalico/calico/felix/bpf"
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/bpf/nat"
-	"github.com/projectcalico/calico/felix/bpf/routes"
-	"github.com/projectcalico/calico/felix/ip"
+	"github.com/alauda/felix/bpf"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/nat"
+	"github.com/alauda/felix/bpf/routes"
+	"github.com/alauda/felix/ip"
 )
 
 var podNPIP = net.IPv4(255, 255, 255, 255)

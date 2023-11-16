@@ -20,11 +20,11 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/bpf/conntrack"
-	"github.com/projectcalico/calico/felix/bpf/nat"
-	"github.com/projectcalico/calico/felix/bpf/routes"
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
-	"github.com/projectcalico/calico/felix/ip"
+	"github.com/alauda/felix/bpf/conntrack"
+	"github.com/alauda/felix/bpf/nat"
+	"github.com/alauda/felix/bpf/routes"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
+	"github.com/alauda/felix/ip"
 
 	"github.com/google/gopacket/layers"
 	. "github.com/onsi/gomega"

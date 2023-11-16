@@ -22,13 +22,13 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/bpf/bpfmap"
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/bpf/routes"
-	"github.com/projectcalico/calico/felix/ifacemonitor"
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/logutils"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/bpf/bpfmap"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/routes"
+	"github.com/alauda/felix/ifacemonitor"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/logutils"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

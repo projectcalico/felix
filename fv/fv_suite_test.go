@@ -21,7 +21,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/projectcalico/calico/felix/fv/connectivity"
+	"github.com/alauda/felix/fv/connectivity"
 
 	"github.com/onsi/gomega/format"
 
@@ -29,7 +29,7 @@ import (
 	"github.com/onsi/ginkgo/reporters"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/alauda/felix/fv/infrastructure"
 	"github.com/projectcalico/calico/libcalico-go/lib/testutils"
 )
 

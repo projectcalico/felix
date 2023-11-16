@@ -19,7 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/projectcalico/calico/felix/config"
+	"github.com/alauda/felix/config"
 	"github.com/projectcalico/calico/typha/pkg/discovery"
 
 	. "github.com/onsi/ginkgo"

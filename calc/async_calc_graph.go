@@ -25,8 +25,8 @@ import (
 	"github.com/projectcalico/calico/libcalico-go/lib/health"
 	cprometheus "github.com/projectcalico/calico/libcalico-go/lib/prometheus"
 
-	"github.com/projectcalico/calico/felix/config"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/proto"
 )
 
 const (

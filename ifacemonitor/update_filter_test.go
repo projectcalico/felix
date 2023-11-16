@@ -26,8 +26,8 @@ import (
 	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/ifacemonitor"
-	"github.com/projectcalico/calico/felix/timeshim/mocktime"
+	"github.com/alauda/felix/ifacemonitor"
+	"github.com/alauda/felix/timeshim/mocktime"
 )
 
 const (

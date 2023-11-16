@@ -22,7 +22,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/bpf/asm"
+	"github.com/alauda/felix/bpf/asm"
 )
 
 type ProgFD uint32

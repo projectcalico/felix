@@ -18,11 +18,11 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/dataplane/common"
-	"github.com/projectcalico/calico/felix/ipsets"
-	"github.com/projectcalico/calico/felix/iptables"
-	"github.com/projectcalico/calico/felix/proto"
-	"github.com/projectcalico/calico/felix/rules"
+	"github.com/alauda/felix/dataplane/common"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

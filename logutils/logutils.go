@@ -20,7 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/config"
+	"github.com/alauda/felix/config"
 	"github.com/projectcalico/calico/libcalico-go/lib/logutils"
 )
 

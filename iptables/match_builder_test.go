@@ -15,13 +15,13 @@
 package iptables_test
 
 import (
-	. "github.com/projectcalico/calico/felix/iptables"
+	. "github.com/alauda/felix/iptables"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/proto"
 )
 
 var portRanges = []*proto.PortRange{

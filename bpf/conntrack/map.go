@@ -20,11 +20,11 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	v2 "github.com/projectcalico/calico/felix/bpf/conntrack/v2"
-	"github.com/projectcalico/calico/felix/bpf/maps"
+	v2 "github.com/alauda/felix/bpf/conntrack/v2"
+	"github.com/alauda/felix/bpf/maps"
 
 	// When adding a new ct version, change curVer to point to the new version
-	curVer "github.com/projectcalico/calico/felix/bpf/conntrack/v3"
+	curVer "github.com/alauda/felix/bpf/conntrack/v3"
 )
 
 func init() {

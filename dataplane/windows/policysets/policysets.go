@@ -20,10 +20,10 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/iputils"
+	"github.com/alauda/felix/iputils"
 
-	"github.com/projectcalico/calico/felix/dataplane/windows/hns"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/dataplane/windows/hns"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 

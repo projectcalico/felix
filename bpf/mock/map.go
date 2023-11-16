@@ -20,7 +20,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/maps"
 )
 
 type Map struct {

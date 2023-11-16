@@ -27,12 +27,12 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/environment"
-	"github.com/projectcalico/calico/felix/logutils"
+	"github.com/alauda/felix/environment"
+	"github.com/alauda/felix/logutils"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/labelindex"
+	"github.com/alauda/felix/labelindex"
 )
 
 var (

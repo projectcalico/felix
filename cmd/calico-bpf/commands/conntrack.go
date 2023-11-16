@@ -23,10 +23,10 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/bpf"
-	"github.com/projectcalico/calico/felix/bpf/conntrack"
-	v2 "github.com/projectcalico/calico/felix/bpf/conntrack/v2"
-	"github.com/projectcalico/calico/felix/bpf/maps"
+	"github.com/alauda/felix/bpf"
+	"github.com/alauda/felix/bpf/conntrack"
+	v2 "github.com/alauda/felix/bpf/conntrack/v2"
+	"github.com/alauda/felix/bpf/maps"
 
 	"github.com/docopt/docopt-go"
 	"github.com/pkg/errors"

@@ -36,8 +36,8 @@ import (
 
 	"github.com/projectcalico/api/pkg/lib/numorstring"
 
-	"github.com/projectcalico/calico/felix/idalloc"
-	"github.com/projectcalico/calico/felix/stringutils"
+	"github.com/alauda/felix/idalloc"
+	"github.com/alauda/felix/stringutils"
 	cnet "github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 

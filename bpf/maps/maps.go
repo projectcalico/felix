@@ -31,9 +31,9 @@ import (
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/bpf/bpfdefs"
-	"github.com/projectcalico/calico/felix/bpf/libbpf"
-	"github.com/projectcalico/calico/felix/bpf/utils"
+	"github.com/alauda/felix/bpf/bpfdefs"
+	"github.com/alauda/felix/bpf/libbpf"
+	"github.com/alauda/felix/bpf/utils"
 )
 
 const jumpMapVersion = 3

@@ -32,9 +32,9 @@ import (
 
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
-	"github.com/projectcalico/calico/felix/environment"
-	"github.com/projectcalico/calico/felix/iptables/cmdshim"
-	"github.com/projectcalico/calico/felix/logutils"
+	"github.com/alauda/felix/environment"
+	"github.com/alauda/felix/iptables/cmdshim"
+	"github.com/alauda/felix/logutils"
 )
 
 const (

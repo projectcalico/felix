@@ -23,10 +23,10 @@ import (
 
 	"github.com/projectcalico/api/pkg/lib/numorstring"
 
-	"github.com/projectcalico/calico/felix/config"
-	"github.com/projectcalico/calico/felix/ipsets"
-	"github.com/projectcalico/calico/felix/iptables"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/ipsets"
+	"github.com/alauda/felix/iptables"
+	"github.com/alauda/felix/proto"
 )
 
 const (

@@ -20,17 +20,17 @@ import (
 	"math/bits"
 	"strings"
 
-	"github.com/projectcalico/calico/felix/bpf/ipsets"
-	"github.com/projectcalico/calico/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/ipsets"
+	"github.com/alauda/felix/bpf/maps"
 
 	log "github.com/sirupsen/logrus"
 
-	. "github.com/projectcalico/calico/felix/bpf/asm"
-	"github.com/projectcalico/calico/felix/bpf/state"
-	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/proto"
-	"github.com/projectcalico/calico/felix/rules"
+	. "github.com/alauda/felix/bpf/asm"
+	"github.com/alauda/felix/bpf/state"
+	tcdefs "github.com/alauda/felix/bpf/tc/defs"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/rules"
 )
 
 type Builder struct {

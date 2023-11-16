@@ -27,8 +27,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/clock"
 
-	"github.com/projectcalico/calico/felix/config"
-	"github.com/projectcalico/calico/felix/netlinkshim"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/netlinkshim"
 	apiv3 "github.com/projectcalico/calico/libcalico-go/lib/apis/v3"
 	"github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 	cerrors "github.com/projectcalico/calico/libcalico-go/lib/errors"

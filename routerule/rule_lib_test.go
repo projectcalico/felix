@@ -15,7 +15,7 @@
 package routerule_test
 
 import (
-	. "github.com/projectcalico/calico/felix/routerule"
+	. "github.com/alauda/felix/routerule"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

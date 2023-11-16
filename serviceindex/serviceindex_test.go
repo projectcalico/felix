@@ -19,8 +19,8 @@ import (
 	discovery "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/projectcalico/calico/felix/labelindex"
-	. "github.com/projectcalico/calico/felix/serviceindex"
+	"github.com/alauda/felix/labelindex"
+	. "github.com/alauda/felix/serviceindex"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"

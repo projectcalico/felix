@@ -30,9 +30,9 @@ import (
 	cresources "github.com/projectcalico/calico/libcalico-go/lib/resources"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
-	"github.com/projectcalico/calico/felix/dispatcher"
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/dispatcher"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/proto"
 )
 
 // L3RouteResolver is responsible for indexing (currently only IPv4 versions of):

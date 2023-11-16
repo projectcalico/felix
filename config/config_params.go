@@ -30,8 +30,8 @@ import (
 
 	"github.com/projectcalico/calico/libcalico-go/lib/names"
 
-	"github.com/projectcalico/calico/felix/idalloc"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/idalloc"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/apiconfig"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )

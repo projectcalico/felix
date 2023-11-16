@@ -26,9 +26,9 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/calico/felix/bpf/bpfmap"
-	"github.com/projectcalico/calico/felix/bpf/conntrack"
-	bpfmaps "github.com/projectcalico/calico/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/bpfmap"
+	"github.com/alauda/felix/bpf/conntrack"
+	bpfmaps "github.com/alauda/felix/bpf/maps"
 )
 
 func restoreMaps(maps *bpfmap.Maps) {

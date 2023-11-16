@@ -24,16 +24,16 @@ import (
 
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/calico/felix/cachingmap"
+	"github.com/alauda/felix/cachingmap"
 
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	k8sp "k8s.io/kubernetes/pkg/proxy"
 
-	"github.com/projectcalico/calico/felix/bpf/maps"
-	"github.com/projectcalico/calico/felix/bpf/mock"
-	"github.com/projectcalico/calico/felix/bpf/nat"
+	"github.com/alauda/felix/bpf/maps"
+	"github.com/alauda/felix/bpf/mock"
+	"github.com/alauda/felix/bpf/nat"
 )
 
 func makeSvcEpsPair(svcIdx, epCnt, port int, opts ...K8sServicePortOption) (k8sp.ServicePort, []k8sp.Endpoint) {

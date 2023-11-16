@@ -22,8 +22,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/bpf"
-	"github.com/projectcalico/calico/felix/bpf/maps"
+	"github.com/alauda/felix/bpf"
+	"github.com/alauda/felix/bpf/maps"
 )
 
 const (

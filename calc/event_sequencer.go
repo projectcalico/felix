@@ -22,11 +22,11 @@ import (
 
 	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 
-	"github.com/projectcalico/calico/felix/config"
-	"github.com/projectcalico/calico/felix/ip"
-	"github.com/projectcalico/calico/felix/labelindex"
-	"github.com/projectcalico/calico/felix/multidict"
-	"github.com/projectcalico/calico/felix/proto"
+	"github.com/alauda/felix/config"
+	"github.com/alauda/felix/ip"
+	"github.com/alauda/felix/labelindex"
+	"github.com/alauda/felix/multidict"
+	"github.com/alauda/felix/proto"
 	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
 	"github.com/projectcalico/calico/libcalico-go/lib/net"
 	"github.com/projectcalico/calico/libcalico-go/lib/set"

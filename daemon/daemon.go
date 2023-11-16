@@ -56,16 +56,16 @@ import (
 	"github.com/projectcalico/calico/typha/pkg/discovery"
 	"github.com/projectcalico/calico/typha/pkg/syncclient"
 
-	"github.com/projectcalico/calico/felix/buildinfo"
-	"github.com/projectcalico/calico/felix/calc"
-	"github.com/projectcalico/calico/felix/config"
-	dp "github.com/projectcalico/calico/felix/dataplane"
-	"github.com/projectcalico/calico/felix/jitter"
-	"github.com/projectcalico/calico/felix/logutils"
-	"github.com/projectcalico/calico/felix/policysync"
-	"github.com/projectcalico/calico/felix/proto"
-	"github.com/projectcalico/calico/felix/statusrep"
-	"github.com/projectcalico/calico/felix/usagerep"
+	"github.com/alauda/felix/buildinfo"
+	"github.com/alauda/felix/calc"
+	"github.com/alauda/felix/config"
+	dp "github.com/alauda/felix/dataplane"
+	"github.com/alauda/felix/jitter"
+	"github.com/alauda/felix/logutils"
+	"github.com/alauda/felix/policysync"
+	"github.com/alauda/felix/proto"
+	"github.com/alauda/felix/statusrep"
+	"github.com/alauda/felix/usagerep"
 )
 
 const (

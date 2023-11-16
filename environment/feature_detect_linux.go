@@ -29,9 +29,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 
-	"github.com/projectcalico/calico/felix/netlinkshim"
+	"github.com/alauda/felix/netlinkshim"
 
-	"github.com/projectcalico/calico/felix/iptables/cmdshim"
+	"github.com/alauda/felix/iptables/cmdshim"
 )
 
 var (
