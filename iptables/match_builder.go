@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/proto"
+	"github.com/projectcalico/calico/felix/proto"
 )
 
 type MatchCriteria []string
@@ -98,12 +98,20 @@ func (m MatchCriteria) OutInterface(ifaceMatch string) MatchCriteria {
 	return append(m, fmt.Sprintf("--out-interface %s", ifaceMatch))
 }
 
-func (m MatchCriteria) RPFCheckPassed() MatchCriteria {
-	return append(m, "-m rpfilter")
+func (m MatchCriteria) RPFCheckPassed(acceptLocal bool) MatchCriteria {
+	ret := append(m, "-m rpfilter --validmark")
+	if acceptLocal {
+		ret = append(ret, "--accept-local")
+	}
+	return ret
 }
 
-func (m MatchCriteria) RPFCheckFailed() MatchCriteria {
-	return append(m, "-m rpfilter --invert")
+func (m MatchCriteria) RPFCheckFailed(acceptLocal bool) MatchCriteria {
+	ret := append(m, "-m rpfilter --invert --validmark")
+	if acceptLocal {
+		ret = append(ret, "--accept-local")
+	}
+	return ret
 }
 
 func (m MatchCriteria) IPVSConnection() MatchCriteria {
@@ -140,8 +148,16 @@ func (m MatchCriteria) DestAddrType(addrType AddrType) MatchCriteria {
 	return append(m, fmt.Sprintf("-m addrtype --dst-type %s", addrType))
 }
 
+func (m MatchCriteria) NotDestAddrType(addrType AddrType) MatchCriteria {
+	return append(m, fmt.Sprintf("-m addrtype ! --dst-type %s", addrType))
+}
+
 func (m MatchCriteria) ConntrackState(stateNames string) MatchCriteria {
 	return append(m, fmt.Sprintf("-m conntrack --ctstate %s", stateNames))
+}
+
+func (m MatchCriteria) NotConntrackState(stateNames string) MatchCriteria {
+	return append(m, fmt.Sprintf("-m conntrack ! --ctstate %s", stateNames))
 }
 
 func (m MatchCriteria) Protocol(name string) MatchCriteria {
@@ -206,6 +222,18 @@ func (m MatchCriteria) DestIPPortSet(name string) MatchCriteria {
 
 func (m MatchCriteria) NotDestIPPortSet(name string) MatchCriteria {
 	return append(m, fmt.Sprintf("-m set ! --match-set %s dst,dst", name))
+}
+
+func (m MatchCriteria) IPSetNames() (ipSetNames []string) {
+	for _, matchString := range []string(m) {
+		words := strings.Split(matchString, " ")
+		for i := range words {
+			if words[i] == "--match-set" && (i+1) < len(words) {
+				ipSetNames = append(ipSetNames, words[i+1])
+			}
+		}
+	}
+	return
 }
 
 func (m MatchCriteria) SourcePorts(ports ...uint16) MatchCriteria {
@@ -278,6 +306,20 @@ func (m MatchCriteria) ICMPV6TypeAndCode(t, c uint8) MatchCriteria {
 
 func (m MatchCriteria) NotICMPV6TypeAndCode(t, c uint8) MatchCriteria {
 	return append(m, fmt.Sprintf("-m icmp6 ! --icmpv6-type %d/%d", t, c))
+}
+
+// VXLANVNI matches on the VNI contained within the VXLAN header.  It assumes that this is indeed a VXLAN
+// packet; i.e. it should be used with a protocol==UDP and port==VXLAN port match.
+//
+// Note: the -m u32 option is not supported on iptables in NFT mode.
+// https://wiki.nftables.org/wiki-nftables/index.php/Supported_features_compared_to_xtables#u32
+func (m MatchCriteria) VXLANVNI(vni uint32) MatchCriteria {
+	// This uses the U32 module, a simple VM for extracting bytes from a packet.  See
+	// http://www.stearns.org/doc/iptables-u32.current.html
+	return append(m, fmt.Sprintf(`-m u32 --u32 "`+
+		`0>>22&0x3C@` /* jump over the IP header */ +
+		`12>>8=0x%x` /* skip over 8 bytes of UDP header and 4 of VXLAN and compare 3 bytes with the expected VNI */ +
+		`"`, vni))
 }
 
 func PortsToMultiport(ports []uint16) string {

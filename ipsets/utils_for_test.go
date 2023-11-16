@@ -15,26 +15,23 @@
 package ipsets_test
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"bufio"
-
-	"time"
-
-	"bytes"
-	"regexp"
-
-	. "github.com/alauda/felix/ipsets"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	. "github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 // This file contains shared test infrastructure for testing the ipsets package.
@@ -46,14 +43,14 @@ var (
 
 func newMockDataplane() *mockDataplane {
 	return &mockDataplane{
-		IPSetMembers:     make(map[string]set.Set),
+		IPSetMembers:     make(map[string]set.Set[string]),
 		IPSetMetadata:    make(map[string]setMetadata),
-		FailDestroyNames: set.New(),
+		FailDestroyNames: set.New[string](),
 	}
 }
 
 type mockDataplane struct {
-	IPSetMembers      map[string]set.Set
+	IPSetMembers      map[string]set.Set[string]
 	IPSetMetadata     map[string]setMetadata
 	Cmds              []CmdIface
 	CmdNames          []string
@@ -62,7 +59,7 @@ type mockDataplane struct {
 	ListOpFailures    []string
 	RestoreOpFailures []string
 	FailNextDestroy   bool
-	FailDestroyNames  set.Set
+	FailDestroyNames  set.Set[string]
 
 	// Record when various (expected) error cases are hit.
 	TriedToDeleteNonExistent bool
@@ -75,9 +72,9 @@ type mockDataplane struct {
 
 func (d *mockDataplane) ExpectMembers(expected map[string][]string) {
 	// Input has a slice for each set, convert to a set for comparison.
-	membersToCompare := map[string]set.Set{}
+	membersToCompare := map[string]set.Set[string]{}
 	for name, members := range expected {
-		memberSet := set.New()
+		memberSet := set.New[string]()
 		for _, member := range members {
 			memberSet.Add(member)
 		}
@@ -299,24 +296,24 @@ func (c *restoreCmd) main() {
 			log.WithField("setMetadata", setMetadata).Info("Set created")
 
 			if _, ok := c.Dataplane.IPSetMembers[name]; ok {
-				c.Stderr.Write([]byte("set exists"))
+				_, _ = c.Stderr.Write([]byte("set exists"))
 				result = &exec.ExitError{}
 				return
 			}
 
-			c.Dataplane.IPSetMembers[name] = set.New()
+			c.Dataplane.IPSetMembers[name] = set.New[string]()
 			c.Dataplane.IPSetMetadata[name] = setMetadata
 		case "destroy":
 			Expect(len(parts)).To(Equal(2))
 			name := parts[1]
 			c.Dataplane.AttemptedDestroys = append(c.Dataplane.AttemptedDestroys, name)
 			if _, ok := c.Dataplane.IPSetMembers[name]; !ok {
-				c.Stderr.Write([]byte("set doesn't exist"))
+				_, _ = c.Stderr.Write([]byte("set doesn't exist"))
 				result = &exec.ExitError{}
 				return
 			}
 			if c.Dataplane.FailDestroyNames.Contains(name) {
-				c.Stderr.Write([]byte("set is in use"))
+				_, _ = c.Stderr.Write([]byte("set is in use"))
 				result = &exec.ExitError{}
 				return
 			}
@@ -328,14 +325,14 @@ func (c *restoreCmd) main() {
 			newMember := parts[2]
 			logCxt := log.WithField("setName", name)
 			if currentMembers, ok := c.Dataplane.IPSetMembers[name]; !ok {
-				c.Stderr.Write([]byte("set doesn't exist"))
+				_, _ = c.Stderr.Write([]byte("set doesn't exist"))
 				result = &exec.ExitError{}
 				return
 			} else {
 				if currentMembers.Contains(newMember) {
 					c.Dataplane.TriedToAddExistent = true
 					logCxt.Warn("Add of existing member")
-					c.Stderr.Write([]byte("member already exists"))
+					_, _ = c.Stderr.Write([]byte("member already exists"))
 					result = &exec.ExitError{}
 					return
 				}
@@ -349,7 +346,7 @@ func (c *restoreCmd) main() {
 			Expect(parts[3]).To(Equal("--exist"))
 			logCxt := log.WithField("setName", name)
 			if currentMembers, ok := c.Dataplane.IPSetMembers[name]; !ok {
-				c.Stderr.Write([]byte("set doesn't exist"))
+				_, _ = c.Stderr.Write([]byte("set doesn't exist"))
 				result = &exec.ExitError{}
 				return
 			} else {
@@ -380,12 +377,12 @@ func (c *restoreCmd) main() {
 
 			if set1, ok := c.Dataplane.IPSetMembers[name1]; !ok {
 				log.WithField("name", name1).Warn("IP set doesn't exist")
-				c.Stderr.Write([]byte("set doesn't exist"))
+				_, _ = c.Stderr.Write([]byte("set doesn't exist"))
 				result = &exec.ExitError{}
 				return
 			} else if set2, ok := c.Dataplane.IPSetMembers[name2]; !ok {
 				log.WithField("name", name2).Warn("IP set doesn't exist")
-				c.Stderr.Write([]byte("set doesn't exist"))
+				_, _ = c.Stderr.Write([]byte("set doesn't exist"))
 				result = &exec.ExitError{}
 				return
 			} else {
@@ -667,7 +664,7 @@ func (c *listCmd) main() {
 		fmt.Fprintf(c.Stdout, "Name: %s\n", setName)
 		fmt.Fprint(c.Stdout, "Field: foobar\n") // Dummy field, should get ignored.
 		fmt.Fprint(c.Stdout, "Members:\n")
-		members.Iter(func(member interface{}) error {
+		members.Iter(func(member string) error {
 			fmt.Fprintf(c.Stdout, "%s\n", member)
 			return nil
 		})

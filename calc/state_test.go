@@ -18,11 +18,13 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/alauda/felix/dataplane/mock"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/sirupsen/logrus"
+
+	"github.com/projectcalico/calico/felix/dataplane/mock"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 // A state represents a particular state of the datastore and the expected
@@ -32,15 +34,21 @@ type State struct {
 	// List of KVPairs that are in the datastore.  Stored as a list rather
 	// than a map to give us a deterministic ordering of injection.
 	DatastoreState                       []model.KVPair
-	ExpectedIPSets                       map[string]set.Set
-	ExpectedPolicyIDs                    set.Set
-	ExpectedUntrackedPolicyIDs           set.Set
-	ExpectedPreDNATPolicyIDs             set.Set
-	ExpectedProfileIDs                   set.Set
+	ExpectedIPSets                       map[string]set.Set[string]
+	ExpectedPolicyIDs                    set.Set[proto.PolicyID]
+	ExpectedUntrackedPolicyIDs           set.Set[proto.PolicyID]
+	ExpectedPreDNATPolicyIDs             set.Set[proto.PolicyID]
+	ExpectedProfileIDs                   set.Set[proto.ProfileID]
+	ExpectedRoutes                       set.Set[proto.RouteUpdate]
+	ExpectedVTEPs                        set.Set[proto.VXLANTunnelEndpointUpdate]
+	ExpectedWireguardEndpoints           set.Set[proto.WireguardEndpointUpdate]
+	ExpectedWireguardV6Endpoints         set.Set[proto.WireguardEndpointV6Update]
 	ExpectedEndpointPolicyOrder          map[string][]mock.TierInfo
 	ExpectedUntrackedEndpointPolicyOrder map[string][]mock.TierInfo
 	ExpectedPreDNATEndpointPolicyOrder   map[string][]mock.TierInfo
+	ExpectedHostMetadataV4V6             map[string]proto.HostMetadataV4V6Update
 	ExpectedNumberOfALPPolicies          int
+	ExpectedEncapsulation                proto.Encapsulation
 }
 
 func (s State) String() string {
@@ -53,14 +61,19 @@ func (s State) String() string {
 func NewState() State {
 	return State{
 		DatastoreState:                       []model.KVPair{},
-		ExpectedIPSets:                       make(map[string]set.Set),
-		ExpectedPolicyIDs:                    set.New(),
-		ExpectedUntrackedPolicyIDs:           set.New(),
-		ExpectedPreDNATPolicyIDs:             set.New(),
-		ExpectedProfileIDs:                   set.New(),
+		ExpectedIPSets:                       make(map[string]set.Set[string]),
+		ExpectedPolicyIDs:                    set.New[proto.PolicyID](),
+		ExpectedUntrackedPolicyIDs:           set.New[proto.PolicyID](),
+		ExpectedPreDNATPolicyIDs:             set.New[proto.PolicyID](),
+		ExpectedProfileIDs:                   set.New[proto.ProfileID](),
+		ExpectedRoutes:                       set.New[proto.RouteUpdate](),
+		ExpectedVTEPs:                        set.New[proto.VXLANTunnelEndpointUpdate](),
+		ExpectedWireguardEndpoints:           set.New[proto.WireguardEndpointUpdate](),
+		ExpectedWireguardV6Endpoints:         set.New[proto.WireguardEndpointV6Update](),
 		ExpectedEndpointPolicyOrder:          make(map[string][]mock.TierInfo),
 		ExpectedUntrackedEndpointPolicyOrder: make(map[string][]mock.TierInfo),
 		ExpectedPreDNATEndpointPolicyOrder:   make(map[string][]mock.TierInfo),
+		ExpectedHostMetadataV4V6:             make(map[string]proto.HostMetadataV4V6Update),
 	}
 }
 
@@ -80,12 +93,19 @@ func (s State) Copy() State {
 	for k, v := range s.ExpectedPreDNATEndpointPolicyOrder {
 		cpy.ExpectedPreDNATEndpointPolicyOrder[k] = v
 	}
-
+	for k, v := range s.ExpectedHostMetadataV4V6 {
+		cpy.ExpectedHostMetadataV4V6[k] = v
+	}
 	cpy.ExpectedPolicyIDs = s.ExpectedPolicyIDs.Copy()
 	cpy.ExpectedUntrackedPolicyIDs = s.ExpectedUntrackedPolicyIDs.Copy()
 	cpy.ExpectedPreDNATPolicyIDs = s.ExpectedPreDNATPolicyIDs.Copy()
 	cpy.ExpectedProfileIDs = s.ExpectedProfileIDs.Copy()
+	cpy.ExpectedRoutes = s.ExpectedRoutes.Copy()
+	cpy.ExpectedVTEPs = s.ExpectedVTEPs.Copy()
+	cpy.ExpectedWireguardEndpoints = s.ExpectedWireguardEndpoints.Copy()
+	cpy.ExpectedWireguardV6Endpoints = s.ExpectedWireguardV6Endpoints.Copy()
 	cpy.ExpectedNumberOfALPPolicies = s.ExpectedNumberOfALPPolicies
+	cpy.ExpectedEncapsulation = s.ExpectedEncapsulation
 
 	cpy.Name = s.Name
 	return cpy
@@ -100,13 +120,21 @@ func (s State) withKVUpdates(kvs ...model.KVPair) (newState State) {
 	// But replace the datastoreState, which we're about to modify.
 	newState.DatastoreState = make([]model.KVPair, 0, len(kvs)+len(s.DatastoreState))
 	// Make a set containing the new keys.
-	newKeys := make(map[model.Key]bool)
+	newKeys := make(map[string]bool)
 	for _, kv := range kvs {
-		newKeys[kv.Key] = true
+		path, err := model.KeyToDefaultPath(kv.Key)
+		if err != nil {
+			logrus.WithField("key", kv.Key).Panic("Unable to convert key to default path")
+		}
+		newKeys[path] = true
 	}
 	// Copy across the old KVs, skipping ones that are in the updates set.
 	for _, kv := range s.DatastoreState {
-		if newKeys[kv.Key] {
+		path, err := model.KeyToDefaultPath(kv.Key)
+		if err != nil {
+			logrus.WithField("key", kv.Key).Panic("Unable to convert key to default path")
+		}
+		if newKeys[path] {
 			continue
 		}
 		newState.DatastoreState = append(newState.DatastoreState, kv)
@@ -127,11 +155,11 @@ func (s State) withIPSet(name string, members []string) (newState State) {
 	if members == nil {
 		delete(newState.ExpectedIPSets, name)
 	} else {
-		set := set.New()
+		memSet := set.New[string]()
 		for _, ip := range members {
-			set.Add(ip)
+			memSet.Add(ip)
 		}
-		newState.ExpectedIPSets[name] = set
+		newState.ExpectedIPSets[name] = memSet
 	}
 	return
 }
@@ -162,7 +190,7 @@ func (s State) withName(name string) (newState State) {
 
 func (s State) withActivePolicies(ids ...proto.PolicyID) (newState State) {
 	newState = s.Copy()
-	newState.ExpectedPolicyIDs = set.New()
+	newState.ExpectedPolicyIDs = set.New[proto.PolicyID]()
 	for _, id := range ids {
 		newState.ExpectedPolicyIDs.Add(id)
 	}
@@ -177,7 +205,7 @@ func (s State) withTotalALPPolicies(count int) (newState State) {
 
 func (s State) withUntrackedPolicies(ids ...proto.PolicyID) (newState State) {
 	newState = s.Copy()
-	newState.ExpectedUntrackedPolicyIDs = set.New()
+	newState.ExpectedUntrackedPolicyIDs = set.New[proto.PolicyID]()
 	for _, id := range ids {
 		newState.ExpectedUntrackedPolicyIDs.Add(id)
 	}
@@ -186,7 +214,7 @@ func (s State) withUntrackedPolicies(ids ...proto.PolicyID) (newState State) {
 
 func (s State) withPreDNATPolicies(ids ...proto.PolicyID) (newState State) {
 	newState = s.Copy()
-	newState.ExpectedPreDNATPolicyIDs = set.New()
+	newState.ExpectedPreDNATPolicyIDs = set.New[proto.PolicyID]()
 	for _, id := range ids {
 		newState.ExpectedPreDNATPolicyIDs.Add(id)
 	}
@@ -195,58 +223,105 @@ func (s State) withPreDNATPolicies(ids ...proto.PolicyID) (newState State) {
 
 func (s State) withActiveProfiles(ids ...proto.ProfileID) (newState State) {
 	newState = s.Copy()
-	newState.ExpectedProfileIDs = set.New()
+	newState.ExpectedProfileIDs = set.New[proto.ProfileID]()
 	for _, id := range ids {
 		newState.ExpectedProfileIDs.Add(id)
 	}
 	return newState
 }
 
-func (s State) Keys() set.Set {
-	set := set.New()
+func (s State) withVTEPs(vteps ...proto.VXLANTunnelEndpointUpdate) (newState State) {
+	newState = s.Copy()
+	newState.ExpectedVTEPs = set.FromArray(vteps)
+	return newState
+}
+
+func (s State) withRoutes(routes ...proto.RouteUpdate) (newState State) {
+	newState = s.Copy()
+	newState.ExpectedRoutes = set.FromArray(routes)
+	return newState
+}
+
+func (s State) withHostMetadataV4V6(hostMetas ...proto.HostMetadataV4V6Update) (newState State) {
+	newState = s.Copy()
+	newState.ExpectedHostMetadataV4V6 = make(map[string]proto.HostMetadataV4V6Update)
+	for _, v := range hostMetas {
+		newState.ExpectedHostMetadataV4V6[v.Hostname] = v
+	}
+	return newState
+}
+
+func (s State) withExpectedEncapsulation(encap proto.Encapsulation) (newState State) {
+	newState = s.Copy()
+	newState.ExpectedEncapsulation = encap
+	return newState
+}
+
+func (s State) withWireguardEndpoints(endpoints ...proto.WireguardEndpointUpdate) (newState State) {
+	newState = s.Copy()
+	newState.ExpectedWireguardEndpoints = set.FromArray(endpoints)
+	return newState
+}
+
+func (s State) withWireguardV6Endpoints(endpoints ...proto.WireguardEndpointV6Update) (newState State) {
+	newState = s.Copy()
+	newState.ExpectedWireguardV6Endpoints = set.FromArray(endpoints)
+	return newState
+}
+
+func (s State) Keys() set.Set[string] {
+	set := set.New[string]()
 	for _, kv := range s.DatastoreState {
-		set.Add(kv.Key)
+		set.Add(kvToPath(kv))
 	}
 	return set
 }
 
-func (s State) KVsCopy() map[model.Key]interface{} {
-	kvs := make(map[model.Key]interface{})
+func (s State) KVsCopy() map[string]interface{} {
+	kvs := make(map[string]interface{})
 	for _, kv := range s.DatastoreState {
-		kvs[kv.Key] = kv.Value
+		kvs[kvToPath(kv)] = kv.Value
 	}
 	return kvs
 }
 
+func kvToPath(kv model.KVPair) string {
+	path, err := model.KeyToDefaultPath(kv.Key)
+	if err != nil {
+		logrus.WithField("key", kv.Key).Panic("Unable to convert key to default path")
+	}
+	return path
+}
+
 func (s State) KVDeltas(prev State) []api.Update {
 	newAndUpdatedKVs := s.KVsCopy()
-	updatedKVs := make(map[model.Key]bool)
+	updatedKVs := make(map[string]bool)
 	for _, kv := range prev.DatastoreState {
-		if reflect.DeepEqual(newAndUpdatedKVs[kv.Key], kv.Value) {
+		if reflect.DeepEqual(newAndUpdatedKVs[kvToPath(kv)], kv.Value) {
 			// Key had same value in both states so we ignore it.
-			delete(newAndUpdatedKVs, kv.Key)
+			delete(newAndUpdatedKVs, kvToPath(kv))
 		} else {
 			// Key has changed
-			updatedKVs[kv.Key] = true
+			updatedKVs[kvToPath(kv)] = true
 		}
 	}
 	currentKeys := s.Keys()
 	deltas := make([]api.Update, 0)
 	for _, kv := range prev.DatastoreState {
-		if !currentKeys.Contains(kv.Key) {
+		if !currentKeys.Contains(kvToPath(kv)) {
 			deltas = append(
 				deltas,
-				api.Update{model.KVPair{Key: kv.Key}, api.UpdateTypeKVDeleted},
+				api.Update{KVPair: model.KVPair{Key: kv.Key}, UpdateType: api.UpdateTypeKVDeleted},
 			)
 		}
 	}
 	for _, kv := range s.DatastoreState {
-		if _, ok := newAndUpdatedKVs[kv.Key]; ok {
+		if _, ok := newAndUpdatedKVs[kvToPath(kv)]; ok {
 			updateType := api.UpdateTypeKVNew
-			if updatedKVs[kv.Key] {
+			if updatedKVs[kvToPath(kv)] {
 				updateType = api.UpdateTypeKVUpdated
 			}
-			deltas = append(deltas, api.Update{kv, updateType})
+			deltas = append(deltas, api.Update{KVPair: kv, UpdateType: updateType})
 		}
 	}
 	return deltas
@@ -264,10 +339,10 @@ func (s State) NumALPPolicies() int {
 	return s.ExpectedNumberOfALPPolicies
 }
 
-func (s State) ActiveKeys(keyTypeExample interface{}) set.Set {
+func (s State) ActiveKeys(keyTypeExample interface{}) set.Set[model.Key] {
 	// Need to be a little careful here, the DatastoreState can contain an ordered sequence of updates and deletions
 	// We need to track which keys are actually still live at the end of it.
-	keys := set.New()
+	keys := set.NewBoxed[model.Key]()
 	for _, u := range s.DatastoreState {
 		if reflect.TypeOf(u.Key) != reflect.TypeOf(keyTypeExample) {
 			continue

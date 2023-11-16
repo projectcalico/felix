@@ -1,6 +1,4 @@
-// +build fvtests
-
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build fvtests
+
 package fv_test
 
 import (
@@ -24,20 +24,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/projectcalico/calico/felix/fv/connectivity"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/fv/infrastructure"
-	"github.com/alauda/felix/fv/utils"
-	"github.com/projectcalico/libcalico-go/lib/options"
+	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/projectcalico/calico/libcalico-go/lib/options"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/fv/containers"
-	"github.com/alauda/felix/fv/workload"
-	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	client "github.com/projectcalico/libcalico-go/lib/clientv3"
-	"github.com/projectcalico/libcalico-go/lib/net"
+	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/projectcalico/calico/felix/fv/workload"
+	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
+	"github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 
 const (
@@ -48,50 +51,64 @@ const (
 // netsetsConfig is used to parametrise the whole suite of tests for IPv4 or IPv6, it provides
 // methods that return:
 //
-//     - the IP to use for a given workload, each from a separate subnet
-//     - a CIDR that encompasses each workload's IP (and only its IP)
-//     - a full-length CIDR (i.e. the IP address expressed as a /32 or /128).
+//   - the IP to use for a given workload, each from a separate subnet
+//   - a CIDR that encompasses each workload's IP (and only its IP)
+//   - a full-length CIDR (i.e. the IP address expressed as a /32 or /128).
 type netsetsConfig struct {
 	ipVersion int
 	zeroCIDR  string
 }
 
-func (c netsetsConfig) workloadIP(workloadIdx int) string {
+func (c netsetsConfig) workloadIP(workloadIdx int, namespaced bool) string {
 	if c.ipVersion == 4 {
-		// Each IP is in its own /24.
+		if namespaced {
+			// Each IP is in its own /24.
+			return fmt.Sprintf("10.64.%d.1", workloadIdx)
+		}
 		return fmt.Sprintf("10.65.%d.1", workloadIdx)
 	}
-	// Each IP gets its own /64.
-	return fmt.Sprintf("fdc6:3dbc:e983:cbc%x::1", workloadIdx)
+	if namespaced {
+		// Each IP gets its own /64.
+		return fmt.Sprintf("fdc6:3dbc:e983:cbc%x::1", workloadIdx)
+	}
+
+	return fmt.Sprintf("fdc6:3dbc:e983:cdc%x::100", workloadIdx)
 }
 
-func (c netsetsConfig) workloadCIDR(workloadIdx, prefixLengthDelta int) string {
+func (c netsetsConfig) workloadCIDR(workloadIdx, prefixLengthDelta int, namespaced bool) string {
 	if c.ipVersion == 4 {
+		if namespaced {
+			return fmt.Sprintf("10.64.%d.0/%d", workloadIdx, 24+prefixLengthDelta)
+		}
 		return fmt.Sprintf("10.65.%d.0/%d", workloadIdx, 24+prefixLengthDelta)
 	}
-	return fmt.Sprintf("fdc6:3dbc:e983:cbc%x::/%d", workloadIdx, 64+prefixLengthDelta)
+	if namespaced {
+		return fmt.Sprintf("fdc6:3dbc:e983:cbc%x::/%d", workloadIdx, 64+prefixLengthDelta)
+	}
+	return fmt.Sprintf("fdc6:3dbc:e983:cdc%x::/%d", workloadIdx, 64+prefixLengthDelta)
 }
 
-func (c netsetsConfig) workloadFullLengthCIDR(workloadIdx int) string {
-	addr := c.workloadIP(workloadIdx)
+func (c netsetsConfig) workloadFullLengthCIDR(workloadIdx int, namespaced bool) string {
+	addr := c.workloadIP(workloadIdx, namespaced)
 	if c.ipVersion == 4 {
 		return addr + "/32"
 	}
 	return addr + "/128"
 }
 
-var _ = Context("Network sets tests with initialized Felix and etcd datastore", func() {
+var _ = Context("_NET_SETS_ Network sets tests with initialized Felix and etcd datastore", func() {
 
 	var (
 		etcd     *containers.Container
 		felix    *infrastructure.Felix
 		felixPID int
 		client   client.Interface
+		infra    infrastructure.DatastoreInfra
 	)
 
 	BeforeEach(func() {
 		topologyOptions := infrastructure.DefaultTopologyOptions()
-		felix, etcd, client = infrastructure.StartSingleNodeEtcdTopology(topologyOptions)
+		felix, etcd, client, infra = infrastructure.StartSingleNodeEtcdTopology(topologyOptions)
 		felixPID = felix.GetFelixPID()
 	})
 
@@ -102,16 +119,17 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 		felix.Stop()
 
 		if CurrentGinkgoTestDescription().Failed {
-			etcd.Exec("etcdctl", "ls", "--recursive", "/")
+			etcd.Exec("etcdctl", "get", "/", "--prefix", "--keys-only")
 		}
 		etcd.Stop()
+		infra.Stop()
 	})
 
 	describeConnTests := func(c netsetsConfig) {
 		var (
-			w   [4]*workload.Workload
-			cc  *workload.ConnectivityChecker
-			pol *api.GlobalNetworkPolicy
+			w, nw [4]*workload.Workload
+			cc    *connectivity.Checker
+			pol   *api.GlobalNetworkPolicy
 		)
 
 		createPolicy := func(policy *api.GlobalNetworkPolicy) *api.GlobalNetworkPolicy {
@@ -138,16 +156,28 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 					felix,
 					"w"+iiStr,
 					"fv",
-					c.workloadIP(ii),
+					c.workloadIP(ii, false),
 					ports,
 					"tcp",
 				)
 
 				w[ii].DefaultPort = "3000"
 				w[ii].Configure(client)
+
+				nw[ii] = workload.Run(
+					felix,
+					"nw"+iiStr,
+					"fv",
+					c.workloadIP(ii, true),
+					ports,
+					"tcp",
+				)
+
+				nw[ii].DefaultPort = "3000"
+				nw[ii].Configure(client)
 			}
 
-			cc = &workload.ConnectivityChecker{
+			cc = &connectivity.Checker{
 				Protocol: "tcp",
 			}
 
@@ -176,22 +206,439 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 		})
 
 		assertNoConnectivity := func() {
-			cc.ExpectNone(w[0], w[1])
-			cc.ExpectNone(w[0], w[2])
-			cc.ExpectNone(w[0], w[3])
-			cc.ExpectNone(w[1], w[0])
-			cc.ExpectNone(w[1], w[2])
-			cc.ExpectNone(w[1], w[3])
-			cc.ExpectNone(w[2], w[0])
-			cc.ExpectNone(w[2], w[1])
-			cc.ExpectNone(w[2], w[3])
-			cc.ExpectNone(w[3], w[0])
-			cc.ExpectNone(w[3], w[1])
-			cc.ExpectNone(w[3], w[2])
+			for i := 0; i < len(w); i++ {
+				for j := 0; j < len(w); j++ {
+					if i != j {
+						cc.ExpectNone(w[i], w[j])
+						cc.ExpectNone(nw[i], nw[j])
+					}
+				}
+			}
 			cc.CheckConnectivity()
 		}
 
 		It("with no matching network sets, should deny all", assertNoConnectivity)
+
+		Describe("with namespaced network sets matching some workloads", func() {
+			var (
+				namespacedSrcNS  *api.NetworkSet
+				namespacedDestNS *api.NetworkSet
+			)
+
+			BeforeEach(func() {
+				// We put workloads 0, 1 and 2 in a set that's allowed as a source.
+				namespacedSrcNS = api.NewNetworkSet()
+				namespacedSrcNS.Name = "ns-1"
+				namespacedSrcNS.Namespace = "default"
+				namespacedSrcNS.Spec.Nets = []string{
+					c.workloadCIDR(0, 0, true),
+					c.workloadCIDR(1, 0, true),
+					c.workloadCIDR(2, 0, true),
+				}
+				namespacedSrcNS.Labels = map[string]string{
+					"allow-as-source": "",
+				}
+				var err error
+				namespacedSrcNS, err = client.NetworkSets().Create(utils.Ctx, namespacedSrcNS, utils.NoOptions)
+				Expect(err).NotTo(HaveOccurred())
+
+				// We put workloads 2 and 3 in a set that's allowed as destination.
+				namespacedDestNS = api.NewNetworkSet()
+				namespacedDestNS.Name = "ns-2"
+				namespacedDestNS.Namespace = "default"
+				namespacedDestNS.Spec.Nets = []string{
+					c.workloadCIDR(2, 0, true),
+					c.workloadCIDR(3, 0, true),
+				}
+				namespacedDestNS.Labels = map[string]string{
+					"allow-as-dest": "",
+				}
+				namespacedDestNS, err = client.NetworkSets().Create(utils.Ctx, namespacedDestNS, utils.NoOptions)
+				Expect(err).NotTo(HaveOccurred())
+			})
+
+			assertBaselineNetsetsConnectivity := func() {
+				cc.ExpectNone(nw[0], nw[1]) // not in dest net set
+				cc.ExpectSome(nw[0], nw[2])
+				cc.ExpectSome(nw[0], nw[3])
+				cc.ExpectNone(nw[1], nw[0]) // not in dest net set
+				cc.ExpectSome(nw[1], nw[2])
+				cc.ExpectSome(nw[1], nw[3])
+				cc.ExpectNone(nw[2], nw[0]) // not in dest net set
+				cc.ExpectNone(nw[2], nw[1]) // not in dest net set
+				cc.ExpectSome(nw[2], nw[3])
+				// 3 isn't in the source net set so it can't talk to anyone.
+				cc.ExpectNone(nw[3], nw[0])
+				cc.ExpectNone(nw[3], nw[1])
+				cc.ExpectNone(nw[3], nw[2])
+				cc.CheckConnectivity()
+			}
+
+			It("should have expected connectivity", assertBaselineNetsetsConnectivity)
+
+			resetNetsetsMembers := func() {
+				namespacedSrcNS.Spec.Nets = []string{
+					c.workloadCIDR(0, 0, true),
+					c.workloadCIDR(1, 0, true),
+					c.workloadCIDR(2, 0, true),
+				}
+				var err error
+				namespacedSrcNS, err = client.NetworkSets().Update(utils.Ctx, namespacedSrcNS, utils.NoOptions)
+				Expect(err).NotTo(HaveOccurred())
+
+				namespacedDestNS.Spec.Nets = []string{
+					c.workloadCIDR(2, 0, true),
+					c.workloadCIDR(3, 0, true),
+				}
+				namespacedDestNS, err = client.NetworkSets().Update(utils.Ctx, namespacedDestNS, utils.NoOptions)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			Describe("after updating some members in the sets", func() {
+				BeforeEach(func() {
+					namespacedSrcNS.Spec.Nets = []string{
+						// c.workloadCIDR(0, 0, true), removed
+						c.workloadCIDR(1, 0, true),
+						c.workloadCIDR(2, 0, true),
+						c.workloadCIDR(3, 0, true), // added
+					}
+					var err error
+					namespacedSrcNS, err = client.NetworkSets().Update(utils.Ctx, namespacedSrcNS, utils.NoOptions)
+					Expect(err).NotTo(HaveOccurred())
+
+					namespacedDestNS.Spec.Nets = []string{
+						// c.workloadCIDR(2, 0, true), removed
+						c.workloadCIDR(1, 0, true),
+						c.workloadCIDR(3, 0, true),
+					}
+					namespacedDestNS, err = client.NetworkSets().Update(utils.Ctx, namespacedDestNS, utils.NoOptions)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("should have expected connectivity", func() {
+					// Now nw[0] isn't in the source set so it can't talk to anyone.
+					cc.ExpectNone(nw[0], nw[1])
+					cc.ExpectNone(nw[0], nw[2])
+					cc.ExpectNone(nw[0], nw[3])
+
+					cc.ExpectNone(nw[1], nw[0]) // not in dest net set
+					cc.ExpectNone(nw[1], nw[2]) // not in dest net set
+					cc.ExpectSome(nw[1], nw[3])
+
+					cc.ExpectNone(nw[2], nw[0]) // not in dest net set
+					cc.ExpectSome(nw[2], nw[1])
+					cc.ExpectSome(nw[2], nw[3])
+
+					cc.ExpectNone(nw[3], nw[0])
+					cc.ExpectSome(nw[3], nw[1])
+					cc.ExpectNone(nw[3], nw[2])
+					cc.CheckConnectivity()
+				})
+
+				Describe("after reverting the change", func() {
+					BeforeEach(resetNetsetsMembers)
+					It("should have expected connectivity", assertBaselineNetsetsConnectivity)
+				})
+			})
+
+			Describe("after switching to zero-CIDR", func() {
+				BeforeEach(func() {
+					namespacedSrcNS.Spec.Nets = []string{
+						c.zeroCIDR,
+					}
+					var err error
+					namespacedSrcNS, err = client.NetworkSets().Update(utils.Ctx, namespacedSrcNS, utils.NoOptions)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("should have expected connectivity", func() {
+					cc.ExpectNone(nw[0], nw[1]) // not in dest net set
+					cc.ExpectSome(nw[0], nw[2])
+					cc.ExpectSome(nw[0], nw[3])
+					cc.ExpectNone(nw[1], nw[0]) // not in dest net set
+					cc.ExpectSome(nw[1], nw[2])
+					cc.ExpectSome(nw[1], nw[3])
+					cc.ExpectNone(nw[2], nw[0]) // not in dest net set
+					cc.ExpectNone(nw[2], nw[1]) // not in dest net set
+					cc.ExpectSome(nw[2], nw[3])
+					cc.ExpectNone(nw[3], nw[0])
+					cc.ExpectNone(nw[3], nw[1])
+					cc.ExpectSome(nw[3], nw[2]) // now allowed because all sources are allowed
+					cc.CheckConnectivity()
+				})
+
+				Describe("after reverting the change", func() {
+					BeforeEach(resetNetsetsMembers)
+					It("should have expected connectivity", assertBaselineNetsetsConnectivity)
+				})
+			})
+
+			Describe("after adding a new, overlapping source namespaced network set", func() {
+				var namespacedSrcNS2 *api.NetworkSet
+
+				BeforeEach(func() {
+					namespacedSrcNS2 = api.NewNetworkSet()
+					namespacedSrcNS2.Name = "ns-3"
+					namespacedSrcNS2.Namespace = "default"
+					namespacedSrcNS2.Spec.Nets = []string{
+						c.workloadCIDR(1, 0, true),        // exact match
+						c.workloadFullLengthCIDR(2, true), // exact match
+						c.workloadCIDR(3, 0, true),        // unique to this net set
+					}
+					namespacedSrcNS2.Labels = map[string]string{
+						"allow-as-source": "",
+					}
+					var err error
+					namespacedSrcNS2, err = client.NetworkSets().Create(utils.Ctx, namespacedSrcNS2, utils.NoOptions)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("should have expected connectivity", func() {
+					cc.ExpectNone(nw[0], nw[1]) // not in dest net set
+					cc.ExpectSome(nw[0], nw[2])
+					cc.ExpectSome(nw[0], nw[3])
+					cc.ExpectNone(nw[1], nw[0]) // not in dest net set
+					cc.ExpectSome(nw[1], nw[2])
+					cc.ExpectSome(nw[1], nw[3])
+					cc.ExpectNone(nw[2], nw[0]) // not in dest net set
+					cc.ExpectNone(nw[2], nw[1]) // not in dest net set
+					cc.ExpectSome(nw[2], nw[3])
+					// 3 is now a valid source.
+					cc.ExpectNone(nw[3], nw[0])
+					cc.ExpectNone(nw[3], nw[1])
+					cc.ExpectSome(nw[3], nw[2])
+					cc.CheckConnectivity()
+				})
+
+				Describe("after removing the original src netset", func() {
+					BeforeEach(func() {
+						_, err := client.NetworkSets().Delete(utils.Ctx, namespacedSrcNS.Namespace, namespacedSrcNS.Name, options.DeleteOptions{})
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					It("should have expected connectivity", func() {
+						// nw[0] is no longer a valid source.
+						cc.ExpectNone(nw[0], nw[1])
+						cc.ExpectNone(nw[0], nw[2])
+						cc.ExpectNone(nw[0], nw[3])
+
+						cc.ExpectNone(nw[1], nw[0]) // not in dest net set
+						cc.ExpectSome(nw[1], nw[2])
+						cc.ExpectSome(nw[1], nw[3])
+
+						cc.ExpectNone(nw[2], nw[0]) // not in dest net set
+						cc.ExpectNone(nw[2], nw[1]) // not in dest net set
+						cc.ExpectSome(nw[2], nw[3])
+
+						// 3 is still a valid source.
+						cc.ExpectNone(nw[3], nw[0])
+						cc.ExpectNone(nw[3], nw[1])
+						cc.ExpectSome(nw[3], nw[2])
+						cc.CheckConnectivity()
+					})
+
+					Describe("after removing the new src netset", func() {
+						BeforeEach(func() {
+							_, err := client.NetworkSets().Delete(utils.Ctx, namespacedSrcNS2.Namespace, namespacedSrcNS2.Name, options.DeleteOptions{})
+							Expect(err).NotTo(HaveOccurred())
+						})
+						It("should have no connectivity", assertNoConnectivity)
+					})
+				})
+
+				Describe("after removing the new src netset", func() {
+					BeforeEach(func() {
+						// Make sure the new netset becomes active before we remove it...
+						cc.ExpectSome(nw[3], nw[2])
+						cc.CheckConnectivity()
+						cc.ResetExpectations()
+
+						_, err := client.NetworkSets().Delete(utils.Ctx, namespacedSrcNS2.Namespace, namespacedSrcNS2.Name, options.DeleteOptions{})
+						Expect(err).NotTo(HaveOccurred())
+					})
+					It("should have baseline connectivity", assertBaselineNetsetsConnectivity)
+				})
+			})
+
+			Describe("after adding duplicate and overlapping members", func() {
+				BeforeEach(func() {
+					namespacedSrcNS.Spec.Nets = []string{
+						c.workloadCIDR(1, 0, true),
+						c.workloadCIDR(2, 0, true),
+						// Lots of dupes...
+						c.workloadFullLengthCIDR(3, true),
+						c.workloadFullLengthCIDR(3, true),
+						c.workloadCIDR(3, 4, true),
+						c.workloadCIDR(3, 0, true),
+						c.workloadCIDR(3, 0, true),
+						c.workloadCIDR(3, 4, true),
+						c.workloadCIDR(3, 0, true),
+					}
+					var err error
+					namespacedSrcNS, err = client.NetworkSets().Update(utils.Ctx, namespacedSrcNS, utils.NoOptions)
+					Expect(err).NotTo(HaveOccurred())
+
+					namespacedDestNS.Spec.Nets = []string{
+						// c.workloadCIDR(2, 0, true), // removed
+						c.workloadCIDR(1, 0, true),        // added
+						c.workloadCIDR(1, 1, true),        // added
+						c.workloadFullLengthCIDR(1, true), // added
+						c.workloadCIDR(3, 0, true),
+					}
+					namespacedDestNS, err = client.NetworkSets().Update(utils.Ctx, namespacedDestNS, utils.NoOptions)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("should have expected connectivity", func() {
+					// Now nw[0] isn't in the source set so it can't talk to anyone.
+					cc.ExpectNone(nw[0], nw[1])
+					cc.ExpectNone(nw[0], nw[2])
+					cc.ExpectNone(nw[0], nw[3])
+
+					cc.ExpectNone(nw[1], nw[0]) // not in dest net set
+					cc.ExpectNone(nw[1], nw[2]) // not in dest net set
+					cc.ExpectSome(nw[1], nw[3])
+
+					cc.ExpectNone(nw[2], nw[0]) // not in dest net set
+					cc.ExpectSome(nw[2], nw[1])
+					cc.ExpectSome(nw[2], nw[3])
+
+					cc.ExpectNone(nw[3], nw[0])
+					cc.ExpectSome(nw[3], nw[1])
+					cc.ExpectNone(nw[3], nw[2])
+					cc.CheckConnectivity()
+				})
+
+				Describe("after removing some duplicates and adding back some members", func() {
+					BeforeEach(func() {
+						namespacedSrcNS.Spec.Nets = []string{
+							c.workloadCIDR(1, 0, true),
+							c.workloadCIDR(2, 0, true),
+							c.workloadFullLengthCIDR(3, true), // added
+							c.workloadIP(3, true),             // added
+						}
+						var err error
+						namespacedSrcNS, err = client.NetworkSets().Update(utils.Ctx, namespacedSrcNS, utils.NoOptions)
+						Expect(err).NotTo(HaveOccurred())
+
+						namespacedDestNS.Spec.Nets = []string{
+							c.workloadCIDR(0, 0, true),
+							c.workloadCIDR(2, 0, true),
+							c.workloadCIDR(1, 0, true),
+							c.workloadCIDR(3, 0, true),
+						}
+						namespacedDestNS, err = client.NetworkSets().Update(utils.Ctx, namespacedDestNS, utils.NoOptions)
+						Expect(err).NotTo(HaveOccurred())
+					})
+
+					It("should have expected connectivity", func() {
+						// Now nw[0] isn't in the source set so it can't talk to anyone.
+						cc.ExpectNone(nw[0], nw[1])
+						cc.ExpectNone(nw[0], nw[2])
+						cc.ExpectNone(nw[0], nw[3])
+
+						cc.ExpectSome(nw[1], nw[0])
+						cc.ExpectSome(nw[1], nw[2])
+						cc.ExpectSome(nw[1], nw[3])
+
+						cc.ExpectSome(nw[2], nw[0])
+						cc.ExpectSome(nw[2], nw[1])
+						cc.ExpectSome(nw[2], nw[3])
+
+						cc.ExpectSome(nw[3], nw[0])
+						cc.ExpectSome(nw[3], nw[1])
+						cc.ExpectSome(nw[3], nw[2])
+						cc.CheckConnectivity()
+					})
+
+					Describe("after reverting the netsets", func() {
+						BeforeEach(resetNetsetsMembers)
+						It("should have expected connectivity", assertBaselineNetsetsConnectivity)
+					})
+
+					Describe("after removing the src netset", func() {
+						BeforeEach(func() {
+							_, err := client.NetworkSets().Delete(utils.Ctx, namespacedSrcNS.Namespace, namespacedSrcNS.Name, options.DeleteOptions{})
+							Expect(err).NotTo(HaveOccurred())
+						})
+						It("should have no connectivity", assertNoConnectivity)
+					})
+
+					Describe("after removing the dest netset", func() {
+						BeforeEach(func() {
+							_, err := client.NetworkSets().Delete(utils.Ctx, namespacedDestNS.Namespace, namespacedDestNS.Name, options.DeleteOptions{})
+							Expect(err).NotTo(HaveOccurred())
+						})
+						It("should have no connectivity", assertNoConnectivity)
+					})
+				})
+
+				Describe("after reverting the change", func() {
+					BeforeEach(resetNetsetsMembers)
+					It("should have expected connectivity", assertBaselineNetsetsConnectivity)
+				})
+			})
+
+			Describe("after updating rules to allow some traffic based on workload labels", func() {
+				BeforeEach(func() {
+					pol.Spec.Ingress[0].Source.Selector =
+						"has(allow-as-source) || name in {'" + nw[3].Name + "', '" + nw[0].Name + "'}"
+					pol = updatePolicy(pol)
+				})
+
+				It("should have expected connectivity", func() {
+					cc.ExpectNone(nw[0], nw[1]) // not in dest net set
+					cc.ExpectSome(nw[0], nw[2])
+					cc.ExpectSome(nw[0], nw[3])
+					cc.ExpectNone(nw[1], nw[0]) // not in dest net set
+					cc.ExpectSome(nw[1], nw[2])
+					cc.ExpectSome(nw[1], nw[3])
+					cc.ExpectNone(nw[2], nw[0]) // not in dest net set
+					cc.ExpectNone(nw[2], nw[1]) // not in dest net set
+					cc.ExpectSome(nw[2], nw[3])
+					cc.ExpectNone(nw[3], nw[0])
+					cc.ExpectNone(nw[3], nw[1])
+					cc.ExpectSome(nw[3], nw[2]) // Can now reach
+					cc.CheckConnectivity()
+				})
+
+				Describe("after removing the src netset", func() {
+					BeforeEach(func() {
+						_, err := client.NetworkSets().Delete(utils.Ctx, namespacedSrcNS.Namespace, namespacedSrcNS.Name, options.DeleteOptions{})
+						Expect(err).NotTo(HaveOccurred())
+					})
+					It("should have expected connectivity", func() {
+						cc.ExpectNone(nw[0], nw[1]) // not in dest net set
+						cc.ExpectSome(nw[0], nw[2])
+						cc.ExpectSome(nw[0], nw[3])
+
+						// Doesn't match as a source.
+						cc.ExpectNone(nw[1], nw[0])
+						cc.ExpectNone(nw[1], nw[2])
+						cc.ExpectNone(nw[1], nw[3])
+
+						// Doesn't match as a source any more.
+						cc.ExpectNone(nw[2], nw[0])
+						cc.ExpectNone(nw[2], nw[1])
+						cc.ExpectNone(nw[2], nw[3])
+
+						cc.ExpectNone(nw[3], nw[0])
+						cc.ExpectNone(nw[3], nw[1])
+						cc.ExpectSome(nw[3], nw[2]) // Can now reach
+						cc.CheckConnectivity()
+					})
+				})
+
+				Describe("after reverting that change", func() {
+					BeforeEach(func() {
+						pol.Spec.Ingress[0].Source.Selector = "has(allow-as-source)"
+						pol = updatePolicy(pol)
+					})
+
+					It("should have expected connectivity", assertBaselineNetsetsConnectivity)
+				})
+			})
+		})
 
 		Describe("with network sets matching some workloads", func() {
 			var (
@@ -204,9 +651,9 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 				srcNS = api.NewGlobalNetworkSet()
 				srcNS.Name = "ns-1"
 				srcNS.Spec.Nets = []string{
-					c.workloadCIDR(0, 0),
-					c.workloadCIDR(1, 0),
-					c.workloadCIDR(2, 0),
+					c.workloadCIDR(0, 0, false),
+					c.workloadCIDR(1, 0, false),
+					c.workloadCIDR(2, 0, false),
 				}
 				srcNS.Labels = map[string]string{
 					"allow-as-source": "",
@@ -219,8 +666,8 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 				destNS = api.NewGlobalNetworkSet()
 				destNS.Name = "ns-2"
 				destNS.Spec.Nets = []string{
-					c.workloadCIDR(2, 0),
-					c.workloadCIDR(3, 0),
+					c.workloadCIDR(2, 0, false),
+					c.workloadCIDR(3, 0, false),
 				}
 				destNS.Labels = map[string]string{
 					"allow-as-dest": "",
@@ -250,17 +697,17 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 
 			resetNetsetsMembers := func() {
 				srcNS.Spec.Nets = []string{
-					c.workloadCIDR(0, 0),
-					c.workloadCIDR(1, 0),
-					c.workloadCIDR(2, 0),
+					c.workloadCIDR(0, 0, false),
+					c.workloadCIDR(1, 0, false),
+					c.workloadCIDR(2, 0, false),
 				}
 				var err error
 				srcNS, err = client.GlobalNetworkSets().Update(utils.Ctx, srcNS, utils.NoOptions)
 				Expect(err).NotTo(HaveOccurred())
 
 				destNS.Spec.Nets = []string{
-					c.workloadCIDR(2, 0),
-					c.workloadCIDR(3, 0),
+					c.workloadCIDR(2, 0, false),
+					c.workloadCIDR(3, 0, false),
 				}
 				destNS, err = client.GlobalNetworkSets().Update(utils.Ctx, destNS, utils.NoOptions)
 				Expect(err).NotTo(HaveOccurred())
@@ -269,19 +716,19 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 			Describe("after updating some members in the sets", func() {
 				BeforeEach(func() {
 					srcNS.Spec.Nets = []string{
-						// c.workloadCIDR(0, 0), removed
-						c.workloadCIDR(1, 0),
-						c.workloadCIDR(2, 0),
-						c.workloadCIDR(3, 0), // added
+						// c.workloadCIDR(0, 0, false), removed
+						c.workloadCIDR(1, 0, false),
+						c.workloadCIDR(2, 0, false),
+						c.workloadCIDR(3, 0, false), // added
 					}
 					var err error
 					srcNS, err = client.GlobalNetworkSets().Update(utils.Ctx, srcNS, utils.NoOptions)
 					Expect(err).NotTo(HaveOccurred())
 
 					destNS.Spec.Nets = []string{
-						// c.workloadCIDR(2, 0), removed
-						c.workloadCIDR(1, 0),
-						c.workloadCIDR(3, 0),
+						// c.workloadCIDR(2, 0, false), removed
+						c.workloadCIDR(1, 0, false),
+						c.workloadCIDR(3, 0, false),
 					}
 					destNS, err = client.GlobalNetworkSets().Update(utils.Ctx, destNS, utils.NoOptions)
 					Expect(err).NotTo(HaveOccurred())
@@ -335,7 +782,7 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 					cc.ExpectSome(w[2], w[3])
 					cc.ExpectNone(w[3], w[0])
 					cc.ExpectNone(w[3], w[1])
-					cc.ExpectSome(w[3], w[2]) // now allowed because all sources are white listed
+					cc.ExpectSome(w[3], w[2]) // now allowed because all sources are allowed
 					cc.CheckConnectivity()
 				})
 
@@ -352,9 +799,9 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 					srcNS2 = api.NewGlobalNetworkSet()
 					srcNS2.Name = "ns-3"
 					srcNS2.Spec.Nets = []string{
-						c.workloadCIDR(1, 0),        // exact match
-						c.workloadFullLengthCIDR(2), // exact match
-						c.workloadCIDR(3, 0),        // unique to this net set
+						c.workloadCIDR(1, 0, false),        // exact match
+						c.workloadFullLengthCIDR(2, false), // exact match
+						c.workloadCIDR(3, 0, false),        // unique to this net set
 					}
 					srcNS2.Labels = map[string]string{
 						"allow-as-source": "",
@@ -434,27 +881,27 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 			Describe("after adding duplicate and overlapping members", func() {
 				BeforeEach(func() {
 					srcNS.Spec.Nets = []string{
-						c.workloadCIDR(1, 0),
-						c.workloadCIDR(2, 0),
+						c.workloadCIDR(1, 0, false),
+						c.workloadCIDR(2, 0, false),
 						// Lots of dupes...
-						c.workloadFullLengthCIDR(3),
-						c.workloadFullLengthCIDR(3),
-						c.workloadCIDR(3, 4),
-						c.workloadCIDR(3, 0),
-						c.workloadCIDR(3, 0),
-						c.workloadCIDR(3, 4),
-						c.workloadCIDR(3, 0),
+						c.workloadFullLengthCIDR(3, false),
+						c.workloadFullLengthCIDR(3, false),
+						c.workloadCIDR(3, 4, false),
+						c.workloadCIDR(3, 0, false),
+						c.workloadCIDR(3, 0, false),
+						c.workloadCIDR(3, 4, false),
+						c.workloadCIDR(3, 0, false),
 					}
 					var err error
 					srcNS, err = client.GlobalNetworkSets().Update(utils.Ctx, srcNS, utils.NoOptions)
 					Expect(err).NotTo(HaveOccurred())
 
 					destNS.Spec.Nets = []string{
-						// c.workloadCIDR(2, 0), // removed
-						c.workloadCIDR(1, 0),        // added
-						c.workloadCIDR(1, 1),        // added
-						c.workloadFullLengthCIDR(1), // added
-						c.workloadCIDR(3, 0),
+						// c.workloadCIDR(2, 0, false), // removed
+						c.workloadCIDR(1, 0, false),        // added
+						c.workloadCIDR(1, 1, false),        // added
+						c.workloadFullLengthCIDR(1, false), // added
+						c.workloadCIDR(3, 0, false),
 					}
 					destNS, err = client.GlobalNetworkSets().Update(utils.Ctx, destNS, utils.NoOptions)
 					Expect(err).NotTo(HaveOccurred())
@@ -483,20 +930,20 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 				Describe("after removing some duplicates and adding back some members", func() {
 					BeforeEach(func() {
 						srcNS.Spec.Nets = []string{
-							c.workloadCIDR(1, 0),
-							c.workloadCIDR(2, 0),
-							c.workloadFullLengthCIDR(3), // added
-							c.workloadIP(3),             // added
+							c.workloadCIDR(1, 0, false),
+							c.workloadCIDR(2, 0, false),
+							c.workloadFullLengthCIDR(3, false), // added
+							c.workloadIP(3, false),             // added
 						}
 						var err error
 						srcNS, err = client.GlobalNetworkSets().Update(utils.Ctx, srcNS, utils.NoOptions)
 						Expect(err).NotTo(HaveOccurred())
 
 						destNS.Spec.Nets = []string{
-							c.workloadCIDR(0, 0),
-							c.workloadCIDR(2, 0),
-							c.workloadCIDR(1, 0),
-							c.workloadCIDR(3, 0),
+							c.workloadCIDR(0, 0, false),
+							c.workloadCIDR(2, 0, false),
+							c.workloadCIDR(1, 0, false),
+							c.workloadCIDR(3, 0, false),
 						}
 						destNS, err = client.GlobalNetworkSets().Update(utils.Ctx, destNS, utils.NoOptions)
 						Expect(err).NotTo(HaveOccurred())
@@ -615,10 +1062,13 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 			for ii := range w {
 				w[ii].Stop()
 			}
+			for ii := range nw {
+				nw[ii].Stop()
+			}
 		})
 	}
 
-	Context("IPv4: Network sets tests with initialized Felix and etcd datastore", func() {
+	Context("_BPF-SAFE_ IPv4: Network sets tests with initialized Felix and etcd datastore", func() {
 		netsetsConfigV4 := netsetsConfig{ipVersion: 4, zeroCIDR: "0.0.0.0/0"}
 		describeConnTests(netsetsConfigV4)
 	})
@@ -628,7 +1078,7 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 		describeConnTests(netsetsConfigV6)
 	})
 
-	Describe("churn tests", func() {
+	Describe("_BPF-SAFE_ churn tests", func() {
 		var (
 			policies    []*api.GlobalNetworkPolicy
 			networkSets []*api.GlobalNetworkSet
@@ -645,6 +1095,16 @@ var _ = Context("Network sets tests with initialized Felix and etcd datastore", 
 				"tcp",
 			)
 			w.Configure(client)
+
+			nw := workload.Run(
+				felix,
+				"w",
+				"default",
+				"10.64.0.2",
+				"8055",
+				"tcp",
+			)
+			nw.Configure(client)
 
 			// Generate policies and network sets.
 			for i := 0; i < numPolicies; i++ {

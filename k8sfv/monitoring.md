@@ -22,7 +22,6 @@ local port number, for example
 
 and then visit <http://localhost:8082> in your web browser.
 
-
 ## How to interpret the results and metrics that it shows
 
 Each k8sfv test run reports a set of metrics when the run as a whole
@@ -51,7 +50,7 @@ k8sfv puts the following labels on these metrics.
 -   **code_level:** Indicates the line of development of the code used for
     that test, e.g. as `<repository name>-<branch>`.  So
     measurements with
-    `https://github.com/alauda/felix.git-master`
+    `https://github.com/projectcalico/felix.git-master`
     indicate checked-in Felix master code.  Tests with
     non-checked in code should have `dev` here.
 
@@ -62,19 +61,17 @@ k8sfv puts the following labels on these metrics.
     within that test case, some name indicating the test
     step, such as "iteration2".
 
-
 ## Technical details of how that setup runs
 
 The monitoring pieces - Grafana, a Prometheus server, and a Prometheus
 push gateway - run in a GKE container cluster, "k8sfv", in the
 `calico-test` GCE project.
 
-
 ## How to recreate that setup, if you need to
 
 -   Create a GKE container cluster with 2 nodes.  Follow the web UI
     instructions to get credentials so you can run `kubectl` on your own
-    machine, targetting that cluster.
+    machine, targeting that cluster.
 
 -   Run `kubectl apply -f monitoring.yaml` repeatedly, with intervening
     pauses, until it completely succeeds (where `monitoring.yaml` is in
@@ -107,7 +104,6 @@ push gateway - run in a GKE container cluster, "k8sfv", in the
     metrics and results to this new setup, configure them to run with
     the `PROMPG_URL` environment variable set to `http://<Prometheus
       push gateway IP>:9091`.
-
 
 ## Outstanding queries
 

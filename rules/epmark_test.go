@@ -21,7 +21,7 @@ import (
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
-	. "github.com/alauda/felix/rules"
+	. "github.com/projectcalico/calico/felix/rules"
 )
 
 func init() {
@@ -151,5 +151,4 @@ func (h *mockHash32) Sum32() uint32 {
 }
 
 func (h *mockHash32) Reset() {
-	return
 }

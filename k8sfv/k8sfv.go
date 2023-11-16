@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017,2019 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,14 @@
 
 package main
 
+// XXX staticcheck disabled for the whole import as golangci-lint ignores
+// specific directives, still an open issue:
+// https://github.com/golangci/golangci-lint/issues/741
+//
+// SA1019 prometheus is using that lib and so need we
+// github.com/golang/protobuf/proto is deprecated and fails lint
+
+//nolint:staticcheck
 import (
 	"context"
 	"fmt"
@@ -30,8 +38,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
-	client "github.com/projectcalico/libcalico-go/lib/clientv3"
+	"github.com/projectcalico/calico/libcalico-go/lib/apiconfig"
+	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 )
 
 // Global config - these are set by arguments on the ginkgo command line.
@@ -167,7 +175,8 @@ func initialize(k8sServerEndpoint string) (clientset *kubernetes.Clientset) {
 			return
 		}
 
-		ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancelFunc := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelFunc()
 		err = calicoClient.EnsureInitialized(
 			ctx,
 			"v3.0.0-test",
@@ -210,7 +219,7 @@ func cleanupAll(clientset *kubernetes.Clientset, nsPrefix string) {
 
 func panicIfError(err error) {
 	if err != nil {
+		log.WithError(err).Error("About to panic...")
 		panic(err)
 	}
-	return
 }

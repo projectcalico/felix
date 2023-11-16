@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,11 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/ipsets"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/rules"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/dataplane/common"
+	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/rules"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 // masqManager manages the ipsets and iptables chains used to implement the "NAT outgoing" or
@@ -38,10 +39,10 @@ import (
 // pool is excluded.
 type masqManager struct {
 	ipVersion       uint8
-	ipsetsDataplane ipsetsDataplane
+	ipsetsDataplane common.IPSetsDataplane
 	natTable        iptablesTable
 	activePools     map[string]*proto.IPAMPool
-	masqPools       set.Set
+	masqPools       set.Set[string]
 	dirty           bool
 	ruleRenderer    rules.RuleRenderer
 
@@ -49,7 +50,7 @@ type masqManager struct {
 }
 
 func newMasqManager(
-	ipsetsDataplane ipsetsDataplane,
+	ipsetsDataplane common.IPSetsDataplane,
 	natTable iptablesTable,
 	ruleRenderer rules.RuleRenderer,
 	maxIPSetSize int,
@@ -74,7 +75,7 @@ func newMasqManager(
 		ipsetsDataplane: ipsetsDataplane,
 		natTable:        natTable,
 		activePools:     map[string]*proto.IPAMPool{},
-		masqPools:       set.New(),
+		masqPools:       set.New[string](),
 		dirty:           true,
 		ruleRenderer:    ruleRenderer,
 		logCxt:          log.WithField("ipVersion", ipVersion),

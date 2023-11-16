@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2022 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,15 +15,16 @@
 package rules_test
 
 import (
-	. "github.com/alauda/felix/rules"
+	"github.com/projectcalico/calico/felix/environment"
+	. "github.com/projectcalico/calico/felix/rules"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/ipsets"
-	"github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
+	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
 )
 
 var ruleTestData = []TableEntry{
@@ -32,10 +33,10 @@ var ruleTestData = []TableEntry{
 	// Non-negated matches...
 
 	Entry("Protocol name", 4,
-		proto.Rule{Protocol: &proto.Protocol{NumberOrName: &proto.Protocol_Name{"tcp"}}},
+		proto.Rule{Protocol: &proto.Protocol{NumberOrName: &proto.Protocol_Name{Name: "tcp"}}},
 		"-p tcp"),
 	Entry("Protocol num", 4,
-		proto.Rule{Protocol: &proto.Protocol{NumberOrName: &proto.Protocol_Number{8}}},
+		proto.Rule{Protocol: &proto.Protocol{NumberOrName: &proto.Protocol_Number{Number: 8}}},
 		"-p 8"),
 
 	Entry("Source net", 4,
@@ -93,10 +94,10 @@ var ruleTestData = []TableEntry{
 	// Negated matches...
 
 	Entry("Protocol name", 4,
-		proto.Rule{NotProtocol: &proto.Protocol{NumberOrName: &proto.Protocol_Name{"tcp"}}},
+		proto.Rule{NotProtocol: &proto.Protocol{NumberOrName: &proto.Protocol_Name{Name: "tcp"}}},
 		"! -p tcp"),
 	Entry("Protocol num", 4,
-		proto.Rule{NotProtocol: &proto.Protocol{NumberOrName: &proto.Protocol_Number{8}}},
+		proto.Rule{NotProtocol: &proto.Protocol{NumberOrName: &proto.Protocol_Number{Number: 8}}},
 		"! -p 8"),
 
 	Entry("Negated source net", 4,
@@ -274,7 +275,7 @@ var _ = Describe("Protobuf rule to iptables rule conversion", func() {
 	)
 
 	DescribeTable(
-		"Deny rules should be correctly rendered",
+		"Deny (DROP) rules should be correctly rendered",
 		func(ipVer int, in proto.Rule, expMatch string) {
 			renderer := NewRenderer(rrConfigNormal)
 			denyRule := in
@@ -284,6 +285,23 @@ var _ = Describe("Protobuf rule to iptables rule conversion", func() {
 			Expect(len(rules)).To(Equal(1))
 			Expect(rules[0].Match.Render()).To(Equal(expMatch))
 			Expect(rules[0].Action).To(Equal(iptables.DropAction{}))
+		},
+		ruleTestData...,
+	)
+
+	DescribeTable(
+		"Deny (REJECT) rules should be correctly rendered",
+		func(ipVer int, in proto.Rule, expMatch string) {
+			rrConfigReject := rrConfigNormal
+			rrConfigReject.IptablesFilterDenyAction = "REJECT"
+			renderer := NewRenderer(rrConfigReject)
+			denyRule := in
+			denyRule.Action = "deny"
+			rules := renderer.ProtoRuleToIptablesRules(&denyRule, uint8(ipVer))
+			// For deny, should be one match rule that just does the REJECT.
+			Expect(len(rules)).To(Equal(1))
+			Expect(rules[0].Match.Render()).To(Equal(expMatch))
+			Expect(rules[0].Action).To(Equal(iptables.RejectAction{}))
 		},
 		ruleTestData...,
 	)
@@ -315,7 +333,7 @@ var _ = Describe("Protobuf rule to iptables rule conversion", func() {
 			iptRules := renderer.ProtoRuleToIptablesRules(&pRule, 4)
 			rendered := []string{}
 			for _, ir := range iptRules {
-				s := ir.RenderAppend("test", "", &iptables.Features{})
+				s := ir.RenderAppend("test", "", &environment.Features{})
 				rendered = append(rendered, s)
 			}
 			Expect(rendered).To(Equal(expected))
@@ -431,7 +449,7 @@ var _ = Describe("Protobuf rule to iptables rule conversion", func() {
 			iptRules := renderer.ProtoRuleToIptablesRules(&pRule, 4)
 			rendered := []string{}
 			for _, ir := range iptRules {
-				s := ir.RenderAppend("test", "", &iptables.Features{})
+				s := ir.RenderAppend("test", "", &environment.Features{})
 				rendered = append(rendered, s)
 			}
 			Expect(rendered).To(Equal(expected))
@@ -1023,3 +1041,124 @@ var _ = DescribeTable("Port split tests",
 		{First: 215, Last: 216},
 	}}),
 )
+
+var _ = Describe("rule metadata tests", func() {
+	rule := &proto.Rule{
+		Metadata: &proto.RuleMetadata{Annotations: map[string]string{
+			"testkey00": "testvalue00",
+			"testkey01": "testvalue01",
+		}},
+		Protocol: &proto.Protocol{NumberOrName: &proto.Protocol_Name{Name: "tcp"}},
+	}
+	rrConfigNormal := Config{
+		IPIPEnabled:          true,
+		IPIPTunnelAddress:    nil,
+		IPSetConfigV4:        ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
+		IPSetConfigV6:        ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
+		IptablesMarkAccept:   0x80,
+		IptablesMarkPass:     0x100,
+		IptablesMarkScratch0: 0x200,
+		IptablesMarkScratch1: 0x400,
+		IptablesMarkEndpoint: 0xff000,
+		IptablesLogPrefix:    "calico-packet",
+	}
+
+	It("IPv4 should include annotations in comments", func() {
+		renderer := NewRenderer(rrConfigNormal)
+		rs := renderer.ProtoRuleToIptablesRules(rule, uint8(4))
+		for _, r := range rs {
+			Expect(r.Comment).To(ContainElement("testkey00=testvalue00"))
+			Expect(r.Comment).To(ContainElement("testkey01=testvalue01"))
+		}
+	})
+
+	It("IPv6 should include annotations in comments", func() {
+		renderer := NewRenderer(rrConfigNormal)
+		rs := renderer.ProtoRuleToIptablesRules(rule, uint8(6))
+		for _, r := range rs {
+			Expect(r.Comment).To(ContainElement("testkey00=testvalue00"))
+			Expect(r.Comment).To(ContainElement("testkey01=testvalue01"))
+		}
+	})
+
+	It("should include a chain name comment", func() {
+		renderer := NewRenderer(rrConfigNormal)
+		chains := renderer.PolicyToIptablesChains(
+			&proto.PolicyID{
+				Name: "long-policy-name-that-gets-hashed",
+			},
+			&proto.Policy{
+				InboundRules: []*proto.Rule{{Action: "allow"}},
+			},
+			4,
+		)
+		Expect(chains).To(ConsistOf(
+			&iptables.Chain{
+				Name: "cali-pi-_ffOMcf6pikpiZ6hgKcW",
+				Rules: []iptables.Rule{
+					{
+						Match:  nil,
+						Action: iptables.SetMarkAction{Mark: 0x80},
+						Comment: []string{
+							"Policy long-policy-name-that-gets-hashed ingress",
+						},
+					},
+					{
+						Match:  iptables.Match().MarkSingleBitSet(0x80),
+						Action: iptables.ReturnAction{},
+					},
+				},
+			},
+			&iptables.Chain{
+				Name: "cali-po-_ffOMcf6pikpiZ6hgKcW",
+				Rules: []iptables.Rule{
+					{
+						Comment: []string{
+							"Policy long-policy-name-that-gets-hashed egress",
+						},
+					},
+				},
+			},
+		))
+	})
+	It("should include a chain name comment", func() {
+		renderer := NewRenderer(rrConfigNormal)
+		inbound, outbound := renderer.ProfileToIptablesChains(
+			&proto.ProfileID{
+				Name: "long-policy-name-that-gets-hashed",
+			},
+			&proto.Profile{
+				InboundRules: []*proto.Rule{{Action: "allow"}},
+			},
+			4,
+		)
+		Expect([]*iptables.Chain{inbound, outbound}).To(ConsistOf(
+			&iptables.Chain{
+				Name: "cali-pri-_ffOMcf6pikpiZ6hgKc",
+				Rules: []iptables.Rule{
+					{
+						Match:  nil,
+						Action: iptables.SetMarkAction{Mark: 0x80},
+						Comment: []string{
+							"Profile long-policy-name-that-gets-hashed ingress",
+						},
+					},
+					{
+						Match:  iptables.Match().MarkSingleBitSet(0x80),
+						Action: iptables.ReturnAction{},
+					},
+				},
+			},
+			&iptables.Chain{
+				Name: "cali-pro-_ffOMcf6pikpiZ6hgKc",
+				Rules: []iptables.Rule{
+					{
+						Comment: []string{
+							"Profile long-policy-name-that-gets-hashed egress",
+						},
+					},
+				},
+			},
+		))
+	})
+})

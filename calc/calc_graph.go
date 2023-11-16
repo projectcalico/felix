@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2021 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,27 +18,24 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/dispatcher"
-	"github.com/alauda/felix/labelindex"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/net"
+	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"github.com/projectcalico/calico/felix/config"
+	"github.com/projectcalico/calico/felix/dispatcher"
+	"github.com/projectcalico/calico/felix/labelindex"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/serviceindex"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 
-var (
-	gaugeNumActiveSelectors = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "felix_active_local_selectors",
-		Help: "Number of active selectors on this host.",
-	})
-	gaugeNumActiveTags = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "felix_active_local_tags",
-		Help: "Number of active tags on this host.",
-	})
-)
+var gaugeNumActiveSelectors = prometheus.NewGauge(prometheus.GaugeOpts{
+	Name: "felix_active_local_selectors",
+	Help: "Number of active selectors on this host.",
+})
 
 func init() {
-	prometheus.MustRegister(gaugeNumActiveTags)
 	prometheus.MustRegister(gaugeNumActiveSelectors)
 }
 
@@ -59,7 +56,7 @@ type rulesUpdateCallbacks interface {
 type endpointCallbacks interface {
 	OnEndpointTierUpdate(endpointKey model.Key,
 		endpoint interface{},
-		filteredTiers []tierInfo)
+		filteredTiers []TierInfo)
 }
 
 type configCallbacks interface {
@@ -67,23 +64,49 @@ type configCallbacks interface {
 	OnDatastoreNotReady()
 }
 
+type encapCallbacks interface {
+	OnEncapUpdate(encap config.Encapsulation)
+}
+
 type passthruCallbacks interface {
 	OnHostIPUpdate(hostname string, ip *net.IP)
 	OnHostIPRemove(hostname string)
+	OnHostIPv6Update(hostname string, ip *net.IP)
+	OnHostIPv6Remove(hostname string)
+	OnHostMetadataUpdate(hostname string, ip4 *net.IPNet, ip6 *net.IPNet, asnumber string, labels map[string]string)
+	OnHostMetadataRemove(hostname string)
 	OnIPPoolUpdate(model.IPPoolKey, *model.IPPool)
 	OnIPPoolRemove(model.IPPoolKey)
 	OnServiceAccountUpdate(*proto.ServiceAccountUpdate)
 	OnServiceAccountRemove(proto.ServiceAccountID)
 	OnNamespaceUpdate(*proto.NamespaceUpdate)
 	OnNamespaceRemove(proto.NamespaceID)
+	OnWireguardUpdate(string, *model.Wireguard)
+	OnWireguardRemove(string)
+	OnGlobalBGPConfigUpdate(*v3.BGPConfiguration)
+	OnServiceUpdate(*proto.ServiceUpdate)
+	OnServiceRemove(*proto.ServiceRemove)
+}
+
+type routeCallbacks interface {
+	OnRouteUpdate(update *proto.RouteUpdate)
+	OnRouteRemove(dst string)
+}
+
+type vxlanCallbacks interface {
+	OnVTEPUpdate(update *proto.VXLANTunnelEndpointUpdate)
+	OnVTEPRemove(node string)
 }
 
 type PipelineCallbacks interface {
 	ipSetUpdateCallbacks
 	rulesUpdateCallbacks
+	encapCallbacks
 	endpointCallbacks
 	configCallbacks
 	passthruCallbacks
+	routeCallbacks
+	vxlanCallbacks
 }
 
 type CalcGraph struct {
@@ -92,7 +115,8 @@ type CalcGraph struct {
 	activeRulesCalculator *ActiveRulesCalculator
 }
 
-func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) *CalcGraph {
+func NewCalculationGraph(callbacks PipelineCallbacks, conf *config.Config, liveCallback func()) *CalcGraph {
+	hostname := conf.FelixHostname
 	log.Infof("Creating calculation graph, filtered to hostname %v", hostname)
 
 	// The source of the processing graph, this dispatcher will be fed all the updates from the
@@ -155,8 +179,8 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) *CalcGrap
 
 	// The active rules calculator only figures out which rules are active, it doesn't extract
 	// any information from the rules.  The rule scanner takes the output from the active rules
-	// calculator and scans the individual rules for selectors, tags, and named ports.  It
-	// generates events when a new selector/tag/named port starts/stops being used.
+	// calculator and scans the individual rules for selectors and named ports.  It
+	// generates events when a new selector/named port starts/stops being used.
 	//
 	//             ...
 	//     Active Rules Calculator
@@ -165,7 +189,7 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) *CalcGrap
 	//              |
 	//         Rule scanner
 	//          |    \
-	//          |     \ Locally active tags/selectors/named ports
+	//          |     \ Locally active selectors/named ports
 	//          |      \
 	//          |      ...
 	//          |
@@ -180,11 +204,35 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) *CalcGrap
 	// below.
 	ruleScanner.RulesUpdateCallbacks = callbacks
 
-	// The rule scanner only goes as far as figuring out which tags/selectors/named ports are
+	serviceIndex := serviceindex.NewServiceIndex()
+	serviceIndex.RegisterWith(allUpdDispatcher)
+	// Send the Service IP set member index's outputs to the dataplane.
+	serviceIndex.OnMemberAdded = func(ipSetID string, member labelindex.IPSetMember) {
+		if log.GetLevel() >= log.DebugLevel {
+			log.WithFields(log.Fields{
+				"ipSetID": ipSetID,
+				"member":  member,
+			}).Debug("Member added to service IP set.")
+		}
+		callbacks.OnIPSetMemberAdded(ipSetID, member)
+	}
+	serviceIndex.OnMemberRemoved = func(ipSetID string, member labelindex.IPSetMember) {
+		if log.GetLevel() >= log.DebugLevel {
+			log.WithFields(log.Fields{
+				"ipSetID": ipSetID,
+				"member":  member,
+			}).Debug("Member removed from service IP set.")
+		}
+		callbacks.OnIPSetMemberRemoved(ipSetID, member)
+	}
+	serviceIndex.OnAlive = liveCallback
+
+	// The rule scanner only goes as far as figuring out which selectors/named ports are
 	// active. Next we need to figure out which endpoints (and hence which IP addresses/ports) are
 	// in each tag/selector/named port. The IP set member index calculates the set of IPs and named
-	// ports that should be in each IP set.  To do that, it matches the active selectors/tags/named
-	// ports extracted by the rule scanner against all the endpoints.
+	// ports that should be in each IP set.  To do that, it matches the active selectors/named
+	// ports extracted by the rule scanner against all the endpoints. The service index does the same
+	// for service based rules, building IP set contributions from endpoint slices.
 	//
 	//        ...
 	//     Dispatcher (all updates)
@@ -194,28 +242,37 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) *CalcGrap
 	//      |       ...
 	//      |    Rule scanner
 	//      |     |       \
-	//      |    ...       \ Locally active tags/selectors/named ports
+	//      |    ...       \ Locally active selectors/named ports
 	//       \              |
 	//        \_____        |
 	//              \       |
-	//            IP set member index
+	//            IP set member index / service index
 	//                   |
 	//                   | IP set member added/removed
 	//                   |
 	//               <dataplane>
 	//
 	ipsetMemberIndex := labelindex.NewSelectorAndNamedPortIndex()
+	ipsetMemberIndex.OnAlive = liveCallback
 	// Wire up the inputs to the IP set member index.
 	ipsetMemberIndex.RegisterWith(allUpdDispatcher)
 	ruleScanner.OnIPSetActive = func(ipSet *IPSetData) {
 		log.WithField("ipSet", ipSet).Info("IPSet now active")
 		callbacks.OnIPSetAdded(ipSet.UniqueID(), ipSet.DataplaneProtocolType())
-		ipsetMemberIndex.UpdateIPSet(ipSet.UniqueID(), ipSet.Selector, ipSet.NamedPortProtocol, ipSet.NamedPort)
+		if ipSet.Service != "" {
+			serviceIndex.UpdateIPSet(ipSet.UniqueID(), ipSet.Service)
+		} else {
+			ipsetMemberIndex.UpdateIPSet(ipSet.UniqueID(), ipSet.Selector, ipSet.NamedPortProtocol, ipSet.NamedPort)
+		}
 		gaugeNumActiveSelectors.Inc()
 	}
 	ruleScanner.OnIPSetInactive = func(ipSet *IPSetData) {
 		log.WithField("ipSet", ipSet).Info("IPSet now inactive")
-		ipsetMemberIndex.DeleteIPSet(ipSet.UniqueID())
+		if ipSet.Service != "" {
+			serviceIndex.DeleteIPSet(ipSet.UniqueID())
+		} else {
+			ipsetMemberIndex.DeleteIPSet(ipSet.UniqueID())
+		}
 		callbacks.OnIPSetRemoved(ipSet.UniqueID())
 		gaugeNumActiveSelectors.Dec()
 	}
@@ -283,6 +340,41 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) *CalcGrap
 	hostIPPassthru := NewDataplanePassthru(callbacks)
 	hostIPPassthru.RegisterWith(allUpdDispatcher)
 
+	if conf.BPFEnabled || conf.Encapsulation.VXLANEnabled || conf.Encapsulation.VXLANEnabledV6 || conf.WireguardEnabled || conf.WireguardEnabledV6 {
+		// Calculate simple node-ownership routes.
+		//        ...
+		//     Dispatcher (all updates)
+		//         |
+		//         | host IPs, host config, IP pools, IPAM blocks
+		//         |
+		//       L3 resolver
+		//         |
+		//         | routes
+		//         |
+		//      <dataplane>
+		//
+		l3RR := NewL3RouteResolver(hostname, callbacks, conf.UseNodeResourceUpdates(), conf.RouteSource)
+		l3RR.RegisterWith(allUpdDispatcher, localEndpointDispatcher)
+		l3RR.OnAlive = liveCallback
+	}
+
+	// Calculate VXLAN routes.
+	//        ...
+	//     Dispatcher (all updates)
+	//         |
+	//         | host IPs, host config, IP pools, IPAM blocks
+	//         |
+	//       vxlan resolver
+	//         |
+	//         | VTEPs, routes
+	//         |
+	//      <dataplane>
+	//
+	if conf.Encapsulation.VXLANEnabled || conf.Encapsulation.VXLANEnabledV6 {
+		vxlanResolver := NewVXLANResolver(hostname, callbacks, conf.UseNodeResourceUpdates())
+		vxlanResolver.RegisterWith(allUpdDispatcher)
+	}
+
 	// Register for config updates.
 	//
 	//        ...
@@ -315,6 +407,20 @@ func NewCalculationGraph(callbacks PipelineCallbacks, hostname string) *CalcGrap
 	//
 	profileDecoder := NewProfileDecoder(callbacks)
 	profileDecoder.RegisterWith(allUpdDispatcher)
+
+	// Register for IP Pool updates. EncapsulationResolver will send a message to the
+	// dataplane so that Felix is restarted if IPIP and/or VXLAN encapsulation changes
+	// due to IP pool changes, so that it is recalculated at Felix startup.
+	//
+	//        ...
+	//     Dispatcher (all updates)
+	//         |
+	//         | IP pools
+	//         |
+	//       encapsulation resolver
+	//
+	encapsulationResolver := NewEncapsulationResolver(conf, callbacks)
+	encapsulationResolver.RegisterWith(allUpdDispatcher)
 
 	return &CalcGraph{
 		AllUpdDispatcher:      allUpdDispatcher,

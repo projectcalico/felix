@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,20 +16,26 @@ package intdataplane
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"strings"
+	"sync"
+
+	"github.com/projectcalico/calico/felix/ifacemonitor"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/ip"
-	"github.com/alauda/felix/ipsets"
-	"github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/routetable"
-	"github.com/alauda/felix/rules"
-	"github.com/alauda/felix/testutils"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/dataplane/common"
+	"github.com/projectcalico/calico/felix/ip"
+	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/routetable"
+	"github.com/projectcalico/calico/felix/rules"
+	"github.com/projectcalico/calico/felix/testutils"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 var wlDispatchEmpty = []*iptables.Chain{
@@ -39,7 +45,7 @@ var wlDispatchEmpty = []*iptables.Chain{
 			{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		},
 	},
@@ -49,7 +55,7 @@ var wlDispatchEmpty = []*iptables.Chain{
 			{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		},
 	},
@@ -59,7 +65,7 @@ var wlDispatchEmpty = []*iptables.Chain{
 			{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		},
 	},
@@ -69,16 +75,16 @@ var wlDispatchEmpty = []*iptables.Chain{
 			iptables.Rule{
 				Match:   iptables.Match().InInterface("cali+"),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown endpoint",
+				Comment: []string{"Unknown endpoint"},
 			},
 			iptables.Rule{
 				Match:   iptables.Match().InInterface("tap+"),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown endpoint",
+				Comment: []string{"Unknown endpoint"},
 			},
 			{
 				Action:  iptables.SetMaskedMarkAction{Mark: 0x0100, Mask: 0xff00},
-				Comment: "Non-Cali endpoint mark",
+				Comment: []string{"Non-Cali endpoint mark"},
 			},
 		},
 	},
@@ -113,31 +119,46 @@ var fromHostDispatchEmpty = []*iptables.Chain{
 	},
 }
 
+var toHostDispatchEmpty = []*iptables.Chain{
+	{
+		Name:  "cali-to-host-endpoint",
+		Rules: []iptables.Rule{},
+	},
+}
+
 func hostChainsForIfaces(ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
-	return append(chainsForIfaces(ifaceMetadata, epMarkMapper, true, "normal"),
-		chainsForIfaces(ifaceMetadata, epMarkMapper, true, "applyOnForward")...,
+	return append(chainsForIfaces(ifaceMetadata, epMarkMapper, true, "normal", false, iptables.AcceptAction{}),
+		chainsForIfaces(ifaceMetadata, epMarkMapper, true, "applyOnForward", false, iptables.AcceptAction{})...,
 	)
 }
 
+func mangleEgressChainsForIfaces(ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
+	return chainsForIfaces(ifaceMetadata, epMarkMapper, true, "normal", true, iptables.SetMarkAction{Mark: 0x8}, iptables.ReturnAction{})
+}
+
 func rawChainsForIfaces(ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
-	return chainsForIfaces(ifaceMetadata, epMarkMapper, true, "untracked")
+	return chainsForIfaces(ifaceMetadata, epMarkMapper, true, "untracked", false, iptables.AcceptAction{})
 }
 
 func preDNATChainsForIfaces(ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
-	return chainsForIfaces(ifaceMetadata, epMarkMapper, true, "preDNAT")
+	return chainsForIfaces(ifaceMetadata, epMarkMapper, true, "preDNAT", false, iptables.AcceptAction{})
 }
 
 func wlChainsForIfaces(ifaceMetadata []string, epMarkMapper rules.EndpointMarkMapper) []*iptables.Chain {
-	return chainsForIfaces(ifaceMetadata, epMarkMapper, false, "normal")
+	return chainsForIfaces(ifaceMetadata, epMarkMapper, false, "normal", false, iptables.AcceptAction{})
 }
 
 func chainsForIfaces(ifaceMetadata []string,
 	epMarkMapper rules.EndpointMarkMapper,
 	host bool,
-	tableKind string) []*iptables.Chain {
+	tableKind string,
+	egressOnly bool,
+	allowActions ...iptables.Action,
+) []*iptables.Chain {
 	const (
 		ProtoUDP  = 17
 		ProtoIPIP = 4
+		VXLANPort = 4789
 	)
 
 	log.WithFields(log.Fields{
@@ -161,9 +182,15 @@ func chainsForIfaces(ifaceMetadata []string,
 	epmarkFromPrefix := outPrefix[:6]
 	dropEncapRules := []iptables.Rule{
 		{
+			Match: iptables.Match().ProtocolNum(ProtoUDP).
+				DestPorts(uint16(VXLANPort)),
+			Action:  iptables.DropAction{},
+			Comment: []string{"Drop VXLAN encapped packets originating in workloads"},
+		},
+		{
 			Match:   iptables.Match().ProtocolNum(ProtoIPIP),
 			Action:  iptables.DropAction{},
-			Comment: "Drop IPinIP encapped packets originating in pods",
+			Comment: []string{"Drop IPinIP encapped packets originating in workloads"},
 		},
 	}
 
@@ -226,12 +253,14 @@ func chainsForIfaces(ifaceMetadata []string,
 		outRules := []iptables.Rule{}
 
 		if tableKind != "untracked" {
-			outRules = append(outRules,
-				iptables.Rule{
-					Match:  iptables.Match().ConntrackState("RELATED,ESTABLISHED"),
-					Action: iptables.AcceptAction{},
-				},
-			)
+			for _, allowAction := range allowActions {
+				outRules = append(outRules,
+					iptables.Rule{
+						Match:  iptables.Match().ConntrackState("RELATED,ESTABLISHED"),
+						Action: allowAction,
+					},
+				)
+			}
 			outRules = append(outRules, iptables.Rule{
 				Match:  iptables.Match().ConntrackState("INVALID"),
 				Action: iptables.DropAction{},
@@ -255,7 +284,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			outRules = append(outRules, iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.ClearMarkAction{Mark: 16},
-				Comment: "Start of policies",
+				Comment: []string{"Start of policies"},
 			})
 			outRules = append(outRules, iptables.Rule{
 				Match:  iptables.Match().MarkClear(16),
@@ -270,7 +299,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			outRules = append(outRules, iptables.Rule{
 				Match:   iptables.Match().MarkSingleBitSet(8),
 				Action:  iptables.ReturnAction{},
-				Comment: "Return if policy accepted",
+				Comment: []string{"Return if policy accepted"},
 			})
 			if tableKind == "normal" || tableKind == "applyOnForward" {
 				// Only end with a drop rule in the filter chain.  In the raw chain,
@@ -279,7 +308,7 @@ func chainsForIfaces(ifaceMetadata []string,
 				outRules = append(outRules, iptables.Rule{
 					Match:   iptables.Match().MarkClear(16),
 					Action:  iptables.DropAction{},
-					Comment: "Drop if no policies passed packet",
+					Comment: []string{"Drop if no policies passed packet"},
 				})
 			}
 
@@ -288,11 +317,11 @@ func chainsForIfaces(ifaceMetadata []string,
 			// applicable policies.
 			outRules = append(outRules, iptables.Rule{
 				Action:  iptables.SetMarkAction{Mark: 8},
-				Comment: "Allow forwarded traffic by default",
+				Comment: []string{"Allow forwarded traffic by default"},
 			})
 			outRules = append(outRules, iptables.Rule{
 				Action:  iptables.ReturnAction{},
-				Comment: "Return for accepted forward traffic",
+				Comment: []string{"Return for accepted forward traffic"},
 			})
 		}
 
@@ -300,19 +329,21 @@ func chainsForIfaces(ifaceMetadata []string,
 			outRules = append(outRules, iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Drop if no profiles matched",
+				Comment: []string{"Drop if no profiles matched"},
 			})
 		}
 
 		inRules := []iptables.Rule{}
 
 		if tableKind != "untracked" {
-			inRules = append(inRules,
-				iptables.Rule{
-					Match:  iptables.Match().ConntrackState("RELATED,ESTABLISHED"),
-					Action: iptables.AcceptAction{},
-				},
-			)
+			for _, allowAction := range allowActions {
+				inRules = append(inRules,
+					iptables.Rule{
+						Match:  iptables.Match().ConntrackState("RELATED,ESTABLISHED"),
+						Action: allowAction,
+					},
+				)
+			}
 			inRules = append(inRules, iptables.Rule{
 				Match:  iptables.Match().ConntrackState("INVALID"),
 				Action: iptables.DropAction{},
@@ -333,7 +364,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			inRules = append(inRules, iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.ClearMarkAction{Mark: 16},
-				Comment: "Start of policies",
+				Comment: []string{"Start of policies"},
 			})
 			// For untracked policy, we expect a tier with a policy in it.
 			inRules = append(inRules, iptables.Rule{
@@ -349,7 +380,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			inRules = append(inRules, iptables.Rule{
 				Match:   iptables.Match().MarkSingleBitSet(8),
 				Action:  iptables.ReturnAction{},
-				Comment: "Return if policy accepted",
+				Comment: []string{"Return if policy accepted"},
 			})
 			if tableKind == "normal" || tableKind == "applyOnForward" {
 				// Only end with a drop rule in the filter chain.  In the raw chain,
@@ -358,7 +389,7 @@ func chainsForIfaces(ifaceMetadata []string,
 				inRules = append(inRules, iptables.Rule{
 					Match:   iptables.Match().MarkClear(16),
 					Action:  iptables.DropAction{},
-					Comment: "Drop if no policies passed packet",
+					Comment: []string{"Drop if no policies passed packet"},
 				})
 			}
 
@@ -367,11 +398,11 @@ func chainsForIfaces(ifaceMetadata []string,
 			// applicable policies.
 			inRules = append(inRules, iptables.Rule{
 				Action:  iptables.SetMarkAction{Mark: 8},
-				Comment: "Allow forwarded traffic by default",
+				Comment: []string{"Allow forwarded traffic by default"},
 			})
 			inRules = append(inRules, iptables.Rule{
 				Action:  iptables.ReturnAction{},
-				Comment: "Return for accepted forward traffic",
+				Comment: []string{"Return for accepted forward traffic"},
 			})
 		}
 
@@ -379,7 +410,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			inRules = append(inRules, iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Drop if no profiles matched",
+				Comment: []string{"Drop if no profiles matched"},
 			})
 		}
 
@@ -396,11 +427,15 @@ func chainsForIfaces(ifaceMetadata []string,
 					Name:  outPrefix[:6] + hostOrWlLetter + "-" + ifaceName,
 					Rules: outRules,
 				},
-				&iptables.Chain{
-					Name:  inPrefix[:6] + hostOrWlLetter + "-" + ifaceName,
-					Rules: inRules,
-				},
 			)
+			if !egressOnly {
+				chains = append(chains,
+					&iptables.Chain{
+						Name:  inPrefix[:6] + hostOrWlLetter + "-" + ifaceName,
+						Rules: inRules,
+					},
+				)
+			}
 		}
 
 		if host {
@@ -410,12 +445,14 @@ func chainsForIfaces(ifaceMetadata []string,
 					Action: iptables.GotoAction{Target: outPrefix[:6] + hostOrWlLetter + "-" + ifaceName},
 				},
 			)
-			dispatchIn = append(dispatchIn,
-				iptables.Rule{
-					Match:  iptables.Match().InInterface(ifaceName),
-					Action: iptables.GotoAction{Target: inPrefix[:6] + hostOrWlLetter + "-" + ifaceName},
-				},
-			)
+			if !egressOnly {
+				dispatchIn = append(dispatchIn,
+					iptables.Rule{
+						Match:  iptables.Match().InInterface(ifaceName),
+						Action: iptables.GotoAction{Target: inPrefix[:6] + hostOrWlLetter + "-" + ifaceName},
+					},
+				)
+			}
 		} else {
 			dispatchOut = append(dispatchOut,
 				iptables.Rule{
@@ -431,7 +468,7 @@ func chainsForIfaces(ifaceMetadata []string,
 			)
 		}
 
-		if tableKind != "preDNAT" && tableKind != "untracked" {
+		if tableKind != "preDNAT" && tableKind != "untracked" && !egressOnly {
 			chains = append(chains,
 				&iptables.Chain{
 					Name: epMarkSetOnePrefix + ifaceName,
@@ -462,40 +499,40 @@ func chainsForIfaces(ifaceMetadata []string,
 			iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		)
 		dispatchIn = append(dispatchIn,
 			iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		)
 	}
 
-	if tableKind != "preDNAT" && tableKind != "untracked" {
+	if tableKind != "preDNAT" && tableKind != "untracked" && !egressOnly {
 		epMarkSet = append(epMarkSet,
 			iptables.Rule{
 				Match:   iptables.Match().InInterface("cali+"),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown endpoint",
+				Comment: []string{"Unknown endpoint"},
 			},
 			iptables.Rule{
 				Match:   iptables.Match().InInterface("tap+"),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown endpoint",
+				Comment: []string{"Unknown endpoint"},
 			},
 			iptables.Rule{
 				Action:  iptables.SetMaskedMarkAction{Mark: 0x0100, Mask: 0xff00},
-				Comment: "Non-Cali endpoint mark",
+				Comment: []string{"Non-Cali endpoint mark"},
 			},
 		)
 		epMarkFrom = append(epMarkFrom,
 			iptables.Rule{
 				Match:   iptables.Match(),
 				Action:  iptables.DropAction{},
-				Comment: "Unknown interface",
+				Comment: []string{"Unknown interface"},
 			},
 		)
 		chains = append(chains,
@@ -506,6 +543,15 @@ func chainsForIfaces(ifaceMetadata []string,
 			&iptables.Chain{
 				Name:  epMarkFromName,
 				Rules: epMarkFrom,
+			},
+		)
+	}
+
+	if tableKind == "untracked" {
+		chains = append(chains,
+			&iptables.Chain{
+				Name:  rules.ChainRpfSkip,
+				Rules: []iptables.Rule{},
 			},
 		)
 	}
@@ -523,18 +569,23 @@ func chainsForIfaces(ifaceMetadata []string,
 				Name:  outPrefix + hostOrWlDispatch,
 				Rules: dispatchOut,
 			},
-			&iptables.Chain{
-				Name:  inPrefix + hostOrWlDispatch,
-				Rules: dispatchIn,
-			},
 		)
+		if !egressOnly {
+			chains = append(chains,
+				&iptables.Chain{
+					Name:  inPrefix + hostOrWlDispatch,
+					Rules: dispatchIn,
+				},
+			)
+		}
 	}
 
 	return chains
 }
 
 type mockRouteTable struct {
-	currentRoutes map[string][]routetable.Target
+	currentRoutes   map[string][]routetable.Target
+	currentL2Routes map[string][]routetable.L2Target
 }
 
 func (t *mockRouteTable) SetRoutes(ifaceName string, targets []routetable.Target) {
@@ -543,6 +594,26 @@ func (t *mockRouteTable) SetRoutes(ifaceName string, targets []routetable.Target
 		"targets":   targets,
 	}).Debug("SetRoutes")
 	t.currentRoutes[ifaceName] = targets
+}
+
+func (t *mockRouteTable) SetL2Routes(ifaceName string, targets []routetable.L2Target) {
+	log.WithFields(log.Fields{
+		"ifaceName": ifaceName,
+		"targets":   targets,
+	}).Debug("SetL2Routes")
+	t.currentL2Routes[ifaceName] = targets
+}
+
+func (t *mockRouteTable) RouteRemove(_ string, _ ip.CIDR) {
+}
+
+func (t *mockRouteTable) RouteUpdate(_ string, _ routetable.Target) {
+}
+
+func (t *mockRouteTable) OnIfaceStateChanged(string, ifacemonitor.State) {}
+func (t *mockRouteTable) QueueResync()                                   {}
+func (t *mockRouteTable) Apply() error {
+	return nil
 }
 
 func (t *mockRouteTable) checkRoutes(ifaceName string, expected []routetable.Target) {
@@ -574,6 +645,13 @@ type hostEpSpec struct {
 	polName   string
 }
 
+func applyUpdates(epMgr *endpointManager) {
+	err := epMgr.ResolveUpdateBatch()
+	Expect(err).ToNot(HaveOccurred())
+	err = epMgr.CompleteDeferredWork()
+	Expect(err).ToNot(HaveOccurred())
+}
+
 func endpointManagerTests(ipVersion uint8) func() {
 	return func() {
 		const (
@@ -587,12 +665,13 @@ func endpointManagerTests(ipVersion uint8) func() {
 			mangleTable     *mockTable
 			filterTable     *mockTable
 			rrConfigNormal  rules.Config
-			eth0Addrs       set.Set
-			loAddrs         set.Set
-			eth1Addrs       set.Set
+			eth0Addrs       set.Set[string]
+			loAddrs         set.Set[string]
+			eth1Addrs       set.Set[string]
 			routeTable      *mockRouteTable
 			mockProcSys     *testProcSys
 			statusReportRec *statusReportRecorder
+			hepListener     *testHEPListener
 		)
 
 		BeforeEach(func() {
@@ -609,14 +688,16 @@ func endpointManagerTests(ipVersion uint8) func() {
 				IptablesMarkNonCaliEndpoint: 0x0100,
 				KubeIPVSSupportEnabled:      true,
 				WorkloadIfacePrefixes:       []string{"cali", "tap"},
+				VXLANPort:                   4789,
+				VXLANVNI:                    4096,
 			}
-			eth0Addrs = set.New()
+			eth0Addrs = set.New[string]()
 			eth0Addrs.Add(ipv4)
 			eth0Addrs.Add(ipv6)
-			loAddrs = set.New()
+			loAddrs = set.New[string]()
 			loAddrs.Add("127.0.1.1")
 			loAddrs.Add("::1")
-			eth1Addrs = set.New()
+			eth1Addrs = set.New[string]()
 			eth1Addrs.Add(ipv4Eth1)
 		})
 
@@ -628,8 +709,9 @@ func endpointManagerTests(ipVersion uint8) func() {
 			routeTable = &mockRouteTable{
 				currentRoutes: map[string][]routetable.Target{},
 			}
-			mockProcSys = &testProcSys{state: map[string]string{}}
+			mockProcSys = &testProcSys{state: map[string]string{}, pathsThatExist: map[string]bool{}}
 			statusReportRec = &statusReportRecorder{currentState: map[interface{}]string{}}
+			hepListener = &testHEPListener{}
 			epMgr = newEndpointManagerWithShims(
 				rawTable,
 				mangleTable,
@@ -642,6 +724,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 				[]string{"cali"},
 				statusReportRec.endpointStatusUpdateCallback,
 				mockProcSys.write,
+				mockProcSys.stat,
+				"1",
+				false,
+				hepListener,
+				common.NewCallbacks(),
+				true,
 			)
 		})
 
@@ -709,7 +797,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 						ExpectedIpv6Addrs: spec.ipv6Addrs,
 					},
 				})
-				epMgr.CompleteDeferredWork()
+				applyUpdates(epMgr)
 			}
 		}
 
@@ -724,6 +812,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 				})
 				mangleTable.checkChains([][]*iptables.Chain{
 					preDNATChainsForIfaces(names, epMgr.epMarkMapper),
+					mangleEgressChainsForIfaces(names, epMgr.epMarkMapper),
 				})
 			}
 		}
@@ -737,9 +826,14 @@ func endpointManagerTests(ipVersion uint8) func() {
 				})
 				rawTable.checkChains([][]*iptables.Chain{
 					hostDispatchEmptyNormal,
+					[]*iptables.Chain{{
+						Name:  "cali-rpf-skip",
+						Rules: []iptables.Rule{},
+					}},
 				})
 				mangleTable.checkChains([][]*iptables.Chain{
 					fromHostDispatchEmpty,
+					toHostDispatchEmpty,
 				})
 			}
 		}
@@ -751,13 +845,13 @@ func endpointManagerTests(ipVersion uint8) func() {
 						EndpointId: id,
 					},
 				})
-				epMgr.CompleteDeferredWork()
+				applyUpdates(epMgr)
 			}
 		}
 
 		Context("with host interfaces eth0, lo", func() {
 			JustBeforeEach(func() {
-				epMgr.OnUpdate(&ifaceUpdate{
+				epMgr.OnUpdate(&ifaceStateUpdate{
 					Name:  "eth0",
 					State: "up",
 				})
@@ -765,7 +859,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 					Name:  "eth0",
 					Addrs: eth0Addrs,
 				})
-				epMgr.OnUpdate(&ifaceUpdate{
+				epMgr.OnUpdate(&ifaceStateUpdate{
 					Name:  "lo",
 					State: "up",
 				})
@@ -773,12 +867,32 @@ func endpointManagerTests(ipVersion uint8) func() {
 					Name:  "lo",
 					Addrs: loAddrs,
 				})
-				epMgr.CompleteDeferredWork()
+				applyUpdates(epMgr)
 			})
 
 			It("should have empty dispatch chains", expectEmptyChains())
 			It("should make no status reports", func() {
 				Expect(statusReportRec.currentState).To(BeEmpty())
+			})
+
+			Describe("with * host endpoint", func() {
+				JustBeforeEach(configureHostEp(&hostEpSpec{
+					id:      "id1",
+					name:    "*",
+					polName: "polA",
+				}))
+
+				It("should report id1 up", func() {
+					Expect(statusReportRec.currentState).To(Equal(map[interface{}]string{
+						proto.HostEndpointID{EndpointId: "id1"}: "up",
+					}))
+				})
+
+				It("should define host endpoints", func() {
+					Expect(hepListener.state).To(Equal(map[string]string{
+						"any-interface-at-all": "profiles=,normal=I=polA,E=polA,untracked=,preDNAT=,AoF=",
+					}))
+				})
 			})
 
 			// Configure host endpoints with tier names here, so we can check which of
@@ -798,6 +912,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 					}))
 				})
 
+				It("should define host endpoints", func() {
+					Expect(hepListener.state).To(Equal(map[string]string{
+						"eth0": "profiles=,normal=I=polA,E=polA,untracked=,preDNAT=,AoF=",
+					}))
+				})
+
 				Context("with another host ep (>ID) that matches the IPv4 address", func() {
 					JustBeforeEach(configureHostEp(&hostEpSpec{
 						id:        "id2",
@@ -812,6 +932,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 						}))
 					})
 
+					It("should define host endpoints", func() {
+						Expect(hepListener.state).To(Equal(map[string]string{
+							"eth0": "profiles=,normal=I=polA,E=polA,untracked=,preDNAT=,AoF=",
+						}))
+					})
+
 					Context("with the first host ep removed", func() {
 						JustBeforeEach(removeHostEp("id1"))
 						It("should have expected chains", expectChainsFor("eth0_polB"))
@@ -820,9 +946,20 @@ func endpointManagerTests(ipVersion uint8) func() {
 								proto.HostEndpointID{EndpointId: "id2"}: "up",
 							}))
 						})
+
+						It("should define host endpoints", func() {
+							Expect(hepListener.state).To(Equal(map[string]string{
+								"eth0": "profiles=,normal=I=polB,E=polB,untracked=,preDNAT=,AoF=",
+							}))
+						})
+
 						Context("with both host eps removed", func() {
 							JustBeforeEach(removeHostEp("id2"))
 							It("should have empty dispatch chains", expectEmptyChains())
+
+							It("should define host endpoints", func() {
+								Expect(hepListener.state).To(BeEmpty())
+							})
 						})
 					})
 				})
@@ -841,6 +978,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 						}))
 					})
 
+					It("should define host endpoints", func() {
+						Expect(hepListener.state).To(Equal(map[string]string{
+							"eth0": "profiles=,normal=I=polB,E=polB,untracked=,preDNAT=,AoF=",
+						}))
+					})
+
 					Context("with the first host ep removed", func() {
 						JustBeforeEach(removeHostEp("id1"))
 						It("should have expected chains", expectChainsFor("eth0_polB"))
@@ -850,12 +993,22 @@ func endpointManagerTests(ipVersion uint8) func() {
 							}))
 						})
 
+						It("should define host endpoints", func() {
+							Expect(hepListener.state).To(Equal(map[string]string{
+								"eth0": "profiles=,normal=I=polB,E=polB,untracked=,preDNAT=,AoF=",
+							}))
+						})
+
 						Context("with both host eps removed", func() {
 							JustBeforeEach(removeHostEp("id0"))
 							It("should have empty dispatch chains", expectEmptyChains())
 
 							It("should remove all status reports", func() {
 								Expect(statusReportRec.currentState).To(BeEmpty())
+							})
+
+							It("should define host endpoints", func() {
+								Expect(hepListener.state).To(BeEmpty())
 							})
 						})
 					})
@@ -868,6 +1021,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 						polName: "polA_untracked",
 					}))
 					It("should have expected chains", expectChainsFor("eth0_polA_untracked"))
+
+					It("should define host endpoints", func() {
+						Expect(hepListener.state).To(Equal(map[string]string{
+							"eth0": "profiles=,normal=,untracked=I=polA,E=polA,preDNAT=,AoF=",
+						}))
+					})
 				})
 
 				Describe("replaced with applyOnForward version", func() {
@@ -877,6 +1036,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 						polName: "polA_applyOnForward",
 					}))
 					It("should have expected chains", expectChainsFor("eth0_polA_applyOnForward"))
+
+					It("should define host endpoints", func() {
+						Expect(hepListener.state).To(Equal(map[string]string{
+							"eth0": "profiles=,normal=,untracked=,preDNAT=,AoF=I=polA,E=polA",
+						}))
+					})
 				})
 
 				Describe("replaced with pre-DNAT version", func() {
@@ -886,6 +1051,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 						polName: "polA_preDNAT",
 					}))
 					It("should have expected chains", expectChainsFor("eth0_polA_preDNAT"))
+
+					It("should define host endpoints", func() {
+						Expect(hepListener.state).To(Equal(map[string]string{
+							"eth0": "profiles=,normal=,untracked=,preDNAT=I=polA,E=,AoF=",
+						}))
+					})
 				})
 
 				Describe("replaced with ingress-only version", func() {
@@ -895,6 +1066,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 						polName: "polA_ingress",
 					}))
 					It("should have expected chains", expectChainsFor("eth0_polA_ingress"))
+
+					It("should define host endpoints", func() {
+						Expect(hepListener.state).To(Equal(map[string]string{
+							"eth0": "profiles=,normal=I=polA,E=,untracked=,preDNAT=,AoF=",
+						}))
+					})
 				})
 
 				Describe("replaced with egress-only version", func() {
@@ -904,6 +1081,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 						polName: "polA_egress",
 					}))
 					It("should have expected chains", expectChainsFor("eth0_polA_egress"))
+
+					It("should define host endpoints", func() {
+						Expect(hepListener.state).To(Equal(map[string]string{
+							"eth0": "profiles=,normal=I=,E=polA,untracked=,preDNAT=,AoF=",
+						}))
+					})
 				})
 			})
 
@@ -1065,7 +1248,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 
 				Context("with another host interface eth1", func() {
 					JustBeforeEach(func() {
-						epMgr.OnUpdate(&ifaceUpdate{
+						epMgr.OnUpdate(&ifaceStateUpdate{
 							Name:  "eth1",
 							State: "up",
 						})
@@ -1073,7 +1256,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 							Name:  "eth1",
 							Addrs: eth1Addrs,
 						})
-						epMgr.CompleteDeferredWork()
+						applyUpdates(epMgr)
 					})
 
 					It("should have expected chains", expectChainsFor("eth0"))
@@ -1251,7 +1434,6 @@ func endpointManagerTests(ipVersion uint8) func() {
 					}))
 				})
 			})
-
 		})
 
 		Context("with host endpoint configured before interface signaled", func() {
@@ -1268,7 +1450,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 
 			Context("with interface signaled", func() {
 				JustBeforeEach(func() {
-					epMgr.OnUpdate(&ifaceUpdate{
+					epMgr.OnUpdate(&ifaceStateUpdate{
 						Name:  "eth0",
 						State: "up",
 					})
@@ -1276,7 +1458,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 						Name:  "eth0",
 						Addrs: eth0Addrs,
 					})
-					epMgr.CompleteDeferredWork()
+					applyUpdates(epMgr)
 				})
 				It("should have expected chains", expectChainsFor("eth0"))
 				It("should report id3 up", func() {
@@ -1296,12 +1478,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 				})
 				mangleTable.checkChains([][]*iptables.Chain{
 					fromHostDispatchEmpty,
+					toHostDispatchEmpty,
 				})
 			}
 		}
 
 		Describe("workload endpoints", func() {
-
 			Context("with a workload endpoint", func() {
 				wlEPID1 := proto.WorkloadEndpointID{
 					OrchestratorId: "k8s",
@@ -1327,7 +1509,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 							Ipv6Nets:   []string{"2001:db8:2::2/128"},
 						},
 					})
-					epMgr.CompleteDeferredWork()
+					applyUpdates(epMgr)
 				})
 
 				Context("with policy", func() {
@@ -1340,6 +1522,106 @@ func endpointManagerTests(ipVersion uint8) func() {
 					})
 
 					It("should have expected chains", expectWlChainsFor("cali12345-ab_policy1"))
+
+					Context("with another endpoint with the same interface name and earlier workload ID, and no policy", func() {
+						JustBeforeEach(func() {
+							epMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
+								Id: &proto.WorkloadEndpointID{
+									OrchestratorId: "k8s",
+									WorkloadId:     "pod-10a",
+									EndpointId:     "endpoint-id-11",
+								},
+								Endpoint: &proto.WorkloadEndpoint{
+									State:      "active",
+									Mac:        "01:02:03:04:05:06",
+									Name:       "cali12345-ab",
+									ProfileIds: []string{},
+									Tiers:      []*proto.TierInfo{},
+									Ipv4Nets:   []string{"10.0.240.2/24"},
+									Ipv6Nets:   []string{"2001:db8:2::2/128"},
+								},
+							})
+							applyUpdates(epMgr)
+						})
+
+						It("should have expected chains with no policy", expectWlChainsFor("cali12345-ab"))
+
+						Context("with the first endpoint removed", func() {
+							JustBeforeEach(func() {
+								epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+									Id: &wlEPID1,
+								})
+								applyUpdates(epMgr)
+							})
+
+							It("should have expected chains with no policy", expectWlChainsFor("cali12345-ab"))
+
+							Context("with the second endpoint removed", func() {
+								JustBeforeEach(func() {
+									epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+										Id: &proto.WorkloadEndpointID{
+											OrchestratorId: "k8s",
+											WorkloadId:     "pod-10a",
+											EndpointId:     "endpoint-id-11",
+										},
+									})
+									applyUpdates(epMgr)
+								})
+
+								It("should have empty dispatch chains", expectEmptyChains())
+							})
+						})
+					})
+
+					Context("with another endpoint with the same interface name and later workload ID, and no policy", func() {
+						JustBeforeEach(func() {
+							epMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
+								Id: &proto.WorkloadEndpointID{
+									OrchestratorId: "k8s",
+									WorkloadId:     "pod-11a",
+									EndpointId:     "endpoint-id-11",
+								},
+								Endpoint: &proto.WorkloadEndpoint{
+									State:      "active",
+									Mac:        "01:02:03:04:05:06",
+									Name:       "cali12345-ab",
+									ProfileIds: []string{},
+									Tiers:      []*proto.TierInfo{},
+									Ipv4Nets:   []string{"10.0.240.2/24"},
+									Ipv6Nets:   []string{"2001:db8:2::2/128"},
+								},
+							})
+							applyUpdates(epMgr)
+						})
+
+						It("should have expected chains", expectWlChainsFor("cali12345-ab_policy1"))
+
+						Context("with the first endpoint removed", func() {
+							JustBeforeEach(func() {
+								epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+									Id: &wlEPID1,
+								})
+								applyUpdates(epMgr)
+							})
+
+							It("should have expected chains with no policy", expectWlChainsFor("cali12345-ab"))
+
+							Context("with the second endpoint removed", func() {
+								JustBeforeEach(func() {
+									epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+										Id: &proto.WorkloadEndpointID{
+											OrchestratorId: "k8s",
+											WorkloadId:     "pod-11a",
+											EndpointId:     "endpoint-id-11",
+										},
+									})
+									applyUpdates(epMgr)
+								})
+
+								It("should have empty dispatch chains", expectEmptyChains())
+							})
+						})
+					})
 				})
 
 				Context("with ingress-only policy", func() {
@@ -1388,15 +1670,15 @@ func endpointManagerTests(ipVersion uint8) func() {
 				Context("with updates for the workload's iface and proc/sys failure", func() {
 					JustBeforeEach(func() {
 						mockProcSys.Fail = true
-						epMgr.OnUpdate(&ifaceUpdate{
+						epMgr.OnUpdate(&ifaceStateUpdate{
 							Name:  "cali12345-ab",
 							State: "up",
 						})
 						epMgr.OnUpdate(&ifaceAddrsUpdate{
 							Name:  "cali12345-ab",
-							Addrs: set.New(),
+							Addrs: set.New[string](),
 						})
-						epMgr.CompleteDeferredWork()
+						applyUpdates(epMgr)
 					})
 					It("should report the interface in error", func() {
 						Expect(statusReportRec.currentState).To(Equal(map[interface{}]string{
@@ -1407,15 +1689,15 @@ func endpointManagerTests(ipVersion uint8) func() {
 
 				Context("with updates for the workload's iface", func() {
 					JustBeforeEach(func() {
-						epMgr.OnUpdate(&ifaceUpdate{
+						epMgr.OnUpdate(&ifaceStateUpdate{
 							Name:  "cali12345-ab",
 							State: "up",
 						})
 						epMgr.OnUpdate(&ifaceAddrsUpdate{
 							Name:  "cali12345-ab",
-							Addrs: set.New(),
+							Addrs: set.New[string](),
 						})
-						epMgr.CompleteDeferredWork()
+						applyUpdates(epMgr)
 					})
 
 					It("should have expected chains", expectWlChainsFor("cali12345-ab"))
@@ -1428,14 +1710,16 @@ func endpointManagerTests(ipVersion uint8) func() {
 					It("should write /proc/sys entries", func() {
 						if ipVersion == 6 {
 							mockProcSys.checkState(map[string]string{
+								"/proc/sys/net/ipv6/conf/cali12345-ab/accept_ra":  "0",
 								"/proc/sys/net/ipv6/conf/cali12345-ab/proxy_ndp":  "1",
 								"/proc/sys/net/ipv6/conf/cali12345-ab/forwarding": "1",
 							})
 						} else {
 							mockProcSys.checkState(map[string]string{
+								"/proc/sys/net/ipv6/conf/cali12345-ab/accept_ra":      "0",
 								"/proc/sys/net/ipv4/conf/cali12345-ab/forwarding":     "1",
-								"/proc/sys/net/ipv4/conf/cali12345-ab/rp_filter":      "1",
 								"/proc/sys/net/ipv4/conf/cali12345-ab/route_localnet": "1",
+								"/proc/sys/net/ipv4/conf/cali12345-ab/rp_filter":      "1",
 								"/proc/sys/net/ipv4/conf/cali12345-ab/proxy_arp":      "1",
 								"/proc/sys/net/ipv4/neigh/cali12345-ab/proxy_delay":   "0",
 							})
@@ -1464,7 +1748,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 									},
 								},
 							})
-							epMgr.CompleteDeferredWork()
+							applyUpdates(epMgr)
 						})
 
 						It("should have expected chains", expectWlChainsFor("cali12345-ab"))
@@ -1504,12 +1788,65 @@ func endpointManagerTests(ipVersion uint8) func() {
 						})
 					})
 
+					// Test that by disabling floatingIPs on the endpoint manager, even workload endpoints
+					// that have floating IP NAT addresses specified will not result in those routes being
+					// programmed.
+					Context("with floating IPs disasbled, but added to the endpoint", func() {
+						JustBeforeEach(func() {
+							epMgr.floatingIPsEnabled = false
+							epMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
+								Id: &wlEPID1,
+								Endpoint: &proto.WorkloadEndpoint{
+									State:      "active",
+									Mac:        "01:02:03:04:05:06",
+									Name:       "cali12345-ab",
+									ProfileIds: []string{},
+									Tiers:      []*proto.TierInfo{},
+									Ipv4Nets:   []string{"10.0.240.2/24"},
+									Ipv6Nets:   []string{"2001:db8:2::2/128"},
+									Ipv4Nat: []*proto.NatInfo{
+										{ExtIp: "172.16.1.3", IntIp: "10.0.240.2"},
+										{ExtIp: "172.18.1.4", IntIp: "10.0.240.2"},
+									},
+									Ipv6Nat: []*proto.NatInfo{
+										{ExtIp: "2001:db8:3::2", IntIp: "2001:db8:2::2"},
+										{ExtIp: "2001:db8:4::2", IntIp: "2001:db8:4::2"},
+									},
+								},
+							})
+							err := epMgr.ResolveUpdateBatch()
+							Expect(err).ToNot(HaveOccurred())
+							err = epMgr.CompleteDeferredWork()
+							Expect(err).ToNot(HaveOccurred())
+						})
+
+						It("should have expected chains", expectWlChainsFor("cali12345-ab"))
+
+						It("should set routes with no floating IPs", func() {
+							if ipVersion == 6 {
+								routeTable.checkRoutes("cali12345-ab", []routetable.Target{
+									{
+										CIDR:    ip.MustParseCIDROrIP("2001:db8:2::2/128"),
+										DestMAC: testutils.MustParseMAC("01:02:03:04:05:06"),
+									},
+								})
+							} else {
+								routeTable.checkRoutes("cali12345-ab", []routetable.Target{
+									{
+										CIDR:    ip.MustParseCIDROrIP("10.0.240.0/24"),
+										DestMAC: testutils.MustParseMAC("01:02:03:04:05:06"),
+									},
+								})
+							}
+						})
+					})
+
 					Context("with the endpoint removed", func() {
 						JustBeforeEach(func() {
 							epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
 								Id: &wlEPID1,
 							})
-							epMgr.CompleteDeferredWork()
+							applyUpdates(epMgr)
 						})
 
 						It("should have empty dispatch chains", expectEmptyChains())
@@ -1524,13 +1861,13 @@ func endpointManagerTests(ipVersion uint8) func() {
 
 					Context("changing the endpoint to another up interface", func() {
 						JustBeforeEach(func() {
-							epMgr.OnUpdate(&ifaceUpdate{
+							epMgr.OnUpdate(&ifaceStateUpdate{
 								Name:  "cali12345-cd",
 								State: "up",
 							})
 							epMgr.OnUpdate(&ifaceAddrsUpdate{
 								Name:  "cali12345-cd",
-								Addrs: set.New(),
+								Addrs: set.New[string](),
 							})
 							epMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
 								Id: &wlEPID1,
@@ -1544,7 +1881,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 									Ipv6Nets:   []string{"2001:db8:2::2/128"},
 								},
 							})
-							epMgr.CompleteDeferredWork()
+							applyUpdates(epMgr)
 						})
 
 						It("should have expected chains", expectWlChainsFor("cali12345-cd"))
@@ -1575,6 +1912,99 @@ func endpointManagerTests(ipVersion uint8) func() {
 				})
 			})
 
+			Context("with RPF checking disabled", func() {
+				var (
+					wlEPID1        proto.WorkloadEndpointID
+					workloadUpdate *proto.WorkloadEndpointUpdate
+					interfaceUp    *ifaceStateUpdate
+				)
+
+				BeforeEach(func() {
+					wlEPID1 = proto.WorkloadEndpointID{
+						OrchestratorId: "k8s",
+						WorkloadId:     "pod-12",
+						EndpointId:     "endpoint-id-12",
+					}
+					workloadUpdate = &proto.WorkloadEndpointUpdate{
+						Id: &wlEPID1,
+						Endpoint: &proto.WorkloadEndpoint{
+							State:                      "active",
+							Mac:                        "01:02:03:04:05:06",
+							Name:                       "cali23456-cd",
+							ProfileIds:                 []string{},
+							Tiers:                      []*proto.TierInfo{},
+							Ipv4Nets:                   []string{"10.0.240.2/24"},
+							Ipv6Nets:                   []string{"2001:db8:2::2/128"},
+							AllowSpoofedSourcePrefixes: []string{"8.8.8.8/32"},
+						},
+					}
+					interfaceUp = &ifaceStateUpdate{
+						Name:  "cali23456-cd",
+						State: "up",
+					}
+				})
+
+				It("should properly handle the source IP spoofing configuration", func() {
+					By("Creating a workload with IP spoofing configured")
+					epMgr.OnUpdate(workloadUpdate)
+					// Set the interface up so that the sysctls are configured
+					epMgr.OnUpdate(interfaceUp)
+					applyUpdates(epMgr)
+					if ipVersion == 4 {
+						mockProcSys.checkStateContains(map[string]string{
+							"/proc/sys/net/ipv4/conf/cali23456-cd/rp_filter": "0",
+						})
+					}
+					rawTable.checkChains([][]*iptables.Chain{hostDispatchEmptyNormal, {
+						&iptables.Chain{Name: rules.ChainRpfSkip, Rules: []iptables.Rule{
+							iptables.Rule{
+								Match:  iptables.Match().InInterface("cali23456-cd").SourceNet("8.8.8.8/32"),
+								Action: iptables.AcceptAction{},
+							},
+						}},
+					}})
+
+					By("Re-enabling rpf check on an existing workload")
+					workloadUpdate.Endpoint.AllowSpoofedSourcePrefixes = []string{}
+					epMgr.OnUpdate(workloadUpdate)
+					applyUpdates(epMgr)
+					if ipVersion == 4 {
+						mockProcSys.checkStateContains(map[string]string{
+							"/proc/sys/net/ipv4/conf/cali23456-cd/rp_filter": "1",
+						})
+					}
+					rawTable.checkChains([][]*iptables.Chain{hostDispatchEmptyNormal, {
+						&iptables.Chain{Name: rules.ChainRpfSkip, Rules: []iptables.Rule{}},
+					}})
+
+					By("Enabling IP spoofing on an existing workload")
+					workloadUpdate.Endpoint.AllowSpoofedSourcePrefixes = []string{"8.8.8.8/32"}
+					epMgr.OnUpdate(workloadUpdate)
+					applyUpdates(epMgr)
+					if ipVersion == 4 {
+						mockProcSys.checkStateContains(map[string]string{
+							"/proc/sys/net/ipv4/conf/cali23456-cd/rp_filter": "0",
+						})
+					}
+					rawTable.checkChains([][]*iptables.Chain{hostDispatchEmptyNormal, {
+						&iptables.Chain{Name: rules.ChainRpfSkip, Rules: []iptables.Rule{
+							iptables.Rule{
+								Match:  iptables.Match().InInterface("cali23456-cd").SourceNet("8.8.8.8/32"),
+								Action: iptables.AcceptAction{},
+							}}},
+					}})
+
+					By("Removing a workload with IP spoofing configured")
+					epMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+						Id: &wlEPID1,
+					})
+					applyUpdates(epMgr)
+					rawTable.checkChains([][]*iptables.Chain{hostDispatchEmptyNormal, {
+						&iptables.Chain{Name: rules.ChainRpfSkip, Rules: []iptables.Rule{}},
+					}})
+				})
+			})
+
 			Context("with an inactive workload endpoint", func() {
 				wlEPID1 := proto.WorkloadEndpointID{
 					OrchestratorId: "k8s",
@@ -1594,7 +2024,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 							Ipv6Nets:   []string{"2001:db8:2::2/128"},
 						},
 					})
-					epMgr.CompleteDeferredWork()
+					applyUpdates(epMgr)
 				})
 
 				It("should have expected chains", func() {
@@ -1603,7 +2033,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 							Name: "cali-tw-cali12345-ab",
 							Rules: []iptables.Rule{{
 								Action:  iptables.DropAction{},
-								Comment: "Endpoint admin disabled",
+								Comment: []string{"Endpoint admin disabled"},
 							}},
 						},
 					))
@@ -1612,7 +2042,7 @@ func endpointManagerTests(ipVersion uint8) func() {
 							Name: "cali-fw-cali12345-ab",
 							Rules: []iptables.Rule{{
 								Action:  iptables.DropAction{},
-								Comment: "Endpoint admin disabled",
+								Comment: []string{"Endpoint admin disabled"},
 							}},
 						},
 					))
@@ -1627,6 +2057,12 @@ func endpointManagerTests(ipVersion uint8) func() {
 				})
 			})
 		})
+
+		It("should check the correct path", func() {
+			mockProcSys.pathsThatExist[fmt.Sprintf("/proc/sys/net/ipv%d/conf/cali1234", ipVersion)] = true
+			Expect(epMgr.interfaceExistsInProcSys("cali1234")).To(BeTrue())
+			Expect(epMgr.interfaceExistsInProcSys("cali3456")).To(BeFalse())
+		})
 	}
 }
 
@@ -1635,15 +2071,17 @@ var _ = Describe("EndpointManager IPv4", endpointManagerTests(4))
 var _ = Describe("EndpointManager IPv6", endpointManagerTests(6))
 
 type testProcSys struct {
-	state map[string]string
-	Fail  bool
+	lock           sync.Mutex
+	state          map[string]string
+	pathsThatExist map[string]bool
+	Fail           bool
 }
 
-var (
-	procSysFail = errors.New("mock proc sys failure")
-)
+var procSysFail = errors.New("mock proc sys failure")
 
 func (t *testProcSys) write(path, value string) error {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	log.WithFields(log.Fields{
 		"path":  path,
 		"value": value,
@@ -1655,6 +2093,52 @@ func (t *testProcSys) write(path, value string) error {
 	return nil
 }
 
+func (t *testProcSys) stat(path string) (os.FileInfo, error) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	exists := t.pathsThatExist[path]
+	if exists {
+		return nil, nil
+	} else {
+		return os.Stat("/file/that/does/not/exist")
+	}
+}
+
 func (t *testProcSys) checkState(expected map[string]string) {
+	t.lock.Lock()
+	defer t.lock.Unlock()
 	Expect(t.state).To(Equal(expected))
+}
+
+func (t *testProcSys) checkStateContains(expected map[string]string) {
+	for k, v := range expected {
+		actual, ok := t.state[k]
+		Expect(ok).To(BeTrue())
+		Expect(actual).To(Equal(v))
+	}
+}
+
+type testHEPListener struct {
+	state map[string]string
+}
+
+func (t *testHEPListener) OnHEPUpdate(hostIfaceToEpMap map[string]proto.HostEndpoint) {
+	log.Infof("OnHEPUpdate: %v", hostIfaceToEpMap)
+	t.state = map[string]string{}
+	stringify := func(tiers []*proto.TierInfo) string {
+		var tierStrings []string
+		for _, tier := range tiers {
+			tierStrings = append(tierStrings,
+				"I="+strings.Join(tier.IngressPolicies, ",")+
+					",E="+strings.Join(tier.EgressPolicies, ","))
+		}
+		return strings.Join(tierStrings, "/")
+	}
+	for ifaceName, hep := range hostIfaceToEpMap {
+		t.state[ifaceName] = "profiles=" + strings.Join(hep.ProfileIds, ",") +
+			",normal=" + stringify(hep.Tiers) +
+			",untracked=" + stringify(hep.UntrackedTiers) +
+			",preDNAT=" + stringify(hep.PreDnatTiers) +
+			",AoF=" + stringify(hep.ForwardTiers)
+	}
 }

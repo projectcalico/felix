@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2019,2021-2022 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,21 +15,22 @@
 package labelindex
 
 import (
+	"fmt"
+	"reflect"
+	"strings"
+	"time"
+
 	log "github.com/sirupsen/logrus"
 
-	"reflect"
+	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
 
-	"strings"
-
-	"fmt"
-
-	"github.com/alauda/felix/dispatcher"
-	"github.com/alauda/felix/ip"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
-	"github.com/projectcalico/libcalico-go/lib/selector"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/dispatcher"
+	"github.com/projectcalico/calico/felix/ip"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/selector"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 // endpointData holds the data that we need to know about a particular endpoint.
@@ -39,12 +40,12 @@ type endpointData struct {
 	ports   []model.EndpointPort
 	parents []*npParentData
 
-	cachedMatchingIPSetIDs set.Set /* or, as an optimization, nil if there are none */
+	cachedMatchingIPSetIDs set.Set[string] /* or, as an optimization, nil if there are none */
 }
 
 func (d *endpointData) AddMatchingIPSetID(id string) {
 	if d.cachedMatchingIPSetIDs == nil {
-		d.cachedMatchingIPSetIDs = set.New()
+		d.cachedMatchingIPSetIDs = set.New[string]()
 	}
 	d.cachedMatchingIPSetIDs.Add(id)
 }
@@ -93,6 +94,8 @@ func (p IPSetPortProtocol) MatchesModelProtocol(protocol numorstring.Protocol) b
 		return strings.ToLower(protocol.StrVal) == "tcp"
 	case ProtocolUDP:
 		return strings.ToLower(protocol.StrVal) == "udp"
+	case ProtocolSCTP:
+		return strings.ToLower(protocol.StrVal) == "sctp"
 	}
 	log.WithField("protocol", p).Panic("Unknown protocol")
 	return false
@@ -104,6 +107,8 @@ func (p IPSetPortProtocol) String() string {
 		return "tcp"
 	case ProtocolUDP:
 		return "udp"
+	case ProtocolSCTP:
+		return "sctp"
 	case ProtocolNone:
 		return "none"
 	default:
@@ -115,6 +120,7 @@ const (
 	ProtocolNone IPSetPortProtocol = 0
 	ProtocolTCP  IPSetPortProtocol = 6
 	ProtocolUDP  IPSetPortProtocol = 17
+	ProtocolSCTP IPSetPortProtocol = 132
 )
 
 type IPSetMember struct {
@@ -139,32 +145,88 @@ type ipSetData struct {
 // Get implements the Labels interface for endpointData.  Combines the endpoint's own labels with
 // those of its parents on the fly.  This reduces the number of allocations we need to do and
 // it's fast in the mainline case (where there are 0-1 parents).
-func (endpointData *endpointData) Get(labelName string) (value string, present bool) {
-	if value, present = endpointData.labels[labelName]; present {
+func (d *endpointData) Get(labelName string) (value string, present bool) {
+	if value, present = d.labels[labelName]; present {
 		return
 	}
-	for _, parent := range endpointData.parents {
+	for _, parent := range d.parents {
 		if value, present = parent.labels[labelName]; present {
 			return
-		}
-		for _, tag := range parent.tags {
-			if tag == labelName {
-				present = true
-				return
-			}
 		}
 	}
 	return
 }
 
+func (d *endpointData) Equals(other *endpointData) bool {
+	if len(d.labels) != len(other.labels) {
+		return false
+	}
+	if len(d.ports) != len(other.ports) {
+		return false
+	}
+	if len(d.nets) != len(other.nets) {
+		return false
+	}
+	if len(d.parents) != len(other.parents) {
+		return false
+	}
+
+	for k, v := range d.labels {
+		otherLabel, exists := other.labels[k]
+		if !exists || otherLabel != v {
+			return false
+		}
+	}
+	for i, p := range d.ports {
+		if other.ports[i] != p {
+			return false
+		}
+	}
+	for i, c := range d.nets {
+		if other.nets[i] != c {
+			return false
+		}
+	}
+	for i, p := range d.parents {
+		// Note: this is a pointer comparison; we know that pointers will be shared.
+		if other.parents[i] != p {
+			return false
+		}
+	}
+	return true
+}
+
 // npParentData holds the data that we know about each parent (i.e. each security profile).  Since,
-// profiles consist of multiple resources in our data-model, the labels or tags fields may be nil
+// profiles consist of multiple resources in our data-model, the labels fields may be nil
 // if we have partial information.
 type npParentData struct {
-	id             string
-	labels         map[string]string
-	tags           []string
-	referenceCount uint64
+	id          string
+	labels      map[string]string
+	endpointIDs set.Set[any]
+}
+
+func (d *npParentData) DiscardEndpointID(id interface{}) {
+	if d.endpointIDs == nil {
+		panic("discard of unknown ID")
+	}
+	d.endpointIDs.Discard(id)
+	if d.endpointIDs.Len() == 0 {
+		d.endpointIDs = nil
+	}
+}
+
+func (d *npParentData) AddEndpointID(id interface{}) {
+	if d.endpointIDs == nil {
+		d.endpointIDs = set.NewBoxed[any]()
+	}
+	d.endpointIDs.Add(id)
+}
+
+func (d *npParentData) IterEndpointIDs(f func(id interface{}) error) {
+	if d.endpointIDs == nil {
+		return
+	}
+	d.endpointIDs.Iter(f)
 }
 
 type NamedPortMatchCallback func(ipSetID string, member IPSetMember)
@@ -177,6 +239,9 @@ type SelectorAndNamedPortIndex struct {
 	// Callback functions
 	OnMemberAdded   NamedPortMatchCallback
 	OnMemberRemoved NamedPortMatchCallback
+
+	OnAlive        func()
+	lastLiveReport time.Time
 }
 
 func NewSelectorAndNamedPortIndex() *SelectorAndNamedPortIndex {
@@ -188,13 +253,13 @@ func NewSelectorAndNamedPortIndex() *SelectorAndNamedPortIndex {
 		// Callback functions
 		OnMemberAdded:   func(ipSetID string, member IPSetMember) {},
 		OnMemberRemoved: func(ipSetID string, member IPSetMember) {},
+		OnAlive:         func() {},
 	}
 	return &inheritIdx
 }
 
 func (idx *SelectorAndNamedPortIndex) RegisterWith(allUpdDispatcher *dispatcher.Dispatcher) {
-	allUpdDispatcher.Register(model.ProfileTagsKey{}, idx.OnUpdate)
-	allUpdDispatcher.Register(model.ProfileLabelsKey{}, idx.OnUpdate)
+	allUpdDispatcher.Register(model.ResourceKey{}, idx.OnUpdate)
 	allUpdDispatcher.Register(model.WorkloadEndpointKey{}, idx.OnUpdate)
 	allUpdDispatcher.Register(model.HostEndpointKey{}, idx.OnUpdate)
 	allUpdDispatcher.Register(model.NetworkSetKey{}, idx.OnUpdate)
@@ -240,33 +305,28 @@ func (idx *SelectorAndNamedPortIndex) OnUpdate(update api.Update) (_ bool) {
 			// Figure out what's changed and update the cache.
 			log.Debugf("Updating NamedPortIndex for network set %v", key)
 			netSet := update.Value.(*model.NetworkSet)
+			profileIDs := netSet.ProfileIDs
 			idx.UpdateEndpointOrSet(
 				key,
 				netSet.Labels,
 				extractCIDRsFromNetworkSet(netSet),
 				nil,
-				nil)
+				profileIDs)
 		} else {
 			log.Debugf("Deleting network set %v from NamedPortIndex", key)
 			idx.DeleteEndpoint(key)
 		}
-	case model.ProfileLabelsKey:
+	case model.ResourceKey:
+		if key.Kind != v3.KindProfile {
+			return
+		}
 		if update.Value != nil {
 			log.Debugf("Updating NamedPortIndex for profile labels %v", key)
-			labels := update.Value.(map[string]string)
+			labels := update.Value.(*v3.Profile).Spec.LabelsToApply
 			idx.UpdateParentLabels(key.Name, labels)
 		} else {
 			log.Debugf("Removing profile labels %v from NamedPortIndex", key)
 			idx.DeleteParentLabels(key.Name)
-		}
-	case model.ProfileTagsKey:
-		if update.Value != nil {
-			log.Debugf("Updating NamedPortIndex for profile tags %v", key)
-			labels := update.Value.([]string)
-			idx.UpdateParentTags(key.Name, labels)
-		} else {
-			log.Debugf("Removing profile tags %v from NamedPortIndex", key)
-			idx.DeleteParentTags(key.Name)
 		}
 	}
 	return
@@ -376,6 +436,9 @@ func (idx *SelectorAndNamedPortIndex) UpdateIPSet(ipSetID string, sel selector.S
 
 	// Then scan all endpoints.
 	for epID, epData := range idx.endpointDataByID {
+		// Make sure we don't appear non-live if there are a lot of endpoints to get through.
+		idx.maybeReportLive()
+
 		if !sel.EvaluateLabels(epData) {
 			// Endpoint doesn't match.
 			continue
@@ -421,6 +484,8 @@ func (idx *SelectorAndNamedPortIndex) DeleteIPSet(id string) {
 
 	// Then scan all endpoints and fix up their indexes to remove the match.
 	for _, epData := range idx.endpointDataByID {
+		// Make sure we don't appear non-live if there are a lot of endpoints to get through.
+		idx.maybeReportLive()
 		epData.RemoveMatchingIPSetID(id)
 	}
 
@@ -472,10 +537,7 @@ func (idx *SelectorAndNamedPortIndex) UpdateEndpointOrSet(
 	if oldEndpointData != nil {
 		// Before we do the (potentially expensive) selector scan, check if there can possibly be a
 		// change.
-		if reflect.DeepEqual(oldEndpointData.labels, newEndpointData.labels) &&
-			reflect.DeepEqual(oldEndpointData.ports, newEndpointData.ports) &&
-			reflect.DeepEqual(oldEndpointData.nets, newEndpointData.nets) &&
-			reflect.DeepEqual(oldEndpointData.parents, newEndpointData.parents) {
+		if oldEndpointData.Equals(newEndpointData) {
 			log.Debug("Endpoint update makes no changes, skipping.")
 			return
 		}
@@ -492,12 +554,17 @@ func (idx *SelectorAndNamedPortIndex) UpdateEndpointOrSet(
 	// Record the new endpoint data.
 	idx.endpointDataByID[id] = newEndpointData
 
+	newParentIDs := set.NewBoxed[any]()
 	for _, parent := range newEndpointData.parents {
-		parent.referenceCount++
+		parent.AddEndpointID(id)
+		newParentIDs.Add(parent.id)
 	}
 	if oldEndpointData != nil {
 		for _, parent := range oldEndpointData.parents {
-			parent.referenceCount--
+			if newParentIDs.Contains(parent.id) {
+				continue
+			}
+			parent.DiscardEndpointID(id)
 			idx.discardParentIfEmpty(parent.id)
 		}
 	}
@@ -508,6 +575,9 @@ func (idx *SelectorAndNamedPortIndex) scanEndpointAgainstAllIPSets(
 	oldIPSetContributions map[string][]IPSetMember,
 ) {
 	for ipSetID, ipSetData := range idx.ipSetDataByID {
+		// Make sure we don't appear non-live if there are a lot of IP sets to get through.
+		idx.maybeReportLive()
+
 		// Remove any previous match from the endpoint's cache.  We'll re-add it below if the match
 		// is still correct.  (This is a no-op when we're called from UpdateEndpointOrSet(), which always
 		// creates a new endpointData struct.)
@@ -582,7 +652,7 @@ func (idx *SelectorAndNamedPortIndex) DeleteEndpoint(id interface{}) {
 	// Record the new endpoint data.
 	delete(idx.endpointDataByID, id)
 	for _, parent := range oldEndpointData.parents {
-		parent.referenceCount--
+		parent.DiscardEndpointID(id)
 		idx.discardParentIfEmpty(parent.id)
 	}
 }
@@ -607,32 +677,9 @@ func (idx *SelectorAndNamedPortIndex) UpdateParentLabels(parentID string, labels
 	)
 }
 
-func (idx *SelectorAndNamedPortIndex) UpdateParentTags(parentID string, tags []string) {
-	parentData := idx.getOrCreateParent(parentID)
-	if reflect.DeepEqual(parentData.tags, tags) {
-		log.WithField("parentID", parentID).Debug("Skipping no-op update to parent labels")
-		return
-	}
-	oldTags := parentData.tags
-	idx.updateParent(
-		parentData,
-		// Function to apply the update.
-		func() {
-			parentData.tags = tags
-		},
-		// Function to back out the update.
-		func() {
-			parentData.tags = oldTags
-		},
-	)
-}
-
 func (idx *SelectorAndNamedPortIndex) updateParent(parentData *npParentData, applyUpdate, revertUpdate func()) {
-	for _, epData := range idx.endpointDataByID {
-		if !epData.HasParent(parentData) {
-			continue
-		}
-
+	parentData.IterEndpointIDs(func(id interface{}) error {
+		epData := idx.endpointDataByID[id]
 		// This endpoint matches this parent, calculate its old contribution.  (The revert function
 		// is a no-op on the first loop but keeping it here, rather than at the bottom of the loop
 		// makes it harder to accidentally skip it with a well-intentioned "continue".)
@@ -642,7 +689,9 @@ func (idx *SelectorAndNamedPortIndex) updateParent(parentData *npParentData, app
 		// Apply the update to the parent while we calculate this endpoint's new contribution.
 		applyUpdate()
 		idx.scanEndpointAgainstAllIPSets(epData, oldIPSetContributions)
-	}
+
+		return nil
+	})
 
 	// Defensive: make sure we leave the update applied to the parent.
 	applyUpdate()
@@ -689,18 +738,12 @@ func (idx *SelectorAndNamedPortIndex) RecalcCachedContributions(epData *endpoint
 		return nil
 	}
 	contrib := map[string][]IPSetMember{}
-	epData.cachedMatchingIPSetIDs.Iter(func(item interface{}) error {
-		ipSetID := item.(string)
+	epData.cachedMatchingIPSetIDs.Iter(func(ipSetID string) error {
 		ipSetData := idx.ipSetDataByID[ipSetID]
 		contrib[ipSetID] = idx.CalculateEndpointContribution(epData, ipSetData)
 		return nil
 	})
 	return contrib
-}
-
-func (idx *SelectorAndNamedPortIndex) DeleteParentTags(parentID string) {
-	idx.UpdateParentTags(parentID, nil)
-	idx.discardParentIfEmpty(parentID)
 }
 
 func (idx *SelectorAndNamedPortIndex) getOrCreateParent(id string) *npParentData {
@@ -719,7 +762,16 @@ func (idx *SelectorAndNamedPortIndex) discardParentIfEmpty(id string) {
 	if parent == nil {
 		return
 	}
-	if parent.referenceCount == 0 && parent.labels == nil && parent.tags == nil {
+	if parent.endpointIDs == nil && parent.labels == nil {
 		delete(idx.parentDataByParentID, id)
 	}
+}
+
+func (idx *SelectorAndNamedPortIndex) maybeReportLive() {
+	// We report from some tight loops so rate limit our reports.
+	if time.Since(idx.lastLiveReport) < 100*time.Millisecond {
+		return
+	}
+	idx.OnAlive()
+	idx.lastLiveReport = time.Now()
 }

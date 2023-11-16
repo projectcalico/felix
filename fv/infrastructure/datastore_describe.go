@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,12 +14,11 @@
 package infrastructure
 
 import (
-	"errors"
 	"fmt"
 
 	. "github.com/onsi/ginkgo"
 
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
+	"github.com/projectcalico/calico/libcalico-go/lib/apiconfig"
 )
 
 type InfraFactory func() DatastoreInfra
@@ -45,7 +44,7 @@ func DatastoreDescribe(description string, datastores []apiconfig.DatastoreType,
 					body(createK8sDatastoreInfra)
 				})
 		default:
-			panic(errors.New(fmt.Sprintf("Unknown DatastoreType, %s", ds)))
+			panic(fmt.Errorf("Unknown DatastoreType, %s", ds))
 		}
 	}
 

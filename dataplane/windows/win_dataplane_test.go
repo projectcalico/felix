@@ -1,6 +1,4 @@
-//+build windows
-
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +18,10 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/config"
-	"github.com/alauda/felix/dataplane/windows"
+	"github.com/projectcalico/calico/felix/dataplane/windows/hns"
+
+	"github.com/projectcalico/calico/felix/config"
+	windataplane "github.com/projectcalico/calico/felix/dataplane/windows"
 )
 
 var _ = Describe("Constructor test", func() {
@@ -37,7 +37,7 @@ var _ = Describe("Constructor test", func() {
 	})
 
 	It("should be constructable", func() {
-		var dp = windataplane.NewWinDataplaneDriver(dpConfig)
+		var dp = windataplane.NewWinDataplaneDriver(hns.API{}, dpConfig)
 		Expect(dp).ToNot(BeNil())
 	})
 })

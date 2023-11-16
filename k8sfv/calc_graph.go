@@ -15,10 +15,11 @@
 package main
 
 import (
+	"context"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -47,7 +48,7 @@ func rotateLabels(clientset *kubernetes.Clientset, nsPrefix string) error {
 	// Create pods.
 	waiter := sync.WaitGroup{}
 	waiter.Add(len(nsMaturity))
-	for nsName, _ := range nsMaturity {
+	for nsName := range nsMaturity {
 		nsName := nsName
 		go func() {
 			for _, role := range []string{"1", "2", "3", "4", "5"} {
@@ -79,13 +80,16 @@ func rotateLabels(clientset *kubernetes.Clientset, nsPrefix string) error {
 		for nsName, maturity := range nsMaturity {
 			if maturity == changeFrom[ii] {
 				nsMaturity[nsName] = changeTo[ii]
-				ns_in, err := clientset.CoreV1().Namespaces().Get(nsName, v1.GetOptions{})
+				ns_in, err := clientset.CoreV1().Namespaces().Get(context.Background(), nsName, v1.GetOptions{})
 				log.WithField("ns_in", ns_in).Debug("Namespace retrieved")
 				if err != nil {
 					panic(err)
 				}
 				ns_in.ObjectMeta.Labels["maturity"] = changeTo[ii]
-				ns_out, err := clientset.CoreV1().Namespaces().Update(ns_in)
+				ns_out, err := clientset.CoreV1().Namespaces().Update(context.Background(), ns_in, v1.UpdateOptions{})
+				if err != nil {
+					log.WithField("ns_in", ns_in).Error("failed to update namespace")
+				}
 				log.WithField("ns_out", ns_out).Debug("Updated namespace")
 			}
 		}

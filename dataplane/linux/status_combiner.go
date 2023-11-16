@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2017,2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,22 +17,22 @@ package intdataplane
 import (
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 // endpointStatusCombiner combines the status reports of endpoints from the IPv4 and IPv6
 // endpoint managers.  Where conflicts occur, it reports the "worse" status.
 type endpointStatusCombiner struct {
 	ipVersionToStatuses map[uint8]map[interface{}]string
-	dirtyIDs            set.Set
+	dirtyIDs            set.Set[any] /* FIXME HEP or WEP ID */
 	fromDataplane       chan interface{}
 }
 
 func newEndpointStatusCombiner(fromDataplane chan interface{}, ipv6Enabled bool) *endpointStatusCombiner {
 	e := &endpointStatusCombiner{
 		ipVersionToStatuses: map[uint8]map[interface{}]string{},
-		dirtyIDs:            set.New(),
+		dirtyIDs:            set.NewBoxed[any](),
 		fromDataplane:       fromDataplane,
 	}
 
@@ -72,7 +72,7 @@ func (e *endpointStatusCombiner) Apply() {
 			status := statuses[id]
 			logCxt := logCxt.WithField("ipVersion", ipVer).WithField("status", status)
 			if status == "error" {
-				logCxt.Warn("Endpoint is in error, will report error")
+				logCxt.Info("Endpoint is in error, will report error")
 				statusToReport = "error"
 			} else if status == "down" && statusToReport != "error" {
 				logCxt.Info("Endpoint down for at least one IP version")

@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,11 +21,12 @@ import (
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/apis/v3"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/net"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
+
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 
 var ipv0 = 0
@@ -90,6 +91,8 @@ var fullyLoadedParsedRule = ParsedRule{
 		{Exact: "/foo"},
 		{Prefix: "/bar"},
 	}},
+
+	Metadata: &model.RuleMetadata{Annotations: map[string]string{"key": "value"}},
 }
 
 var fullyLoadedProtoRule = proto.Rule{
@@ -97,7 +100,7 @@ var fullyLoadedProtoRule = proto.Rule{
 	IpVersion: proto.IPVersion_IPV4,
 
 	Protocol: &proto.Protocol{
-		NumberOrName: &proto.Protocol_Number{123},
+		NumberOrName: &proto.Protocol_Number{Number: 123},
 	},
 
 	SrcNet:   []string{"10.0.0.0/8"},
@@ -105,7 +108,7 @@ var fullyLoadedProtoRule = proto.Rule{
 	DstNet:   []string{"11.0.0.0/16"},
 	DstPorts: []*proto.PortRange{{First: 123, Last: 456}},
 
-	Icmp: &proto.Rule_IcmpTypeCode{&proto.IcmpTypeAndCode{
+	Icmp: &proto.Rule_IcmpTypeCode{IcmpTypeCode: &proto.IcmpTypeAndCode{
 		Type: 10,
 		Code: 12,
 	}},
@@ -114,7 +117,7 @@ var fullyLoadedProtoRule = proto.Rule{
 	DstIpSetIds: []string{"dstID1", "dstID2"},
 
 	NotProtocol: &proto.Protocol{
-		NumberOrName: &proto.Protocol_Name{"tcp"},
+		NumberOrName: &proto.Protocol_Name{Name: "tcp"},
 	},
 
 	NotSrcNet:   []string{"12.0.0.0/8"},
@@ -127,7 +130,7 @@ var fullyLoadedProtoRule = proto.Rule{
 	NotSrcNamedPortIpSetIds: []string{"notSrcNP"},
 	NotDstNamedPortIpSetIds: []string{"notDstNP"},
 
-	NotIcmp: &proto.Rule_NotIcmpTypeCode{&proto.IcmpTypeAndCode{
+	NotIcmp: &proto.Rule_NotIcmpTypeCode{NotIcmpTypeCode: &proto.IcmpTypeAndCode{
 		Type: 11,
 		Code: 13,
 	}},
@@ -152,10 +155,11 @@ var fullyLoadedProtoRule = proto.Rule{
 	},
 
 	HttpMatch: &proto.HTTPMatch{Methods: []string{"GET", "POST"},
-		Paths: []*proto.HTTPMatch_PathMatch{
-			{&proto.HTTPMatch_PathMatch_Exact{Exact: "/foo"}},
-			{&proto.HTTPMatch_PathMatch_Prefix{Prefix: "/bar"}},
+		Paths: []*proto.HTTPMatch_PathMatch{{PathMatch: &proto.HTTPMatch_PathMatch_Exact{Exact: "/foo"}},
+			{PathMatch: &proto.HTTPMatch_PathMatch_Prefix{Prefix: "/bar"}},
 		}},
+
+	Metadata: &proto.RuleMetadata{Annotations: map[string]string{"key": "value"}},
 }
 
 var _ = DescribeTable("ParsedRulesToProtoRules",
@@ -207,6 +211,13 @@ var _ = DescribeTable("ParsedRulesToProtoRules",
 			NotIcmp: &proto.Rule_NotIcmpType{
 				NotIcmpType: 11,
 			},
+		}),
+	Entry("Service match rule",
+		ParsedRule{
+			DstIPPortSetIDs: []string{"ipPortSetID"},
+		},
+		proto.Rule{
+			DstIpPortSetIds: []string{"ipPortSetID"},
 		}),
 	Entry("fully-loaded rule",
 		fullyLoadedParsedRule,
@@ -274,5 +285,5 @@ func mustParseCalicoIPNet(s string) *net.IPNet {
 	if err != nil {
 		panic(err)
 	}
-	return &net.IPNet{*ipNet}
+	return &net.IPNet{IPNet: *ipNet}
 }

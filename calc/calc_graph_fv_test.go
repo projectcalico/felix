@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2020 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,22 +18,25 @@
 package calc_test
 
 import (
-	. "github.com/alauda/felix/calc"
-	"github.com/alauda/felix/dataplane/mock"
-
 	"fmt"
+	"os"
+	"sort"
+	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/davecgh/go-spew/spew"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/calico/libcalico-go/lib/health"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
-	"github.com/alauda/felix/config"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
-	"github.com/projectcalico/libcalico-go/lib/health"
+	. "github.com/projectcalico/calico/felix/calc"
+	"github.com/projectcalico/calico/felix/config"
+	"github.com/projectcalico/calico/felix/dataplane/mock"
+	"github.com/projectcalico/calico/felix/proto"
 )
 
 // Each entry in baseTests contains a series of states to move through (defined in
@@ -66,9 +69,11 @@ var baseTests = []StateList{
 
 	// Tests of policy ordering.  Each state has one tier but we shuffle
 	// the order of the policies within it.
-	{localEp1WithOneTierPolicy123,
+	{
+		localEp1WithOneTierPolicy123,
 		localEp1WithOneTierPolicy321,
-		localEp1WithOneTierPolicyAlpha},
+		localEp1WithOneTierPolicyAlpha,
+	},
 
 	// Test mutating the profile list of some endpoints.
 	{localEpsWithNonMatchingProfile, localEpsWithProfile},
@@ -77,12 +82,14 @@ var baseTests = []StateList{
 	{hostEp1WithPolicy, hostEp2WithPolicy, hostEp1WithIngressPolicy, hostEp1WithEgressPolicy},
 
 	// Network set tests.
-	{hostEp1WithPolicy,
+	{
+		hostEp1WithPolicy,
 		hostEp1WithPolicyAndANetworkSet,
 		hostEp1WithPolicyAndANetworkSetMatchingBEqB,
 		hostEp2WithPolicy,
 		hostEp1WithPolicyAndANetworkSet,
-		hostEp1WithPolicyAndTwoNetworkSets},
+		hostEp1WithPolicyAndTwoNetworkSets,
+	},
 
 	// Untracked policy on its own.
 	{hostEp1WithUntrackedPolicy},
@@ -137,7 +144,8 @@ var baseTests = []StateList{
 		// Then change inherited label on EP2 to stop the match.
 		localEpsAndNamedPortPolicyNoLongerMatchingInheritedLabelOnEP2,
 		// Ditto for EP1.  Now matches none of the EPs.
-		localEpsAndNamedPortPolicyNoLongerMatchingInheritedLabelOnEP1},
+		localEpsAndNamedPortPolicyNoLongerMatchingInheritedLabelOnEP1,
+	},
 	// This scenario introduces ports with duplicate names.
 	{
 		// Start with endpoints and policy.
@@ -161,9 +169,11 @@ var baseTests = []StateList{
 
 	// Repro of a particular named port index update failure case.  The inherited profile was
 	// improperly cleaned up, so, when it was added back in again we ended up with multiple copies.
-	{localEpsWithTagInheritProfile,
+	{
+		localEpsWithTagInheritProfile,
 		localEp1WithPolicy,
-		localEpsWithProfile},
+		localEpsWithProfile,
+	},
 
 	// A long, fairly random sequence of updates.
 	{
@@ -212,7 +222,8 @@ var baseTests = []StateList{
 	},
 
 	// And another.
-	{localEpsWithProfile,
+	{
+		localEpsWithProfile,
 		localEp1WithOneTierPolicy123,
 		localEpsWithNonMatchingProfile,
 		localEpsWithTagInheritProfile,
@@ -241,20 +252,296 @@ var baseTests = []StateList{
 		withNonALPPolicy,
 	},
 
-	// TODO(smc): Test config calculation
-	// TODO(smc): Test mutation of endpoints
-	// TODO(smc): Test mutation of host endpoints
-	// TODO(smc): Test validation
-	// TODO(smc): Test rule conversions
+	// VXLAN tests.
+
+	{
+		// Start with a basic VXLAN scenario with one block.
+		vxlanWithBlock,
+
+		// Delete the block, should clean up the routes.
+		vxlanBlockDelete,
+
+		// Add it back again.
+		vxlanWithBlock,
+
+		// Delete the host, should clean up VTEP and routes.
+		vxlanHostIPDelete,
+
+		// Add it back again.
+		vxlanWithBlock,
+
+		// Delete tunnel IP, should clean up.
+		vxlanTunnelIPDelete,
+
+		// Add it back again.
+		vxlanWithBlock,
+
+		// Adding/removing IPv6 pool should cause no problems.
+		vxlanWithIPv6Resources,
+		vxlanWithBlock,
+	},
+	{
+		// This sequence switches the IP pool between VXLAN and IPIP.
+		vxlanWithBlock,
+		vxlanToIPIPSwitch,
+		vxlanWithBlock,
+		vxlanToIPIPSwitch,
+	},
+	{
+		vxlanWithBlockAndDifferentTunnelIP,
+	},
+	{
+		// This sequence simulates updating a node's tunnel IP.
+		vxlanWithBlock,
+		vxlanWithBlockAndDifferentTunnelIP,
+		vxlanWithBlock,
+	},
+	{
+		// This sequence simulates updating a node's IP.
+		vxlanWithBlock,
+		vxlanWithBlockAndDifferentNodeIP,
+		vxlanWithBlock,
+	},
+	{
+		// Start with a block.
+		vxlanWithBlock,
+
+		// This sequence adds some borrowed routes and then switches their owners back and forth.
+		vxlanWithBlockAndBorrows,
+		vxlanBlockOwnerSwitch,
+		vxlanWithBlockAndBorrows,
+
+		// Then check that removing the VTEP of a borrowed route withdraws the route.
+		vxlanWithBlockAndBorrowsAndMissingFirstVTEP,
+
+		// Back to base.
+		vxlanWithBlock,
+	},
+	{
+		// Test a local block with some IPs borrowed by another node.
+		vxlanLocalBlockWithBorrows,
+		vxlanWithBlock,
+		vxlanLocalBlockWithBorrows,
+		vxlanWithBlock,
+	},
+	{
+		// Create a VXLAN scenario with a block and MAC.
+		vxlanWithMAC,
+
+		// Delete the host tunnel MAC address
+		vxlanWithBlock,
+
+		// Add it back again.
+		vxlanWithMAC,
+	},
+	{
+		// Test L3 route resolver in node resource mode.
+		// Note: the test logic below auto-enables the Node resources flag if it detects any states with
+		// Node resources (and the route resolver ignores whichever datatype it expects to be disabled).
+		// Hence, we have to use all Node resource-based states or all host IP-base ones.
+		vxlanWithBlockNodeRes,
+		vxlanLocalBlockWithBorrowsNodeRes,
+		vxlanLocalBlockWithBorrowsCrossSubnetNodeRes,
+		vxlanLocalBlockWithBorrowsDifferentSubnetNodeRes,
+		vxlanWithBlockNodeRes,
+	},
+	{
+		// Test L3 route resolver in node resource mode using WorkloadIPs as the route source.
+		// This test starts with a single remote workload, then moves to two remote workloads with the same
+		// IP address on different nodes, and then back to a single workload.
+		vxlanWithWEPIPs,
+		vxlanWithWEPIPsAndWEP,
+		vxlanWithWEPIPsAndWEPDuplicate,
+		vxlanWithWEPIPsAndWEP,
+	},
+	{
+		// Test corner case where the IP pool and block share a /32.
+		// Should be able to add or remove the block or pool in either order and get the same result.
+		vxlanSlash32,
+		vxlanSlash32NoBlock,
+		vxlanSlash32NoPool,
+		vxlanSlash32,
+		vxlanSlash32NoPool,
+		vxlanSlash32NoBlock,
+		vxlanSlash32,
+	},
+	{
+		// Corner case where there's a remote workload and a local WEP with overlapping IPs.
+		vxlanLocalBlockWithBorrows,
+		vxlanLocalBlockWithBorrowsLocalWEP,
+		vxlanLocalBlockWithBorrows,
+		vxlanLocalBlockWithBorrowsLocalWEP,
+	},
+	{
+		// Corner case: host is inside an IP pool (used to influence NAT outgoing behaviour).
+		vxlanWithBlock,
+		hostInIPPool,
+		vxlanWithBlock,
+	},
+	{
+		// Corner case: hosts with duplicate IPs.
+		vxlanWithBlock,
+		vxlanWithBlockDupNodeIP,
+		vxlanWithBlock,
+	},
+	{
+		// Corner case: hosts with duplicate IPs; scenario where we add a host with a dup IP and then remove the
+		// original host.
+		vxlanWithBlockDupNodeIP,
+		vxlanWithDupNodeIPRemoved,
+	},
+	{
+		nodesWithMoreIPs,
+		nodesWithMoreIPsAndDuplicates,
+		nodesWithDifferentAddressTypes,
+		nodesWithMoreIPsDeleted,
+	},
+	{
+		// Service NetworkPolicy basic case.
+		endpointSliceAndLocalWorkload,
+		endpointSliceActive,
+	},
+	{
+		// Service NetworkPolicy test updating endpoint slices.
+		endpointSliceActiveNewIPs,
+		endpointSliceActiveNewIPs2,
+		endpointSliceActiveNewIPs,
+	},
+	{
+		// Service NetworkPolicy test overlapping two endpoint slices with same IPs.
+		endpointSliceActiveNewIPs,
+		endpointSliceOverlap,
+		endpointSlice2OnlyActiveNewIPs2,
+	},
+	{
+		encapWithIPIPPool,
+		encapWithVXLANPool,
+		encapWithIPIPAndVXLANPool,
+	},
+	{
+		endpointSliceActiveSpecNoPorts,
+	},
+	{
+		// This case repros an aliasing bug where having an ingress rule and an egress rule for the
+		// same selector resulted in collision at cleanup time.
+		endpointSliceActiveSpecNoPorts,
+		endpointSliceActiveSpecPortsAndNoPorts,
+		endpointSliceActiveSpecNoPorts,
+		endpointSliceActiveSpecPortsAndNoPorts,
+		endpointSliceActiveNewIPs,
+	},
+
+	// IPv6 VXLAN tests.
+
+	{
+		// Start with a basic VXLAN scenario with one block.
+		vxlanV6WithBlock,
+
+		// Delete the block, should clean up the routes.
+		vxlanV6BlockDelete,
+
+		// Add it back again.
+		vxlanV6WithBlock,
+
+		// Delete the node IP, should clean up VTEP and routes.
+		vxlanV6NodeResIPDelete,
+
+		// Add it back again.
+		vxlanV6WithBlock,
+
+		// Delete tunnel IP, should clean up.
+		vxlanV6TunnelIPDelete,
+
+		// Add it back again.
+		vxlanV6WithBlock,
+
+		// Delete the node BGP, should clean up VTEP and routes.
+		vxlanV6NodeResBGPDelete,
+
+		// Add it back again.
+		vxlanV6WithBlock,
+
+		// Delete the node resource, should clean up VTEP and routes.
+		vxlanV6NodeResDelete,
+
+		// Add it back again.
+		vxlanV6WithBlock,
+
+		// Specify a VXLAN tunnel MAC
+		vxlanV6WithMAC,
+
+		// Remove the VXLAN tunnel MAC
+		vxlanV6WithBlock,
+	},
+
+	// IPv4+IPv6 (dual stack) VXLAN tests.
+	{
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6BlockV6Delete,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6BlockV4Delete,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6NodeResIPv4Delete,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6NodeResIPv6Delete,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6NodeResIPv4Delete,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6NodeResBGPDelete,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6NodeResDelete,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6TunnelIPv4Delete,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6TunnelIPv6Delete,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6WithMAC,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6WithV4MAC,
+		vxlanV4V6WithBlock,
+
+		vxlanV4V6WithV6MAC,
+		vxlanV4V6WithBlock,
+	},
+	{
+		wireguardV4,
+		wireguardV6,
+		wireguardV4V6,
+	},
 }
 
-var testExpanders = []func(baseTest StateList) (desc string, mappedTests []StateList){
-	identity,
-	reverseKVOrder,
-	reverseStateOrder,
-	insertEmpties,
-	splitStates,
-	squashStates,
+var logOnce sync.Once
+
+func testExpanders() (testExpanders []func(baseTest StateList) (desc string, mappedTests []StateList)) {
+	testExpanders = []func(baseTest StateList) (desc string, mappedTests []StateList){
+		identity,
+	}
+
+	if os.Getenv("DISABLE_TEST_EXPANSION") == "true" {
+		logOnce.Do(func() {
+			log.Info("Test expansion disabled")
+		})
+		return
+	}
+	testExpanders = append(testExpanders,
+		reverseKVOrder,
+		reverseStateOrder,
+		insertEmpties,
+		splitStates,
+		squashStates,
+	)
+	return
 }
 
 // These tests drive the calculation graph directly (and synchronously).
@@ -271,15 +558,16 @@ var testExpanders = []func(baseTest StateList) (desc string, mappedTests []State
 var _ = Describe("Calculation graph state sequencing tests:", func() {
 	for _, test := range baseTests {
 		baseTest := test
-		for _, expander := range testExpanders {
+		for _, expander := range testExpanders() {
 			expanderDesc, expandedTests := expander(baseTest)
 			for _, expandedTest := range expandedTests {
-				// Always worth adding an empty to the end of the test.
-				expandedTest = append(expandedTest, empty)
 				desc := fmt.Sprintf("with input states %v %v", baseTest, expanderDesc)
 				Describe(desc+" flushing after each KV", func() {
 					doStateSequenceTest(expandedTest, afterEachKV)
 				})
+				if os.Getenv("DISABLE_TEST_EXPANSION") == "true" {
+					break
+				}
 				Describe(desc+" flushing after each KV and duplicating each update", func() {
 					doStateSequenceTest(expandedTest, afterEachKVAndDupe)
 				})
@@ -304,13 +592,17 @@ var _ = Describe("Calculation graph state sequencing tests:", func() {
 // synchronous test above is passing.  It's much easier to debug a
 // deterministic test!
 var _ = Describe("Async calculation graph state sequencing tests:", func() {
+	if os.Getenv("DISABLE_ASYNC_TESTS") == "true" {
+		log.Info("Async tests disabled")
+		return
+	}
 	for _, test := range baseTests {
 		if len(test) == 0 {
 			continue
 		}
 		baseTest := test
 
-		for _, expander := range testExpanders {
+		for _, expander := range testExpanders() {
 			expanderDesc, expandedTests := expander(baseTest)
 			for _, test := range expandedTests {
 				test := test
@@ -318,11 +610,15 @@ var _ = Describe("Async calculation graph state sequencing tests:", func() {
 					// Create the calculation graph.
 					conf := config.New()
 					conf.FelixHostname = localHostname
+					conf.BPFEnabled = true
+					conf.SetUseNodeResourceUpdates(test.UsesNodeResources())
+					conf.RouteSource = test.RouteSource()
 					outputChan := make(chan interface{})
+					conf.Encapsulation = config.Encapsulation{VXLANEnabled: true, VXLANEnabledV6: true}
 					asyncGraph := NewAsyncCalcGraph(conf, []chan<- interface{}{outputChan}, nil)
 					// And a validation filter, with a channel between it
 					// and the async graph.
-					validator := NewValidationFilter(asyncGraph)
+					validator := NewValidationFilter(asyncGraph, conf)
 					toValidator := NewSyncerCallbacksDecoupler()
 					// Start the validator in one thread.
 					go toValidator.SendTo(validator)
@@ -336,7 +632,11 @@ var _ = Describe("Async calculation graph state sequencing tests:", func() {
 						lastState := empty
 						for _, state := range test {
 							log.WithField("state", state).Info("Injecting next state")
+							_, _ = fmt.Fprintf(GinkgoWriter, "       -> Injecting state (single update): %v\n", state)
 							kvDeltas := state.KVDeltas(lastState)
+							for _, kv := range kvDeltas {
+								_, _ = fmt.Fprintf(GinkgoWriter, "            %v = %v\n", kv.Key, kv.Value)
+							}
 							toValidator.OnUpdates(kvDeltas)
 							lastState = state
 						}
@@ -374,38 +674,71 @@ var _ = Describe("Async calculation graph state sequencing tests:", func() {
 							}
 						}
 					}
-					state := test[len(test)-1]
 
-					// Async tests are slower to run so we do all the assertions
-					// on each test rather than as separate It() blocks.
-					Expect(mockDataplane.IPSets()).To(Equal(state.ExpectedIPSets),
-						"IP sets didn't match expected state after moving to state: %v",
-						state.Name)
-
-					Expect(mockDataplane.ActivePolicies()).To(Equal(state.ExpectedPolicyIDs),
-						"Active policy IDs were incorrect after moving to state: %v",
-						state.Name)
-
-					Expect(mockDataplane.ActiveProfiles()).To(Equal(state.ExpectedProfileIDs),
-						"Active profile IDs were incorrect after moving to state: %v",
-						state.Name)
-
-					Expect(mockDataplane.EndpointToPolicyOrder()).To(Equal(state.ExpectedEndpointPolicyOrder),
-						"Endpoint policy order incorrect after moving to state: %v",
-						state.Name)
-
-					Expect(mockDataplane.EndpointToPreDNATPolicyOrder()).To(Equal(state.ExpectedPreDNATEndpointPolicyOrder),
-						"Endpoint pre-DNAT policy order incorrect after moving to state: %v",
-						state.Name)
-
-					Expect(mockDataplane.EndpointToUntrackedPolicyOrder()).To(Equal(state.ExpectedUntrackedEndpointPolicyOrder),
-						"Endpoint untracked policy order incorrect after moving to state: %v",
-						state.Name)
+					// Do the common sync/async assertions.
+					expectCorrectDataplaneState(mockDataplane, test[len(test)-1])
 				})
 			}
 		}
 	}
 })
+
+func expectCorrectDataplaneState(mockDataplane *mock.MockDataplane, state State) {
+	log.WithField("state", state.Name).Info("Doing assertions on state")
+	Expect(mockDataplane.IPSets()).To(Equal(state.ExpectedIPSets),
+		"IP sets didn't match expected state after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.ActivePolicies()).To(Equal(state.ExpectedPolicyIDs),
+		"Active policy IDs were incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.ActiveProfiles()).To(Equal(state.ExpectedProfileIDs),
+		"Active profile IDs were incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.ActiveVTEPs()).To(Equal(state.ExpectedVTEPs),
+		"Active VTEPs were incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.ActiveWireguardEndpoints()).To(Equal(state.ExpectedWireguardEndpoints),
+		"Active IPv4 Wireguard Endpoints were incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.ActiveWireguardV6Endpoints()).To(Equal(state.ExpectedWireguardV6Endpoints),
+		"Active IPv6 Wireguard Endpoints were incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.ActiveHostMetadataV4V6()).To(Equal(state.ExpectedHostMetadataV4V6),
+		"Active Host MetadataV4V6 were incorrect after moving to state: %v",
+		state.Name)
+	// Comparing stringified versions of the routes here so that, on failure, we get much more readable output.
+	Expect(stringifyRoutes(mockDataplane.ActiveRoutes())).To(Equal(stringifyRoutes(state.ExpectedRoutes)),
+		"Active routes were incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.EndpointToPolicyOrder()).To(Equal(state.ExpectedEndpointPolicyOrder),
+		"Endpoint policy order incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.EndpointToUntrackedPolicyOrder()).To(Equal(state.ExpectedUntrackedEndpointPolicyOrder),
+		"Untracked endpoint policy order incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.EndpointToPreDNATPolicyOrder()).To(Equal(state.ExpectedPreDNATEndpointPolicyOrder),
+		"Untracked endpoint policy order incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.ActiveUntrackedPolicies()).To(Equal(state.ExpectedUntrackedPolicyIDs),
+		"Untracked policies incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.ActivePreDNATPolicies()).To(Equal(state.ExpectedPreDNATPolicyIDs),
+		"PreDNAT policies incorrect after moving to state: %v",
+		state.Name)
+	Expect(mockDataplane.Encapsulation()).To(Equal(state.ExpectedEncapsulation),
+		"Encapsulation incorrect after moving to state: %v",
+		state.Name)
+}
+
+func stringifyRoutes(routes set.Set[proto.RouteUpdate]) []string {
+	out := make([]string, 0, routes.Len())
+	routes.Iter(func(item proto.RouteUpdate) error {
+		out = append(out, fmt.Sprintf("%+v", item))
+		return nil
+	})
+	sort.Strings(out)
+	return out
+}
 
 type flushStrategy int
 
@@ -427,17 +760,23 @@ func doStateSequenceTest(expandedTest StateList, flushStrategy flushStrategy) {
 	var lastStats StatsUpdate
 
 	BeforeEach(func() {
+		conf := config.New()
+		conf.FelixHostname = localHostname
+		conf.BPFEnabled = true
+		conf.SetUseNodeResourceUpdates(expandedTest.UsesNodeResources())
+		conf.RouteSource = expandedTest.RouteSource()
 		mockDataplane = mock.NewMockDataplane()
 		eventBuf = NewEventSequencer(mockDataplane)
 		eventBuf.Callback = mockDataplane.OnEvent
-		calcGraph = NewCalculationGraph(eventBuf, localHostname)
+		conf.Encapsulation = config.Encapsulation{VXLANEnabled: true, VXLANEnabledV6: true}
+		calcGraph = NewCalculationGraph(eventBuf, conf, func() {})
 		statsCollector := NewStatsCollector(func(stats StatsUpdate) error {
 			log.WithField("stats", stats).Info("Stats update")
 			lastStats = stats
 			return nil
 		})
 		statsCollector.RegisterWith(calcGraph)
-		validationFilter = NewValidationFilter(calcGraph.AllUpdDispatcher)
+		validationFilter = NewValidationFilter(calcGraph.AllUpdDispatcher, conf)
 		sentInSync = false
 		lastState = empty
 		state = empty
@@ -454,7 +793,7 @@ func doStateSequenceTest(expandedTest StateList, flushStrategy flushStrategy) {
 					ii, lastState.Name, state.Name))
 				kvDeltas := state.KVDeltas(lastState)
 				for _, kv := range kvDeltas {
-					fmt.Fprintf(GinkgoWriter, "       -> Injecting KV: %v\n", kv)
+					_, _ = fmt.Fprintf(GinkgoWriter, "       -> Injecting KV: %v\n", kv)
 					validationFilter.OnUpdates([]api.Update{kv})
 					if flushStrategy == afterEachKV || flushStrategy == afterEachKVAndDupe {
 						if !sentInSync {
@@ -468,7 +807,7 @@ func doStateSequenceTest(expandedTest StateList, flushStrategy flushStrategy) {
 						eventBuf.Flush()
 					}
 				}
-				fmt.Fprintln(GinkgoWriter, "       -- <<FLUSH>>")
+				_, _ = fmt.Fprintln(GinkgoWriter, "       -- <<FLUSH>>")
 				if flushStrategy == afterEachState {
 					if !sentInSync {
 						validationFilter.OnStatusUpdated(api.InSync)
@@ -483,36 +822,21 @@ func doStateSequenceTest(expandedTest StateList, flushStrategy flushStrategy) {
 				}
 				lastState = state
 			}
+			if flushStrategy == atEnd {
+				validationFilter.OnStatusUpdated(api.InSync)
+				eventBuf.Flush()
+				expectation()
+			}
 		}
 	}
 
 	// Note: these used to be separate It() blocks but combining them knocks ~10s off the
 	// runtime, which is worthwhile!
 	It("should result in correct active state", iterStates(func() {
-		Expect(mockDataplane.IPSets()).To(Equal(state.ExpectedIPSets),
-			"IP sets didn't match expected state after moving to state: %v",
-			state.Name)
-		Expect(mockDataplane.ActivePolicies()).To(Equal(state.ExpectedPolicyIDs),
-			"Active policy IDs were incorrect after moving to state: %v",
-			state.Name)
-		Expect(mockDataplane.ActiveProfiles()).To(Equal(state.ExpectedProfileIDs),
-			"Active profile IDs were incorrect after moving to state: %v",
-			state.Name)
-		Expect(mockDataplane.EndpointToPolicyOrder()).To(Equal(state.ExpectedEndpointPolicyOrder),
-			"Endpoint policy order incorrect after moving to state: %v",
-			state.Name)
-		Expect(mockDataplane.EndpointToUntrackedPolicyOrder()).To(Equal(state.ExpectedUntrackedEndpointPolicyOrder),
-			"Untracked endpoint policy order incorrect after moving to state: %v",
-			state.Name)
-		Expect(mockDataplane.EndpointToPreDNATPolicyOrder()).To(Equal(state.ExpectedPreDNATEndpointPolicyOrder),
-			"Untracked endpoint policy order incorrect after moving to state: %v",
-			state.Name)
-		Expect(mockDataplane.ActiveUntrackedPolicies()).To(Equal(state.ExpectedUntrackedPolicyIDs),
-			"Untracked policies incorrect after moving to state: %v",
-			state.Name)
-		Expect(mockDataplane.ActivePreDNATPolicies()).To(Equal(state.ExpectedPreDNATPolicyIDs),
-			"PreDNAT policies incorrect after moving to state: %v",
-			state.Name)
+		// Do common sync/async assertions.
+		expectCorrectDataplaneState(mockDataplane, state)
+
+		// We only track stats in the sync tests.
 		Expect(lastStats.NumPolicies).To(Equal(state.NumPolicies()),
 			"number of policies stat incorrect after moving to state: %v\n%+v",
 			state.Name, spew.Sdump(state.DatastoreState))
@@ -526,13 +850,13 @@ func doStateSequenceTest(expandedTest StateList, flushStrategy flushStrategy) {
 }
 
 var _ = Describe("calc graph with health state", func() {
-
 	It("should be constructable", func() {
 		// Create the calculation graph.
 		conf := config.New()
 		conf.FelixHostname = localHostname
 		outputChan := make(chan interface{})
 		healthAggregator := health.NewHealthAggregator()
+		conf.Encapsulation = config.Encapsulation{VXLANEnabled: true, VXLANEnabledV6: true}
 		asyncGraph := NewAsyncCalcGraph(conf, []chan<- interface{}{outputChan}, healthAggregator)
 		Expect(asyncGraph).NotTo(BeNil())
 	})

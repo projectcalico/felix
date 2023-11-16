@@ -1,6 +1,6 @@
-// +build fvtests
+//go:build fvtests
 
-// Copyright (c) 2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2019-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package fv
+package fv_test
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -32,64 +31,55 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/projectcalico/libcalico-go/lib/backend/k8s/conversion"
-	"github.com/projectcalico/libcalico-go/lib/options"
-	"github.com/projectcalico/pod2daemon/binder"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/k8s/conversion"
+	"github.com/projectcalico/calico/libcalico-go/lib/options"
+	"github.com/projectcalico/calico/pod2daemon/binder"
 
-	"github.com/alauda/felix/dataplane/mock"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/dataplane/mock"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
-	"github.com/alauda/felix/proto"
+	"github.com/projectcalico/calico/felix/proto"
 
-	"github.com/alauda/felix/fv/containers"
-	"github.com/alauda/felix/fv/infrastructure"
-	"github.com/alauda/felix/fv/utils"
-	"github.com/alauda/felix/fv/workload"
-	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	client "github.com/projectcalico/libcalico-go/lib/clientv3"
+	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/projectcalico/calico/felix/fv/workload"
+	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 )
 
-var _ = Context("policy sync API tests", func() {
+var _ = Context("_POL-SYNC_ _BPF-SAFE_ policy sync API tests", func() {
 
 	var (
 		etcd              *containers.Container
 		felix             *infrastructure.Felix
 		calicoClient      client.Interface
+		infra             infrastructure.DatastoreInfra
 		w                 [3]*workload.Workload
 		tempDir           string
 		hostMgmtCredsPath string
 	)
 
 	BeforeEach(func() {
-		// Create a temporary directory to map into the container as /var/run/calico, which
+		// Create a temporary directory to map into the container as /var/run/calico/policysync, which
 		// is where we tell Felix to put the policy sync mounts and credentials.
 		var err error
-		tempDir, err = ioutil.TempDir("", "felixfv")
+		tempDir, err = os.MkdirTemp("", "felixfv")
 		Expect(err).NotTo(HaveOccurred())
 
 		// Configure felix to enable the policy sync API.
 		options := infrastructure.DefaultTopologyOptions()
-		options.ExtraEnvVars["FELIX_PolicySyncPathPrefix"] = "/var/run/calico"
+		options.ExtraEnvVars["FELIX_PolicySyncPathPrefix"] = "/var/run/calico/policysync"
 		// To enable debug logs, uncomment these lines; watch out for timeouts caused by the
 		// resulting slow down!
 		// options.ExtraEnvVars["FELIX_DebugDisableLogDropping"] = "true"
 		// options.FelixLogSeverity = "debug"
-		options.ExtraVolumes[tempDir] = "/var/run/calico"
-		felix, etcd, calicoClient = infrastructure.StartSingleNodeEtcdTopology(options)
-
-		// Install a default profile that allows workloads with this profile to talk to each
-		// other, in the absence of any Policy.
-		defaultProfile := api.NewProfile()
-		defaultProfile.Name = "default"
-		defaultProfile.Spec.LabelsToApply = map[string]string{"default": ""}
-		defaultProfile.Spec.Egress = []api.Rule{{Action: api.Allow}}
-		defaultProfile.Spec.Ingress = []api.Rule{{
-			Action: api.Allow,
-			Source: api.EntityRule{Selector: "default == ''"},
-		}}
-		_, err = calicoClient.Profiles().Create(utils.Ctx, defaultProfile, utils.NoOptions)
-		Expect(err).NotTo(HaveOccurred())
+		options.ExtraVolumes[tempDir] = "/var/run/calico/policysync"
+		felix, etcd, calicoClient, infra = infrastructure.StartSingleNodeEtcdTopology(options)
+		infrastructure.CreateDefaultProfile(calicoClient, "default", map[string]string{"default": ""}, "default == ''")
 
 		// Create three workloads, using that profile.
 		for ii := range w {
@@ -111,9 +101,10 @@ var _ = Context("policy sync API tests", func() {
 		felix.Stop()
 
 		if CurrentGinkgoTestDescription().Failed {
-			etcd.Exec("etcdctl", "ls", "--recursive", "/")
+			etcd.Exec("etcdctl", "get", "/", "--prefix", "--keys-only")
 		}
 		etcd.Stop()
+		infra.Stop()
 	})
 
 	AfterEach(func() {
@@ -137,7 +128,7 @@ var _ = Context("policy sync API tests", func() {
 			dirName := dirNameForWorkload(wl)
 			hostWlDir := filepath.Join(tempDir, dirName)
 			os.MkdirAll(hostWlDir, 0777)
-			return hostWlDir, filepath.Join("/var/run/calico", dirName)
+			return hostWlDir, filepath.Join("/var/run/calico/policysync", dirName)
 		}
 
 		writeCredentialsToFile := func(credentials *binder.Credentials) error {
@@ -150,7 +141,7 @@ var _ = Context("policy sync API tests", func() {
 			credentialFileName := credentials.Uid + binder.CredentialsExtension
 
 			credsFileTmp := filepath.Join(tempDir, credentialFileName)
-			err = ioutil.WriteFile(credsFileTmp, attrs, 0777)
+			err = os.WriteFile(credsFileTmp, attrs, 0777)
 			if err != nil {
 				return err
 			}
@@ -201,7 +192,7 @@ var _ = Context("policy sync API tests", func() {
 
 			It("felix should create the workload socket", func() {
 				for _, p := range hostWlSocketPath {
-					Eventually(p).Should(BeAnExistingFile())
+					Eventually(p, "3s").Should(BeAnExistingFile())
 				}
 			})
 
@@ -218,7 +209,7 @@ var _ = Context("policy sync API tests", func() {
 
 				createWorkloadConn := func(i int) (*grpc.ClientConn, proto.PolicySyncClient) {
 					var opts []grpc.DialOption
-					opts = append(opts, grpc.WithInsecure())
+					opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 					opts = append(opts, grpc.WithDialer(unixDialer))
 					var conn *grpc.ClientConn
 					conn, err = grpc.Dial(hostWlSocketPath[i], opts...)
@@ -233,7 +224,7 @@ var _ = Context("policy sync API tests", func() {
 					for i := range w {
 						// Use the fact that anything we exec inside the Felix container runs as root to fix the
 						// permissions on the socket so the test process can connect.
-						Eventually(hostWlSocketPath[i]).Should(BeAnExistingFile())
+						Eventually(hostWlSocketPath[i], "3s").Should(BeAnExistingFile())
 						felix.Exec("chmod", "a+rw", containerWlSocketPath[i])
 						wlConn[i], wlClient[i] = createWorkloadConn(i)
 					}
@@ -295,7 +286,7 @@ var _ = Context("policy sync API tests", func() {
 						doChurn := func(wlIndexes ...int) {
 							for i := 0; i < 100; i++ {
 								wlIdx := wlIndexes[i%len(wlIndexes)]
-								By(fmt.Sprintf("Churn %d; targetting workload %d", i, wlIdx))
+								By(fmt.Sprintf("Churn %d; targeting workload %d", i, wlIdx))
 
 								policy := api.NewGlobalNetworkPolicy()
 								policy.SetName("policy-0")
@@ -304,16 +295,23 @@ var _ = Context("policy sync API tests", func() {
 								policy, err = calicoClient.GlobalNetworkPolicies().Create(ctx, policy, utils.NoOptions)
 								Expect(err).NotTo(HaveOccurred())
 
+								waitTime := "1s" // gomega default
+								if os.Getenv("FELIX_FV_ENABLE_BPF") == "true" {
+									// FIXME avoid blocking policysync while BPF dataplane does its thing.
+									// When BPF dataplane reprograms policy it can block >1s.
+									waitTime = "5s"
+								}
+
 								if wlIdx != 2 {
 									policyID := proto.PolicyID{Name: "default.policy-0", Tier: "default"}
-									Eventually(mockWlClient[wlIdx].ActivePolicies).Should(Equal(set.From(policyID)))
+									Eventually(mockWlClient[wlIdx].ActivePolicies, waitTime).Should(Equal(set.From(policyID)))
 								}
 
 								_, err = calicoClient.GlobalNetworkPolicies().Delete(ctx, "policy-0", options.DeleteOptions{})
 								Expect(err).NotTo(HaveOccurred())
 
 								if wlIdx != 2 {
-									Eventually(mockWlClient[wlIdx].ActivePolicies).Should(Equal(set.New()))
+									Eventually(mockWlClient[wlIdx].ActivePolicies, waitTime).Should(Equal(set.New[proto.PolicyID]()))
 								}
 							}
 						}
@@ -377,8 +375,8 @@ var _ = Context("policy sync API tests", func() {
 									IngressPolicyNames: []string{"default.policy-0"},
 								}}}))
 
-							Consistently(mockWlClient[1].ActivePolicies).Should(Equal(set.New()))
-							Consistently(mockWlClient[2].ActivePolicies).Should(Equal(set.New()))
+							Consistently(mockWlClient[1].ActivePolicies).Should(Equal(set.New[proto.PolicyID]()))
+							Consistently(mockWlClient[2].ActivePolicies).Should(Equal(set.New[proto.PolicyID]()))
 						})
 
 						It("should be correctly mapped to proto policy", func() {
@@ -431,7 +429,7 @@ var _ = Context("policy sync API tests", func() {
 							_, err := calicoClient.GlobalNetworkPolicies().Delete(ctx, "policy-0", options.DeleteOptions{})
 							Expect(err).NotTo(HaveOccurred())
 
-							Eventually(mockWlClient[0].ActivePolicies).Should(Equal(set.New()))
+							Eventually(mockWlClient[0].ActivePolicies).Should(Equal(set.New[proto.PolicyID]()))
 						})
 
 						It("should handle a change of selector", func() {
@@ -449,7 +447,7 @@ var _ = Context("policy sync API tests", func() {
 
 							Eventually(mockWlClient[0].EndpointToPolicyOrder).Should(Equal(
 								map[string][]mock.TierInfo{"k8s/fv/fv-pod-0/eth0": {}}))
-							Eventually(mockWlClient[0].ActivePolicies).Should(Equal(set.New()))
+							Eventually(mockWlClient[0].ActivePolicies).Should(Equal(set.New[proto.PolicyID]()))
 
 							By("Updating workload 1 to make the policy active")
 							Eventually(mockWlClient[1].ActivePolicies).Should(Equal(set.From(policyID)))
@@ -460,7 +458,7 @@ var _ = Context("policy sync API tests", func() {
 									IngressPolicyNames: []string{"default.policy-0"},
 								}}}))
 
-							Consistently(mockWlClient[2].ActivePolicies).Should(Equal(set.New()))
+							Consistently(mockWlClient[2].ActivePolicies).Should(Equal(set.New[proto.PolicyID]()))
 						})
 
 						It("should handle a change of profiles", func() {
@@ -485,6 +483,7 @@ var _ = Context("policy sync API tests", func() {
 								"k8s/fv/fv-pod-0/eth0": {"notdefault"}}))
 							Eventually(mockWlClient[0].ActiveProfiles).Should(Equal(set.From(notDefProfID)))
 
+							Eventually(mockWlClient[2].ActiveProfiles).Should(Equal(set.From(defProfID)))
 							Consistently(mockWlClient[2].ActiveProfiles).Should(Equal(set.From(defProfID)))
 						})
 					})

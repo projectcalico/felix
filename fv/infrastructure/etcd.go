@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2018,2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,21 +15,34 @@
 package infrastructure
 
 import (
+	"fmt"
+
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/fv/containers"
-	"github.com/alauda/felix/fv/utils"
+	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/projectcalico/calico/felix/fv/utils"
 )
 
 func RunEtcd() *containers.Container {
-	log.Info("Starting etcd")
-	return containers.Run("etcd",
-		containers.RunOpts{AutoRemove: true},
+	args := []string{
 		"--privileged", // So that we can add routes inside the etcd container,
 		// when using the etcd container to model an external client connecting
 		// into the cluster.
 		utils.Config.EtcdImage,
 		"etcd",
 		"--advertise-client-urls", "http://127.0.0.1:2379",
-		"--listen-client-urls", "http://0.0.0.0:2379")
+		"--listen-client-urls", "http://0.0.0.0:2379"}
+	arch := utils.GetSysArch()
+	if arch != "amd64" {
+		args = append([]string{"-e", fmt.Sprintf("ETCD_UNSUPPORTED_ARCH=%s", arch)},
+			args...)
+	}
+
+	log.Info("Starting etcd")
+	return containers.Run("etcd",
+		containers.RunOpts{
+			AutoRemove: true,
+			StopSignal: "SIGKILL",
+		},
+		args...)
 }

@@ -1,6 +1,6 @@
-// +build fvtests
+//go:build fvtests
 
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2019,2021 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,29 +37,27 @@ package fv_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 	log "github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
-	apierrs "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/projectcalico/libcalico-go/lib/apis/v3"
+	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 
-	"time"
-
-	"github.com/alauda/felix/fv/containers"
-	"github.com/alauda/felix/fv/infrastructure"
-	"github.com/alauda/felix/fv/utils"
-	"github.com/projectcalico/libcalico-go/lib/health"
-	"github.com/projectcalico/libcalico-go/lib/options"
+	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/projectcalico/calico/felix/fv/workload"
+	"github.com/projectcalico/calico/libcalico-go/lib/health"
+	"github.com/projectcalico/calico/libcalico-go/lib/options"
 )
 
-var _ = Describe("health tests", func() {
+var _ = Describe("_HEALTH_ _BPF-SAFE_ health tests", func() {
 
 	var k8sInfra *infrastructure.K8sDatastoreInfra
 
@@ -79,14 +77,12 @@ var _ = Describe("health tests", func() {
 		k8sInfra.Stop()
 	})
 
-	var felixContainer *containers.Container
+	var felix *infrastructure.Felix
 	var felixReady, felixLiveness func() int
 
 	// describeCommonFelixTests creates specs for Felix tests that are common between the
 	// two scenarios below (with and without Typha).
 	describeCommonFelixTests := func() {
-		var podsToCleanUp []string
-
 		Describe("with normal Felix startup", func() {
 
 			It("should become ready and stay ready", func() {
@@ -102,41 +98,16 @@ var _ = Describe("health tests", func() {
 
 		createLocalPod := func() {
 			testPodName := fmt.Sprintf("test-pod-%x", rand.Uint32())
-			pod := &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: testPodName},
-				Spec: v1.PodSpec{Containers: []v1.Container{{
-					Name:  fmt.Sprintf("container-foo"),
-					Image: "ignore",
-				}},
-					NodeName: felixContainer.Hostname,
-				},
-				Status: v1.PodStatus{
-					Phase: v1.PodRunning,
-					Conditions: []v1.PodCondition{{
-						Type:   v1.PodScheduled,
-						Status: v1.ConditionTrue,
-					}},
-					PodIP: "10.0.0.1",
-				},
-			}
-			var err error
-			pod, err = k8sInfra.K8sClient.CoreV1().Pods("default").Create(pod)
-			Expect(err).NotTo(HaveOccurred())
-			pod.Status.PodIP = "10.0.0.1"
-			_, err = k8sInfra.K8sClient.CoreV1().Pods("default").UpdateStatus(pod)
-			Expect(err).NotTo(HaveOccurred())
-			podsToCleanUp = append(podsToCleanUp, testPodName)
+			podIP := "10.0.0.1"
+			pod := workload.New(felix, testPodName, "default",
+				podIP, "12345", "tcp")
+			pod.Start()
+
+			pod.ConfigureInInfra(k8sInfra)
 		}
 
 		AfterEach(func() {
-			for _, name := range podsToCleanUp {
-				// It is possible for a local pod to be deleted by GC if node is gone.
-				err := k8sInfra.K8sClient.CoreV1().Pods("default").Delete(name, &metav1.DeleteOptions{})
-				if err != nil && !apierrs.IsNotFound(err) {
-					Expect(err).NotTo(HaveOccurred())
-				}
-			}
-			podsToCleanUp = nil
+			felix.Stop()
 		})
 
 		Describe("after removing iptables-restore", func() {
@@ -145,7 +116,7 @@ var _ = Describe("health tests", func() {
 				Eventually(felixReady, "5s", "100ms").Should(BeGood())
 
 				// Then remove iptables-restore.
-				err := felixContainer.ExecMayFail("rm", "/sbin/iptables-restore")
+				err := felix.ExecMayFail("rm", "/usr/sbin/iptables-legacy-restore")
 				Expect(err).NotTo(HaveOccurred())
 
 				// Make an update that will force felix to run iptables-restore.
@@ -154,7 +125,7 @@ var _ = Describe("health tests", func() {
 
 			It("should become unready, then die", func() {
 				Eventually(felixReady, "120s", "10s").ShouldNot(BeGood())
-				Eventually(felixContainer.Stopped, "5s").Should(BeTrue())
+				Eventually(felix.Stopped, "5s").Should(BeTrue())
 			})
 		})
 
@@ -167,16 +138,16 @@ var _ = Describe("health tests", func() {
 
 				// We need to delete the file first since it's a symlink and "docker cp"
 				// follows the link and overwrites the wrong file if we don't.
-				err := felixContainer.ExecMayFail("rm", "/sbin/iptables-restore")
+				err := felix.ExecMayFail("rm", "/usr/sbin/iptables-legacy-restore")
 				Expect(err).NotTo(HaveOccurred())
 
 				// Copy in the nobbled iptables command.
-				err = felixContainer.CopyFileIntoContainer("slow-iptables-restore",
-					"/sbin/iptables-restore")
+				err = felix.CopyFileIntoContainer("slow-iptables-restore",
+					"/usr/sbin/iptables-legacy-restore")
 				Expect(err).NotTo(HaveOccurred())
 
 				// Make it executable.
-				err = felixContainer.ExecMayFail("chmod", "+x", "/sbin/iptables-restore")
+				err = felix.ExecMayFail("chmod", "+x", "/usr/sbin/iptables-legacy-restore")
 				Expect(err).NotTo(HaveOccurred())
 
 				// Make an update that will force felix to run iptables-restore.
@@ -211,73 +182,77 @@ var _ = Describe("health tests", func() {
 		typhaLiveness = getHealthStatus(typhaContainer.IP, "9098", "liveness")
 	}
 
-	startFelix := func(typhaAddr string, getDockerArgs func() []string, calcGraphHangTime, dataplaneHangTime, healthHost string) {
-		felixContainer = containers.Run("felix",
-			containers.RunOpts{AutoRemove: true},
-			append(getDockerArgs(),
-				"--privileged",
-				"-e", "FELIX_IPV6SUPPORT=false",
-				"-e", "FELIX_HEALTHENABLED=true",
-				"-e", "FELIX_HEALTHHOST="+healthHost,
-				"-e", "FELIX_LOGSEVERITYSCREEN=info",
-				"-e", "FELIX_PROMETHEUSMETRICSENABLED=true",
-				"-e", "FELIX_USAGEREPORTINGENABLED=false",
-				"-e", "FELIX_DEBUGMEMORYPROFILEPATH=\"heap-<timestamp>\"",
-				"-e", "FELIX_DebugSimulateCalcGraphHangAfter="+calcGraphHangTime,
-				"-e", "FELIX_DebugSimulateDataplaneHangAfter="+dataplaneHangTime,
-				"-e", "FELIX_TYPHAADDR="+typhaAddr,
-				utils.Config.FelixImage)...)
-		Expect(felixContainer).NotTo(BeNil())
-
-		felixReady = getHealthStatus(felixContainer.IP, "9099", "readiness")
-		felixLiveness = getHealthStatus(felixContainer.IP, "9099", "liveness")
+	type felixParams struct {
+		dataplaneTimeout, calcGraphTimeout, calcGraphHangTime, dataplaneHangTime, healthHost string
+	}
+	startFelix := func(typhaAddr string, getDockerArgs func() []string, params felixParams) {
+		envVars := map[string]string{
+			"FELIX_HEALTHENABLED":                   "true",
+			"FELIX_HEALTHHOST":                      params.healthHost,
+			"FELIX_DEBUGMEMORYPROFILEPATH":          "heap-<timestamp>",
+			"FELIX_DataplaneWatchdogTimeout":        params.dataplaneTimeout,
+			"FELIX_DebugSimulateCalcGraphHangAfter": params.calcGraphHangTime,
+			"FELIX_DebugSimulateDataplaneHangAfter": params.dataplaneHangTime,
+			"FELIX_TYPHAADDR":                       typhaAddr,
+		}
+		if params.calcGraphTimeout != "" {
+			envVars["FELIX_HealthTimeoutOverrides"] = "CalculationGraph=" + params.calcGraphTimeout
+		}
+		felix = infrastructure.RunFelix(
+			k8sInfra, 0, infrastructure.TopologyOptions{
+				EnableIPv6:   false,
+				ExtraEnvVars: envVars,
+			},
+		)
+		felixReady = getHealthStatus(felix.IP, "9099", "readiness")
+		felixLiveness = getHealthStatus(felix.IP, "9099", "liveness")
 	}
 
 	Describe("healthHost not 'all interfaces'", func() {
 		checkHealthInternally := func() error {
-			_, err := felixContainer.ExecOutput("wget", "-S", "-T", "2", "http://127.0.0.1:9099/readiness", "-O", "-")
+			_, err := felix.ExecOutput("wget", "-S", "-T", "2", "http://127.0.0.1:9099/readiness", "-O", "-")
 			return err
 		}
 
 		It("should run healthchecks on localhost by default", func() {
-			startFelix("", k8sInfra.GetDockerArgs, "", "", "")
+			startFelix("", k8sInfra.GetDockerArgs, felixParams{dataplaneTimeout: "20s"})
 			Eventually(checkHealthInternally, "10s", "100ms").ShouldNot(HaveOccurred())
 		})
 
 		It("should run support running healthchecks on '127.0.0.1'", func() {
-			startFelix("", k8sInfra.GetDockerArgs, "", "", "127.0.0.1")
+			startFelix("", k8sInfra.GetDockerArgs, felixParams{dataplaneTimeout: "20", healthHost: "127.0.0.1"})
 			Eventually(checkHealthInternally, "10s", "100ms").ShouldNot(HaveOccurred())
 		})
 
 		It("should support running healthchecks on 'localhost'", func() {
-			startFelix("", k8sInfra.GetDockerArgs, "", "", "localhost")
+			startFelix("", k8sInfra.GetDockerArgs, felixParams{dataplaneTimeout: "20", healthHost: "localhost"})
 			Eventually(checkHealthInternally, "10s", "100ms").ShouldNot(HaveOccurred())
 		})
 
 		AfterEach(func() {
-			felixContainer.Stop()
+			felix.Stop()
 		})
 	})
 
 	Describe("with Felix running (no Typha)", func() {
 		BeforeEach(func() {
-			startFelix("", k8sInfra.GetDockerArgs, "", "", "0.0.0.0")
+			startFelix("", k8sInfra.GetDockerArgs, felixParams{dataplaneTimeout: "20", healthHost: "0.0.0.0"})
 		})
 
 		AfterEach(func() {
-			felixContainer.Stop()
+			felix.Stop()
 		})
 
 		describeCommonFelixTests()
 	})
 
-	Describe("with Felix (no Typha) and Felix calc graph set to hang", func() {
+	Describe("with Felix (no Typha) and Felix calc graph set to hang (10s calc graph timeout)", func() {
 		BeforeEach(func() {
-			startFelix("", k8sInfra.GetDockerArgs, "5", "", "0.0.0.0")
+			startFelix("", k8sInfra.GetDockerArgs, felixParams{calcGraphTimeout: "10s", calcGraphHangTime: "5", healthHost: "0.0.0.0"})
 		})
 
 		AfterEach(func() {
-			felixContainer.Stop()
+			felix.Stop()
 		})
 
 		It("should report live initially, then become non-live", func() {
@@ -287,13 +262,30 @@ var _ = Describe("health tests", func() {
 		})
 	})
 
-	Describe("with Felix (no Typha) and Felix dataplane set to hang", func() {
+	Describe("with Felix (no Typha) and Felix dataplane set to hang (default 90s timeout)", func() {
 		BeforeEach(func() {
-			startFelix("", k8sInfra.GetDockerArgs, "", "5", "0.0.0.0")
+			startFelix("", k8sInfra.GetDockerArgs, felixParams{dataplaneHangTime: "5", healthHost: "0.0.0.0"})
 		})
 
 		AfterEach(func() {
-			felixContainer.Stop()
+			felix.Stop()
+		})
+
+		It("should report live initially, then become non-live", func() {
+			Eventually(felixLiveness, "10s", "100ms").Should(BeGood())
+			Consistently(felixLiveness, "60s", "1s").Should(BeGood())
+			Eventually(felixLiveness, "60s", "1s").Should(BeBad())
+			Consistently(felixLiveness, "10s", "1s").Should(BeBad())
+		})
+	})
+
+	Describe("with Felix (no Typha) and Felix dataplane set to hang (20s timeout)", func() {
+		BeforeEach(func() {
+			startFelix("", k8sInfra.GetDockerArgs, felixParams{dataplaneTimeout: "20", dataplaneHangTime: "5", healthHost: "0.0.0.0"})
+		})
+
+		AfterEach(func() {
+			felix.Stop()
 		})
 
 		It("should report live initially, then become non-live", func() {
@@ -306,11 +298,11 @@ var _ = Describe("health tests", func() {
 	Describe("with Felix and Typha running", func() {
 		BeforeEach(func() {
 			startTypha(k8sInfra.GetDockerArgs)
-			startFelix(typhaContainer.IP+":5473", k8sInfra.GetDockerArgs, "", "", "0.0.0.0")
+			startFelix(typhaContainer.IP+":5473", k8sInfra.GetDockerArgs, felixParams{dataplaneTimeout: "20", healthHost: "0.0.0.0"})
 		})
 
 		AfterEach(func() {
-			felixContainer.Stop()
+			felix.Stop()
 			typhaContainer.Stop()
 		})
 
@@ -324,6 +316,32 @@ var _ = Describe("health tests", func() {
 		It("typha should report live", func() {
 			Eventually(typhaLiveness, "5s", "100ms").Should(BeGood())
 			Consistently(typhaLiveness, "10s", "1s").Should(BeGood())
+		})
+	})
+
+	Describe("with Felix unable to connect to Typha at first (20s timeout)", func() {
+		BeforeEach(func() {
+			// We have to start Typha first so we can pass its IP to Felix.
+			startTypha(k8sInfra.GetDockerArgs)
+			// Start felix with the wrong Typha port so it won't be able to connect initially.  Then, we'll add a
+			// NAT rule to steer the traffic to the right port below.
+			startFelix(typhaContainer.IP+":5474" /*wrong port!*/, k8sInfra.GetDockerArgs, felixParams{dataplaneTimeout: "20", healthHost: "0.0.0.0"})
+		})
+
+		AfterEach(func() {
+			felix.Stop()
+			typhaContainer.Stop()
+		})
+
+		It("should report not ready until it connects to Typha, then report ready", func() {
+			Eventually(felixReady, "5s", "100ms").Should(BeBad())
+			Consistently(felixReady, "5s", "100ms").Should(BeBad())
+
+			// Add a NAT rule to steer traffic from the port that Felix is using to the correct Typha port.
+			felix.Exec("iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp",
+				"--destination", typhaContainer.IP, "--dport", "5474", "-j", "DNAT", "--to-destination", ":5473")
+
+			Eventually(felixReady, "5s", "100ms").Should(BeGood())
 		})
 	})
 
@@ -345,7 +363,7 @@ var _ = Describe("health tests", func() {
 		})
 	})
 
-	Describe("with datastore not ready", func() {
+	Describe("with datastore not ready (20s timeout)", func() {
 		var (
 			info *v3.ClusterInformation
 		)
@@ -367,7 +385,7 @@ var _ = Describe("health tests", func() {
 				options.SetOptions{},
 			)
 			Expect(err).NotTo(HaveOccurred())
-			startFelix("", k8sInfra.GetDockerArgs, "", "", "0.0.0.0")
+			startFelix("", k8sInfra.GetDockerArgs, felixParams{dataplaneTimeout: "20", healthHost: "0.0.0.0"})
 		})
 
 		AfterEach(func() {
@@ -385,7 +403,7 @@ var _ = Describe("health tests", func() {
 		})
 
 		AfterEach(func() {
-			felixContainer.Stop()
+			felix.Stop()
 		})
 
 		It("felix should report ready", func() {
@@ -396,6 +414,22 @@ var _ = Describe("health tests", func() {
 		It("felix should report live", func() {
 			Eventually(felixLiveness, "5s", "100ms").Should(BeGood())
 			Consistently(felixLiveness, "10s", "1s").Should(BeGood())
+		})
+	})
+
+	Describe("with Felix connected to bad typha port", func() {
+		BeforeEach(func() {
+			startTypha(k8sInfra.GetDockerArgs)
+			startFelix(typhaContainer.IP+":5474", k8sInfra.GetDockerArgs, felixParams{dataplaneTimeout: "20", healthHost: "0.0.0.0"})
+		})
+		AfterEach(func() {
+			felix.Stop()
+			typhaContainer.Stop()
+		})
+		It("should become unready, then die", func() {
+			Eventually(felixReady, "5s", "1s").ShouldNot(BeGood())
+			Consistently(felix.Stopped, "20s").Should(BeFalse()) // Should stay up for 20+s
+			Eventually(felix.Stopped, "15s").Should(BeTrue())    // Should die at roughly 30s.
 		})
 	})
 })
@@ -410,7 +444,8 @@ func getHealthStatus(ip, port, endpoint string) func() int {
 			return statusErr
 		}
 		defer resp.Body.Close()
-		log.WithField("resp", resp).Info("Health response")
+		body, _ := io.ReadAll(resp.Body)
+		log.WithField("resp", resp).Infof("Health response:\n%v\n", string(body))
 		return resp.StatusCode
 	}
 }

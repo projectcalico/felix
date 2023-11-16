@@ -22,11 +22,11 @@ import (
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/calc"
-	"github.com/alauda/felix/config"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/net"
+	"github.com/projectcalico/calico/felix/calc"
+	"github.com/projectcalico/calico/felix/config"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 
 var _ = DescribeTable("ModelWorkloadEndpointToProto",
@@ -62,7 +62,22 @@ var _ = DescribeTable("ModelWorkloadEndpointToProto",
 				IntIp: "10.28.0.13",
 			},
 		},
-		Ipv6Nat: []*proto.NatInfo{},
+		Ipv6Nat:                    []*proto.NatInfo{},
+		AllowSpoofedSourcePrefixes: []string{},
+	}),
+	Entry("workload endpoint with source IP spoofing configured", model.WorkloadEndpoint{
+		State:                      "up",
+		Name:                       "bill",
+		AllowSpoofedSourcePrefixes: []net.IPNet{net.MustParseCIDR("8.8.8.8/32")},
+	}, proto.WorkloadEndpoint{
+		State:                      "up",
+		Name:                       "bill",
+		Ipv4Nets:                   []string{},
+		Ipv6Nets:                   []string{},
+		Tiers:                      []*proto.TierInfo{},
+		Ipv4Nat:                    []*proto.NatInfo{},
+		Ipv6Nat:                    []*proto.NatInfo{},
+		AllowSpoofedSourcePrefixes: []string{"8.8.8.8/32"},
 	}),
 )
 
@@ -96,7 +111,7 @@ var _ = Describe("ParsedRulesToActivePolicyUpdate", func() {
 
 	It("a fully-loaded ParsedRules struct should result in all fields being set in the protobuf rules", func() {
 		// We use reflection to scan all the fields in the protobuf rule to make sure that they're
-		// all filled in.  If any are still at their zero value, either hte test is out of date
+		// all filled in.  If any are still at their zero value, either the test is out of date
 		// or we forgot to add conversion logic for that field.
 		protoUpdate := calc.ParsedRulesToActivePolicyUpdate(model.PolicyKey{Name: "a-policy"}, &fullyLoadedParsedRules)
 		protoPolicy := *protoUpdate.Policy
@@ -362,6 +377,11 @@ func (d *dataplaneRecorder) record(message interface{}) {
 }
 
 type dummyConfigInterface struct{}
+
+func (i *dummyConfigInterface) ToConfigUpdate() *proto.ConfigUpdate {
+	// TODO implement me
+	panic("implement me")
+}
 
 func (i *dummyConfigInterface) UpdateFrom(map[string]string, config.Source) (changed bool, err error) {
 	return false, nil

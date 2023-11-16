@@ -1,6 +1,4 @@
-// +build fvtests
-
-// Copyright (c) 2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build fvtests
+
 package fv_test
 
 import (
@@ -21,29 +21,29 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/projectcalico/calico/felix/fv/connectivity"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/fv/containers"
-	"github.com/alauda/felix/fv/infrastructure"
-	"github.com/alauda/felix/fv/utils"
-	"github.com/alauda/felix/fv/workload"
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
-	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	client "github.com/projectcalico/libcalico-go/lib/clientv3"
-	"github.com/projectcalico/libcalico-go/lib/options"
+	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/projectcalico/calico/felix/fv/workload"
+	"github.com/projectcalico/calico/libcalico-go/lib/apiconfig"
+	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
+	"github.com/projectcalico/calico/libcalico-go/lib/options"
 )
 
-var _ = infrastructure.DatastoreDescribe("do-not-track policy tests; with 2 nodes", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
+var _ = infrastructure.DatastoreDescribe("_BPF-SAFE_ do-not-track policy tests; with 2 nodes", []apiconfig.DatastoreType{apiconfig.EtcdV3, apiconfig.Kubernetes}, func(getInfra infrastructure.InfraFactory) {
 
 	var (
 		infra          infrastructure.DatastoreInfra
 		felixes        []*infrastructure.Felix
 		hostW          [2]*workload.Workload
 		client         client.Interface
-		cc             *workload.ConnectivityChecker
-		dumpedDiags    bool
+		cc             *connectivity.Checker
 		externalClient *containers.Container
 	)
 
@@ -51,10 +51,9 @@ var _ = infrastructure.DatastoreDescribe("do-not-track policy tests; with 2 node
 		var err error
 		infra = getInfra()
 
-		dumpedDiags = false
 		options := infrastructure.DefaultTopologyOptions()
 		felixes, client = infrastructure.StartNNodeTopology(2, options, infra)
-		cc = &workload.ConnectivityChecker{}
+		cc = &connectivity.Checker{}
 
 		// Start a host networked workload on each host for connectivity checks.
 		for ii := range felixes {
@@ -76,39 +75,22 @@ var _ = infrastructure.DatastoreDescribe("do-not-track policy tests; with 2 node
 
 		// We will use this container to model an external client trying to connect into
 		// workloads on a host.  Create a route in the container for the workload CIDR.
-		externalClient = containers.Run("external-client",
-			containers.RunOpts{AutoRemove: true},
-			"--privileged", // So that we can add routes inside the container.
-			utils.Config.BusyboxImage,
-			"/bin/sh", "-c", "sleep 1000")
-
+		externalClient = infrastructure.RunExtClient("ext-client")
 		err = infra.AddDefaultDeny()
 		Expect(err).To(BeNil())
 	})
 
-	// Utility function to dump diags if the test failed.  Should be called in the inner-most
-	// AfterEach() to dump diags before the test is torn down.  Only the first call for a given
-	// test has any effect.
-	dumpDiags := func() {
-		if !CurrentGinkgoTestDescription().Failed || dumpedDiags {
-			return
-		}
-		for ii := range felixes {
-			iptSave, err := felixes[ii].ExecOutput("iptables-save", "-c")
-			if err == nil {
-				log.WithField("felix", ii).Info("iptables-save:\n" + iptSave)
-			}
-			ipR, err := felixes[ii].ExecOutput("ip", "r")
-			if err == nil {
-				log.WithField("felix", ii).Info("ip route:\n" + ipR)
+	JustAfterEach(func() {
+		if CurrentGinkgoTestDescription().Failed {
+			for _, felix := range felixes {
+				felix.Exec("iptables-save", "-c")
+				felix.Exec("ip", "r")
+				felix.Exec("calico-bpf", "policy", "dump", "eth0", "all")
 			}
 		}
-		infra.DumpErrorData()
-
-	}
+	})
 
 	AfterEach(func() {
-		dumpDiags()
 		for _, f := range felixes {
 			f.Stop()
 		}
@@ -161,7 +143,6 @@ var _ = infrastructure.DatastoreDescribe("do-not-track policy tests; with 2 node
 		})
 
 		AfterEach(func() {
-			dumpDiags()
 			cancel()
 		})
 

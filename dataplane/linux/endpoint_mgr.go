@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,17 +25,87 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/ifacemonitor"
-	"github.com/alauda/felix/ip"
-	"github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/routetable"
-	"github.com/alauda/felix/rules"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	apiv3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"github.com/projectcalico/calico/felix/dataplane/common"
+	"github.com/projectcalico/calico/felix/ifacemonitor"
+	"github.com/projectcalico/calico/felix/ip"
+	"github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/routetable"
+	"github.com/projectcalico/calico/felix/rules"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
-type routeTable interface {
-	SetRoutes(ifaceName string, targets []routetable.Target)
+type hepListener interface {
+	OnHEPUpdate(hostIfaceToEpMap map[string]proto.HostEndpoint)
+}
+
+type endpointManagerCallbacks struct {
+	addInterface           *common.AddInterfaceFuncs
+	removeInterface        *common.RemoveInterfaceFuncs
+	updateInterface        *common.UpdateInterfaceFuncs
+	updateHostEndpoint     *common.UpdateHostEndpointFuncs
+	removeHostEndpoint     *common.RemoveHostEndpointFuncs
+	updateWorkloadEndpoint *common.UpdateWorkloadEndpointFuncs
+	removeWorkloadEndpoint *common.RemoveWorkloadEndpointFuncs
+}
+
+func newEndpointManagerCallbacks(callbacks *common.Callbacks, ipVersion uint8) endpointManagerCallbacks {
+	if ipVersion == 4 {
+		return endpointManagerCallbacks{
+			addInterface:           callbacks.AddInterfaceV4,
+			removeInterface:        callbacks.RemoveInterfaceV4,
+			updateInterface:        callbacks.UpdateInterfaceV4,
+			updateHostEndpoint:     callbacks.UpdateHostEndpointV4,
+			removeHostEndpoint:     callbacks.RemoveHostEndpointV4,
+			updateWorkloadEndpoint: callbacks.UpdateWorkloadEndpointV4,
+			removeWorkloadEndpoint: callbacks.RemoveWorkloadEndpointV4,
+		}
+	} else {
+		return endpointManagerCallbacks{
+			addInterface:           &common.AddInterfaceFuncs{},
+			removeInterface:        &common.RemoveInterfaceFuncs{},
+			updateInterface:        &common.UpdateInterfaceFuncs{},
+			updateHostEndpoint:     &common.UpdateHostEndpointFuncs{},
+			removeHostEndpoint:     &common.RemoveHostEndpointFuncs{},
+			updateWorkloadEndpoint: &common.UpdateWorkloadEndpointFuncs{},
+			removeWorkloadEndpoint: &common.RemoveWorkloadEndpointFuncs{},
+		}
+	}
+}
+
+func (c *endpointManagerCallbacks) InvokeInterfaceCallbacks(old, new map[string]proto.HostEndpointID) {
+	for ifaceName, oldEpID := range old {
+		if newEpID, ok := new[ifaceName]; ok {
+			if oldEpID != newEpID {
+				c.updateInterface.Invoke(ifaceName, newEpID)
+			}
+		} else {
+			c.removeInterface.Invoke(ifaceName)
+		}
+	}
+	for ifaceName, newEpID := range new {
+		if _, ok := old[ifaceName]; !ok {
+			c.addInterface.Invoke(ifaceName, newEpID)
+		}
+	}
+}
+
+func (c *endpointManagerCallbacks) InvokeUpdateHostEndpoint(hostEpID proto.HostEndpointID) {
+	c.updateHostEndpoint.Invoke(hostEpID)
+}
+
+func (c *endpointManagerCallbacks) InvokeRemoveHostEndpoint(hostEpID proto.HostEndpointID) {
+	c.removeHostEndpoint.Invoke(hostEpID)
+}
+
+func (c *endpointManagerCallbacks) InvokeUpdateWorkload(old, new *proto.WorkloadEndpoint) {
+	c.updateWorkloadEndpoint.Invoke(old, new)
+}
+
+func (c *endpointManagerCallbacks) InvokeRemoveWorkload(old *proto.WorkloadEndpoint) {
+	c.removeWorkloadEndpoint.Invoke(old)
 }
 
 // endpointManager manages the dataplane resources that belong to each endpoint as well as
@@ -53,14 +123,16 @@ type endpointManager struct {
 	ipVersion              uint8
 	wlIfacesRegexp         *regexp.Regexp
 	kubeIPVSSupportEnabled bool
+	floatingIPsEnabled     bool
 
 	// Our dependencies.
 	rawTable     iptablesTable
 	mangleTable  iptablesTable
 	filterTable  iptablesTable
 	ruleRenderer rules.RuleRenderer
-	routeTable   routeTable
+	routeTable   routetable.RouteTableInterface
 	writeProcSys procSysWriter
+	osStat       func(path string) (os.FileInfo, error)
 	epMarkMapper rules.EndpointMarkMapper
 
 	// Pending updates, cleared in CompleteDeferredWork as the data is copied to the activeXYZ
@@ -71,30 +143,44 @@ type endpointManager struct {
 	// Active state, updated in CompleteDeferredWork.
 	activeWlEndpoints          map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint
 	activeWlIfaceNameToID      map[string]proto.WorkloadEndpointID
-	activeUpIfaces             set.Set
+	activeUpIfaces             set.Set[string]
 	activeWlIDToChains         map[proto.WorkloadEndpointID][]*iptables.Chain
 	activeWlDispatchChains     map[string]*iptables.Chain
 	activeEPMarkDispatchChains map[string]*iptables.Chain
 
+	// Workload endpoints that would be locally active but are 'shadowed' by other endpoints
+	// with the same interface name.
+	shadowedWlEndpoints map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint
+
 	// wlIfaceNamesToReconfigure contains names of workload interfaces that need to have
 	// their configuration (sysctls etc.) refreshed.
-	wlIfaceNamesToReconfigure set.Set
+	wlIfaceNamesToReconfigure set.Set[string]
 
 	// epIDsToUpdateStatus contains IDs of endpoints that we need to report status for.
 	// Mix of host and workload endpoint IDs.
-	epIDsToUpdateStatus set.Set
+	epIDsToUpdateStatus set.Set[any]
+
+	// sourceSpoofingConfig maps interface names to lists of source IPs that we accept from these interfaces
+	// these interfaces (in addition to the pod IPs)
+	sourceSpoofingConfig map[string][]string
+	// rpfSkipChainDirty is set to true when the rpf status of some endpoints is updated
+	rpfSkipChainDirty bool
+	// default configuration for new interfaces
+	// used to reset kernel settings when source spoofing is disabled
+	defaultRPFilter string
 
 	// hostIfaceToAddrs maps host interface name to the set of IPs on that interface (reported
-	// fro the dataplane).
-	hostIfaceToAddrs map[string]set.Set
+	// from the dataplane).
+	hostIfaceToAddrs map[string]set.Set[string]
 	// rawHostEndpoints contains the raw (i.e. not resolved to interface) host endpoints.
 	rawHostEndpoints map[proto.HostEndpointID]*proto.HostEndpoint
 	// hostEndpointsDirty is set to true when host endpoints are updated.
 	hostEndpointsDirty bool
 	// activeHostIfaceToChains maps host interface name to the chains that we've programmed.
-	activeHostIfaceToRawChains    map[string][]*iptables.Chain
-	activeHostIfaceToFiltChains   map[string][]*iptables.Chain
-	activeHostIfaceToMangleChains map[string][]*iptables.Chain
+	activeHostIfaceToRawChains           map[string][]*iptables.Chain
+	activeHostIfaceToFiltChains          map[string][]*iptables.Chain
+	activeHostIfaceToMangleIngressChains map[string][]*iptables.Chain
+	activeHostIfaceToMangleEgressChains  map[string][]*iptables.Chain
 	// Dispatch chains that we've programmed for host endpoints.
 	activeHostRawDispatchChains    map[string]*iptables.Chain
 	activeHostFilterDispatchChains map[string]*iptables.Chain
@@ -103,12 +189,16 @@ type endpointManager struct {
 	activeHostEpIDToIfaceNames map[proto.HostEndpointID][]string
 	// activeIfaceNameToHostEpID records which endpoint we resolved each host interface to.
 	activeIfaceNameToHostEpID map[string]proto.HostEndpointID
+	newIfaceNameToHostEpID    map[string]proto.HostEndpointID
 
 	needToCheckDispatchChains     bool
 	needToCheckEndpointMarkChains bool
 
 	// Callbacks
 	OnEndpointStatusUpdate EndpointStatusUpdateCallback
+	callbacks              endpointManagerCallbacks
+	bpfEnabled             bool
+	bpfEndpointManager     hepListener
 }
 
 type EndpointStatusUpdateCallback func(ipVersion uint8, id interface{}, status string)
@@ -120,12 +210,17 @@ func newEndpointManager(
 	mangleTable iptablesTable,
 	filterTable iptablesTable,
 	ruleRenderer rules.RuleRenderer,
-	routeTable routeTable,
+	routeTable routetable.RouteTableInterface,
 	ipVersion uint8,
 	epMarkMapper rules.EndpointMarkMapper,
 	kubeIPVSSupportEnabled bool,
 	wlInterfacePrefixes []string,
 	onWorkloadEndpointStatusUpdate EndpointStatusUpdateCallback,
+	defaultRPFilter string,
+	bpfEnabled bool,
+	bpfEndpointManager hepListener,
+	callbacks *common.Callbacks,
+	floatingIPsEnabled bool,
 ) *endpointManager {
 	return newEndpointManagerWithShims(
 		rawTable,
@@ -139,6 +234,12 @@ func newEndpointManager(
 		wlInterfacePrefixes,
 		onWorkloadEndpointStatusUpdate,
 		writeProcSys,
+		os.Stat,
+		defaultRPFilter,
+		bpfEnabled,
+		bpfEndpointManager,
+		callbacks,
+		floatingIPsEnabled,
 	)
 }
 
@@ -147,13 +248,19 @@ func newEndpointManagerWithShims(
 	mangleTable iptablesTable,
 	filterTable iptablesTable,
 	ruleRenderer rules.RuleRenderer,
-	routeTable routeTable,
+	routeTable routetable.RouteTableInterface,
 	ipVersion uint8,
 	epMarkMapper rules.EndpointMarkMapper,
 	kubeIPVSSupportEnabled bool,
 	wlInterfacePrefixes []string,
 	onWorkloadEndpointStatusUpdate EndpointStatusUpdateCallback,
 	procSysWriter procSysWriter,
+	osStat func(name string) (os.FileInfo, error),
+	defaultRPFilter string,
+	bpfEnabled bool,
+	bpfEndpointManager hepListener,
+	callbacks *common.Callbacks,
+	floatingIPsEnabled bool,
 ) *endpointManager {
 	wlIfacesPattern := "^(" + strings.Join(wlInterfacePrefixes, "|") + ").*"
 	wlIfacesRegexp := regexp.MustCompile(wlIfacesPattern)
@@ -162,6 +269,9 @@ func newEndpointManagerWithShims(
 		ipVersion:              ipVersion,
 		wlIfacesRegexp:         wlIfacesRegexp,
 		kubeIPVSSupportEnabled: kubeIPVSSupportEnabled,
+		bpfEnabled:             bpfEnabled,
+		bpfEndpointManager:     bpfEndpointManager,
+		floatingIPsEnabled:     floatingIPsEnabled,
 
 		rawTable:     rawTable,
 		mangleTable:  mangleTable,
@@ -169,6 +279,7 @@ func newEndpointManagerWithShims(
 		ruleRenderer: ruleRenderer,
 		routeTable:   routeTable,
 		writeProcSys: procSysWriter,
+		osStat:       osStat,
 		epMarkMapper: epMarkMapper,
 
 		// Pending updates, we store these up as OnUpdate is called, then process them
@@ -176,23 +287,30 @@ func newEndpointManagerWithShims(
 		pendingWlEpUpdates:  map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint{},
 		pendingIfaceUpdates: map[string]ifacemonitor.State{},
 
-		activeUpIfaces: set.New(),
+		activeUpIfaces: set.New[string](),
 
 		activeWlEndpoints:     map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint{},
 		activeWlIfaceNameToID: map[string]proto.WorkloadEndpointID{},
 		activeWlIDToChains:    map[proto.WorkloadEndpointID][]*iptables.Chain{},
 
-		wlIfaceNamesToReconfigure: set.New(),
+		shadowedWlEndpoints: map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint{},
 
-		epIDsToUpdateStatus: set.New(),
+		wlIfaceNamesToReconfigure: set.New[string](),
 
-		hostIfaceToAddrs:   map[string]set.Set{},
+		epIDsToUpdateStatus: set.NewBoxed[any](),
+
+		sourceSpoofingConfig: map[string][]string{},
+		rpfSkipChainDirty:    true,
+		defaultRPFilter:      defaultRPFilter,
+
+		hostIfaceToAddrs:   map[string]set.Set[string]{},
 		rawHostEndpoints:   map[proto.HostEndpointID]*proto.HostEndpoint{},
 		hostEndpointsDirty: true,
 
-		activeHostIfaceToRawChains:    map[string][]*iptables.Chain{},
-		activeHostIfaceToFiltChains:   map[string][]*iptables.Chain{},
-		activeHostIfaceToMangleChains: map[string][]*iptables.Chain{},
+		activeHostIfaceToRawChains:           map[string][]*iptables.Chain{},
+		activeHostIfaceToFiltChains:          map[string][]*iptables.Chain{},
+		activeHostIfaceToMangleIngressChains: map[string][]*iptables.Chain{},
+		activeHostIfaceToMangleEgressChains:  map[string][]*iptables.Chain{},
 
 		// Caches of the current dispatch chains indexed by chain name.  We use these to
 		// calculate deltas when we need to update the chains.
@@ -205,6 +323,7 @@ func newEndpointManagerWithShims(
 		needToCheckEndpointMarkChains:  true, // Need to do start-of-day update.
 
 		OnEndpointStatusUpdate: onWorkloadEndpointStatusUpdate,
+		callbacks:              newEndpointManagerCallbacks(callbacks, ipVersion),
 	}
 }
 
@@ -217,15 +336,17 @@ func (m *endpointManager) OnUpdate(protoBufMsg interface{}) {
 		m.pendingWlEpUpdates[*msg.Id] = nil
 	case *proto.HostEndpointUpdate:
 		log.WithField("msg", msg).Debug("Host endpoint update")
+		m.callbacks.InvokeUpdateHostEndpoint(*msg.Id)
 		m.rawHostEndpoints[*msg.Id] = msg.Endpoint
 		m.hostEndpointsDirty = true
 		m.epIDsToUpdateStatus.Add(*msg.Id)
 	case *proto.HostEndpointRemove:
 		log.WithField("msg", msg).Debug("Host endpoint removed")
+		m.callbacks.InvokeRemoveHostEndpoint(*msg.Id)
 		delete(m.rawHostEndpoints, *msg.Id)
 		m.hostEndpointsDirty = true
 		m.epIDsToUpdateStatus.Add(*msg.Id)
-	case *ifaceUpdate:
+	case *ifaceStateUpdate:
 		log.WithField("update", msg).Debug("Interface state changed.")
 		m.pendingIfaceUpdates[msg.Name] = msg.State
 	case *ifaceAddrsUpdate:
@@ -243,7 +364,7 @@ func (m *endpointManager) OnUpdate(protoBufMsg interface{}) {
 	}
 }
 
-func (m *endpointManager) CompleteDeferredWork() error {
+func (m *endpointManager) ResolveUpdateBatch() error {
 	// Copy the pending interface state to the active set and mark any interfaces that have
 	// changed state for reconfiguration by resolveWorkload/HostEndpoints()
 	for ifaceName, state := range m.pendingIfaceUpdates {
@@ -266,12 +387,27 @@ func (m *endpointManager) CompleteDeferredWork() error {
 		delete(m.pendingIfaceUpdates, ifaceName)
 	}
 
+	if m.hostEndpointsDirty {
+		log.Debug("Host endpoints updated, resolving them.")
+		m.newIfaceNameToHostEpID = m.resolveHostEndpoints()
+	}
+
+	return nil
+}
+
+func (m *endpointManager) CompleteDeferredWork() error {
 	m.resolveWorkloadEndpoints()
 
 	if m.hostEndpointsDirty {
 		log.Debug("Host endpoints updated, resolving them.")
-		m.resolveHostEndpoints()
+		m.updateHostEndpoints()
 		m.hostEndpointsDirty = false
+	}
+
+	if m.rpfSkipChainDirty {
+		log.Debug("Workload RPF configuration updated, applying changes")
+		m.updateRPFSkipChain()
+		m.rpfSkipChainDirty = false
 	}
 
 	if m.kubeIPVSSupportEnabled && m.needToCheckEndpointMarkChains {
@@ -283,6 +419,10 @@ func (m *endpointManager) CompleteDeferredWork() error {
 	m.updateEndpointStatuses()
 
 	return nil
+}
+
+func (m *endpointManager) GetRouteTableSyncers() []routetable.RouteTableSyncer {
+	return []routetable.RouteTableSyncer{m.routeTable}
 }
 
 func (m *endpointManager) markEndpointStatusDirtyByIface(ifaceName string) {
@@ -407,110 +547,190 @@ func (m *endpointManager) resolveWorkloadEndpoints() {
 		m.needToCheckDispatchChains = true
 	}
 
-	// Update any dirty endpoints.
-	for id, workload := range m.pendingWlEpUpdates {
-		logCxt := log.WithField("id", id)
-		oldWorkload := m.activeWlEndpoints[id]
-		if workload != nil {
-			logCxt.Info("Updating per-endpoint chains.")
-			if oldWorkload != nil && oldWorkload.Name != workload.Name {
-				logCxt.Debug("Interface name changed, cleaning up old state")
-				m.epMarkMapper.ReleaseEndpointMark(oldWorkload.Name)
-				m.filterTable.RemoveChains(m.activeWlIDToChains[id])
-				m.routeTable.SetRoutes(oldWorkload.Name, nil)
-				m.wlIfaceNamesToReconfigure.Discard(oldWorkload.Name)
-				delete(m.activeWlIfaceNameToID, oldWorkload.Name)
+	removeActiveWorkload := func(logCxt *log.Entry, oldWorkload *proto.WorkloadEndpoint, id proto.WorkloadEndpointID) {
+		m.callbacks.InvokeRemoveWorkload(oldWorkload)
+		m.filterTable.RemoveChains(m.activeWlIDToChains[id])
+		delete(m.activeWlIDToChains, id)
+		if oldWorkload != nil {
+			m.epMarkMapper.ReleaseEndpointMark(oldWorkload.Name)
+			// Remove any routes from the routing table.  The RouteTable will remove any
+			// conntrack entries as a side-effect.
+			logCxt.Info("Workload removed, deleting old state.")
+			m.routeTable.SetRoutes(oldWorkload.Name, nil)
+			m.wlIfaceNamesToReconfigure.Discard(oldWorkload.Name)
+			delete(m.activeWlIfaceNameToID, oldWorkload.Name)
+			if m.hasSourceSpoofingConfiguration(oldWorkload.Name) {
+				logCxt.Debugf("Removing RPF configuration for old workload %s", oldWorkload.Name)
+				delete(m.sourceSpoofingConfig, oldWorkload.Name)
+				m.rpfSkipChainDirty = true
 			}
-			var ingressPolicyNames, egressPolicyNames []string
-			if len(workload.Tiers) > 0 {
-				ingressPolicyNames = workload.Tiers[0].IngressPolicies
-				egressPolicyNames = workload.Tiers[0].EgressPolicies
-			}
-			adminUp := workload.State == "active"
-			chains := m.ruleRenderer.WorkloadEndpointToIptablesChains(
-				workload.Name,
-				m.epMarkMapper,
-				adminUp,
-				ingressPolicyNames,
-				egressPolicyNames,
-				workload.ProfileIds,
-			)
-			m.filterTable.UpdateChains(chains)
-			m.activeWlIDToChains[id] = chains
-
-			// Collect the IP prefixes that we want to route locally to this endpoint:
-			logCxt.Info("Updating endpoint routes.")
-			var (
-				ipStrings  []string
-				natInfos   []*proto.NatInfo
-				addrSuffix string
-			)
-			if m.ipVersion == 4 {
-				ipStrings = workload.Ipv4Nets
-				natInfos = workload.Ipv4Nat
-				addrSuffix = "/32"
-			} else {
-				ipStrings = workload.Ipv6Nets
-				natInfos = workload.Ipv6Nat
-				addrSuffix = "/128"
-			}
-			if len(natInfos) != 0 {
-				old := ipStrings
-				ipStrings = make([]string, len(old)+len(natInfos))
-				copy(ipStrings, old)
-				for ii, natInfo := range natInfos {
-					ipStrings[len(old)+ii] = natInfo.ExtIp + addrSuffix
-				}
-			}
-
-			var mac net.HardwareAddr
-			if workload.Mac != "" {
-				var err error
-				mac, err = net.ParseMAC(workload.Mac)
-				if err != nil {
-					logCxt.WithError(err).Error(
-						"Failed to parse endpoint's MAC address")
-				}
-			}
-			var routeTargets []routetable.Target
-			if adminUp {
-				logCxt.Debug("Endpoint up, adding routes")
-				for _, s := range ipStrings {
-					routeTargets = append(routeTargets, routetable.Target{
-						CIDR:    ip.MustParseCIDROrIP(s),
-						DestMAC: mac,
-					})
-				}
-			} else {
-				logCxt.Debug("Endpoint down, removing routes")
-			}
-			m.routeTable.SetRoutes(workload.Name, routeTargets)
-			m.wlIfaceNamesToReconfigure.Add(workload.Name)
-			m.activeWlEndpoints[id] = workload
-			m.activeWlIfaceNameToID[workload.Name] = id
-			delete(m.pendingWlEpUpdates, id)
-		} else {
-			logCxt.Info("Workload removed, deleting its chains.")
-			m.filterTable.RemoveChains(m.activeWlIDToChains[id])
-			delete(m.activeWlIDToChains, id)
-			if oldWorkload != nil {
-				m.epMarkMapper.ReleaseEndpointMark(oldWorkload.Name)
-				// Remove any routes from the routing table.  The RouteTable will
-				// remove any conntrack entries as a side-effect.
-				logCxt.Info("Workload removed, deleting old state.")
-				m.routeTable.SetRoutes(oldWorkload.Name, nil)
-				m.wlIfaceNamesToReconfigure.Discard(oldWorkload.Name)
-				delete(m.activeWlIfaceNameToID, oldWorkload.Name)
-			}
-			delete(m.activeWlEndpoints, id)
-			delete(m.pendingWlEpUpdates, id)
 		}
-
-		// Update or deletion, make sure we update the interface status.
-		m.epIDsToUpdateStatus.Add(id)
+		delete(m.activeWlEndpoints, id)
 	}
 
-	if m.needToCheckDispatchChains {
+	// Repeat the following loop until the pending update map is empty.  Note that it's possible
+	// for an endpoint deletion to add a further update into the map (for a previously shadowed
+	// endpoint), so we cannot assume that a single iteration will always be enough.
+	for len(m.pendingWlEpUpdates) > 0 {
+		// Handle pending workload endpoint updates.
+		for id, workload := range m.pendingWlEpUpdates {
+			logCxt := log.WithField("id", id)
+			oldWorkload := m.activeWlEndpoints[id]
+			if workload != nil {
+				// Check if there is already an active workload endpoint with the same
+				// interface name.
+				if existingId, ok := m.activeWlIfaceNameToID[workload.Name]; ok && existingId != id {
+					// There is.  We need to decide which endpoint takes preference.
+					// (We presume this is some kind of make before break logic, and the
+					// situation will shortly be resolved by one of the endpoints being
+					// removed.  But in the meantime we must have predictable
+					// behaviour.)
+					logCxt.WithFields(log.Fields{
+						"interfaceName": workload.Name,
+						"existingId":    existingId,
+					}).Info("New endpoint has same iface name as existing")
+					if wlIdsAscending(&existingId, &id) {
+						logCxt.Info("Existing endpoint takes preference")
+						m.shadowedWlEndpoints[id] = workload
+						delete(m.pendingWlEpUpdates, id)
+						continue
+					}
+					logCxt.Info("New endpoint takes preference; remove existing")
+					m.shadowedWlEndpoints[existingId] = m.activeWlEndpoints[existingId]
+					removeActiveWorkload(logCxt, m.activeWlEndpoints[existingId], existingId)
+				}
+				logCxt.Info("Updating per-endpoint chains.")
+				if oldWorkload != nil && oldWorkload.Name != workload.Name {
+					logCxt.Debug("Interface name changed, cleaning up old state")
+					m.epMarkMapper.ReleaseEndpointMark(oldWorkload.Name)
+					if !m.bpfEnabled {
+						m.filterTable.RemoveChains(m.activeWlIDToChains[id])
+						if m.hasSourceSpoofingConfiguration(oldWorkload.Name) {
+							logCxt.Debugf("Removing RPF configuration for workload %s", workload.Name)
+							delete(m.sourceSpoofingConfig, workload.Name)
+							m.rpfSkipChainDirty = true
+						}
+					}
+					m.routeTable.SetRoutes(oldWorkload.Name, nil)
+					m.wlIfaceNamesToReconfigure.Discard(oldWorkload.Name)
+					delete(m.activeWlIfaceNameToID, oldWorkload.Name)
+				}
+				var ingressPolicyNames, egressPolicyNames []string
+				if len(workload.Tiers) > 0 {
+					ingressPolicyNames = workload.Tiers[0].IngressPolicies
+					egressPolicyNames = workload.Tiers[0].EgressPolicies
+				}
+				adminUp := workload.State == "active"
+				if !m.bpfEnabled {
+					chains := m.ruleRenderer.WorkloadEndpointToIptablesChains(
+						workload.Name,
+						m.epMarkMapper,
+						adminUp,
+						ingressPolicyNames,
+						egressPolicyNames,
+						workload.ProfileIds,
+					)
+					m.filterTable.UpdateChains(chains)
+					m.activeWlIDToChains[id] = chains
+
+					if len(workload.AllowSpoofedSourcePrefixes) > 0 && !m.hasSourceSpoofingConfiguration(workload.Name) {
+						logCxt.Infof("Disabling RPF check for workload %s", workload.Name)
+						m.sourceSpoofingConfig[workload.Name] = workload.AllowSpoofedSourcePrefixes
+						m.rpfSkipChainDirty = true
+					} else if m.hasSourceSpoofingConfiguration(workload.Name) && len(workload.AllowSpoofedSourcePrefixes) == 0 {
+						logCxt.Infof("Enabling RPF check for workload %s (previously disabled)", workload.Name)
+						delete(m.sourceSpoofingConfig, workload.Name)
+						m.rpfSkipChainDirty = true
+					}
+				}
+
+				// Collect the IP prefixes that we want to route locally to this endpoint:
+				logCxt.Info("Updating endpoint routes.")
+				var (
+					ipStrings  []string
+					natInfos   []*proto.NatInfo
+					addrSuffix string
+				)
+				if m.ipVersion == 4 {
+					ipStrings = workload.Ipv4Nets
+					natInfos = workload.Ipv4Nat
+					addrSuffix = "/32"
+				} else {
+					ipStrings = workload.Ipv6Nets
+					natInfos = workload.Ipv6Nat
+					addrSuffix = "/128"
+				}
+				alreadyCopied := false
+				for _, natInfo := range natInfos {
+					if m.floatingIPsEnabled || id.OrchestratorId == apiv3.OrchestratorOpenStack {
+						if !alreadyCopied {
+							ipStrings = append([]string(nil), ipStrings...)
+							alreadyCopied = true
+						}
+						ipStrings = append(ipStrings, natInfo.ExtIp+addrSuffix)
+					}
+				}
+
+				var mac net.HardwareAddr
+				if workload.Mac != "" {
+					var err error
+					mac, err = net.ParseMAC(workload.Mac)
+					if err != nil {
+						logCxt.WithError(err).Error(
+							"Failed to parse endpoint's MAC address")
+					}
+				}
+				var routeTargets []routetable.Target
+				if adminUp {
+					logCxt.Debug("Endpoint up, adding routes")
+					for _, s := range ipStrings {
+						routeTargets = append(routeTargets, routetable.Target{
+							CIDR:    ip.MustParseCIDROrIP(s),
+							DestMAC: mac,
+						})
+					}
+				} else {
+					logCxt.Debug("Endpoint down, removing routes")
+				}
+				m.routeTable.SetRoutes(workload.Name, routeTargets)
+				m.wlIfaceNamesToReconfigure.Add(workload.Name)
+				m.activeWlEndpoints[id] = workload
+				m.activeWlIfaceNameToID[workload.Name] = id
+				delete(m.pendingWlEpUpdates, id)
+
+				m.callbacks.InvokeUpdateWorkload(oldWorkload, workload)
+			} else {
+				logCxt.Info("Workload removed, deleting its chains.")
+				removeActiveWorkload(logCxt, oldWorkload, id)
+				delete(m.pendingWlEpUpdates, id)
+				delete(m.shadowedWlEndpoints, id)
+
+				if oldWorkload != nil {
+					// Check for another endpoint with the same interface name,
+					// that should now become active.
+					bestShadowedId := proto.WorkloadEndpointID{}
+					for sId, sWorkload := range m.shadowedWlEndpoints {
+						logCxt.Infof("Old workload %v", oldWorkload)
+						logCxt.Infof("Shadowed workload %v", sWorkload)
+						if sWorkload.Name == oldWorkload.Name {
+							if bestShadowedId.EndpointId == "" || wlIdsAscending(&sId, &bestShadowedId) {
+								bestShadowedId = sId
+							}
+						}
+					}
+					if bestShadowedId.EndpointId != "" {
+						m.pendingWlEpUpdates[bestShadowedId] = m.shadowedWlEndpoints[bestShadowedId]
+						delete(m.shadowedWlEndpoints, bestShadowedId)
+					}
+				}
+			}
+
+			// Update or deletion, make sure we update the interface status.
+			m.epIDsToUpdateStatus.Add(id)
+		}
+	}
+
+	if !m.bpfEnabled && m.needToCheckDispatchChains {
 		// Rewrite the dispatch chains if they've changed.
 		newDispatchChains := m.ruleRenderer.WorkloadDispatchChains(m.activeWlEndpoints)
 		m.updateDispatchChains(m.activeWlDispatchChains, newDispatchChains, m.filterTable)
@@ -520,25 +740,66 @@ func (m *endpointManager) resolveWorkloadEndpoints() {
 		m.needToCheckEndpointMarkChains = true
 	}
 
-	m.wlIfaceNamesToReconfigure.Iter(func(item interface{}) error {
-		ifaceName := item.(string)
+	m.wlIfaceNamesToReconfigure.Iter(func(ifaceName string) error {
 		err := m.configureInterface(ifaceName)
 		if err != nil {
-			log.WithError(err).Warn("Failed to configure interface, will retry")
+			if exists, err := m.interfaceExistsInProcSys(ifaceName); err == nil && !exists {
+				// Suppress log spam if interface has been removed.
+				log.WithError(err).Debug("Failed to configure interface and it seems to be gone")
+			} else {
+				log.WithError(err).Warn("Failed to configure interface, will retry")
+			}
 			return nil
 		}
 		return set.RemoveItem
 	})
 }
 
+func wlIdsAscending(id1, id2 *proto.WorkloadEndpointID) bool {
+	if id1.OrchestratorId == id2.OrchestratorId {
+		// Need to compare WorkloadId.
+		if id1.WorkloadId == id2.WorkloadId {
+			// Need to compare EndpointId.
+			return id1.EndpointId < id2.EndpointId
+		}
+		return id1.WorkloadId < id2.WorkloadId
+	}
+	return id1.OrchestratorId < id2.OrchestratorId
+}
+
+func (m *endpointManager) hasSourceSpoofingConfiguration(interfaceName string) bool {
+	_, ok := m.sourceSpoofingConfig[interfaceName]
+	return ok
+}
+
+func (m *endpointManager) updateRPFSkipChain() {
+	log.Debug("Updating RPF skip chain")
+	chain := &iptables.Chain{
+		Name:  rules.ChainRpfSkip,
+		Rules: make([]iptables.Rule, 0),
+	}
+	for interfaceName, addresses := range m.sourceSpoofingConfig {
+		for _, addr := range addresses {
+			chain.Rules = append(chain.Rules, iptables.Rule{
+				Match:  iptables.Match().InInterface(interfaceName).SourceNet(addr),
+				Action: iptables.AcceptAction{},
+			})
+		}
+	}
+	m.rawTable.UpdateChain(chain)
+}
+
 func (m *endpointManager) resolveEndpointMarks() {
+	if m.bpfEnabled {
+		return
+	}
+
 	// Render endpoint mark chains for active workload and host endpoint.
 	newEndpointMarkDispatchChains := m.ruleRenderer.EndpointMarkDispatchChains(m.epMarkMapper, m.activeWlEndpoints, m.activeIfaceNameToHostEpID)
 	m.updateDispatchChains(m.activeEPMarkDispatchChains, newEndpointMarkDispatchChains, m.filterTable)
 }
 
-func (m *endpointManager) resolveHostEndpoints() {
-
+func (m *endpointManager) resolveHostEndpoints() map[string]proto.HostEndpointID {
 	// Host endpoint resolution
 	// ------------------------
 	//
@@ -566,16 +827,12 @@ func (m *endpointManager) resolveHostEndpoints() {
 	// seeing which of them are matched by the current set of HostEndpoints as a
 	// whole.
 	newIfaceNameToHostEpID := map[string]proto.HostEndpointID{}
-	newPreDNATIfaceNameToHostEpID := map[string]proto.HostEndpointID{}
-	newUntrackedIfaceNameToHostEpID := map[string]proto.HostEndpointID{}
-	newHostEpIDToIfaceNames := map[proto.HostEndpointID][]string{}
 	for ifaceName, ifaceAddrs := range m.hostIfaceToAddrs {
 		ifaceCxt := log.WithFields(log.Fields{
 			"ifaceName":  ifaceName,
 			"ifaceAddrs": ifaceAddrs,
 		})
 		bestHostEpId := proto.HostEndpointID{}
-		var bestHostEp proto.HostEndpoint
 	HostEpLoop:
 		for id, hostEp := range m.rawHostEndpoints {
 			logCxt := ifaceCxt.WithField("id", id)
@@ -595,7 +852,6 @@ func (m *endpointManager) resolveHostEndpoints() {
 				// interface.
 				logCxt.Debug("Match on explicit iface name")
 				bestHostEpId = id
-				bestHostEp = *hostEp
 				continue
 			} else if hostEp.Name != "" {
 				// The HostEndpoint has an explicit name that isn't this
@@ -612,7 +868,6 @@ func (m *endpointManager) resolveHostEndpoints() {
 						// that is on this interface.
 						logCxt.Debug("Match on address")
 						bestHostEpId = id
-						bestHostEp = *hostEp
 						continue HostEpLoop
 					}
 				}
@@ -625,28 +880,86 @@ func (m *endpointManager) resolveHostEndpoints() {
 			})
 			logCxt.Debug("Got HostEp for interface")
 			newIfaceNameToHostEpID[ifaceName] = bestHostEpId
-			if len(bestHostEp.UntrackedTiers) > 0 {
+		}
+	}
+
+	// Similar loop to find the best all-interfaces host endpoint.
+	bestHostEpId := proto.HostEndpointID{}
+	for id, hostEp := range m.rawHostEndpoints {
+		logCxt := log.WithField("id", id)
+		if !forAllInterfaces(hostEp) {
+			logCxt.Debug("Skip interface-specific host endpoint")
+			continue
+		}
+		if (bestHostEpId.EndpointId != "") && (bestHostEpId.EndpointId < id.EndpointId) {
+			// We already have a HostEndpointId that is better than
+			// this one, so no point looking any further.
+			logCxt.Debug("No better than existing match")
+			continue
+		}
+		logCxt.Debug("New best all-interfaces host endpoint")
+		bestHostEpId = id
+	}
+
+	if bestHostEpId.EndpointId != "" {
+		log.WithField("bestHostEpId", bestHostEpId).Debug("Got all interfaces HostEp")
+		newIfaceNameToHostEpID[allInterfaces] = bestHostEpId
+	}
+
+	if m.bpfEndpointManager != nil {
+		// Construct map of interface names to host endpoints, and pass to the BPF endpoint
+		// manager.
+		hostIfaceToEpMap := map[string]proto.HostEndpoint{}
+		for ifaceName, id := range newIfaceNameToHostEpID {
+			// Note, dereference the proto.HostEndpoint here so that the data lifetime
+			// is decoupled from the validity of the pointer here.
+			hostIfaceToEpMap[ifaceName] = *m.rawHostEndpoints[id]
+		}
+		m.bpfEndpointManager.OnHEPUpdate(hostIfaceToEpMap)
+	}
+
+	return newIfaceNameToHostEpID
+}
+
+func (m *endpointManager) updateHostEndpoints() {
+	// Calculate filtered name/id maps for untracked and pre-DNAT policy, and a reverse map from
+	// each active host endpoint to the interfaces it is in use for.
+	newIfaceNameToHostEpID := m.newIfaceNameToHostEpID
+	newPreDNATIfaceNameToHostEpID := map[string]proto.HostEndpointID{}
+	newUntrackedIfaceNameToHostEpID := map[string]proto.HostEndpointID{}
+	newHostEpIDToIfaceNames := map[proto.HostEndpointID][]string{}
+	for ifaceName, id := range newIfaceNameToHostEpID {
+		logCxt := log.WithField("id", id).WithField("ifaceName", ifaceName)
+		ep := m.rawHostEndpoints[id]
+		if len(ep.UntrackedTiers) > 0 {
+			if ifaceName == allInterfaces {
+				// GlobalNetworkPolicy with `doNotTrack: True` has been configured
+				// to apply to a host-* endpoint, which is not currently supported.
+				// Log and warning and ignore it.
+				logCxt.Warning("DoNotTrack policy is not supported for a HEP with `interfaceName: *`; ignoring it")
+			} else {
 				// Optimisation: only add the endpoint chains to the raw (untracked)
 				// table if there's some untracked policy to apply.  This reduces
 				// per-packet latency since every packet has to traverse the raw
 				// table.
 				logCxt.Debug("Endpoint has untracked policies.")
-				newUntrackedIfaceNameToHostEpID[ifaceName] = bestHostEpId
+				newUntrackedIfaceNameToHostEpID[ifaceName] = id
 			}
-			if len(bestHostEp.PreDnatTiers) > 0 {
-				// Similar optimisation (or neatness) for pre-DNAT policy.
-				logCxt.Debug("Endpoint has pre-DNAT policies.")
-				newPreDNATIfaceNameToHostEpID[ifaceName] = bestHostEpId
-			}
-			// Record that this host endpoint is in use, for status reporting.
-			newHostEpIDToIfaceNames[bestHostEpId] = append(
-				newHostEpIDToIfaceNames[bestHostEpId], ifaceName)
 		}
+		if len(ep.PreDnatTiers) > 0 {
+			// Similar optimisation (or neatness) for pre-DNAT policy.
+			logCxt.Debug("Endpoint has pre-DNAT policies.")
+			newPreDNATIfaceNameToHostEpID[ifaceName] = id
+		}
+		// Record that this host endpoint is in use, for status reporting.
+		newHostEpIDToIfaceNames[id] = append(
+			newHostEpIDToIfaceNames[id], ifaceName)
 
+		// Also determine endpoints for which we need to review status.
 		oldID, wasKnown := m.activeIfaceNameToHostEpID[ifaceName]
 		newID, isKnown := newIfaceNameToHostEpID[ifaceName]
 		if oldID != newID {
-			logCxt := ifaceCxt.WithFields(log.Fields{
+			logCxt := logCxt.WithFields(log.Fields{
 				"oldID": m.activeIfaceNameToHostEpID[ifaceName],
 				"newID": newIfaceNameToHostEpID[ifaceName],
 			})
@@ -662,166 +975,195 @@ func (m *endpointManager) resolveHostEndpoints() {
 		}
 	}
 
-	// Similar loop to find the best all-interfaces host endpoint.
-	bestHostEpId := proto.HostEndpointID{}
-	var bestHostEp proto.HostEndpoint
-	for id, hostEp := range m.rawHostEndpoints {
-		logCxt := log.WithField("id", id)
-		if !forAllInterfaces(hostEp) {
-			logCxt.Debug("Skip interface-specific host endpoint")
-			continue
+	if !m.bpfEnabled {
+		// Build iptables chains for normal and apply-on-forward host endpoint policy.
+		newHostIfaceFiltChains := map[string][]*iptables.Chain{}
+		newHostIfaceMangleEgressChains := map[string][]*iptables.Chain{}
+		for ifaceName, id := range newIfaceNameToHostEpID {
+			log.WithField("id", id).Info("Updating host endpoint normal policy chains.")
+			hostEp := m.rawHostEndpoints[id]
+
+			// Update chains in the filter and mangle tables, for normal traffic.
+			var ingressPolicyNames, egressPolicyNames []string
+			var ingressForwardPolicyNames, egressForwardPolicyNames []string
+			if len(hostEp.Tiers) > 0 {
+				ingressPolicyNames = hostEp.Tiers[0].IngressPolicies
+				egressPolicyNames = hostEp.Tiers[0].EgressPolicies
+			}
+			if len(hostEp.ForwardTiers) > 0 {
+				ingressForwardPolicyNames = hostEp.ForwardTiers[0].IngressPolicies
+				egressForwardPolicyNames = hostEp.ForwardTiers[0].EgressPolicies
+			}
+
+			filtChains := m.ruleRenderer.HostEndpointToFilterChains(
+				ifaceName,
+				m.epMarkMapper,
+				ingressPolicyNames,
+				egressPolicyNames,
+				ingressForwardPolicyNames,
+				egressForwardPolicyNames,
+				hostEp.ProfileIds,
+			)
+
+			if !reflect.DeepEqual(filtChains, m.activeHostIfaceToFiltChains[ifaceName]) {
+				m.filterTable.UpdateChains(filtChains)
+			}
+			newHostIfaceFiltChains[ifaceName] = filtChains
+			delete(m.activeHostIfaceToFiltChains, ifaceName)
+
+			mangleChains := m.ruleRenderer.HostEndpointToMangleEgressChains(
+				ifaceName,
+				egressPolicyNames,
+				hostEp.ProfileIds,
+			)
+			if !reflect.DeepEqual(mangleChains, m.activeHostIfaceToMangleEgressChains[ifaceName]) {
+				m.mangleTable.UpdateChains(mangleChains)
+			}
+			newHostIfaceMangleEgressChains[ifaceName] = mangleChains
+			delete(m.activeHostIfaceToMangleEgressChains, ifaceName)
 		}
-		if (bestHostEpId.EndpointId != "") && (bestHostEpId.EndpointId < id.EndpointId) {
-			// We already have a HostEndpointId that is better than
-			// this one, so no point looking any further.
-			logCxt.Debug("No better than existing match")
-			continue
+
+		// Build iptables chains for pre-DNAT host endpoint policy.
+		newHostIfaceMangleIngressChains := map[string][]*iptables.Chain{}
+		for ifaceName, id := range newPreDNATIfaceNameToHostEpID {
+			log.WithField("id", id).Info("Updating host endpoint mangle ingress chains.")
+			hostEp := m.rawHostEndpoints[id]
+
+			// Update the mangle table for preDNAT policy.
+			var ingressPolicyNames []string
+			if len(hostEp.PreDnatTiers) > 0 {
+				ingressPolicyNames = hostEp.PreDnatTiers[0].IngressPolicies
+			}
+			mangleChains := m.ruleRenderer.HostEndpointToMangleIngressChains(
+				ifaceName,
+				ingressPolicyNames,
+			)
+			if !reflect.DeepEqual(mangleChains, m.activeHostIfaceToMangleIngressChains[ifaceName]) {
+				m.mangleTable.UpdateChains(mangleChains)
+			}
+			newHostIfaceMangleIngressChains[ifaceName] = mangleChains
+			delete(m.activeHostIfaceToMangleIngressChains, ifaceName)
 		}
-		logCxt.Debug("New best all-interfaces host endpoint")
-		bestHostEpId = id
-		bestHostEp = *hostEp
+
+		// Remove normal, apply-on-forward and pre-DNAT policy iptables chains that are no
+		// longer wanted.
+		for ifaceName, chains := range m.activeHostIfaceToFiltChains {
+			log.WithField("ifaceName", ifaceName).Info(
+				"Host interface no longer protected, deleting its normal chains.")
+			m.filterTable.RemoveChains(chains)
+		}
+		for ifaceName, chains := range m.activeHostIfaceToMangleEgressChains {
+			log.WithField("ifaceName", ifaceName).Info(
+				"Host interface no longer protected, deleting its mangle egress chains.")
+			m.mangleTable.RemoveChains(chains)
+		}
+		for ifaceName, chains := range m.activeHostIfaceToMangleIngressChains {
+			log.WithField("ifaceName", ifaceName).Info(
+				"Host interface no longer protected, deleting its preDNAT chains.")
+			m.mangleTable.RemoveChains(chains)
+		}
+
+		m.callbacks.InvokeInterfaceCallbacks(m.activeIfaceNameToHostEpID, newIfaceNameToHostEpID)
+
+		m.activeHostIfaceToFiltChains = newHostIfaceFiltChains
+		m.activeHostIfaceToMangleEgressChains = newHostIfaceMangleEgressChains
+		m.activeHostIfaceToMangleIngressChains = newHostIfaceMangleIngressChains
 	}
 
-	// We currently only implement pre-DNAT policy for the all-interfaces host endpoint.
-	if bestHostEpId.EndpointId != "" {
-		logCxt := log.WithField("bestHostEpId", bestHostEpId)
-		logCxt.Debug("Got all interfaces HostEp")
-		if len(bestHostEp.PreDnatTiers) > 0 {
-			logCxt.Debug("Endpoint has pre-DNAT policies.")
-			newPreDNATIfaceNameToHostEpID[allInterfaces] = bestHostEpId
+	if m.ipVersion == 4 || !m.bpfEnabled /* BPF enforces RPF on its own */ {
+		// Build iptables chains for untracked host endpoint policy.
+		newHostIfaceRawChains := map[string][]*iptables.Chain{}
+		for ifaceName, id := range newUntrackedIfaceNameToHostEpID {
+			log.WithField("id", id).Info("Updating host endpoint raw chains.")
+			hostEp := m.rawHostEndpoints[id]
+
+			// Update the raw chain, for untracked traffic.
+			var ingressPolicyNames, egressPolicyNames []string
+			if len(hostEp.UntrackedTiers) > 0 {
+				ingressPolicyNames = hostEp.UntrackedTiers[0].IngressPolicies
+				egressPolicyNames = hostEp.UntrackedTiers[0].EgressPolicies
+			}
+			var rawChains []*iptables.Chain
+			if m.bpfEnabled {
+				rawChains = append(rawChains, m.ruleRenderer.HostEndpointToRawEgressChain(
+					ifaceName,
+					egressPolicyNames,
+				))
+			} else {
+				rawChains = m.ruleRenderer.HostEndpointToRawChains(
+					ifaceName,
+					ingressPolicyNames,
+					egressPolicyNames,
+				)
+			}
+			if !reflect.DeepEqual(rawChains, m.activeHostIfaceToRawChains[ifaceName]) {
+				m.rawTable.UpdateChains(rawChains)
+			}
+			newHostIfaceRawChains[ifaceName] = rawChains
+			delete(m.activeHostIfaceToRawChains, ifaceName)
 		}
-		// Record that this host endpoint is in use, for status reporting.
-		newHostEpIDToIfaceNames[bestHostEpId] = append(
-			newHostEpIDToIfaceNames[bestHostEpId], allInterfaces)
-	}
 
-	// Set up programming for the host endpoints that are now to be used.
-	newHostIfaceFiltChains := map[string][]*iptables.Chain{}
-	for ifaceName, id := range newIfaceNameToHostEpID {
-		log.WithField("id", id).Info("Updating host endpoint chains.")
-		hostEp := m.rawHostEndpoints[id]
-
-		// Update the filter chain, for normal traffic.
-		var ingressPolicyNames, egressPolicyNames []string
-		var ingressForwardPolicyNames, egressForwardPolicyNames []string
-		if len(hostEp.Tiers) > 0 {
-			ingressPolicyNames = hostEp.Tiers[0].IngressPolicies
-			egressPolicyNames = hostEp.Tiers[0].EgressPolicies
-		}
-		if len(hostEp.ForwardTiers) > 0 {
-			ingressForwardPolicyNames = hostEp.ForwardTiers[0].IngressPolicies
-			egressForwardPolicyNames = hostEp.ForwardTiers[0].EgressPolicies
+		// Remove untracked policy iptables chains that are no longer wanted.
+		for ifaceName, chains := range m.activeHostIfaceToRawChains {
+			log.WithField("ifaceName", ifaceName).Info(
+				"Host interface no longer protected, deleting its untracked chains.")
+			m.rawTable.RemoveChains(chains)
 		}
 
-		filtChains := m.ruleRenderer.HostEndpointToFilterChains(
-			ifaceName,
-			m.epMarkMapper,
-			ingressPolicyNames,
-			egressPolicyNames,
-			ingressForwardPolicyNames,
-			egressForwardPolicyNames,
-			hostEp.ProfileIds,
-		)
-
-		if !reflect.DeepEqual(filtChains, m.activeHostIfaceToFiltChains[ifaceName]) {
-			m.filterTable.UpdateChains(filtChains)
-		}
-		newHostIfaceFiltChains[ifaceName] = filtChains
-		delete(m.activeHostIfaceToFiltChains, ifaceName)
-	}
-
-	newHostIfaceMangleChains := map[string][]*iptables.Chain{}
-	for ifaceName, id := range newPreDNATIfaceNameToHostEpID {
-		log.WithField("id", id).Info("Updating host endpoint mangle chains.")
-		hostEp := m.rawHostEndpoints[id]
-
-		// Update the mangle table, for preDNAT policy.
-		var ingressPolicyNames []string
-		if len(hostEp.PreDnatTiers) > 0 {
-			ingressPolicyNames = hostEp.PreDnatTiers[0].IngressPolicies
-		}
-		mangleChains := m.ruleRenderer.HostEndpointToMangleChains(
-			ifaceName,
-			ingressPolicyNames,
-		)
-		if !reflect.DeepEqual(mangleChains, m.activeHostIfaceToMangleChains[ifaceName]) {
-			m.mangleTable.UpdateChains(mangleChains)
-		}
-		newHostIfaceMangleChains[ifaceName] = mangleChains
-		delete(m.activeHostIfaceToMangleChains, ifaceName)
-	}
-
-	newHostIfaceRawChains := map[string][]*iptables.Chain{}
-	for ifaceName, id := range newUntrackedIfaceNameToHostEpID {
-		log.WithField("id", id).Info("Updating host endpoint raw chains.")
-		hostEp := m.rawHostEndpoints[id]
-
-		// Update the raw chain, for untracked traffic.
-		var ingressPolicyNames, egressPolicyNames []string
-		if len(hostEp.UntrackedTiers) > 0 {
-			ingressPolicyNames = hostEp.UntrackedTiers[0].IngressPolicies
-			egressPolicyNames = hostEp.UntrackedTiers[0].EgressPolicies
-		}
-		rawChains := m.ruleRenderer.HostEndpointToRawChains(
-			ifaceName,
-			ingressPolicyNames,
-			egressPolicyNames,
-		)
-		if !reflect.DeepEqual(rawChains, m.activeHostIfaceToRawChains[ifaceName]) {
-			m.rawTable.UpdateChains(rawChains)
-		}
-		newHostIfaceRawChains[ifaceName] = rawChains
-		delete(m.activeHostIfaceToRawChains, ifaceName)
-	}
-
-	// Remove programming for host endpoints that are not now in use.
-	for ifaceName, chains := range m.activeHostIfaceToFiltChains {
-		log.WithField("ifaceName", ifaceName).Info(
-			"Host interface no longer protected, deleting its normal chains.")
-		m.filterTable.RemoveChains(chains)
-	}
-	for ifaceName, chains := range m.activeHostIfaceToMangleChains {
-		log.WithField("ifaceName", ifaceName).Info(
-			"Host interface no longer protected, deleting its preDNAT chains.")
-		m.mangleTable.RemoveChains(chains)
-	}
-	for ifaceName, chains := range m.activeHostIfaceToRawChains {
-		log.WithField("ifaceName", ifaceName).Info(
-			"Host interface no longer protected, deleting its untracked chains.")
-		m.rawTable.RemoveChains(chains)
+		m.activeHostIfaceToRawChains = newHostIfaceRawChains
 	}
 
 	// Remember the host endpoints that are now in use.
 	m.activeIfaceNameToHostEpID = newIfaceNameToHostEpID
 	m.activeHostEpIDToIfaceNames = newHostEpIDToIfaceNames
-	m.activeHostIfaceToFiltChains = newHostIfaceFiltChains
-	m.activeHostIfaceToMangleChains = newHostIfaceMangleChains
-	m.activeHostIfaceToRawChains = newHostIfaceRawChains
+
+	if m.ipVersion == 4 || !m.bpfEnabled {
+		// Rewrite the raw dispatch chains if they've changed.  Note, we use iptables for untracked
+		// egress policy even in BPF mode.
+		log.WithField("resolvedHostEpIds", newUntrackedIfaceNameToHostEpID).Debug("Rewrite raw dispatch chains?")
+		var newRawDispatchChains []*iptables.Chain
+		if m.bpfEnabled {
+			newRawDispatchChains = m.ruleRenderer.ToHostDispatchChains(newUntrackedIfaceNameToHostEpID, "")
+		} else {
+			newRawDispatchChains = m.ruleRenderer.HostDispatchChains(newUntrackedIfaceNameToHostEpID, "", false)
+		}
+		m.updateDispatchChains(m.activeHostRawDispatchChains, newRawDispatchChains, m.rawTable)
+	}
+
+	if m.bpfEnabled {
+		// Code after this point is for other dispatch chains and IPVS endpoint marking,
+		// which aren't needed in BPF mode.
+		return
+	}
 
 	// Rewrite the filter dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newIfaceNameToHostEpID).Debug("Rewrite filter dispatch chains?")
-	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, true)
+	defaultIfaceName := ""
+	if _, ok := newIfaceNameToHostEpID[allInterfaces]; ok {
+		// All-interfaces host endpoint is active.  Arrange for it to be the default,
+		// instead of trying to dispatch to it directly based on the non-existent interface
+		// name *.
+		defaultIfaceName = allInterfaces
+		delete(newIfaceNameToHostEpID, allInterfaces)
+	}
+	newFilterDispatchChains := m.ruleRenderer.HostDispatchChains(newIfaceNameToHostEpID, defaultIfaceName, true)
+	newMangleEgressDispatchChains := m.ruleRenderer.ToHostDispatchChains(newIfaceNameToHostEpID, defaultIfaceName)
 	m.updateDispatchChains(m.activeHostFilterDispatchChains, newFilterDispatchChains, m.filterTable)
 	// Set flag to update endpoint mark chains.
 	m.needToCheckEndpointMarkChains = true
 
 	// Rewrite the mangle dispatch chains if they've changed.
 	log.WithField("resolvedHostEpIds", newPreDNATIfaceNameToHostEpID).Debug("Rewrite mangle dispatch chains?")
-	defaultChainName := ""
+	defaultIfaceName = ""
 	if _, ok := newPreDNATIfaceNameToHostEpID[allInterfaces]; ok {
-		// All-interfaces host endpoint is active.  Arrange for it to be the default,
-		// instead of trying to dispatch to it directly based on the non-existent interface
-		// name *.
-		defaultChainName = rules.EndpointChainName(rules.HostFromEndpointPfx, allInterfaces)
+		// All-interfaces host endpoint is active.  Arrange for it to be the
+		// default. This is handled the same as the filter dispatch chains above.
+		defaultIfaceName = allInterfaces
 		delete(newPreDNATIfaceNameToHostEpID, allInterfaces)
 	}
-	newMangleDispatchChains := m.ruleRenderer.FromHostDispatchChains(newPreDNATIfaceNameToHostEpID, defaultChainName)
+	newMangleIngressDispatchChains := m.ruleRenderer.FromHostDispatchChains(newPreDNATIfaceNameToHostEpID, defaultIfaceName)
+	newMangleDispatchChains := append(newMangleIngressDispatchChains, newMangleEgressDispatchChains...)
 	m.updateDispatchChains(m.activeHostMangleDispatchChains, newMangleDispatchChains, m.mangleTable)
-
-	// Rewrite the raw dispatch chains if they've changed.
-	log.WithField("resolvedHostEpIds", newUntrackedIfaceNameToHostEpID).Debug("Rewrite raw dispatch chains?")
-	newRawDispatchChains := m.ruleRenderer.HostDispatchChains(newUntrackedIfaceNameToHostEpID, false)
-	m.updateDispatchChains(m.activeHostRawDispatchChains, newRawDispatchChains, m.rawTable)
 
 	log.Debug("Done resolving host endpoints.")
 }
@@ -835,7 +1177,7 @@ func (m *endpointManager) updateDispatchChains(
 	newChains []*iptables.Chain,
 	table iptablesTable,
 ) {
-	seenChains := set.New()
+	seenChains := set.New[string]()
 	for _, newChain := range newChains {
 		seenChains.Add(newChain.Name)
 		oldChain := activeChains[newChain.Name]
@@ -852,33 +1194,43 @@ func (m *endpointManager) updateDispatchChains(
 	}
 }
 
-func (m *endpointManager) configureInterface(name string) error {
-	if !m.activeUpIfaces.Contains(name) {
-		log.WithField("ifaceName", name).Info(
-			"Skipping configuration of interface because it is oper down.")
+func (m *endpointManager) interfaceExistsInProcSys(name string) (bool, error) {
+	var directory string
+	if m.ipVersion == 4 {
+		directory = fmt.Sprintf("/proc/sys/net/ipv4/conf/%s", name)
+	} else {
+		directory = fmt.Sprintf("/proc/sys/net/ipv6/conf/%s", name)
+	}
+	_, err := m.osStat(directory)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func configureInterface(name string, ipVersion int, rpFilter string, writeProcSys procSysWriter) error {
+	if os.Getuid() != 0 {
+		// there is no permission to set sysctl variables
 		return nil
 	}
+
 	log.WithField("ifaceName", name).Info(
 		"Applying /proc/sys configuration to interface.")
-	if m.ipVersion == 4 {
-		// Enable strict reverse-path filtering.  This prevents a workload from spoofing its
-		// IP address.  Non-privileged containers have additional anti-spoofing protection
-		// but VM workloads, for example, can easily spoof their IP.
-		err := m.writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/rp_filter", name), "1")
-		if err != nil {
-			return err
-		}
+	if ipVersion == 4 {
 		// Enable routing to localhost.  This is required to allow for NAT to the local
 		// host.
-		err = m.writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/route_localnet", name), "1")
+		err := writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/route_localnet", name), "1")
 		if err != nil {
 			return err
 		}
 		// Normally, the kernel has a delay before responding to proxy ARP but we know
 		// that's not needed in a Calico network so we disable it.
-		err = m.writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/neigh/%s/proxy_delay", name), "0")
+		err = writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/neigh/%s/proxy_delay", name), "0")
 		if err != nil {
-			return err
+			log.Warnf("failed to set net.ipv4.neigh.%s.proxy_delay=0: %s", name, err)
 		}
 		// Enable proxy ARP, this makes the host respond to all ARP requests with its own
 		// MAC.  This has a couple of advantages:
@@ -896,32 +1248,74 @@ func (m *endpointManager) configureInterface(name string) error {
 		//   means that we don't need to assign the link local address explicitly to each
 		//   host side of the veth, which is one fewer thing to maintain and one fewer
 		//   thing we may clash over.
-		err = m.writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/proxy_arp", name), "1")
+		err = writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/proxy_arp", name), "1")
 		if err != nil {
 			return err
 		}
 		// Enable IP forwarding of packets coming _from_ this interface.  For packets to
 		// be forwarded in both directions we need this flag to be set on the fabric-facing
 		// interface too (or for the global default to be set).
-		err = m.writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/forwarding", name), "1")
+		err = writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/forwarding", name), "1")
+		if err != nil {
+			return err
+		}
+		// Disable kernel rpf check for interfaces that have rpf filtering explicitly disabled
+		// This is set only in IPv4 mode as there's no equivalent sysctl in IPv6
+		err = writeProcSys(fmt.Sprintf("/proc/sys/net/ipv4/conf/%s/rp_filter", name), rpFilter)
 		if err != nil {
 			return err
 		}
 	} else {
 		// Enable proxy NDP, similarly to proxy ARP, described above.
-		err := m.writeProcSys(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/proxy_ndp", name), "1")
+		err := writeProcSys(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/proxy_ndp", name), "1")
 		if err != nil {
 			return err
 		}
 		// Enable IP forwarding of packets coming _from_ this interface.  For packets to
 		// be forwarded in both directions we need this flag to be set on the fabric-facing
 		// interface too (or for the global default to be set).
-		err = m.writeProcSys(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/forwarding", name), "1")
+		err = writeProcSys(fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/forwarding", name), "1")
 		if err != nil {
 			return err
 		}
 	}
+
 	return nil
+}
+
+func (m *endpointManager) configureInterface(name string) error {
+	if os.Getuid() != 0 {
+		// there is no permission to set sysctl variables
+		return nil
+	}
+
+	if !m.activeUpIfaces.Contains(name) {
+		log.WithField("ifaceName", name).Info(
+			"Skipping configuration of interface because it is oper down.")
+		return nil
+	}
+
+	// Special case: for security, even if our IPv6 support is disabled, try to disable RAs on the interface.
+	acceptRAPath := fmt.Sprintf("/proc/sys/net/ipv6/conf/%s/accept_ra", name)
+	err := m.writeProcSys(acceptRAPath, "0")
+	if err != nil {
+		if exists, err2 := m.interfaceExistsInProcSys(name); err2 == nil && !exists {
+			log.WithField("file", acceptRAPath).Debug(
+				"Failed to set accept_ra flag. Interface is missing in /proc/sys.")
+		} else {
+			if err2 != nil {
+				log.WithError(err2).Error("Error checking if interface exists")
+			}
+			log.WithError(err).WithField("ifaceName", name).Warnf("Could not set accept_ra")
+		}
+	}
+
+	rpFilter := m.defaultRPFilter
+	if m.hasSourceSpoofingConfiguration(name) || m.bpfEnabled {
+		rpFilter = "0"
+	}
+
+	return configureInterface(name, int(m.ipVersion), rpFilter, m.writeProcSys)
 }
 
 func writeProcSys(path, value string) error {
@@ -946,4 +1340,9 @@ var allInterfaces = "any-interface-at-all"
 // True if the given host endpoint is for all interfaces, as opposed to for a specific interface.
 func forAllInterfaces(hep *proto.HostEndpoint) bool {
 	return hep.Name == "*"
+}
+
+// for implementing the endpointsSource interface
+func (m *endpointManager) GetRawHostEndpoints() map[proto.HostEndpointID]*proto.HostEndpoint {
+	return m.rawHostEndpoints
 }

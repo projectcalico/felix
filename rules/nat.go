@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,39 @@ package rules
 import (
 	"fmt"
 	"sort"
+	"strings"
 
-	"github.com/alauda/felix/iptables"
+	tcdefs "github.com/projectcalico/calico/felix/bpf/tc/defs"
+	"github.com/projectcalico/calico/felix/iptables"
 )
 
 func (r *DefaultRuleRenderer) MakeNatOutgoingRule(protocol string, action iptables.Action, ipVersion uint8) iptables.Rule {
+	if r.Config.BPFEnabled {
+		return r.makeNATOutgoingRuleBPF(ipVersion, protocol, action)
+	} else {
+		return r.makeNATOutgoingRuleIPTables(ipVersion, protocol, action)
+	}
+}
+
+func (r *DefaultRuleRenderer) makeNATOutgoingRuleBPF(version uint8, protocol string, action iptables.Action) iptables.Rule {
+	match := iptables.Match().MarkMatchesWithMask(tcdefs.MarkSeenNATOutgoing, tcdefs.MarkSeenNATOutgoingMask)
+
+	if protocol != "" {
+		match = match.Protocol(protocol)
+	}
+
+	if r.Config.IptablesNATOutgoingInterfaceFilter != "" {
+		match = match.OutInterface(r.Config.IptablesNATOutgoingInterfaceFilter)
+	}
+
+	rule := iptables.Rule{
+		Action: action,
+		Match:  match,
+	}
+	return rule
+}
+
+func (r *DefaultRuleRenderer) makeNATOutgoingRuleIPTables(ipVersion uint8, protocol string, action iptables.Action) iptables.Rule {
 	ipConf := r.ipSetConfig(ipVersion)
 	allIPsSetName := ipConf.NameForMainIPSet(IPSetIDNATOutgoingAllPools)
 	masqIPsSetName := ipConf.NameForMainIPSet(IPSetIDNATOutgoingMasqPools)
@@ -48,18 +76,28 @@ func (r *DefaultRuleRenderer) MakeNatOutgoingRule(protocol string, action iptabl
 func (r *DefaultRuleRenderer) NATOutgoingChain(natOutgoingActive bool, ipVersion uint8) *iptables.Chain {
 	var rules []iptables.Rule
 	if natOutgoingActive {
+		var defaultSnatRule iptables.Action = iptables.MasqAction{}
+		if r.Config.NATOutgoingAddress != nil {
+			defaultSnatRule = iptables.SNATAction{ToAddr: r.Config.NATOutgoingAddress.String()}
+		}
+
 		if r.Config.NATPortRange.MaxPort > 0 {
 			toPorts := fmt.Sprintf("%d-%d", r.Config.NATPortRange.MinPort, r.Config.NATPortRange.MaxPort)
+			var portRangeSnatRule iptables.Action = iptables.MasqAction{ToPorts: toPorts}
+			if r.Config.NATOutgoingAddress != nil {
+				toAddress := fmt.Sprintf("%s:%s", r.Config.NATOutgoingAddress.String(), toPorts)
+				portRangeSnatRule = iptables.SNATAction{ToAddr: toAddress}
+			}
 			rules = []iptables.Rule{
-				r.MakeNatOutgoingRule("tcp", iptables.MasqAction{ToPorts: toPorts}, ipVersion),
+				r.MakeNatOutgoingRule("tcp", portRangeSnatRule, ipVersion),
 				r.MakeNatOutgoingRule("tcp", iptables.ReturnAction{}, ipVersion),
-				r.MakeNatOutgoingRule("udp", iptables.MasqAction{ToPorts: toPorts}, ipVersion),
+				r.MakeNatOutgoingRule("udp", portRangeSnatRule, ipVersion),
 				r.MakeNatOutgoingRule("udp", iptables.ReturnAction{}, ipVersion),
-				r.MakeNatOutgoingRule("", iptables.MasqAction{}, ipVersion),
+				r.MakeNatOutgoingRule("", defaultSnatRule, ipVersion),
 			}
 		} else {
 			rules = []iptables.Rule{
-				r.MakeNatOutgoingRule("", iptables.MasqAction{}, ipVersion),
+				r.MakeNatOutgoingRule("", defaultSnatRule, ipVersion),
 			}
 		}
 	}
@@ -109,6 +147,26 @@ func (r *DefaultRuleRenderer) SNATsToIptablesChains(snats map[string]string) []*
 	}
 	return []*iptables.Chain{{
 		Name:  ChainFIPSnat,
+		Rules: rules,
+	}}
+}
+
+func (r *DefaultRuleRenderer) BlockedCIDRsToIptablesChains(cidrs []string, ipVersion uint8) []*iptables.Chain {
+	rules := []iptables.Rule{}
+	if r.blockCIDRAction != nil {
+		// Sort CIDRs so we can program rules in a determined order.
+		sort.Strings(cidrs)
+		for _, cidr := range cidrs {
+			if strings.Contains(cidr, ":") == (ipVersion == 6) {
+				rules = append(rules, iptables.Rule{
+					Match:  iptables.Match().DestNet(cidr),
+					Action: r.blockCIDRAction,
+				})
+			}
+		}
+	}
+	return []*iptables.Chain{{
+		Name:  ChainCIDRBlock,
 		Rules: rules,
 	}}
 }

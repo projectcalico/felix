@@ -1,6 +1,4 @@
-//+build windows
-
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,16 +15,23 @@
 package windataplane
 
 import (
+	"math"
+	"regexp"
 	"time"
+
+	"github.com/projectcalico/calico/felix/dataplane/windows/hcn"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/dataplane/windows/ipsets"
-	"github.com/alauda/felix/dataplane/windows/policysets"
-	"github.com/alauda/felix/jitter"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/throttle"
-	"github.com/projectcalico/libcalico-go/lib/health"
+	"github.com/projectcalico/calico/felix/dataplane/windows/hns"
+
+	"github.com/projectcalico/calico/felix/dataplane/common"
+	"github.com/projectcalico/calico/felix/dataplane/windows/ipsets"
+	"github.com/projectcalico/calico/felix/dataplane/windows/policysets"
+	"github.com/projectcalico/calico/felix/jitter"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/throttle"
+	"github.com/projectcalico/calico/libcalico-go/lib/health"
 )
 
 const (
@@ -51,6 +56,14 @@ func init() {
 type Config struct {
 	IPv6Enabled      bool
 	HealthAggregator *health.HealthAggregator
+
+	// Currently set to maximum value.
+	MaxIPSetSize int
+
+	Hostname     string
+	VXLANEnabled bool
+	VXLANID      int
+	VXLANPort    int
 }
 
 // winDataplane implements an in-process Felix dataplane driver capable of applying network policy
@@ -58,7 +71,7 @@ type Config struct {
 // datastore-facing part of Felix via the Send/RecvMessage methods, which operate on the
 // protobuf-defined API objects.
 //
-// Architecture
+// # Architecture
 //
 // The Windows dataplane driver is organised around a main event loop, which handles
 // update events from the datastore and dataplane.
@@ -75,7 +88,7 @@ type Config struct {
 // we refer back to the caches to recalculate the sets of rules which need to be sent to HNS. As the
 // HNS API surface is enhanced, we may be able to optimize and remove some or all of these caches.
 //
-// Requirements on the API
+// # Requirements on the API
 //
 // The dataplane does not do consistency checks on the incoming data. It expects to be told about
 // dependent resources before they are needed and for their lifetime to exceed that of the resources
@@ -86,8 +99,11 @@ type WindowsDataplane struct {
 	toDataplane chan interface{}
 	// the channel used to send messages from the dataplane to felix
 	fromDataplane chan interface{}
+	// ifaceAddrUpdates is a channel used to signal when the host's IPs change.
+	ifaceAddrUpdates chan []string
 	// stores all of the managers which will be processing  the various updates from felix.
 	allManagers []Manager
+	endpointMgr *endpointManager
 	// each IPSets manages a whole "plane" of IP sets, i.e. all the IPv4 sets, or all the IPv6
 	// IP sets.
 	ipSets []*ipsets.IPSets
@@ -114,8 +130,9 @@ type WindowsDataplane struct {
 }
 
 const (
-	healthName     = "win_dataplane"
+	healthName     = "WindowsDataplaneMainLoop"
 	healthInterval = 10 * time.Second
+	healthTimeout  = 90 * time.Second
 )
 
 // Interface for Managers. Each Manager is responsible for processing updates from felix and
@@ -137,7 +154,7 @@ func (d *WindowsDataplane) RegisterManager(mgr Manager) {
 
 // NewWinDataplaneDriver creates and initializes a new dataplane driver using the provided
 // configuration.
-func NewWinDataplaneDriver(config Config) *WindowsDataplane {
+func NewWinDataplaneDriver(hns hns.API, config Config) *WindowsDataplane {
 	log.WithField("config", config).Info("Creating Windows dataplane driver.")
 
 	ipSetsConfigV4 := ipsets.NewIPVersionConfig(
@@ -145,22 +162,43 @@ func NewWinDataplaneDriver(config Config) *WindowsDataplane {
 	)
 
 	ipSetsV4 := ipsets.NewIPSets(ipSetsConfigV4)
+	config.MaxIPSetSize = math.MaxInt64
 
 	dp := &WindowsDataplane{
-		toDataplane:   make(chan interface{}, msgPeekLimit),
-		fromDataplane: make(chan interface{}, 100),
-		config:        config,
-		applyThrottle: throttle.New(10),
+		toDataplane:      make(chan interface{}, msgPeekLimit),
+		fromDataplane:    make(chan interface{}, 100),
+		ifaceAddrUpdates: make(chan []string, 1),
+		config:           config,
+		applyThrottle:    throttle.New(10),
 	}
 
 	dp.applyThrottle.Refill() // Allow the first apply() immediately.
 
 	dp.ipSets = append(dp.ipSets, ipSetsV4)
-	dp.policySets = policysets.NewPolicySets(dp.ipSets)
 
-	dp.RegisterManager(newIPSetsManager(ipSetsV4))
+	var ipsc []policysets.IPSetCache
+	for _, i := range dp.ipSets {
+		ipsc = append(ipsc, i)
+	}
+	dp.policySets = policysets.NewPolicySets(hns, ipsc, policysets.FileReader(policysets.StaticFileName))
+
+	dp.RegisterManager(common.NewIPSetsManager(ipSetsV4, config.MaxIPSetSize))
 	dp.RegisterManager(newPolicyManager(dp.policySets))
-	dp.RegisterManager(newEndpointManager(dp.policySets))
+	dp.endpointMgr = newEndpointManager(hns, dp.policySets)
+	dp.RegisterManager(dp.endpointMgr)
+	ipSetsV4.SetCallback(dp.endpointMgr.OnIPSetsUpdate)
+	if config.VXLANEnabled {
+		log.Info("VXLAN enabled, starting the VXLAN manager")
+		dp.RegisterManager(newVXLANManager(
+			hcn.API{},
+			config.Hostname,
+			regexp.MustCompile(defaultNetworkName), // FIXME Hard-coded regex
+			config.VXLANID,
+			config.VXLANPort,
+		))
+	} else {
+		log.Info("VXLAN disabled, not starting the VXLAN manager")
+	}
 
 	// Register that we will report liveness and readiness.
 	if config.HealthAggregator != nil {
@@ -168,7 +206,7 @@ func NewWinDataplaneDriver(config Config) *WindowsDataplane {
 		config.HealthAggregator.RegisterReporter(
 			healthName,
 			&health.HealthReport{Live: true, Ready: true},
-			healthInterval*2,
+			healthTimeout,
 		)
 	}
 
@@ -178,6 +216,7 @@ func NewWinDataplaneDriver(config Config) *WindowsDataplane {
 // Starts the driver.
 func (d *WindowsDataplane) Start() {
 	go d.loopUpdatingDataplane()
+	go loopPollingForInterfaceAddrs(d.ifaceAddrUpdates)
 }
 
 // Called by someone to put a message into our channel so that the loop will pick it up
@@ -207,7 +246,7 @@ func (d *WindowsDataplane) loopUpdatingDataplane() {
 	d.reportHealth()
 
 	// Fill the apply throttle leaky bucket.
-	throttleC := jitter.NewTicker(100*time.Millisecond, 10*time.Millisecond).C
+	throttleC := jitter.NewTicker(100*time.Millisecond, 10*time.Millisecond).Channel()
 	beingThrottled := false
 
 	datastoreInSync := false
@@ -246,6 +285,8 @@ func (d *WindowsDataplane) loopUpdatingDataplane() {
 				}
 			}
 			d.dataplaneNeedsSync = true
+		case upd := <-d.ifaceAddrUpdates:
+			d.endpointMgr.OnHostAddrsUpdate(upd)
 		case <-throttleC:
 			d.applyThrottle.Refill()
 		case <-healthTicks:
@@ -292,7 +333,7 @@ func (d *WindowsDataplane) loopUpdatingDataplane() {
 }
 
 // Applies any pending changes to the dataplane by giving each of the managers a chance to
-// complete their deffered work. If the operation fails, then this will also set up a
+// complete their deferred work. If the operation fails, then this will also set up a
 // rescheduling kick so that the apply can be reattempted.
 func (d *WindowsDataplane) apply() {
 	// Unset the needs-sync flag, a rescheduling kick will reset it later if something failed

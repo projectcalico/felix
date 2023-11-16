@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2018,2020-2022 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,13 +18,15 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/calc"
-	"github.com/alauda/felix/dispatcher"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
-	"github.com/projectcalico/libcalico-go/lib/backend/k8s/conversion"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/net"
+	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"github.com/projectcalico/calico/felix/calc"
+	"github.com/projectcalico/calico/felix/dispatcher"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/k8s/conversion"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 
 var _ = Describe("profileDecoder", func() {
@@ -44,7 +46,7 @@ var _ = Describe("profileDecoder", func() {
 			uut.RegisterWith(disp)
 		})
 
-		It("should Register for ProfileLabels only", func() {
+		It("should Register for Profile only", func() {
 			disp.OnUpdate(api.Update{
 				KVPair:     model.KVPair{Key: model.HostEndpointKey{}},
 				UpdateType: api.UpdateTypeKVNew,
@@ -144,12 +146,36 @@ func (p *passthruCallbackRecorder) OnHostIPRemove(hostname string) {
 	Fail("HostIPRemove received")
 }
 
+func (p *passthruCallbackRecorder) OnHostIPv6Update(hostname string, ip *net.IP) {
+	Fail("HostIPv6Update received")
+}
+
+func (p *passthruCallbackRecorder) OnHostIPv6Remove(hostname string) {
+	Fail("HostIPv6Remove received")
+}
+
+func (p *passthruCallbackRecorder) OnHostMetadataUpdate(hostname string, ip4 *net.IPNet, ip6 *net.IPNet, asnumber string, labels map[string]string) {
+	Fail("HostUpdate received")
+}
+
+func (p *passthruCallbackRecorder) OnHostMetadataRemove(hostname string) {
+	Fail("HostRemove received")
+}
+
 func (p *passthruCallbackRecorder) OnIPPoolUpdate(model.IPPoolKey, *model.IPPool) {
 	Fail("IPPoolUpdate received")
 }
 
 func (p *passthruCallbackRecorder) OnIPPoolRemove(model.IPPoolKey) {
 	Fail("IPPoolRemove received")
+}
+
+func (p *passthruCallbackRecorder) OnWireguardUpdate(string, *model.Wireguard) {
+	Fail("OnWireguardUpdate received")
+}
+
+func (p *passthruCallbackRecorder) OnWireguardRemove(string) {
+	Fail("OnWireguardRemove received")
 }
 
 func (p *passthruCallbackRecorder) OnServiceAccountUpdate(update *proto.ServiceAccountUpdate) {
@@ -168,12 +194,31 @@ func (p *passthruCallbackRecorder) OnNamespaceRemove(id proto.NamespaceID) {
 	p.nsRemoves = append(p.nsRemoves, id)
 }
 
-func labelsKV(name string, labels interface{}) model.KVPair {
-	return model.KVPair{
-		Key: model.ProfileLabelsKey{
-			ProfileKey: model.ProfileKey{Name: name}},
-		Value: labels,
+func (p *passthruCallbackRecorder) OnGlobalBGPConfigUpdate(*v3.BGPConfiguration) {
+	Fail("OnGlobalBGPConfigUpdate received")
+}
+
+func labelsKV(name string, labels map[string]string) model.KVPair {
+	var value interface{}
+	if labels != nil {
+		value = &v3.Profile{
+			Spec: v3.ProfileSpec{
+				LabelsToApply: labels,
+			},
+		}
 	}
+	return model.KVPair{
+		Key:   model.ResourceKey{Name: name, Kind: v3.KindProfile},
+		Value: value,
+	}
+}
+
+func (p *passthruCallbackRecorder) OnServiceUpdate(_ *proto.ServiceUpdate) {
+	Fail("OnServiceUpdate received")
+}
+
+func (p *passthruCallbackRecorder) OnServiceRemove(_ *proto.ServiceRemove) {
+	Fail("OnServiceRemove received")
 }
 
 func addUpdate(name string, labels map[string]string) api.Update {

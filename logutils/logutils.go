@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2018,2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/config"
-	"github.com/projectcalico/libcalico-go/lib/logutils"
+	"github.com/projectcalico/calico/felix/config"
+	"github.com/projectcalico/calico/libcalico-go/lib/logutils"
 )
 
 var (
@@ -53,7 +53,7 @@ func ConfigureEarlyLogging() {
 
 	// Replace logrus' formatter with a custom one using our time format,
 	// shared with the Python code.
-	log.SetFormatter(&logutils.Formatter{})
+	log.SetFormatter(&logutils.Formatter{Component: "felix"})
 
 	// Install a hook that adds file/line no information.
 	log.AddHook(&logutils.ContextHook{})
@@ -130,7 +130,13 @@ func ConfigureLogging(configParams *config.Config) {
 		}
 	}
 
-	hook := logutils.NewBackgroundHook(logutils.FilterLevels(mostVerboseLevel), logLevelSyslog, dests, counterDroppedLogs)
+	hook := logutils.NewBackgroundHook(
+		logutils.FilterLevels(mostVerboseLevel),
+		logLevelSyslog,
+		dests,
+		counterDroppedLogs,
+		logutils.WithDebugFileRegexp(configParams.LogDebugFilenameRegex),
+	)
 	hook.Start()
 	log.AddHook(hook)
 

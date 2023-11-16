@@ -21,7 +21,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/markbits"
+	"github.com/projectcalico/calico/felix/markbits"
 )
 
 const (
@@ -96,7 +96,11 @@ func (epmm *DefaultEPMarkManager) GetEndpointMark(ep string) (uint32, error) {
 	}
 
 	// Try to allocate a position based on hash from endpoint name.
-	epmm.hash32.Write([]byte(ep))
+	_, err := epmm.hash32.Write([]byte(ep))
+	if err != nil {
+		return 0, errors.New("Failed to allocate a hash position")
+	}
+
 	total := int(epmm.hash32.Sum32())
 	epmm.hash32.Reset()
 

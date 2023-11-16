@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/net"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
+
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 
 const (
@@ -43,13 +44,19 @@ func parsedRulesToProtoRules(in []*ParsedRule, ruleIDSeed string) (out []*proto.
 
 func fillInRuleIDs(rules []*proto.Rule, ruleIDSeed string) {
 	s := sha256.New224()
-	s.Write([]byte(ruleIDSeed))
+	_, err := s.Write([]byte(ruleIDSeed))
+	if err != nil {
+		log.WithError(err).Panic("failed to write rule hash")
+	}
 	hash := s.Sum(nil)
 	for ii, rule := range rules {
 		// Each hash chains in the previous hash, so that its position in the chain and
 		// the rules before it affect its hash.
 		s.Reset()
-		s.Write(hash)
+		_, err = s.Write(hash)
+		if err != nil {
+			log.WithError(err).WithField("rule", rule).Panic("Failed to write hash for rule")
+		}
 
 		// We need a form of the rule that we can hash.  Convert it to the protobuf
 		// binary representation, which is deterministic, at least for a given rev of the
@@ -60,7 +67,10 @@ func fillInRuleIDs(rules []*proto.Rule, ruleIDSeed string) {
 		if err != nil {
 			log.WithError(err).WithField("rule", rule).Panic("Failed to marshal rule")
 		}
-		s.Write(data)
+		_, err = s.Write(data)
+		if err != nil {
+			log.WithError(err).WithField("rule", rule).Panic("Failed to write marshalled rule")
+		}
 		hash = s.Sum(hash[0:0])
 		// Encode the hash using a compact character set.  We use the URL-safe base64
 		// variant because it uses '-' and '_', which are more shell-friendly.
@@ -94,6 +104,7 @@ func parsedRuleToProtoRule(in *ParsedRule) *proto.Rule {
 		DstNamedPortIpSetIds: in.DstNamedPortIPSetIDs,
 		SrcIpSetIds:          in.SrcIPSetIDs,
 		DstIpSetIds:          in.DstIPSetIDs,
+		DstIpPortSetIds:      in.DstIPPortSetIDs,
 
 		NotProtocol:             protocolToProtoProtocol(in.NotProtocol),
 		NotSrcNet:               ipNetsToProtoStrings(in.NotSrcNets),
@@ -112,6 +123,10 @@ func parsedRuleToProtoRule(in *ParsedRule) *proto.Rule {
 		OriginalDstNamespaceSelector: in.OriginalDstNamespaceSelector,
 		OriginalNotSrcSelector:       in.OriginalNotSrcSelector,
 		OriginalNotDstSelector:       in.OriginalNotDstSelector,
+		OriginalSrcService:           in.OriginalSrcService,
+		OriginalSrcServiceNamespace:  in.OriginalSrcServiceNamespace,
+		OriginalDstService:           in.OriginalDstService,
+		OriginalDstServiceNamespace:  in.OriginalDstServiceNamespace,
 	}
 
 	if len(in.OriginalSrcServiceAccountNames) > 0 || in.OriginalSrcServiceAccountSelector != "" {
@@ -148,6 +163,15 @@ func parsedRuleToProtoRule(in *ParsedRule) *proto.Rule {
 		}
 		if len(in.HTTPMatch.Methods) > 0 {
 			out.HttpMatch.Methods = in.HTTPMatch.Methods
+		}
+	}
+
+	if in.Metadata != nil {
+		if in.Metadata.Annotations != nil {
+			out.Metadata = &proto.RuleMetadata{Annotations: make(map[string]string)}
+			for k, v := range in.Metadata.Annotations {
+				out.Metadata.Annotations[k] = v
+			}
 		}
 	}
 

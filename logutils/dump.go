@@ -1,4 +1,4 @@
-// +build !windows
+//go:build !windows
 
 // Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
 //
@@ -26,7 +26,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/config"
+	"github.com/projectcalico/calico/felix/config"
 )
 
 func DumpHeapMemoryProfile(fileName string) {
@@ -63,7 +63,11 @@ func DumpCPUProfile(fileName string) {
 	defer f.Close()
 
 	logCxt.Info("Writing CPU profile...")
-	pprof.StartCPUProfile(f)
+	err = pprof.StartCPUProfile(f)
+	if err != nil {
+		logCxt.WithError(err).Error("Could not start CPU profile")
+		return
+	}
 	defer pprof.StopCPUProfile()
 	time.Sleep(10 * time.Second)
 	logCxt.Info("Finished writing CPU profile")

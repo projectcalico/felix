@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	. "github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/stringutils"
+	. "github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/stringutils"
 )
 
 func (r *DefaultRuleRenderer) WorkloadDispatchChains(
@@ -39,25 +39,62 @@ func (r *DefaultRuleRenderer) WorkloadDispatchChains(
 	endRules := []Rule{
 		Rule{
 			Match:   Match(),
-			Action:  DropAction{},
-			Comment: "Unknown interface",
+			Action:  r.IptablesFilterDenyAction(),
+			Comment: []string{"Unknown interface"},
 		},
 	}
-	result := []*Chain{}
-	result = append(result,
-		// Assemble a from-workload and to-workload dispatch chain.
-		r.interfaceNameDispatchChains(
-			names,
-			WorkloadFromEndpointPfx,
-			WorkloadToEndpointPfx,
-			ChainFromWorkloadDispatch,
-			ChainToWorkloadDispatch,
-			endRules,
-			endRules,
-		)...,
+	return r.interfaceNameDispatchChains(
+		names,
+		WorkloadFromEndpointPfx,
+		WorkloadToEndpointPfx,
+		ChainFromWorkloadDispatch,
+		ChainToWorkloadDispatch,
+		endRules,
+		endRules,
 	)
+}
 
-	return result
+func (r *DefaultRuleRenderer) WorkloadInterfaceAllowChains(
+	endpoints map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint,
+) []*Chain {
+	// Extract endpoint names.
+	log.WithField("numEndpoints", len(endpoints)).Debug("Rendering workload interface allow chain")
+	names := make([]string, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		names = append(names, endpoint.Name)
+	}
+
+	// If workload endpoint is unknown, drop.
+	endRules := []Rule{
+		{
+			Match:   Match(),
+			Action:  r.IptablesFilterDenyAction(),
+			Comment: []string{"Unknown interface"},
+		},
+	}
+
+	// Since there can be >100 endpoints, putting them in a single list adds some latency to
+	// endpoints that are later in the chain.  To reduce that impact, we build a shallow tree of
+	// chains based on the prefixes of the chains.
+	commonPrefix, prefixes, prefixToNames := r.sortAndDivideEndpointNamesToPrefixTree(names)
+	var chains []*Chain
+	// Build to endpoint chains.
+	toChildChains, toRootChain, _ := r.buildSingleDispatchChains(
+		ChainToWorkloadDispatch,
+		commonPrefix,
+		prefixes,
+		prefixToNames,
+		WorkloadPfxSpecialAllow,
+		func(name string) MatchCriteria { return Match().OutInterface(name) },
+		func(pfx, name string) Action {
+			return AcceptAction{}
+		},
+		endRules,
+	)
+	chains = append(chains, toChildChains...)
+	chains = append(chains, toRootChain)
+
+	return chains
 }
 
 // In some scenario, e.g. packet goes to an kubernetes ipvs service ip. Traffic goes through input/output filter chain
@@ -98,22 +135,32 @@ func (r *DefaultRuleRenderer) EndpointMarkDispatchChains(
 
 func (r *DefaultRuleRenderer) HostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
+	defaultIfaceName string,
 	applyOnForward bool,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, "", false, applyOnForward)
+	return r.hostDispatchChains(endpoints, defaultIfaceName, "to+from", applyOnForward)
 }
 
+// For pre-DNAT policy, which only applies on ingress from a host endpoint.
 func (r *DefaultRuleRenderer) FromHostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	defaultChainName string,
+	defaultIfaceName string,
 ) []*Chain {
-	return r.hostDispatchChains(endpoints, defaultChainName, true, false)
+	return r.hostDispatchChains(endpoints, defaultIfaceName, "from", false)
+}
+
+// For applying normal host endpoint egress policy to traffic from the host which has been DNAT'd.
+func (r *DefaultRuleRenderer) ToHostDispatchChains(
+	endpoints map[string]proto.HostEndpointID,
+	defaultIfaceName string,
+) []*Chain {
+	return r.hostDispatchChains(endpoints, defaultIfaceName, "to", false)
 }
 
 func (r *DefaultRuleRenderer) hostDispatchChains(
 	endpoints map[string]proto.HostEndpointID,
-	defaultFromChainName string,
-	fromOnly bool,
+	defaultIfaceName string,
+	directions string,
 	applyOnForward bool,
 ) []*Chain {
 	// Extract endpoint names.
@@ -123,26 +170,66 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 		names = append(names, ifaceName)
 	}
 
-	var fromEndRules, toEndRules []Rule
-	if defaultFromChainName != "" {
-		// Arrange to goto the specified default chain for any packets that don't match an
-		// interface in the `endpoints` map.  (Currently we only use this for pre-DNAT
-		// policy, so it's only needed for 'from' chain programming; but we will extend
-		// later to other kinds of policy, and then it will be wanted equally in 'to' chain
-		// programming.)
+	var fromEndRules, toEndRules, fromEndForwardRules, toEndForwardRules []Rule
+
+	if defaultIfaceName != "" {
+		// Arrange sets of rules to goto the specified default chain for any packets that don't match an
+		// interface in the `endpoints` map.
 		fromEndRules = []Rule{
 			Rule{
-				Action: GotoAction{Target: defaultFromChainName},
+				Action: GotoAction{Target: EndpointChainName(HostFromEndpointPfx, defaultIfaceName)},
+			},
+		}
+		fromEndForwardRules = []Rule{
+			Rule{
+				Action: GotoAction{Target: EndpointChainName(HostFromEndpointForwardPfx, defaultIfaceName)},
+			},
+		}
+
+		// For traffic from the host to a host endpoint, we only use the default chain -
+		// i.e. policy applying to the wildcard HEP - when we're egressing through a
+		// fabric-facing interface.  We never apply wildcard HEP normal policy for traffic
+		// going to a local workload.
+		if !applyOnForward {
+			for _, prefix := range r.WorkloadIfacePrefixes {
+				ifaceMatch := prefix + "+"
+				toEndRules = append(toEndRules, Rule{
+					Match:   Match().OutInterface(ifaceMatch),
+					Action:  ReturnAction{},
+					Comment: []string{"Skip egress WHEP policy for traffic to local workload"},
+				})
+			}
+		}
+
+		toEndRules = append(toEndRules, Rule{
+			Action: GotoAction{Target: EndpointChainName(HostToEndpointPfx, defaultIfaceName)},
+		})
+		toEndForwardRules = []Rule{
+			Rule{
+				Action: GotoAction{Target: EndpointChainName(HostToEndpointForwardPfx, defaultIfaceName)},
 			},
 		}
 	}
-	if fromOnly {
+
+	if directions == "from" {
 		return r.interfaceNameDispatchChains(
 			names,
 			HostFromEndpointPfx,
 			"",
 			ChainDispatchFromHostEndpoint,
 			"",
+			fromEndRules,
+			toEndRules,
+		)
+	}
+
+	if directions == "to" {
+		return r.interfaceNameDispatchChains(
+			names,
+			"",
+			HostToEndpointPfx,
+			"",
+			ChainDispatchToHostEndpoint,
 			fromEndRules,
 			toEndRules,
 		)
@@ -176,8 +263,8 @@ func (r *DefaultRuleRenderer) hostDispatchChains(
 			HostToEndpointForwardPfx,
 			ChainDispatchFromHostEndPointForward,
 			ChainDispatchToHostEndpointForward,
-			fromEndRules,
-			toEndRules,
+			fromEndForwardRules,
+			toEndForwardRules,
 		)...,
 	)
 }
@@ -190,7 +277,7 @@ func (r *DefaultRuleRenderer) interfaceNameDispatchChains(
 	dispatchToEndpointChainName string,
 	fromEndRules []Rule,
 	toEndRules []Rule,
-) []*Chain {
+) (chains []*Chain) {
 
 	log.WithField("ifaceNames", names).Debug("Rendering endpoint dispatch chains")
 
@@ -199,23 +286,25 @@ func (r *DefaultRuleRenderer) interfaceNameDispatchChains(
 	// chains based on the prefixes of the chains.
 	commonPrefix, prefixes, prefixToNames := r.sortAndDivideEndpointNamesToPrefixTree(names)
 
-	// Build from endpoint chains.
-	fromChildChains, fromRootChain, _ := r.buildSingleDispatchChains(
-		dispatchFromEndpointChainName,
-		commonPrefix,
-		prefixes,
-		prefixToNames,
-		fromEndpointPfx,
-		func(name string) MatchCriteria { return Match().InInterface(name) },
-		func(pfx, name string) Action {
-			return GotoAction{
-				Target: EndpointChainName(pfx, name),
-			}
-		},
-		fromEndRules,
-	)
-
-	chains := append(fromChildChains, fromRootChain)
+	if fromEndpointPfx != "" {
+		// Build from endpoint chains.
+		fromChildChains, fromRootChain, _ := r.buildSingleDispatchChains(
+			dispatchFromEndpointChainName,
+			commonPrefix,
+			prefixes,
+			prefixToNames,
+			fromEndpointPfx,
+			func(name string) MatchCriteria { return Match().InInterface(name) },
+			func(pfx, name string) Action {
+				return GotoAction{
+					Target: EndpointChainName(pfx, name),
+				}
+			},
+			fromEndRules,
+		)
+		chains = append(chains, fromChildChains...)
+		chains = append(chains, fromRootChain)
+	}
 
 	if toEndpointPfx != "" {
 		// Build to endpoint chains.
@@ -294,8 +383,8 @@ func (r *DefaultRuleRenderer) endpointMarkDispatchChains(
 		ifaceMatch := prefix + "+"
 		rootSetMarkRules = append(rootSetMarkRules, Rule{
 			Match:   Match().InInterface(ifaceMatch),
-			Action:  DropAction{},
-			Comment: "Unknown endpoint",
+			Action:  r.IptablesFilterDenyAction(),
+			Comment: []string{"Unknown endpoint"},
 		})
 	}
 
@@ -305,7 +394,7 @@ func (r *DefaultRuleRenderer) endpointMarkDispatchChains(
 		Action: SetMaskedMarkAction{
 			Mark: r.IptablesMarkNonCaliEndpoint,
 			Mask: epMarkMapper.GetMask()},
-		Comment: "Non-Cali endpoint mark",
+		Comment: []string{"Non-Cali endpoint mark"},
 	})
 
 	// start rendering from mark rules for workload and host endpoints.
@@ -337,12 +426,12 @@ func (r *DefaultRuleRenderer) endpointMarkDispatchChains(
 		}
 	}
 
-	// Finalizing with a drop rule.
-	log.Debug("Adding drop rules at end of root from mark chains.")
+	// Finalizing with a drop/reject rule.
+	log.Debugf("Adding %s rules at end of root from mark chains.", r.IptablesFilterDenyAction())
 	rootFromMarkRules = append(rootFromMarkRules, Rule{
 		Match:   Match(),
-		Action:  DropAction{},
-		Comment: "Unknown interface",
+		Action:  r.IptablesFilterDenyAction(),
+		Comment: []string{"Unknown interface"},
 	})
 
 	// return set mark and from mark chains.

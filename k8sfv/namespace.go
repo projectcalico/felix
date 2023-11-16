@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017,2019 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -69,7 +70,7 @@ func createNamespaceInt(
 		}
 	}
 	log.WithField("ns_in", ns_in).Debug("Namespace defined")
-	ns_out, err := clientset.CoreV1().Namespaces().Create(ns_in)
+	ns_out, err := clientset.CoreV1().Namespaces().Create(context.Background(), ns_in, metav1.CreateOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -78,17 +79,15 @@ func createNamespaceInt(
 
 func cleanupAllNamespaces(clientset *kubernetes.Clientset, nsPrefix string) {
 	log.Info("Cleaning up all namespaces...")
-	nsList, err := clientset.CoreV1().Namespaces().List(metav1.ListOptions{})
+	nsList, err := clientset.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		panic(err)
 	}
 	log.WithField("count", len(nsList.Items)).Info("Namespaces present")
 	for _, ns := range nsList.Items {
 		if strings.HasPrefix(ns.ObjectMeta.Name, nsPrefix) {
-			err = clientset.CoreV1().Namespaces().Delete(ns.ObjectMeta.Name, deleteImmediately)
-			if err != nil {
-				panic(err)
-			}
+			err = clientset.CoreV1().Namespaces().Delete(context.Background(), ns.ObjectMeta.Name, deleteImmediately)
+			panicIfError(err)
 		} else {
 			log.WithField("name", ns.ObjectMeta.Name).Debug("Namespace skipped")
 		}
@@ -119,5 +118,8 @@ func createNetworkPolicy(clientset *kubernetes.Clientset, namespace string) {
 			},
 		},
 	}
-	clientset.NetworkingV1().NetworkPolicies("").Create(&np)
+	_, err := clientset.NetworkingV1().NetworkPolicies(namespace).Create(context.Background(), &np, metav1.CreateOptions{})
+	if err != nil {
+		log.WithField("name", namespace).WithError(err).Error("failed to create namespace for network policy")
+	}
 }

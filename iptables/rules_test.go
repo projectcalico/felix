@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2022 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,15 @@ package iptables
 import (
 	"bytes"
 	"errors"
-
+	"io"
+	"strings"
 	"sync"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+
+	"github.com/projectcalico/calico/felix/environment"
+	"github.com/projectcalico/calico/felix/iptables/cmdshim"
 )
 
 var (
@@ -69,12 +73,12 @@ var _ = Describe("Hash extraction tests", func() {
 	var table *Table
 
 	BeforeEach(func() {
-		fd := NewFeatureDetector()
-		fd.ReadFile = func(name string) ([]byte, error) {
+		fd := environment.NewFeatureDetector(nil)
+		fd.GetKernelVersionReader = func() (io.Reader, error) {
 			return nil, errors.New("not implemented")
 		}
-		fd.NewCmd = func(name string, arg ...string) CmdIface {
-			return newRealCmd("echo", "iptables v1.4.7")
+		fd.NewCmd = func(name string, arg ...string) cmdshim.CmdIface {
+			return cmdshim.NewRealCmd("echo", "iptables v1.4.7")
 		}
 		table = NewTable(
 			"filter",
@@ -85,6 +89,10 @@ var _ = Describe("Hash extraction tests", func() {
 			TableOptions{
 				HistoricChainPrefixes:    []string{"felix-", "cali"},
 				ExtraCleanupRegexPattern: "an-old-rule",
+				BackendMode:              "legacy",
+				LookPathOverride: func(file string) (s string, e error) {
+					return s, nil
+				},
 			},
 		)
 	})
@@ -93,10 +101,10 @@ var _ = Describe("Hash extraction tests", func() {
 		hashes, rules, err := table.readHashesAndRulesFrom(newClosableBuf("-A FORWARD -j felix-FORWARD\n"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(hashes).To(Equal(map[string][]string{
-			"FORWARD": []string{"OLD INSERT RULE"},
+			"FORWARD": {"OLD INSERT RULE"},
 		}))
 		Expect(rules).To(Equal(map[string][]string{
-			"FORWARD": []string{"-A FORWARD -j felix-FORWARD"},
+			"FORWARD": {"-A FORWARD -j felix-FORWARD"},
 		}))
 	})
 	It("should extract an old felix rule by special case", func() {
@@ -106,7 +114,7 @@ var _ = Describe("Hash extraction tests", func() {
 		))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(hashes).To(Equal(map[string][]string{
-			"FORWARD": []string{
+			"FORWARD": {
 				"OLD INSERT RULE",
 				"",
 			},
@@ -123,7 +131,7 @@ var _ = Describe("Hash extraction tests", func() {
 			"-A FORWARD -m comment --comment \"cali:wUHhoiAYhphO9Mso\" -j cali-FORWARD\n"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(hashes).To(Equal(map[string][]string{
-			"FORWARD": []string{"wUHhoiAYhphO9Mso"},
+			"FORWARD": {"wUHhoiAYhphO9Mso"},
 		}))
 		Expect(rules).To(Equal(map[string][]string{
 			"FORWARD": {
@@ -139,7 +147,7 @@ var _ = Describe("Hash extraction tests", func() {
 				"-A FORWARD -m comment --comment \"cali:1234567890093213\" -j cali-FORWARD\n"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(hashes).To(Equal(map[string][]string{
-			"FORWARD": []string{
+			"FORWARD": {
 				"wUHhoiAYhphO9Mso",
 				"abcdefghij1234-_",
 				"",
@@ -164,11 +172,11 @@ var _ = Describe("Hash extraction tests", func() {
 				"-A FORWARD -m comment --comment \"cali:1234567890093213\" -j cali-FORWARD\n"))
 		Expect(err).NotTo(HaveOccurred())
 		Expect(hashes).To(Equal(map[string][]string{
-			"cali-abcd": []string{
+			"cali-abcd": {
 				"wUHhoiAYhphO9Mso",
 				"abcdefghij1234-_",
 			},
-			"FORWARD": []string{
+			"FORWARD": {
 				"",
 				"1234567890093213",
 			},
@@ -180,6 +188,69 @@ var _ = Describe("Hash extraction tests", func() {
 			},
 		}))
 	})
+
+	It("should extract a rule with a hash and a label commeent", func() {
+		hashes, rules, err := table.readHashesAndRulesFrom(newClosableBuf(
+			"-A FORWARD -m comment --comment \"cali:wUHhoiAYhphO9Mso\" -m comment --comment \"key=value\" -j cali-FORWARD\n"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(hashes).To(Equal(map[string][]string{
+			"FORWARD": {"wUHhoiAYhphO9Mso"},
+		}))
+		Expect(rules).To(Equal(map[string][]string{
+			"FORWARD": {
+				"-A FORWARD -m comment --comment \"cali:wUHhoiAYhphO9Mso\" -m comment --comment \"key=value\" -j cali-FORWARD",
+			},
+		}))
+	})
+
+})
+
+var _ = Describe("rule comments", func() {
+
+	Context("Rule with multiple comments", func() {
+
+		rule := Rule{
+			Match:   MatchCriteria{"-m foobar --foobar baz"},
+			Action:  JumpAction{Target: "biff"},
+			Comment: []string{"boz", "fizz"},
+		}
+
+		It("should render rule including multiple comments", func() {
+			render := rule.RenderAppend("test", "TEST", &environment.Features{})
+			Expect(render).To(ContainSubstring("-m comment --comment \"boz\""))
+			Expect(render).To(ContainSubstring("-m comment --comment \"fizz\""))
+		})
+	})
+
+	Context("Rule with comment with newlines", func() {
+
+		rule := Rule{
+			Match:  MatchCriteria{"-m foobar --foobar baz"},
+			Action: JumpAction{Target: "biff"},
+			Comment: []string{`boz
+fizz`},
+		}
+
+		It("should render rule with newline escaped", func() {
+			render := rule.RenderAppend("test", "TEST", &environment.Features{})
+			Expect(render).To(ContainSubstring("-m comment --comment \"boz_fizz\""))
+		})
+	})
+
+	Context("Rule with comment longer than 256 characters", func() {
+
+		rule := Rule{
+			Match:   MatchCriteria{"-m foobar --foobar baz"},
+			Action:  JumpAction{Target: "biff"},
+			Comment: []string{strings.Repeat("a", 257)},
+		}
+
+		It("should render rule with comment truncated", func() {
+			render := rule.RenderAppend("test", "TEST", &environment.Features{})
+			Expect(render).To(ContainSubstring("-m comment --comment \"" + strings.Repeat("a", 256) + "\""))
+		})
+	})
+
 })
 
 func newClosableBuf(s string) *withDummyClose {
@@ -201,5 +272,5 @@ func calculateHashes(chainName string, rules []Rule) []string {
 		Name:  chainName,
 		Rules: rules,
 	}
-	return chain.RuleHashes(&Features{})
+	return chain.RuleHashes(&environment.Features{})
 }

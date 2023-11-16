@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,16 @@
 package intdataplane
 
 import (
+	"fmt"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/rules"
+	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/rules"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 var _ = Describe("Policy manager", func() {
@@ -58,7 +62,8 @@ var _ = Describe("Policy manager", func() {
 					},
 				},
 			})
-			policyMgr.CompleteDeferredWork()
+			err := policyMgr.CompleteDeferredWork()
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("should install the in and out chain", func() {
@@ -100,7 +105,8 @@ var _ = Describe("Policy manager", func() {
 					Untracked: true,
 				},
 			})
-			policyMgr.CompleteDeferredWork()
+			err := policyMgr.CompleteDeferredWork()
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("should install the raw chains", func() {
@@ -155,7 +161,8 @@ var _ = Describe("Policy manager", func() {
 					PreDnat: true,
 				},
 			})
-			policyMgr.CompleteDeferredWork()
+			err := policyMgr.CompleteDeferredWork()
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("should install the raw chains", func() {
@@ -209,7 +216,8 @@ var _ = Describe("Policy manager", func() {
 					},
 				},
 			})
-			policyMgr.CompleteDeferredWork()
+			err := policyMgr.CompleteDeferredWork()
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("should install the in and out chain", func() {
@@ -219,8 +227,10 @@ var _ = Describe("Policy manager", func() {
 			}})
 		})
 
-		It("should not install to the mangle table", func() {
-			mangleTable.checkChains([][]*iptables.Chain{})
+		It("should install the out chain to the mangle table", func() {
+			mangleTable.checkChains([][]*iptables.Chain{{
+				{Name: "cali-pro-prof1"},
+			}})
 		})
 
 		Describe("after a policy remove", func() {
@@ -238,6 +248,131 @@ var _ = Describe("Policy manager", func() {
 	})
 })
 
+var _ = Describe("Raw egress policy manager", func() {
+	var (
+		policyMgr    *policyManager
+		rawTable     *mockTable
+		neededIPSets set.Set[string]
+	)
+
+	BeforeEach(func() {
+		rawTable = newMockTable("raw")
+		ruleRenderer := rules.NewRenderer(rules.Config{
+			IPSetConfigV4:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
+			IPSetConfigV6:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
+			IptablesMarkAccept:          0x8,
+			IptablesMarkPass:            0x10,
+			IptablesMarkScratch0:        0x20,
+			IptablesMarkScratch1:        0x40,
+			IptablesMarkEndpoint:        0xff00,
+			IptablesMarkNonCaliEndpoint: 0x0100,
+		})
+		policyMgr = newRawEgressPolicyManager(rawTable, ruleRenderer, 4, func(ipSets set.Set[string]) { neededIPSets = ipSets })
+	})
+
+	It("correctly reports needed IP sets", func() {
+		By("defining one untracked policy with an IP set")
+		policyMgr.OnUpdate(&proto.ActivePolicyUpdate{
+			Id: &proto.PolicyID{Tier: "default", Name: "pol1"},
+			Policy: &proto.Policy{
+				Untracked: true,
+				OutboundRules: []*proto.Rule{
+					&proto.Rule{
+						Action:      "deny",
+						DstIpSetIds: []string{"ipsetA"},
+					},
+				},
+			},
+		})
+		err := policyMgr.CompleteDeferredWork()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(neededIPSets).To(MatchIPSets("ipsetA"))
+
+		By("defining another untracked policy with a different IP set")
+		policyMgr.OnUpdate(&proto.ActivePolicyUpdate{
+			Id: &proto.PolicyID{Tier: "default", Name: "pol2"},
+			Policy: &proto.Policy{
+				Untracked: true,
+				OutboundRules: []*proto.Rule{
+					&proto.Rule{
+						Action:      "deny",
+						DstIpSetIds: []string{"ipsetB"},
+					},
+				},
+			},
+		})
+		err = policyMgr.CompleteDeferredWork()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(neededIPSets).To(MatchIPSets("ipsetA", "ipsetB"))
+
+		By("defining a non-untracked policy with a third IP set")
+		policyMgr.OnUpdate(&proto.ActivePolicyUpdate{
+			Id: &proto.PolicyID{Tier: "default", Name: "pol3"},
+			Policy: &proto.Policy{
+				OutboundRules: []*proto.Rule{
+					&proto.Rule{
+						Action:      "deny",
+						DstIpSetIds: []string{"ipsetC"},
+					},
+				},
+			},
+		})
+		err = policyMgr.CompleteDeferredWork()
+		Expect(err).NotTo(HaveOccurred())
+
+		// The non-untracked policy IP set is not needed.
+		Expect(neededIPSets).To(MatchIPSets("ipsetA", "ipsetB"))
+
+		By("removing the first untracked policy")
+		policyMgr.OnUpdate(&proto.ActivePolicyRemove{
+			Id: &proto.PolicyID{Tier: "default", Name: "pol1"},
+		})
+		err = policyMgr.CompleteDeferredWork()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(neededIPSets).To(MatchIPSets("ipsetB"))
+
+		By("removing the second untracked policy")
+		policyMgr.OnUpdate(&proto.ActivePolicyRemove{
+			Id: &proto.PolicyID{Tier: "default", Name: "pol2"},
+		})
+		err = policyMgr.CompleteDeferredWork()
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(neededIPSets).To(MatchIPSets())
+	})
+})
+
+type ipSetsMatcher struct {
+	items []interface{}
+}
+
+func MatchIPSets(items ...interface{}) *ipSetsMatcher {
+	return &ipSetsMatcher{
+		items: items,
+	}
+}
+
+func (m *ipSetsMatcher) Match(actual interface{}) (success bool, err error) {
+	actualSet := actual.(set.Set[string])
+	actualCopy := actualSet.Copy()
+	for _, expected := range m.items {
+		actualCopy.Add("cali40" + expected.(string))
+	}
+	success = (actualSet.Len() == len(m.items)) && (actualCopy.Len() == len(m.items))
+	return
+}
+
+func (m *ipSetsMatcher) FailureMessage(actual interface{}) (message string) {
+	return fmt.Sprintf("Expected %v to match IP set IDs: %v", actual.(set.Set[string]), m.items)
+}
+
+func (m *ipSetsMatcher) NegatedFailureMessage(actual interface{}) (message string) {
+	return fmt.Sprintf("Expected %v not to match IP set IDs: %v", actual.(set.Set[string]), m.items)
+}
+
 type mockPolRenderer struct {
 }
 
@@ -249,13 +384,14 @@ func (r *mockPolRenderer) PolicyToIptablesChains(policyID *proto.PolicyID, polic
 		{Name: outName},
 	}
 }
-func (r *mockPolRenderer) ProfileToIptablesChains(profID *proto.ProfileID, policy *proto.Profile, ipVersion uint8) []*iptables.Chain {
-	inName := rules.ProfileChainName(rules.ProfileInboundPfx, profID)
-	outName := rules.ProfileChainName(rules.ProfileOutboundPfx, profID)
-	return []*iptables.Chain{
-		{Name: inName},
-		{Name: outName},
+func (r *mockPolRenderer) ProfileToIptablesChains(profID *proto.ProfileID, policy *proto.Profile, ipVersion uint8) (inbound, outbound *iptables.Chain) {
+	inbound = &iptables.Chain{
+		Name: rules.ProfileChainName(rules.ProfileInboundPfx, profID),
 	}
+	outbound = &iptables.Chain{
+		Name: rules.ProfileChainName(rules.ProfileOutboundPfx, profID),
+	}
+	return
 }
 
 func newMockPolRenderer() *mockPolRenderer {

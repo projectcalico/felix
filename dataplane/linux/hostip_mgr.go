@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2018-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,24 +20,25 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/ipsets"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/dataplane/common"
+	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 // hostIPManager monitors updates from ifacemonitor for host ip update events. It then flushes host ips into an ipset.
 type hostIPManager struct {
 	nonHostIfacesRegexp *regexp.Regexp
 	// hostIfaceToAddrs maps host interface name to the set of IPs on that interface (reported from the dataplane).
-	hostIfaceToAddrs map[string]set.Set
+	hostIfaceToAddrs map[string]set.Set[string]
 
 	hostIPSetID     string
-	ipsetsDataplane ipsetsDataplane
+	ipsetsDataplane common.IPSetsDataplane
 	maxSize         int
 }
 
 func newHostIPManager(wlIfacesPrefixes []string,
 	ipSetID string,
-	ipsets ipsetsDataplane,
+	ipsets common.IPSetsDataplane,
 	maxIPSetSize int) *hostIPManager {
 
 	return newHostIPManagerWithShims(
@@ -50,7 +51,7 @@ func newHostIPManager(wlIfacesPrefixes []string,
 
 func newHostIPManagerWithShims(wlIfacesPrefixes []string,
 	ipSetID string,
-	ipsets ipsetsDataplane,
+	ipsets common.IPSetsDataplane,
 	maxIPSetSize int) *hostIPManager {
 
 	wlIfacesPattern := "^(" + strings.Join(wlIfacesPrefixes, "|") + ").*"
@@ -58,7 +59,7 @@ func newHostIPManagerWithShims(wlIfacesPrefixes []string,
 
 	return &hostIPManager{
 		nonHostIfacesRegexp: wlIfacesRegexp,
-		hostIfaceToAddrs:    map[string]set.Set{},
+		hostIfaceToAddrs:    map[string]set.Set[string]{},
 		hostIPSetID:         ipSetID,
 		ipsetsDataplane:     ipsets,
 		maxSize:             maxIPSetSize,
@@ -68,8 +69,7 @@ func newHostIPManagerWithShims(wlIfacesPrefixes []string,
 func (m *hostIPManager) getCurrentMembers() []string {
 	members := []string{}
 	for _, addrs := range m.hostIfaceToAddrs {
-		addrs.Iter(func(item interface{}) error {
-			ip := item.(string)
+		addrs.Iter(func(ip string) error {
 			members = append(members, ip)
 			return nil
 		})

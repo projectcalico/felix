@@ -1,4 +1,4 @@
-#!/bin/ash
+#!/bin/bash
 
 # Copyright (c) 2017 Tigera, Inc. All rights reserved.
 #
@@ -19,24 +19,42 @@
 # as used by SIGHUP.
 
 # Pass signals sent to this script through to Felix.
-trap 'echo "SIGINT received, passing on to calico-felix"; kill -INT $pid' SIGINT
-trap 'echo "SIGTERM received, passing on to calico-felix"; kill -TERM $pid' SIGTERM
-trap 'echo "SIGHUP received, passing on to calico-felix"; kill -HUP $pid' SIGHUP
+trap 'echo "calico-felix-wrapper: SIGINT received, passing on to calico-felix"; kill -INT $pid' SIGINT
+trap 'echo "calico-felix-wrapper: SIGTERM received, passing on to calico-felix"; kill -TERM $pid' SIGTERM
+trap 'echo "calico-felix-wrapper: SIGHUP received, passing on to calico-felix"; kill -HUP $pid' SIGHUP
 
 rc=unknown
 
+if [ "$SET_CORE_PATTERN" == "true" ]; then
+  echo '/tmp/core_%h_%e.%p' > /proc/sys/kernel/core_pattern
+fi
+
+# When Felix is run in a non-root netns (for FV testing) the conntrack subsystem doesn't
+# start tracking packets until it is used in some way.  This means that Felix's datastore
+# connection ends up being untracked, causing it to be dropped in BPF mode.
+iptables -A FORWARD -m conntrack --ctstate ESTABLISHED -m comment --comment "cali:workaround"
+
 while true; do
-  echo "Starting calico-felix"
+  if [ "$DELAY_FELIX_START" == "true" ]; then
+    while [ ! -e /start-trigger ]; do
+      echo "calico-felix-wrapper: Delaying starting felix..."
+      sleep 1
+    done
+  fi
+
+  source /extra-env.sh
+
+  echo "calico-felix-wrapper: Starting calico-felix"
   calico-felix &
   pid=$!
-  echo "Started calico-felix, PID=$pid"
+  echo "calico-felix-wrapper: Started calico-felix, PID=$pid"
   wait $pid
   rc=$?
-  echo "Process stopped, RC=$rc"
+  echo "calico-felix-wrapper: Process stopped, RC=$rc"
   if [ "$rc" == "129" ]; then
-    echo "Restarting calico-felix for config reload"
+    echo "calico-felix-wrapper: Restarting calico-felix for config reload"
     continue
   fi
-  echo "Exiting due to non-config shutdown RC=$rc"
+  echo "calico-felix-wrapper: Exiting due to non-config shutdown RC=$rc"
   break
 done

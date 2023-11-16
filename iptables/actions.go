@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,19 @@
 
 package iptables
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/projectcalico/calico/felix/environment"
+)
 
 type Action interface {
-	ToFragment(features *Features) string
+	ToFragment(features *environment.Features) string
+	String() string
+}
+
+type Referrer interface {
+	ReferencedChain() string
 }
 
 type GotoAction struct {
@@ -25,7 +34,7 @@ type GotoAction struct {
 	TypeGoto struct{}
 }
 
-func (g GotoAction) ToFragment(features *Features) string {
+func (g GotoAction) ToFragment(features *environment.Features) string {
 	return "--goto " + g.Target
 }
 
@@ -33,12 +42,18 @@ func (g GotoAction) String() string {
 	return "Goto->" + g.Target
 }
 
+func (g GotoAction) ReferencedChain() string {
+	return g.Target
+}
+
+var _ Referrer = GotoAction{}
+
 type JumpAction struct {
 	Target   string
 	TypeJump struct{}
 }
 
-func (g JumpAction) ToFragment(features *Features) string {
+func (g JumpAction) ToFragment(features *environment.Features) string {
 	return "--jump " + g.Target
 }
 
@@ -46,11 +61,17 @@ func (g JumpAction) String() string {
 	return "Jump->" + g.Target
 }
 
+func (g JumpAction) ReferencedChain() string {
+	return g.Target
+}
+
+var _ Referrer = JumpAction{}
+
 type ReturnAction struct {
 	TypeReturn struct{}
 }
 
-func (r ReturnAction) ToFragment(features *Features) string {
+func (r ReturnAction) ToFragment(features *environment.Features) string {
 	return "--jump RETURN"
 }
 
@@ -62,7 +83,7 @@ type DropAction struct {
 	TypeDrop struct{}
 }
 
-func (g DropAction) ToFragment(features *Features) string {
+func (g DropAction) ToFragment(features *environment.Features) string {
 	return "--jump DROP"
 }
 
@@ -70,12 +91,24 @@ func (g DropAction) String() string {
 	return "Drop"
 }
 
+type RejectAction struct {
+	TypeReject struct{}
+}
+
+func (g RejectAction) ToFragment(features *environment.Features) string {
+	return "--jump REJECT"
+}
+
+func (g RejectAction) String() string {
+	return "Reject"
+}
+
 type LogAction struct {
 	Prefix  string
 	TypeLog struct{}
 }
 
-func (g LogAction) ToFragment(features *Features) string {
+func (g LogAction) ToFragment(features *environment.Features) string {
 	return fmt.Sprintf(`--jump LOG --log-prefix "%s: " --log-level 5`, g.Prefix)
 }
 
@@ -87,7 +120,7 @@ type AcceptAction struct {
 	TypeAccept struct{}
 }
 
-func (g AcceptAction) ToFragment(features *Features) string {
+func (g AcceptAction) ToFragment(features *environment.Features) string {
 	return "--jump ACCEPT"
 }
 
@@ -101,7 +134,7 @@ type DNATAction struct {
 	TypeDNAT struct{}
 }
 
-func (g DNATAction) ToFragment(features *Features) string {
+func (g DNATAction) ToFragment(features *environment.Features) string {
 	if g.DestPort == 0 {
 		return fmt.Sprintf("--jump DNAT --to-destination %s", g.DestAddr)
 	} else {
@@ -118,7 +151,7 @@ type SNATAction struct {
 	TypeSNAT struct{}
 }
 
-func (g SNATAction) ToFragment(features *Features) string {
+func (g SNATAction) ToFragment(features *environment.Features) string {
 	fullyRand := ""
 	if features.SNATFullyRandom {
 		fullyRand = " --random-fully"
@@ -135,7 +168,7 @@ type MasqAction struct {
 	TypeMasq struct{}
 }
 
-func (g MasqAction) ToFragment(features *Features) string {
+func (g MasqAction) ToFragment(features *environment.Features) string {
 	fullyRand := ""
 	if features.MASQFullyRandom {
 		fullyRand = " --random-fully"
@@ -155,7 +188,7 @@ type ClearMarkAction struct {
 	TypeClearMark struct{}
 }
 
-func (c ClearMarkAction) ToFragment(features *Features) string {
+func (c ClearMarkAction) ToFragment(features *environment.Features) string {
 	return fmt.Sprintf("--jump MARK --set-mark 0/%#x", c.Mark)
 }
 
@@ -168,7 +201,7 @@ type SetMarkAction struct {
 	TypeSetMark struct{}
 }
 
-func (c SetMarkAction) ToFragment(features *Features) string {
+func (c SetMarkAction) ToFragment(features *environment.Features) string {
 	return fmt.Sprintf("--jump MARK --set-mark %#x/%#x", c.Mark, c.Mark)
 }
 
@@ -182,7 +215,7 @@ type SetMaskedMarkAction struct {
 	TypeSetMaskedMark struct{}
 }
 
-func (c SetMaskedMarkAction) ToFragment(features *Features) string {
+func (c SetMaskedMarkAction) ToFragment(features *environment.Features) string {
 	return fmt.Sprintf("--jump MARK --set-mark %#x/%#x", c.Mark, c.Mask)
 }
 
@@ -194,10 +227,71 @@ type NoTrackAction struct {
 	TypeNoTrack struct{}
 }
 
-func (g NoTrackAction) ToFragment(features *Features) string {
+func (g NoTrackAction) ToFragment(features *environment.Features) string {
 	return "--jump NOTRACK"
 }
 
 func (g NoTrackAction) String() string {
 	return "NOTRACK"
+}
+
+type SaveConnMarkAction struct {
+	SaveMask     uint32
+	TypeConnMark struct{}
+}
+
+func (c SaveConnMarkAction) ToFragment(features *environment.Features) string {
+	var mask uint32
+	if c.SaveMask == 0 {
+		// If Mask field is ignored, save full mark.
+		mask = 0xffffffff
+	} else {
+		mask = c.SaveMask
+	}
+	return fmt.Sprintf("--jump CONNMARK --save-mark --mask %#x", mask)
+}
+
+func (c SaveConnMarkAction) String() string {
+	return fmt.Sprintf("SaveConnMarkWithMask:%#x", c.SaveMask)
+}
+
+type RestoreConnMarkAction struct {
+	RestoreMask  uint32
+	TypeConnMark struct{}
+}
+
+func (c RestoreConnMarkAction) ToFragment(features *environment.Features) string {
+	var mask uint32
+	if c.RestoreMask == 0 {
+		// If Mask field is ignored, restore full mark.
+		mask = 0xffffffff
+	} else {
+		mask = c.RestoreMask
+	}
+	return fmt.Sprintf("--jump CONNMARK --restore-mark --mask %#x", mask)
+}
+
+func (c RestoreConnMarkAction) String() string {
+	return fmt.Sprintf("RestoreConnMarkWithMask:%#x", c.RestoreMask)
+}
+
+type SetConnMarkAction struct {
+	Mark         uint32
+	Mask         uint32
+	TypeConnMark struct{}
+}
+
+func (c SetConnMarkAction) ToFragment(features *environment.Features) string {
+	var mask uint32
+	if c.Mask == 0 {
+		// If Mask field is ignored, default to full mark.
+		mask = 0xffffffff
+	} else {
+		mask = c.Mask
+	}
+	return fmt.Sprintf("--jump CONNMARK --set-mark %#x/%#x", c.Mark, mask)
+}
+
+func (c SetConnMarkAction) String() string {
+	return fmt.Sprintf("SetConnMarkWithMask:%#x/%#x", c.Mark, c.Mask)
 }

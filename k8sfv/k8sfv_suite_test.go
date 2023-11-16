@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2017,2019 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/logutils"
-	"github.com/projectcalico/libcalico-go/lib/testutils"
+	"github.com/projectcalico/calico/felix/logutils"
+	"github.com/projectcalico/calico/libcalico-go/lib/testutils"
 )
 
 func init() {
@@ -43,6 +43,7 @@ func init() {
 
 func TestMain(t *testing.T) {
 	RegisterFailHandler(Fail)
-	junitReporter := reporters.NewJUnitReporter("../report/k8sfv_suite.xml")
+	// The run-test script runs this file from k8sfv/output.
+	junitReporter := reporters.NewJUnitReporter("../../report/k8sfv_suite.xml")
 	RunSpecsWithDefaultAndCustomReporters(t, "Felix/KDD FV tests", []Reporter{junitReporter})
 }

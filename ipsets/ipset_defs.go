@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,18 +15,20 @@
 package ipsets
 
 import (
+	"fmt"
+	"math"
+	"regexp"
+	"strconv"
+	"strings"
+
 	"github.com/prometheus/client_golang/prometheus"
 	log "github.com/sirupsen/logrus"
 
-	"regexp"
-	"strings"
+	cprometheus "github.com/projectcalico/calico/libcalico-go/lib/prometheus"
 
-	"fmt"
-	"strconv"
-
-	"github.com/alauda/felix/ip"
-	"github.com/alauda/felix/labelindex"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/ip"
+	"github.com/projectcalico/calico/felix/labelindex"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 var (
@@ -50,7 +52,7 @@ var (
 		Name: "felix_ipset_lines_executed",
 		Help: "Number of ipset operations executed.",
 	})
-	summaryExecStart = prometheus.NewSummary(prometheus.SummaryOpts{
+	summaryExecStart = cprometheus.NewSummary(prometheus.SummaryOpts{
 		Name: "felix_exec_time_micros",
 		Help: "Summary of time taken to fork/exec child processes",
 	})
@@ -113,7 +115,7 @@ func (t IPSetType) IsMemberIPV6(member string) bool {
 
 // CanonicaliseMember converts the string representation of an IP set member to a canonical
 // object of some kind.  The object is required to by hashable.
-func (t IPSetType) CanonicaliseMember(member string) ipSetMember {
+func (t IPSetType) CanonicaliseMember(member string) IPSetMember {
 	switch t {
 	case IPSetTypeHashIP:
 		// Convert the string into our ip.Addr type, which is backed by an array.
@@ -134,7 +136,7 @@ func (t IPSetType) CanonicaliseMember(member string) ipSetMember {
 			// This should be prevented by validation.
 			log.WithField("member", member).Panic("Failed to parse IP part of IP,port member")
 		}
-		// parts[1] should contain "(tcp|udp):<port number>"
+		// parts[1] should contain "(tcp|udp|sctp):<port number>"
 		parts = strings.Split(parts[1], ":")
 		var proto labelindex.IPSetPortProtocol
 		switch strings.ToLower(parts[0]) {
@@ -142,12 +144,17 @@ func (t IPSetType) CanonicaliseMember(member string) ipSetMember {
 			proto = labelindex.ProtocolUDP
 		case "tcp":
 			proto = labelindex.ProtocolTCP
+		case "sctp":
+			proto = labelindex.ProtocolSCTP
 		default:
 			log.WithField("member", member).Panic("Unknown protocol")
 		}
 		port, err := strconv.Atoi(parts[1])
 		if err != nil {
 			log.WithField("member", member).WithError(err).Panic("Bad port")
+		}
+		if port > math.MaxUint16 || port < 0 {
+			log.WithField("member", member).Panic("Bad port range (should be between 0 and 65535)")
 		}
 		// Return a dedicated struct for V4 or V6.  This slightly reduces occupancy over storing
 		// the address as an interface by storing one fewer interface headers.  That is worthwhile
@@ -175,7 +182,7 @@ func (t IPSetType) CanonicaliseMember(member string) ipSetMember {
 	return nil
 }
 
-type ipSetMember interface {
+type IPSetMember interface {
 	String() string
 }
 
@@ -202,6 +209,15 @@ func (f IPFamily) IsValid() bool {
 	}
 	return false
 }
+func (f IPFamily) Version() int {
+	switch f {
+	case IPFamilyV4:
+		return 4
+	case IPFamilyV6:
+		return 6
+	}
+	return 0
+}
 
 // IPSetMetadata contains the metadata for a particular IP set, such as its name, type and size.
 type IPSetMetadata struct {
@@ -218,19 +234,19 @@ type ipSet struct {
 
 	// members either contains the members that we've programmed or is nil, indicating that
 	// we're out of sync.
-	members set.Set
+	members set.Set[IPSetMember]
 
 	// pendingReplace is either nil to indicate that there is no pending replace or a set
 	// containing all the entries that we want to write.
-	pendingReplace set.Set
+	pendingReplace set.Set[IPSetMember]
 	// pendingAdds contains members that are queued up to add to the IP set.  If pendingReplace
 	// is non-nil then pendingAdds is empty (and we add members directly to pendingReplace
 	// instead).
-	pendingAdds set.Set
+	pendingAdds set.Set[IPSetMember]
 	// pendingDeletions contains members that are queued up for deletion.  If pendingReplace
 	// is non-nil then pendingDeletions is empty (and we delete members directly from
 	// pendingReplace instead).
-	pendingDeletions set.Set
+	pendingDeletions set.Set[IPSetMember]
 }
 
 // IPVersionConfig wraps up the metadata for a particular IP version.  It can be used by

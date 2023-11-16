@@ -1,6 +1,4 @@
-// +build fvtests
-
-// Copyright (c) 2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,29 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build fvtests
+
 package fv_test
 
 import (
+	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/projectcalico/calico/felix/fv/connectivity"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"github.com/sirupsen/logrus"
 
-	"errors"
-	"fmt"
-
 	"github.com/vishvananda/netlink"
 
-	"github.com/alauda/felix/fv/containers"
-	"github.com/alauda/felix/fv/infrastructure"
-	"github.com/alauda/felix/fv/metrics"
-	"github.com/alauda/felix/fv/utils"
-	"github.com/alauda/felix/fv/workload"
-	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	client "github.com/projectcalico/libcalico-go/lib/clientv3"
+	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/projectcalico/calico/felix/fv/metrics"
+	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/projectcalico/calico/felix/fv/workload"
+	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
 )
 
 var _ = Context("etcd connection interruption", func() {
@@ -45,22 +47,14 @@ var _ = Context("etcd connection interruption", func() {
 		etcd    *containers.Container
 		felixes []*infrastructure.Felix
 		client  client.Interface
+		infra   infrastructure.DatastoreInfra
 		w       [2]*workload.Workload
-		cc      *workload.ConnectivityChecker
+		cc      *connectivity.Checker
 	)
 
 	BeforeEach(func() {
-		felixes, etcd, client = infrastructure.StartNNodeEtcdTopology(2, infrastructure.DefaultTopologyOptions())
-
-		// Install a default profile that allows all ingress and egress, in the absence of any Policy.
-		defaultProfile := api.NewProfile()
-		defaultProfile.Name = "default"
-		defaultProfile.Spec.LabelsToApply = map[string]string{"default": ""}
-		defaultProfile.Spec.Egress = []api.Rule{{Action: api.Allow}}
-		defaultProfile.Spec.Ingress = []api.Rule{{Action: api.Allow}}
-		_, err := client.Profiles().Create(utils.Ctx, defaultProfile, utils.NoOptions)
-		Expect(err).NotTo(HaveOccurred())
-
+		felixes, etcd, client, infra = infrastructure.StartNNodeEtcdTopology(2, infrastructure.DefaultTopologyOptions())
+		infrastructure.CreateDefaultProfile(client, "default", map[string]string{"default": ""}, "")
 		// Wait until the tunl0 device appears; it is created when felix inserts the ipip module
 		// into the kernel.
 		Eventually(func() error {
@@ -84,7 +78,7 @@ var _ = Context("etcd connection interruption", func() {
 			w[ii].Configure(client)
 		}
 
-		cc = &workload.ConnectivityChecker{}
+		cc = &connectivity.Checker{}
 	})
 
 	AfterEach(func() {
@@ -104,9 +98,10 @@ var _ = Context("etcd connection interruption", func() {
 		}
 
 		if CurrentGinkgoTestDescription().Failed {
-			etcd.Exec("etcdctl", "ls", "--recursive", "/")
+			etcd.Exec("etcdctl", "get", "/", "--prefix", "--keys-only")
 		}
 		etcd.Stop()
+		infra.Stop()
 	})
 
 	It("shouldn't use excessive CPU when etcd is stopped", func() {
@@ -140,7 +135,7 @@ var _ = Context("etcd connection interruption", func() {
 		By("silently dropping etcd packets", func() {
 			// Normally, if a connection closes at either end, the other peer's traffic will get
 			// FIN or RST responses, which cleanly shut down the connection.  However, in order
-			// to test the GRPC-level keep-alives, we want to simulate a network or NAT change that
+			// to test the GRPC-level keep-alive, we want to simulate a network or NAT change that
 			// starts to black-hole the TCP connection so that there are no responses of any kind.
 			var portRegexp = regexp.MustCompile(`sport=(\d+).*dport=2379`)
 			for _, felix := range felixes {

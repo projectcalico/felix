@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2022 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,13 +15,17 @@
 package config_test
 
 import (
-	. "github.com/alauda/felix/config"
-
+	"fmt"
 	"net"
 	"reflect"
+	"regexp"
+	"strings"
 	"time"
 
-	"strings"
+	"github.com/projectcalico/calico/felix/config"
+	"github.com/projectcalico/calico/felix/testutils"
+	"github.com/projectcalico/calico/libcalico-go/lib/apiconfig"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
@@ -29,8 +33,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/libcalico-go/lib/apis/v3"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
 )
 
 var _ = Describe("FelixConfig vs ConfigParams parity", func() {
@@ -46,12 +50,26 @@ var _ = Describe("FelixConfig vs ConfigParams parity", func() {
 		"ClusterGUID",
 		"ClusterType",
 		"CalicoVersion",
+		"Variant",
 
 		// Moved to Node.
 		"IpInIpTunnelAddr",
+		"IPv4VXLANTunnelAddr",
+		"IPv6VXLANTunnelAddr",
+		"VXLANTunnelMACAddr",
+		"VXLANTunnelMACAddrV6",
+		"loadClientConfigFromEnvironment",
+
+		"loadClientConfigFromEnvironment",
+		"useNodeResourceUpdates",
+		"internalOverrides",
+
+		// Temporary field to implement and test IPv6 in BPF dataplane
+		"BpfIpv6Support",
 	}
 	cpFieldNameToFC := map[string]string{
 		"IpInIpEnabled":                      "IPIPEnabled",
+		"VXLANEnabled":                       "VXLANEnabled",
 		"IpInIpMtu":                          "IPIPMTU",
 		"Ipv6Support":                        "IPv6Support",
 		"IptablesLockTimeoutSecs":            "IptablesLockTimeout",
@@ -71,7 +89,8 @@ var _ = Describe("FelixConfig vs ConfigParams parity", func() {
 
 	BeforeEach(func() {
 		fcFields = fieldsByName(v3.FelixConfigurationSpec{})
-		cpFields = fieldsByName(Config{})
+
+		cpFields = fieldsByName(config.Config{})
 		for _, name := range cpFieldsToIgnore {
 			delete(cpFields, name)
 		}
@@ -87,6 +106,9 @@ var _ = Describe("FelixConfig vs ConfigParams parity", func() {
 				continue
 			}
 			if strings.Contains(string(f.Tag), "local") {
+				continue
+			}
+			if n == "Encapsulation" {
 				continue
 			}
 			Expect(fcFields).To(HaveKey(n))
@@ -113,20 +135,90 @@ func fieldsByName(example interface{}) map[string]reflect.StructField {
 	return fields
 }
 
+var _ = Describe("Config override empty", func() {
+	var cp *config.Config
+	BeforeEach(func() {
+		cp = config.New()
+	})
+
+	It("should allow config override", func() {
+		changed, err := cp.OverrideParam("BPFEnabled", "true")
+		Expect(changed).To(BeTrue())
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cp.BPFEnabled).To(BeTrue())
+	})
+
+	Describe("with a param set", func() {
+		BeforeEach(func() {
+			_, err := cp.UpdateFrom(map[string]string{"BPFEnabled": "true"}, config.DatastorePerHost)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should allow config override", func() {
+			By("Having correct initial value")
+			Expect(cp.BPFEnabled).To(BeTrue())
+
+			By("Having correct value after override")
+			changed, err := cp.OverrideParam("BPFEnabled", "false")
+			Expect(changed).To(BeTrue())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cp.BPFEnabled).To(BeFalse())
+
+			By("Ignoring a lower-priority config update")
+			// Env vars get converted to lower-case before calling UpdateFrom.
+			changed, err = cp.UpdateFrom(map[string]string{"bpfenabled": "true"}, config.EnvironmentVariable)
+			Expect(changed).To(BeFalse())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cp.BPFEnabled).To(BeFalse())
+		})
+	})
+
+	Describe("with env var set", func() {
+		BeforeEach(func() {
+			// Env vars get converted to lower-case before calling UpdateFrom.
+			changed, err := cp.UpdateFrom(map[string]string{"bpfenabled": "true"}, config.EnvironmentVariable)
+			Expect(changed).To(BeTrue())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cp.BPFEnabled).To(BeTrue())
+		})
+
+		It("should be overridable", func() {
+			changed, err := cp.OverrideParam("BPFEnabled", "false")
+			Expect(changed).To(BeTrue())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(cp.BPFEnabled).To(BeFalse())
+		})
+	})
+
+	It("should have correct initial IptablesBackend value 'auto'", func() {
+		Expect(cp.IptablesBackend).To(Equal("auto"))
+	})
+
+	It("should allow IptablesBackend value 'Auto' read from FelixConfiguration resource", func() {
+		changed, err := cp.UpdateFrom(map[string]string{"IptablesBackend": "Auto"}, config.DatastorePerHost)
+		Expect(changed).To(BeFalse()) // auto is the default.
+		Expect(err).NotTo(HaveOccurred())
+		Expect(cp.IptablesBackend).To(Equal("auto"))
+	})
+})
+
+var t bool = true
+
 var _ = DescribeTable("Config parsing",
 	func(key, value string, expected interface{}, errorExpected ...bool) {
-		config := New()
-		config.UpdateFrom(map[string]string{key: value},
-			EnvironmentVariable)
-		configPtr := reflect.ValueOf(config)
+		cfg := config.New()
+		_, err := cfg.UpdateFrom(map[string]string{key: value}, config.EnvironmentVariable)
+		configPtr := reflect.ValueOf(cfg)
 		configElem := configPtr.Elem()
 		fieldRef := configElem.FieldByName(key)
 		newVal := fieldRef.Interface()
-		Expect(newVal).To(Equal(expected))
+		Expect(newVal).To(Equal(expected), fmt.Sprintf("Expected %s=%q to parse as %v but got %v", key, value, expected, newVal))
 		if len(errorExpected) > 0 && errorExpected[0] {
-			Expect(config.Err).To(HaveOccurred())
+			Expect(err).To(HaveOccurred(), fmt.Sprintf("Expected an error when setting %s=%q", key, value))
+			Expect(cfg.Err).To(HaveOccurred(), fmt.Sprintf("Expected an error to be stored when setting %s=%q", key, value))
 		} else {
-			Expect(config.Err).NotTo(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("Expected no error when setting %s=%q", key, value))
+			Expect(cfg.Err).NotTo(HaveOccurred(), fmt.Sprintf("Expected no error to be stored when setting %s=%q", key, value))
 		}
 	},
 
@@ -158,8 +250,35 @@ var _ = DescribeTable("Config parsing",
 
 	Entry("InterfacePrefix", "InterfacePrefix", "tap", "tap"),
 	Entry("InterfacePrefix list", "InterfacePrefix", "tap,cali", "tap,cali"),
-	Entry("InterfaceExclude", "InterfaceExclude", "kube-ipvs0", "kube-ipvs0"),
-	Entry("InterfaceExclude list", "InterfaceExclude", "kube-ipvs0,dummy", "kube-ipvs0,dummy"),
+
+	Entry("InterfaceExclude one value no regexp", "InterfaceExclude", "kube-ipvs0", []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+	}),
+	Entry("InterfaceExclude list no regexp", "InterfaceExclude", "kube-ipvs0,dummy", []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+		regexp.MustCompile("^dummy$"),
+	}),
+	Entry("InterfaceExclude one value regexp", "InterfaceExclude", "/kube-ipvs/", []*regexp.Regexp{
+		regexp.MustCompile("kube-ipvs"),
+	}),
+	Entry("InterfaceExclude list regexp", "InterfaceExclude", "kube-ipvs0,dummy,/^veth.*$/", []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+		regexp.MustCompile("^dummy$"),
+		regexp.MustCompile("^veth.*$"),
+	}),
+	Entry("InterfaceExclude no regexp", "InterfaceExclude", "/^kube.*/,/veth/", []*regexp.Regexp{
+		regexp.MustCompile("^kube.*"),
+		regexp.MustCompile("veth"),
+	}),
+	Entry("InterfaceExclude list empty regexp", "InterfaceExclude", "kube,//", []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+	}),
+	Entry("InterfaceExclude list bad comma use", "InterfaceExclude", "/kube,/,dummy", []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+	}),
+	Entry("InterfaceExclude list invalid regexp symbol", "InterfaceExclude", `/^kube\K/`, []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+	}),
 
 	Entry("ChainInsertMode append", "ChainInsertMode", "append", "append"),
 	Entry("ChainInsertMode append", "ChainInsertMode", "Append", "append"),
@@ -185,6 +304,9 @@ var _ = DescribeTable("Config parsing",
 	Entry("IptablesMangleAllowAction", "IptablesMangleAllowAction",
 		"RETURN", "RETURN"),
 
+	Entry("IptablesFilterDenyAction", "IptablesFilterDenyAction", "DROP", "DROP"),
+	Entry("IptablesFilterDenyAction", "IptablesFilterDenyAction", "REJECT", "REJECT"),
+
 	Entry("LogFilePath", "LogFilePath", "/tmp/felix.log", "/tmp/felix.log"),
 
 	Entry("LogSeverityFile", "LogSeverityFile", "debug", "DEBUG"),
@@ -202,9 +324,12 @@ var _ = DescribeTable("Config parsing",
 	Entry("LogSeveritySys", "LogSeveritySys", "error", "ERROR"),
 	Entry("LogSeveritySys", "LogSeveritySys", "fatal", "FATAL"),
 
-	Entry("IpInIpEnabled", "IpInIpEnabled", "true", true),
-	Entry("IpInIpEnabled", "IpInIpEnabled", "y", true),
-	Entry("IpInIpEnabled", "IpInIpEnabled", "True", true),
+	Entry("LogDebugFilenameRegex", "LogDebugFilenameRegex", "", (*regexp.Regexp)(nil)),
+	Entry("LogDebugFilenameRegex", "LogDebugFilenameRegex", ".*", regexp.MustCompile(".*")),
+
+	Entry("IpInIpEnabled", "IpInIpEnabled", "true", &t),
+	Entry("IpInIpEnabled", "IpInIpEnabled", "y", &t),
+	Entry("IpInIpEnabled", "IpInIpEnabled", "True", &t),
 
 	Entry("IpInIpMtu", "IpInIpMtu", "1234", int(1234)),
 	Entry("IpInIpTunnelAddr", "IpInIpTunnelAddr",
@@ -228,114 +353,162 @@ var _ = DescribeTable("Config parsing",
 	Entry("HealthPort", "HealthPort", "1234", int(1234)),
 
 	Entry("PrometheusMetricsEnabled", "PrometheusMetricsEnabled", "true", true),
+	Entry("PrometheusMetricsHost", "PrometheusMetricsHost", "10.0.0.1", "10.0.0.1"),
 	Entry("PrometheusMetricsPort", "PrometheusMetricsPort", "1234", int(1234)),
 	Entry("PrometheusGoMetricsEnabled", "PrometheusGoMetricsEnabled", "false", false),
 	Entry("PrometheusProcessMetricsEnabled", "PrometheusProcessMetricsEnabled", "false", false),
 
 	Entry("FailsafeInboundHostPorts old syntax", "FailsafeInboundHostPorts", "1,2,3,4",
-		[]ProtoPort{
+		[]config.ProtoPort{
 			{Protocol: "tcp", Port: 1},
 			{Protocol: "tcp", Port: 2},
 			{Protocol: "tcp", Port: 3},
 			{Protocol: "tcp", Port: 4},
 		}),
 	Entry("FailsafeOutboundHostPorts old syntax", "FailsafeOutboundHostPorts", "1,2,3,4",
-		[]ProtoPort{
+		[]config.ProtoPort{
 			{Protocol: "tcp", Port: 1},
 			{Protocol: "tcp", Port: 2},
 			{Protocol: "tcp", Port: 3},
 			{Protocol: "tcp", Port: 4},
 		}),
 	Entry("FailsafeInboundHostPorts new syntax", "FailsafeInboundHostPorts", "tcp:1,udp:2",
-		[]ProtoPort{
+		[]config.ProtoPort{
 			{Protocol: "tcp", Port: 1},
 			{Protocol: "udp", Port: 2},
 		}),
 	Entry("FailsafeOutboundHostPorts new syntax", "FailsafeOutboundHostPorts", "tcp:1,udp:2",
-		[]ProtoPort{
+		[]config.ProtoPort{
 			{Protocol: "tcp", Port: 1},
 			{Protocol: "udp", Port: 2},
 		}),
+	Entry("FailsafeInboundHostPorts new cidr syntax", "FailsafeInboundHostPorts", "tcp:0.0.0.0/0:1,udp:0.0.0.0/0:2",
+		[]config.ProtoPort{
+			{Net: "0.0.0.0/0", Protocol: "tcp", Port: 1},
+			{Net: "0.0.0.0/0", Protocol: "udp", Port: 2},
+		}),
+	Entry("FailsafeOutboundHostPorts new cidr syntax", "FailsafeOutboundHostPorts", "tcp:0.0.0.0/0:1,udp:0.0.0.0/0:2",
+		[]config.ProtoPort{
+			{Net: "0.0.0.0/0", Protocol: "tcp", Port: 1},
+			{Net: "0.0.0.0/0", Protocol: "udp", Port: 2},
+		}),
+	Entry("FailsafeInboundHostPorts new cidr syntax IPv6", "FailsafeInboundHostPorts", "tcp:[::/0]:1,udp:[::/0]:2",
+		[]config.ProtoPort{
+			{Net: "::/0", Protocol: "tcp", Port: 1},
+			{Net: "::/0", Protocol: "udp", Port: 2},
+		}),
+	Entry("FailsafeOutboundHostPorts new cidr syntax IPv6", "FailsafeOutboundHostPorts", "tcp:[::/0]:1,udp:[::/0]:2",
+		[]config.ProtoPort{
+			{Net: "::/0", Protocol: "tcp", Port: 1},
+			{Net: "::/0", Protocol: "udp", Port: 2},
+		}),
 	Entry("FailsafeInboundHostPorts mixed syntax", "FailsafeInboundHostPorts", "1,udp:2",
-		[]ProtoPort{
+		[]config.ProtoPort{
 			{Protocol: "tcp", Port: 1},
 			{Protocol: "udp", Port: 2},
 		}),
 	Entry("FailsafeOutboundHostPorts mixed syntax", "FailsafeOutboundHostPorts", "1,udp:2",
-		[]ProtoPort{
+		[]config.ProtoPort{
 			{Protocol: "tcp", Port: 1},
 			{Protocol: "udp", Port: 2},
 		}),
+	Entry("FailsafeInboundHostPorts new mixed syntax", "FailsafeInboundHostPorts", "1,udp:0.0.0.0/0:2",
+		[]config.ProtoPort{
+			{Protocol: "tcp", Port: 1},
+			{Net: "0.0.0.0/0", Protocol: "udp", Port: 2},
+		}),
+	Entry("FailsafeOutboundHostPorts new mixed syntax", "FailsafeOutboundHostPorts", "1,udp:0.0.0.0/0:2",
+		[]config.ProtoPort{
+			{Protocol: "tcp", Port: 1},
+			{Net: "0.0.0.0/0", Protocol: "udp", Port: 2},
+		}),
 	Entry("FailsafeInboundHostPorts bad syntax -> defaulted", "FailsafeInboundHostPorts", "foo:1",
-		[]ProtoPort{
+		[]config.ProtoPort{
 			{Protocol: "tcp", Port: 22},
 			{Protocol: "udp", Port: 68},
 			{Protocol: "tcp", Port: 179},
 			{Protocol: "tcp", Port: 2379},
 			{Protocol: "tcp", Port: 2380},
+			{Protocol: "tcp", Port: 5473},
+			{Protocol: "tcp", Port: 6443},
 			{Protocol: "tcp", Port: 6666},
 			{Protocol: "tcp", Port: 6667},
 		},
 		true,
 	),
-	Entry("FailsafeInboundHostPorts too many parts -> defaulted", "FailsafeInboundHostPorts", "tcp:1:bar",
-		[]ProtoPort{
+	Entry("FailsafeInboundHostPorts too many parts -> defaulted", "FailsafeInboundHostPorts", "tcp:0.0.0.0/0:1:bar",
+		[]config.ProtoPort{
 			{Protocol: "tcp", Port: 22},
 			{Protocol: "udp", Port: 68},
 			{Protocol: "tcp", Port: 179},
 			{Protocol: "tcp", Port: 2379},
 			{Protocol: "tcp", Port: 2380},
+			{Protocol: "tcp", Port: 5473},
+			{Protocol: "tcp", Port: 6443},
 			{Protocol: "tcp", Port: 6666},
 			{Protocol: "tcp", Port: 6667},
 		},
 		true,
 	),
 
-	Entry("FailsafeInboundHostPorts none", "FailsafeInboundHostPorts", "none", []ProtoPort(nil)),
-	Entry("FailsafeOutboundHostPorts none", "FailsafeOutboundHostPorts", "none", []ProtoPort(nil)),
+	Entry("FailsafeInboundHostPorts none", "FailsafeInboundHostPorts", "none", []config.ProtoPort(nil)),
+	Entry("FailsafeOutboundHostPorts none", "FailsafeOutboundHostPorts", "none", []config.ProtoPort(nil)),
 
 	Entry("FailsafeInboundHostPorts empty", "FailsafeInboundHostPorts", "",
-		[]ProtoPort{
+		[]config.ProtoPort{
 			{Protocol: "tcp", Port: 22},
 			{Protocol: "udp", Port: 68},
 			{Protocol: "tcp", Port: 179},
 			{Protocol: "tcp", Port: 2379},
 			{Protocol: "tcp", Port: 2380},
+			{Protocol: "tcp", Port: 5473},
+			{Protocol: "tcp", Port: 6443},
 			{Protocol: "tcp", Port: 6666},
 			{Protocol: "tcp", Port: 6667},
 		},
 	),
 	Entry("FailsafeOutboundHostPorts empty", "FailsafeOutboundHostPorts", "",
-		[]ProtoPort{
+		[]config.ProtoPort{
 			{Protocol: "udp", Port: 53},
 			{Protocol: "udp", Port: 67},
 			{Protocol: "tcp", Port: 179},
 			{Protocol: "tcp", Port: 2379},
 			{Protocol: "tcp", Port: 2380},
+			{Protocol: "tcp", Port: 5473},
+			{Protocol: "tcp", Port: 6443},
 			{Protocol: "tcp", Port: 6666},
 			{Protocol: "tcp", Port: 6667},
 		},
 	),
 	Entry("KubeNodePortRanges empty", "KubeNodePortRanges", "",
 		[]numorstring.Port{
-			{30000, 32767, ""},
+			{MinPort: 30000, MaxPort: 32767, PortName: ""},
 		},
 	),
 	Entry("KubeNodePortRanges range", "KubeNodePortRanges", "30001:30002,30030:30040,30500:30600",
 		[]numorstring.Port{
-			{30001, 30002, ""},
-			{30030, 30040, ""},
-			{30500, 30600, ""},
+			{MinPort: 30001, MaxPort: 30002, PortName: ""},
+			{MinPort: 30030, MaxPort: 30040, PortName: ""},
+			{MinPort: 30500, MaxPort: 30600, PortName: ""},
 		},
 	),
 
 	Entry("IptablesNATOutgoingInterfaceFilter", "IptablesNATOutgoingInterfaceFilter", "cali-123", "cali-123"),
 	Entry("IptablesNATOutgoingInterfaceFilter", "IptablesNATOutgoingInterfaceFilter", "cali@123", "", false),
+
+	Entry("HealthTimeoutOverrides", "HealthTimeoutOverrides", "", map[string]time.Duration(nil), false),
+	Entry("HealthTimeoutOverrides good", "HealthTimeoutOverrides", "a=90s", map[string]time.Duration{"a": 90 * time.Second}, false),
+	Entry("HealthTimeoutOverrides good x 2", "HealthTimeoutOverrides", "a=90s, b=10ms",
+		map[string]time.Duration{"a": 90 * time.Second, "b": 10 * time.Millisecond}, false),
+	Entry("HealthTimeoutOverrides good zero", "HealthTimeoutOverrides", "a=0",
+		map[string]time.Duration{"a": 0}, false),
+	// Not a required parameter so a bad value is translated to nil:
+	Entry("HealthTimeoutOverrides non-duration", "HealthTimeoutOverrides", "foo=bar", map[string]time.Duration(nil), false),
 )
 
 var _ = DescribeTable("OpenStack heuristic tests",
 	func(clusterType, metadataAddr, metadataPort, ifacePrefixes interface{}, expected bool) {
-		c := New()
+		c := config.New()
 		values := make(map[string]string)
 		if clusterType != nil {
 			values["ClusterType"] = clusterType.(string)
@@ -349,7 +522,7 @@ var _ = DescribeTable("OpenStack heuristic tests",
 		if ifacePrefixes != nil {
 			values["InterfacePrefix"] = ifacePrefixes.(string)
 		}
-		_, err := c.UpdateFrom(values, EnvironmentVariable)
+		_, err := c.UpdateFrom(values, config.EnvironmentVariable)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.OpenstackActive()).To(Equal(expected))
 	},
@@ -373,13 +546,36 @@ var _ = DescribeTable("OpenStack heuristic tests",
 	Entry("ifacePrefixes = cali ", nil, nil, nil, "cali", false),
 )
 
+var _ = DescribeTable("Kubernetes Provider tests",
+	func(clusterType string, expected config.Provider) {
+		c := config.New()
+		c.ClusterType = clusterType
+		Expect(c.KubernetesProvider()).To(Equal(expected))
+	},
+	Entry("no config", nil, config.ProviderNone),
+
+	Entry("explicit provider as cluster type", "aks", config.ProviderAKS),
+	Entry("explicit provider at start of cluster type", "AKS,k8s", config.ProviderAKS),
+	Entry("explicit provider at end of cluster type", "k8s,aks", config.ProviderAKS),
+	Entry("explicit provider in middle of cluster type", "k8s,EKS,k8s", config.ProviderEKS),
+	Entry("no explicit provider in cluster type", "k8s,something,else", config.ProviderNone),
+
+	Entry("EKS provider", "k8s,eks", config.ProviderEKS),
+	Entry("GKE provider", "GKE,k8s", config.ProviderGKE),
+	Entry("AKS provider", "Aks,k8s", config.ProviderAKS),
+	Entry("OpenShift provider", "OpenShift,k8s", config.ProviderOpenShift),
+	Entry("DockerEE provider", "dockerenterprise,k8s", config.ProviderDockerEE),
+)
+
 var _ = Describe("DatastoreConfig tests", func() {
-	var c *Config
+	var c *config.Config
 	Describe("with IPIP enabled", func() {
 		BeforeEach(func() {
-			c = New()
+			c = config.New()
 			c.DatastoreType = "k8s"
-			c.IpInIpEnabled = true
+			t := true
+			c.IpInIpEnabled = &t
+			c.Encapsulation.IPIPEnabled = true
 		})
 		It("should leave node polling enabled", func() {
 			Expect(c.DatastoreConfig().Spec.K8sDisableNodePoll).To(BeFalse())
@@ -387,20 +583,105 @@ var _ = Describe("DatastoreConfig tests", func() {
 	})
 	Describe("with IPIP disabled", func() {
 		BeforeEach(func() {
-			c = New()
+			c = config.New()
 			c.DatastoreType = "k8s"
-			c.IpInIpEnabled = false
+			f := false
+			c.IpInIpEnabled = &f
+			c.Encapsulation.IPIPEnabled = false
 		})
 		It("should leave node polling enabled", func() {
 			Expect(c.DatastoreConfig().Spec.K8sDisableNodePoll).To(BeTrue())
+		})
+	})
+
+	Describe("with the configuration set only from the common calico configuration", func() {
+		BeforeEach(func() {
+			c = config.New()
+			c.SetLoadClientConfigFromEnvironmentFunction(func() (*apiconfig.CalicoAPIConfig, error) {
+				return &apiconfig.CalicoAPIConfig{
+					Spec: apiconfig.CalicoAPIConfigSpec{
+						DatastoreType: apiconfig.EtcdV3,
+						EtcdConfig: apiconfig.EtcdConfig{
+							EtcdEndpoints:  "http://localhost:1234",
+							EtcdKeyFile:    testutils.TestDataFile("etcdkeyfile.key"),
+							EtcdCertFile:   testutils.TestDataFile("etcdcertfile.cert"),
+							EtcdCACertFile: testutils.TestDataFile("etcdcacertfile.cert"),
+						},
+					},
+				}, nil
+			})
+		})
+		It("sets the configuration options", func() {
+			spec := c.DatastoreConfig().Spec
+			Expect(spec.DatastoreType).To(Equal(apiconfig.EtcdV3))
+			Expect(spec.EtcdEndpoints).To(Equal("http://localhost:1234"))
+			Expect(spec.EtcdKeyFile).To(Equal(testutils.TestDataFile("etcdkeyfile.key")))
+			Expect(spec.EtcdCertFile).To(Equal(testutils.TestDataFile("etcdcertfile.cert")))
+			Expect(spec.EtcdCACertFile).To(Equal(testutils.TestDataFile("etcdcacertfile.cert")))
+		})
+	})
+	Describe("without setting the DatastoreType and setting the etcdv3 suboptions through the felix configuration", func() {
+		BeforeEach(func() {
+			c = config.New()
+			_, err := c.UpdateFrom(map[string]string{
+				"EtcdEndpoints": "http://localhost:1234",
+				"EtcdKeyFile":   testutils.TestDataFile("etcdkeyfile.key"),
+				"EtcdCertFile":  testutils.TestDataFile("etcdcertfile.cert"),
+				"EtcdCaFile":    testutils.TestDataFile("etcdcacertfile.cert"),
+			}, config.EnvironmentVariable)
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("sets the etcd suboptions", func() {
+			spec := c.DatastoreConfig().Spec
+			Expect(spec.DatastoreType).To(Equal(apiconfig.EtcdV3))
+			Expect(spec.EtcdEndpoints).To(Equal("http://localhost:1234/"))
+			Expect(spec.EtcdKeyFile).To(Equal(testutils.TestDataFile("etcdkeyfile.key")))
+			Expect(spec.EtcdCertFile).To(Equal(testutils.TestDataFile("etcdcertfile.cert")))
+			Expect(spec.EtcdCACertFile).To(Equal(testutils.TestDataFile("etcdcacertfile.cert")))
+		})
+	})
+	Describe("with the configuration set from the common calico configuration and the felix configuration", func() {
+		BeforeEach(func() {
+			c = config.New()
+
+			c.SetLoadClientConfigFromEnvironmentFunction(func() (*apiconfig.CalicoAPIConfig, error) {
+				return &apiconfig.CalicoAPIConfig{
+					Spec: apiconfig.CalicoAPIConfigSpec{
+						DatastoreType: apiconfig.Kubernetes,
+						EtcdConfig: apiconfig.EtcdConfig{
+							EtcdEndpoints:  "http://localhost:5432",
+							EtcdKeyFile:    testutils.TestDataFile("etcdkeyfileother.key"),
+							EtcdCertFile:   testutils.TestDataFile("etcdcertfileother.cert"),
+							EtcdCACertFile: testutils.TestDataFile("etcdcacertfileother.cert"),
+						},
+					},
+				}, nil
+			})
+
+			_, err := c.UpdateFrom(map[string]string{
+				"DatastoreType": "etcdv3",
+				"EtcdEndpoints": "http://localhost:1234",
+				"EtcdKeyFile":   testutils.TestDataFile("etcdkeyfile.key"),
+				"EtcdCertFile":  testutils.TestDataFile("etcdcertfile.cert"),
+				"EtcdCaFile":    testutils.TestDataFile("etcdcacertfile.cert"),
+			}, config.EnvironmentVariable)
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("sets the configuration to what the felix configuration is", func() {
+			spec := c.DatastoreConfig().Spec
+			Expect(spec.DatastoreType).To(Equal(apiconfig.EtcdV3))
+			Expect(spec.EtcdEndpoints).To(Equal("http://localhost:1234/"))
+			Expect(spec.EtcdKeyFile).To(Equal(testutils.TestDataFile("etcdkeyfile.key")))
+			Expect(spec.EtcdCertFile).To(Equal(testutils.TestDataFile("etcdcertfile.cert")))
+			Expect(spec.EtcdCACertFile).To(Equal(testutils.TestDataFile("etcdcacertfile.cert")))
 		})
 	})
 })
 
 var _ = DescribeTable("Config validation",
 	func(settings map[string]string, ok bool) {
-		cfg := New()
-		_, err := cfg.UpdateFrom(settings, ConfigFile)
+		cfg := config.New()
+		_, err := cfg.UpdateFrom(settings, config.ConfigFile)
 		log.WithError(err).Info("UpdateFrom result")
 		if err == nil {
 			err = cfg.Validate()
@@ -456,4 +737,151 @@ var _ = DescribeTable("Config validation",
 	Entry("OpenstackRegion too long", map[string]string{
 		"OpenstackRegion": "my-region-has-a-very-long-and-extremely-interesting-name",
 	}, false),
+	Entry("valid RouteTableRange", map[string]string{
+		"RouteTableRange": "1-250",
+	}, true),
+	Entry("invalid RouteTableRange", map[string]string{
+		"RouteTableRange": "1-255",
+	}, false),
+	Entry("valid RouteTableRanges", map[string]string{
+		"RouteTableRanges": "1-10000",
+	}, true),
+	// 0xFFFFFFFF + 1
+	Entry("overflowing RouteTableRanges", map[string]string{
+		"RouteTableRanges": "4294967295-4294967296",
+	}, false),
+	// exceeds max allowed number of individual tables
+	Entry("excessive RouteTableRanges", map[string]string{
+		"RouteTableRanges": "1-100000000",
+	}, false),
+	Entry("invalid RouteTableRanges", map[string]string{
+		"RouteTableRanges": "abcde",
+	}, false),
+)
+
+var _ = DescribeTable("Config InterfaceExclude",
+	func(excludeList string, expected []*regexp.Regexp) {
+		cfg := config.New()
+		_, err := cfg.UpdateFrom(map[string]string{"InterfaceExclude": excludeList}, config.EnvironmentVariable)
+		Expect(err).NotTo(HaveOccurred())
+		regexps := cfg.InterfaceExclude
+		Expect(regexps).To(Equal(expected))
+	},
+
+	Entry("empty exclude list", "", []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+	}),
+	Entry("non-regexp single value", "kube-ipvs0", []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+	}),
+	Entry("non-regexp multiple values", "kube-ipvs0,veth1", []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+		regexp.MustCompile("^veth1$"),
+	}),
+	Entry("regexp single value", "/^veth.*/", []*regexp.Regexp{
+		regexp.MustCompile("^veth.*"),
+	}),
+	Entry("regexp multiple values", "/veth/,/^kube.*/", []*regexp.Regexp{
+		regexp.MustCompile("veth"),
+		regexp.MustCompile("^kube.*"),
+	}),
+	Entry("both non-regexp and regexp values", "kube-ipvs0,/veth/,/^kube.*/", []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+		regexp.MustCompile("veth"),
+		regexp.MustCompile("^kube.*"),
+	}),
+	Entry("invalid non-regexp value", `not.a.valid.interf@e!!`, []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+	}),
+	Entry("invalid regexp value", `/^kube\K/`, []*regexp.Regexp{
+		regexp.MustCompile("^kube-ipvs0$"),
+	}),
+)
+
+var _ = Describe("Config copy tests", func() {
+	var conf *config.Config
+
+	BeforeEach(func() {
+		conf = config.New()
+		changed, err := conf.UpdateFrom(map[string]string{
+			"LogSeverityScreen":            "Debug",
+			"HealthTimeoutOverrides":       "a=10s, b=0,c=50ms",
+			"DisableConntrackInvalidCheck": "true",
+		}, config.DatastoreGlobal)
+		Expect(err).To(Succeed())
+		Expect(changed).To(BeTrue())
+		changed, err = conf.UpdateFrom(map[string]string{
+			"LogSeverityScreen":      "Info",
+			"HealthTimeoutOverrides": "a=6s",
+		}, config.EnvironmentVariable)
+		Expect(err).To(Succeed())
+		Expect(changed).To(BeTrue())
+	})
+
+	It("should copy correctly", func() {
+		Expect(conf.RawValues()).To(Equal(conf.Copy().RawValues()))
+	})
+
+	It("should copy via protobuf correctly", func() {
+		pb := conf.ToConfigUpdate()
+		confCp := config.New()
+		changedFields, err := confCp.UpdateFromConfigUpdate(pb)
+		Expect(err).To(Succeed())
+		Expect(changedFields).To(Equal(set.From(
+			"HealthTimeoutOverrides",
+			"DisableConntrackInvalidCheck",
+		)))
+		Expect(confCp.RawValues()).To(Equal(conf.RawValues()))
+
+		changedFields, err = confCp.UpdateFromConfigUpdate(pb)
+		Expect(err).To(Succeed())
+		Expect(changedFields).To(BeEmpty())
+		Expect(confCp.RawValues()).To(Equal(conf.RawValues()))
+	})
+})
+
+var _ = DescribeTable("SafeParamsEqual",
+	func(a, b any, expected bool) {
+		Expect(config.SafeParamsEqual(a, b)).To(Equal(expected), fmt.Sprintf("SafeParamsEqual(%v, %v) != expected (%v)", a, b, expected))
+		Expect(config.SafeParamsEqual(b, a)).To(Equal(expected), fmt.Sprintf("SafeParamsEqual(%v, %v) != expected (%v)", b, a, expected))
+	},
+	Entry("empty", "", "", true),
+	Entry("different strings", "foo", "", false),
+	Entry("same regexps", regexp.MustCompile("[123]"), regexp.MustCompile("[123]"), true),
+	Entry("different regexps", regexp.MustCompile("[123]"), regexp.MustCompile("[1234]"), false),
+	Entry("same []regexps",
+		[]*regexp.Regexp{regexp.MustCompile("[123]"), regexp.MustCompile("[1234]")},
+		[]*regexp.Regexp{regexp.MustCompile("[123]"), regexp.MustCompile("[1234]")},
+		true,
+	),
+	Entry("different []regexps",
+		[]*regexp.Regexp{regexp.MustCompile("[123]"), regexp.MustCompile("[1234]")},
+		[]*regexp.Regexp{regexp.MustCompile("[123]"), regexp.MustCompile("[124]")},
+		false,
+	),
+	Entry("different length []regexps",
+		[]*regexp.Regexp{regexp.MustCompile("[123]"), regexp.MustCompile("[1234]")},
+		[]*regexp.Regexp{regexp.MustCompile("[123]")},
+		false,
+	),
+	Entry("nil IPs",
+		net.IP(nil),
+		net.IP(nil),
+		true,
+	),
+	Entry("same IPs",
+		net.ParseIP("10.0.0.1"),
+		net.ParseIP("10.0.0.1"),
+		true,
+	),
+	Entry("equivalent IPs",
+		net.ParseIP("10.0.0.1").To4(),
+		net.ParseIP("10.0.0.1").To16(),
+		true,
+	),
+	Entry("different IPs",
+		net.ParseIP("10.0.0.2"),
+		net.ParseIP("10.0.0.1"),
+		false,
+	),
 )

@@ -19,9 +19,11 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/rules"
+	apiv3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/rules"
 )
 
 // A floating IP is an IP that can be used to reach a particular workload endpoint, but that the
@@ -76,12 +78,14 @@ type floatingIPManager struct {
 	activeSNATChains []*iptables.Chain
 	natInfo          map[proto.WorkloadEndpointID][]*proto.NatInfo
 	dirtyNATInfo     bool
+	enabled          bool
 }
 
 func newFloatingIPManager(
 	natTable iptablesTable,
 	ruleRenderer rules.RuleRenderer,
 	ipVersion uint8,
+	enabled bool,
 ) *floatingIPManager {
 	return &floatingIPManager{
 		natTable:     natTable,
@@ -92,16 +96,23 @@ func newFloatingIPManager(
 		activeSNATChains: []*iptables.Chain{},
 		natInfo:          map[proto.WorkloadEndpointID][]*proto.NatInfo{},
 		dirtyNATInfo:     true,
+		enabled:          enabled,
 	}
 }
 
 func (m *floatingIPManager) OnUpdate(protoBufMsg interface{}) {
 	switch msg := protoBufMsg.(type) {
 	case *proto.WorkloadEndpointUpdate:
-		if m.ipVersion == 4 {
-			m.natInfo[*msg.Id] = msg.Endpoint.Ipv4Nat
+		// We only program NAT mappings if the FloatingIPs feature is globally enabled, or
+		// if the requested mapping comes from OpenStack.
+		if m.enabled || msg.Id.OrchestratorId == apiv3.OrchestratorOpenStack {
+			if m.ipVersion == 4 {
+				m.natInfo[*msg.Id] = msg.Endpoint.Ipv4Nat
+			} else {
+				m.natInfo[*msg.Id] = msg.Endpoint.Ipv6Nat
+			}
 		} else {
-			m.natInfo[*msg.Id] = msg.Endpoint.Ipv6Nat
+			delete(m.natInfo, *msg.Id)
 		}
 		m.dirtyNATInfo = true
 	case *proto.WorkloadEndpointRemove:
@@ -131,6 +142,7 @@ func (m *floatingIPManager) CompleteDeferredWork() error {
 				}
 			}
 		}
+
 		// Collate required SNATs as a map from internal IP to external IP.
 		snats := map[string]string{}
 		for extIP, intIP := range dnats {

@@ -1,6 +1,4 @@
-//+build windows
-
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,34 +15,47 @@
 package policysets
 
 import (
+	"fmt"
 	"strings"
 
-	hns "github.com/Microsoft/hcsshim"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/dataplane/windows/ipsets"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/iputils"
+
+	"github.com/projectcalico/calico/felix/dataplane/windows/hns"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
+
+// IPSetCache is our interface to the IP sets tracker.
+type IPSetCache interface {
+	GetIPSetMembers(ipsetID string) []string
+}
+
+// HNSAPI in an interface containing only the parts of the HNS API that we use here.
+type HNSAPI interface {
+	GetHNSSupportedFeatures() hns.HNSSupportedFeatures
+}
 
 // PolicySets manages a whole plane of policies/profiles
 type PolicySets struct {
+	IpSets []IPSetCache
+
+	supportedFeatures      hns.HNSSupportedFeatures
 	policySetIdToPolicySet map[string]*policySet
 
-	IpSets []*ipsets.IPSets
-
-	supportedFeatures hns.HNSSupportedFeatures
-
-	resyncRequired bool
+	// staticACLRules contains the list of static endpoint ACL rules.
+	staticACLRules []*hns.ACLPolicy
 }
 
-func NewPolicySets(ipsets []*ipsets.IPSets) *PolicySets {
+func NewPolicySets(hns HNSAPI, ipsets []IPSetCache, reader StaticRulesReader) *PolicySets {
 	supportedFeatures := hns.GetHNSSupportedFeatures()
 	return &PolicySets{
 		policySetIdToPolicySet: map[string]*policySet{},
 
 		IpSets:            ipsets,
 		supportedFeatures: supportedFeatures,
+		staticACLRules:    readStaticRules(reader),
 	}
 }
 
@@ -54,13 +65,13 @@ func (s *PolicySets) AddOrReplacePolicySet(setId string, policy interface{}) {
 	log.WithField("setID", setId).Info("Processing add/replace of Policy set")
 
 	// Process the policy/profile from the datastore and convert it into
-	// equivalent rules which can be communicated to hns for enforcement in the
+	// equivalent rules which can be communicated to HNS for enforcement in the
 	// dataplane. We compute these rules up front and cache them to avoid needing
 	// to recompute them each time the policy is applied to an endpoint. We also
 	// keep track of any IP sets which were referenced by the policy/profile so that
 	// we can easily tell which Policy sets are impacted when a IP set is modified.
 	var rules []*hns.ACLPolicy
-	var policyIpSetIds set.Set
+	var policyIpSetIds set.Set[string]
 
 	setMetadata := PolicySetMetadata{
 		SetId: setId,
@@ -69,21 +80,26 @@ func (s *PolicySets) AddOrReplacePolicySet(setId string, policy interface{}) {
 	switch p := policy.(type) {
 	case *proto.Policy:
 		// Incoming datastore object is a Policy
+		log.Debug("Policy set represents a Policy")
 		rules = s.convertPolicyToRules(setId, p.InboundRules, p.OutboundRules)
 		policyIpSetIds = getReferencedIpSetIds(p.InboundRules, p.OutboundRules)
 		setMetadata.Type = PolicySetTypePolicy
 	case *proto.Profile:
 		// Incoming datastore object is a Profile
+		log.Debug("Policy set represents a Profile")
 		rules = s.convertPolicyToRules(setId, p.InboundRules, p.OutboundRules)
 		policyIpSetIds = getReferencedIpSetIds(p.InboundRules, p.OutboundRules)
 		setMetadata.Type = PolicySetTypeProfile
+	default:
+		log.WithField("policySet", p).Error("BUG: Unknown type of policy")
+		return
 	}
 
 	// Create the struct and store it off
 	policySet := &policySet{
 		PolicySetMetadata: setMetadata,
 		Policy:            policy,
-		Members:           set.FromArray(rules),
+		Members:           rules,
 		IpSetIds:          policyIpSetIds,
 	}
 	s.policySetIdToPolicySet[setMetadata.SetId] = policySet
@@ -96,45 +112,67 @@ func (s *PolicySets) RemovePolicySet(setId string) {
 }
 
 // GetPolicySetRules receives a list of Policy set ids and it computes the complete
-// set of resultant hns rules which are needed to enforce all of the Policy sets for the
-// specified direction. As the Policy sets are processed, we increment a priority number
-// and assign it to each rule from the current set. By incremening the rule priority for
-// each set, we ensure that all of the sets will be enforced and considered by the dataplane
-// in the order intended by felix. Once all rules are gathered, we add a final pair of rules
-// to default deny any traffic which has not matched any rules from any Policy sets.
+// set of resultant HNS rules that are needed to enforce all of the Policy sets for the
+// specified direction.
 func (s *PolicySets) GetPolicySetRules(setIds []string, isInbound bool) (rules []*hns.ACLPolicy) {
 	// Rules from the first set will receive the default rule priority
-	currentPriority := rulePriority
+	currentPriority := PolicyRuleBasePriority
 
 	direction := hns.Out
 	if isInbound {
 		direction = hns.In
 	}
 
+	debug := log.GetLevel() >= log.DebugLevel
+
+	// Append static rules first.
+	for _, r := range s.staticACLRules {
+		if r.Direction == direction {
+			rules = append(rules, r)
+		}
+	}
+
+	var lastRule *hns.ACLPolicy
 	for _, setId := range setIds {
-		log.WithFields(log.Fields{"setId": setId, "isInbound": isInbound}).Debug("Gathering per-direction rules for policy set")
+		if debug {
+			log.WithFields(log.Fields{"setId": setId, "isInbound": isInbound}).Debug(
+				"Gathering per-direction rules for policy set")
+		}
 
 		policySet := s.policySetIdToPolicySet[setId]
 		if policySet == nil {
-			log.WithField("setId", setId).Error("Unable to find Policy set, this set will be skipped")
-			continue
+			log.WithField("setId", setId).Error("Unable to find Policy set, replacing with a deny rule")
+			break
 		}
 
-		policySet.Members.Iter(func(item interface{}) error {
-			member := item.(*hns.ACLPolicy)
-			if member.Direction == direction {
-				member.Priority = currentPriority
-				rules = append(rules, member)
+		for _, member := range policySet.Members {
+			if member.Direction != direction {
+				continue
 			}
-			return nil
-		})
 
-		// Increment the priority so that rules from the next set will be 'weaker' priority
-		// and therefore considered only after this current set of rules has failed to match.
-		currentPriority += 1
+			if lastRule != nil && lastRule.Action != member.Action {
+				// If we write two HNS rules at the same priority, HNS has a different tie-break algorithm
+				// to Calico.  Hence, to get Calico's first-rule-wins behaviour we need to increment the priority
+				// between rules that it's not safe to re-order.  It's certainly not safe to re-order rules
+				// that have different actions.
+				currentPriority += 1
+				if debug {
+					log.Debugf("Switching from %v to %v, incremented priority to %v",
+						lastRule.Action, member.Action, currentPriority)
+				}
+			}
+
+			// Take a copy so we can mutate the priority.
+			memberCopy := *member
+			memberCopy.Priority = currentPriority
+			rules = append(rules, &memberCopy)
+
+			lastRule = &memberCopy
+		}
 	}
 
 	// Apply a default block rule for this direction at the end of the policy
+	currentPriority++
 	rules = append(rules, s.NewRule(isInbound, currentPriority))
 
 	// Finally, for RS3 only, add default allow rule with a host-scope to allow traffic through
@@ -146,7 +184,7 @@ func (s *PolicySets) GetPolicySetRules(setIds []string, isInbound bool) (rules [
 
 // ProcessIpSetUpdate locates any Policy set(s) which reference the provided IP set, and causes
 // those Policy sets to be recomputed (to ensure any rule address conditions are using the latest
-// addres values from the IP set). A list of the Policy sets which were found and recomputed are
+// address values from the IP set). A list of the Policy sets which were found and recomputed are
 // is returned to the caller.
 func (s *PolicySets) ProcessIpSetUpdate(ipSetId string) []string {
 	log.WithField("IPSetId", ipSetId).Info("IP set has changed, looking for associated policies")
@@ -172,8 +210,7 @@ func (s *PolicySets) ProcessIpSetUpdate(ipSetId string) []string {
 // getPoliciesByIpSetId locates any Policy set(s) which reference the provided IP set
 func (s *PolicySets) getPoliciesByIpSetId(ipSetId string) (policies []string) {
 	for policySetId, policySet := range s.policySetIdToPolicySet {
-		policySet.IpSetIds.Iter(func(item interface{}) error {
-			id := item.(string)
+		policySet.IpSetIds.Iter(func(id string) error {
 			if id == ipSetId {
 				policies = append(policies, policySetId)
 			}
@@ -185,15 +222,16 @@ func (s *PolicySets) getPoliciesByIpSetId(ipSetId string) (policies []string) {
 
 // getReferencedIpSetIds returns all of the IP sets which are referenced by the provided
 // inbound and outbound proto Rules.
-func getReferencedIpSetIds(inboundRules []*proto.Rule, outboundRules []*proto.Rule) set.Set {
+func getReferencedIpSetIds(inboundRules []*proto.Rule, outboundRules []*proto.Rule) set.Set[string] {
 	var rules []*proto.Rule
 	rules = append(rules, inboundRules...)
 	rules = append(rules, outboundRules...)
 
-	ipSetIds := set.New()
+	ipSetIds := set.New[string]()
 	for _, rule := range rules {
 		ipSetIds.AddAll(rule.SrcIpSetIds)
 		ipSetIds.AddAll(rule.DstIpSetIds)
+		ipSetIds.AddAll(rule.DstIpPortSetIds)
 	}
 
 	return ipSetIds
@@ -201,7 +239,7 @@ func getReferencedIpSetIds(inboundRules []*proto.Rule, outboundRules []*proto.Ru
 
 // convertPolicyToRules converts the provided inbound and outbound proto rules into hns rules.
 func (s *PolicySets) convertPolicyToRules(policyId string, inboundRules []*proto.Rule, outboundRules []*proto.Rule) (hnsRules []*hns.ACLPolicy) {
-	log.WithField("policyId", policyId).Debug("ConvertPolicyToRules")
+	log.WithField("policyId", policyId).Debug("Converting policy to HNS rules.")
 
 	inbound := s.protoRulesToHnsRules(policyId, inboundRules, true)
 	hnsRules = append(hnsRules, inbound...)
@@ -209,23 +247,29 @@ func (s *PolicySets) convertPolicyToRules(policyId string, inboundRules []*proto
 	outbound := s.protoRulesToHnsRules(policyId, outboundRules, false)
 	hnsRules = append(hnsRules, outbound...)
 
-	for _, rule := range hnsRules {
-		log.WithFields(log.Fields{"policyId": policyId, "rule": rule}).Debug("ConvertPolicyToRules final rule output")
+	if log.GetLevel() >= log.DebugLevel {
+		for _, rule := range hnsRules {
+			log.WithFields(log.Fields{"policyId": policyId, "rule": rule}).Debug("ConvertPolicyToRules final rule output")
+		}
 	}
 
 	return
 }
 
-// protoRulesToHnsRules converts a set of proto rules into hns rules.
+// protoRulesToHnsRules converts a set of proto rules into HNS rules.
 func (s *PolicySets) protoRulesToHnsRules(policyId string, protoRules []*proto.Rule, isInbound bool) (rules []*hns.ACLPolicy) {
 	log.WithField("policyId", policyId).Debug("protoRulesToHnsRules")
-
+	const ipPortsPerRule = 4000
 	for _, protoRule := range protoRules {
-		hnsRules, err := s.protoRuleToHnsRules(policyId, protoRule, isInbound)
+		hnsRules, err := s.protoRuleToHnsRules(policyId, protoRule, isInbound, ipPortsPerRule)
 		if err != nil {
 			switch err {
-			case SkipRule:
-				log.WithField("rule", protoRule).Info("Rule was skipped")
+			case ErrNotSupported:
+				log.WithField("rule", protoRule).Warn("Skipped rule because it's not supported on Windows.")
+			case ErrRuleIsNoOp:
+				// For example, an IPv6 rule on IPv4.
+				log.WithField("rule", protoRule).Debug("Skipping no-op rule.")
+				continue
 			default:
 				log.WithField("rule", protoRule).Infof("Rule could not be converted, error: %v", err)
 			}
@@ -241,39 +285,32 @@ func (s *PolicySets) protoRulesToHnsRules(policyId string, protoRules []*proto.R
 // there are a few limitations to be aware of:
 //
 // The following types of rules are not supported in this release and will be logged+skipped:
-// Rules with: Negative match criteria, Actions other than 'allow' or 'deny', Port ranges, and ICMP type/codes.
-//
-func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isInbound bool) ([]*hns.ACLPolicy, error) {
+// Rules with: Negative match criteria, Actions other than 'allow' or 'deny'and ICMP type/codes.
+func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isInbound bool, ipPortsPerRule int) ([]*hns.ACLPolicy, error) {
 	log.WithField("policyId", policyId).Debug("protoRuleToHnsRules")
 
 	// Check IpVersion
 	if pRule.IpVersion != 0 && pRule.IpVersion != proto.IPVersion(ipVersion) {
 		log.WithField("rule", pRule).Info("Skipping rule because it is for an unsupported IP version.")
-		return nil, SkipRule
+		return nil, ErrNotSupported
 	}
 
 	// Skip rules with negative match criteria, these are not supported in this version
 	if ruleHasNegativeMatches(pRule) {
 		log.WithField("rule", pRule).Info("Skipping rule because it contains negative matches (currently unsupported).")
-		return nil, SkipRule
-	}
-
-	// Skip rules with port ranges, only a single port is supported in this version
-	if portsContainRanges(pRule.SrcPorts) || portsContainRanges(pRule.DstPorts) {
-		log.WithField("rule", pRule).Info("Skipping rule because it contains port ranges (currently unsupported).")
-		return nil, SkipRule
+		return nil, ErrNotSupported
 	}
 
 	// Skip rules with ICMP type/codes, these are not supported
 	if pRule.Icmp != nil {
 		log.WithField("rule", pRule).Info("Skipping rule because it contains ICMP type or code (currently unsupported).")
-		return nil, SkipRule
+		return nil, ErrNotSupported
 	}
 
 	// Skip rules with name port ipsets
 	if len(pRule.SrcNamedPortIpSetIds) > 0 || len(pRule.DstNamedPortIpSetIds) > 0 {
 		log.WithField("rule", pRule).Info("Skipping rule because it contains named port ipsets (currently unsupported).")
-		return nil, SkipRule
+		return nil, ErrNotSupported
 	}
 
 	// Filter the Src and Dst CIDRs to only the IP version that we're rendering
@@ -282,22 +319,22 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 
 	ruleCopy.SrcNet, filteredAll = filterNets(pRule.SrcNet, ipVersion)
 	if filteredAll {
-		return nil, SkipRule
+		return nil, ErrRuleIsNoOp
 	}
 
 	ruleCopy.NotSrcNet, filteredAll = filterNets(pRule.NotSrcNet, ipVersion)
 	if filteredAll {
-		return nil, SkipRule
+		return nil, ErrRuleIsNoOp
 	}
 
 	ruleCopy.DstNet, filteredAll = filterNets(pRule.DstNet, ipVersion)
 	if filteredAll {
-		return nil, SkipRule
+		return nil, ErrRuleIsNoOp
 	}
 
 	ruleCopy.NotDstNet, filteredAll = filterNets(pRule.NotDstNet, ipVersion)
 	if filteredAll {
-		return nil, SkipRule
+		return nil, ErrRuleIsNoOp
 	}
 
 	// Log with the rule details for context
@@ -305,14 +342,7 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 
 	// Start with a new empty hns aclPolicy (rule)
 	var aclPolicies []*hns.ACLPolicy
-	aclPolicy := s.NewRule(isInbound, rulePriority)
-
-	//
-	// Id
-	//
-	if s.supportedFeatures.Acl.AclRuleId {
-		aclPolicy.Id = (policyId + "-" + ruleCopy.RuleId)
-	}
+	aclPolicy := s.NewRule(isInbound, PolicyRuleBasePriority)
 
 	//
 	// Action
@@ -324,41 +354,74 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 		aclPolicy.Action = hns.Block
 	case "next-tier", "pass", "log":
 		logCxt.WithField("action", ruleCopy.Action).Info("This rule action is not supported, rule will be skipped")
-		return nil, SkipRule
+		return nil, ErrNotSupported
 	default:
 		logCxt.WithField("action", ruleCopy.Action).Panic("Unknown rule action")
 	}
 
 	//
-	// Source ports
+	// DstIpPort sets - these cannot co-exist with other fields, so do them first and short-circuit if set.
 	//
-	if len(ruleCopy.SrcPorts) > 0 {
-		// Windows RS3 limitation, single port
-		ports := uint16(ruleCopy.SrcPorts[0].First)
-
-		if isInbound {
-			aclPolicy.RemotePort = ports
-			logCxt.WithField("RemotePort", aclPolicy.RemotePort).Debug("Adding Source Ports as RemotePort condition")
-		} else {
-			aclPolicy.LocalPort = ports
-			logCxt.WithField("LocalPort", aclPolicy.LocalPort).Debug("Adding Source Ports as LocalPort condition")
+	if len(ruleCopy.DstIpPortSetIds) > 0 {
+		ipsetMembers, err := s.getIPSetAddresses(ruleCopy.DstIpPortSetIds)
+		if err != nil {
+			logCxt.Warn("DstIpPortSetIds could not be resolved, rule will be skipped")
+			return nil, err
 		}
-	}
 
-	//
-	// Destination Ports
-	//
-	if len(ruleCopy.DstPorts) > 0 {
-		// Windows RS3 limitation, single port (start port)
-		ports := uint16(ruleCopy.DstPorts[0].First)
+		parseIPPortMember := func(m string) (string, uint16, string) {
+			// Split out address.
+			splits := strings.Split(m, ",")
+			addr := splits[0]
+			protoPort := splits[1]
 
-		if isInbound {
-			aclPolicy.LocalPort = ports
-			logCxt.WithField("LocalPort", aclPolicy.LocalPort).Debug("Adding Destination Ports as LocalPort condition")
-		} else {
-			aclPolicy.RemotePort = ports
-			logCxt.WithField("RemotePort", aclPolicy.RemotePort).Debug("Adding Destination Ports as RemotePort condition")
+			// Split port and protocol.
+			splits = strings.Split(protoPort, ":")
+			protocol := protocolNameToNumber(splits[0])
+			port := splits[1]
+			return addr, protocol, port
 		}
+
+		// Each member includes both an address and a port.
+		// However, we can combine all addresses across all members that share the same proto+port into a single rule.
+		type policyMembers struct {
+			proto uint16
+			port  string
+			addrs []string
+		}
+
+		// We need to consolidate addrs based on ports/protocols, so use a map to lookup.
+		membersByPort := map[string]*policyMembers{}
+
+		// We need to ensure the ordering of generated rules is deterministic, so use a slice.
+		orderedPolicyMembers := []*policyMembers{}
+		for _, m := range ipsetMembers {
+			// The member should be of the format <IP>,(tcp|udp):<port number>
+			addr, proto, port := parseIPPortMember(m)
+			var pm *policyMembers
+			pm = membersByPort[fmt.Sprintf("%d/%s", proto, port)]
+			if pm == nil {
+				pm = &policyMembers{proto: proto, port: port}
+				membersByPort[fmt.Sprintf("%d/%s", proto, port)] = pm
+				orderedPolicyMembers = append(orderedPolicyMembers, pm)
+			}
+			pm.addrs = append(pm.addrs, addr)
+		}
+
+		for i, m := range orderedPolicyMembers {
+			newPolicy := *aclPolicy
+			newPolicy.RemoteAddresses = strings.Join(m.addrs, ",")
+			newPolicy.RemotePorts = m.port
+			newPolicy.Protocol = m.proto
+			if s.supportedFeatures.Acl.AclRuleId {
+				newPolicy.Id = fmt.Sprintf("%s-%s-%d", policyId, ruleCopy.RuleId, i)
+			}
+			aclPolicies = append(aclPolicies, &newPolicy)
+		}
+
+		// DstIpPortSetIds are mutually exclusive with other fields - if specified, then no other rule match criteria can be.
+		// The API validates against this, so simply return here.
+		return aclPolicies, nil
 	}
 
 	//
@@ -376,20 +439,32 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 	}
 
 	//
-	// Source Neworks and IPSets
+	// Source Networks and IPSets
 	//
-	localAddresses := []string{""} // ensures slice always has at least one value
-	remoteAddresses := []string{""}
+	var localAddresses []string
+	var remoteAddresses []string
 
 	srcAddresses := ruleCopy.SrcNet
 
 	if len(ruleCopy.SrcIpSetIds) > 0 {
 		ipsetAddresses, err := s.getIPSetAddresses(ruleCopy.SrcIpSetIds)
 		if err != nil {
-			logCxt.Info("SrcIpSetIds could not be resolved, rule will be skipped")
-			return nil, SkipRule
+			logCxt.Warn("SrcIpSetIds could not be resolved, rule will be skipped")
+			return nil, err
 		}
-		srcAddresses = append(srcAddresses, ipsetAddresses...)
+
+		if len(srcAddresses) > 0 {
+			// We have both CIDRs in the rule and an IPset.  Our model is that each match criteria should be ANDed
+			// together so that means that we need to intersect the CIDRs with the IP set addresses.
+			logCxt.Debug("Both source CIDRs and IPsets in rule, intersecting them")
+			srcAddresses = iputils.IntersectCIDRs(srcAddresses, ipsetAddresses)
+			if len(srcAddresses) == 0 {
+				logCxt.Debug("No overlap between source CIDRs and IPsets, skipping rule")
+				return nil, ErrRuleIsNoOp
+			}
+		} else {
+			srcAddresses = ipsetAddresses
+		}
 	}
 
 	if len(srcAddresses) > 0 {
@@ -410,10 +485,22 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 	if len(ruleCopy.DstIpSetIds) > 0 {
 		ipsetAddresses, err := s.getIPSetAddresses(ruleCopy.DstIpSetIds)
 		if err != nil {
-			logCxt.Info("DstIpSetIds could not be resolved, rule will be skipped")
-			return nil, SkipRule
+			logCxt.Warn("DstIpSetIds could not be resolved, rule will be skipped")
+			return nil, err
 		}
-		dstAddresses = append(dstAddresses, ipsetAddresses...)
+
+		if len(dstAddresses) > 0 {
+			// We have both CIDRs in the rule and an IPset.  Our model is that each match criteria should be ANDed
+			// together so that means that we need to intersect the CIDRs with the IP set addresses.
+			logCxt.Debug("Both dest CIDRs and IPsets in rule, intersecting them")
+			dstAddresses = iputils.IntersectCIDRs(dstAddresses, ipsetAddresses)
+			if len(dstAddresses) == 0 {
+				logCxt.Debug("No overlap between dest CIDRs and IPsets, skipping rule")
+				return nil, ErrRuleIsNoOp
+			}
+		} else {
+			dstAddresses = ipsetAddresses
+		}
 	}
 
 	if len(dstAddresses) > 0 {
@@ -426,21 +513,119 @@ func (s *PolicySets) protoRuleToHnsRules(policyId string, pRule *proto.Rule, isI
 		}
 	}
 
-	// For Windows RS3 only, there is a dataplane restriction of a single address/cidr per
-	// source or destination condition. The behavior below will be removed in
-	// the next iteration, but for now we have to break up the source and destination
-	// ip address combinations and represent them using multiple rules
-	for _, localAddr := range localAddresses {
-		for _, remoteAddr := range remoteAddresses {
-			newPolicy := *aclPolicy
-			newPolicy.LocalAddresses = localAddr
-			newPolicy.RemoteAddresses = remoteAddr
-			// Add this rule to the rules being returned
-			aclPolicies = append(aclPolicies, &newPolicy)
+	// Windows RS4+ supports multiple CIDRs and port ranges in a rule but Microsoft recommended
+	// limiting the number of entries per rule to a few thousand(say 4000 for now).
+	// Break up larger sets of ports/CIDRs into chunks and render one rule for each combination
+	var remotePortChunks [][]*proto.PortRange
+	var localPortChunks [][]*proto.PortRange
+	i := 0
+	debug := log.GetLevel() >= log.DebugLevel
+
+	localAddrChunks := SplitIPList(localAddresses, ipPortsPerRule)
+	remoteAddrChunks := SplitIPList(remoteAddresses, ipPortsPerRule)
+	// assign src/dstPortsChunks based on traffic direction
+	if isInbound {
+		remotePortChunks = SplitPortList(pRule.SrcPorts, ipPortsPerRule)
+		localPortChunks = SplitPortList(pRule.DstPorts, ipPortsPerRule)
+	} else {
+		localPortChunks = SplitPortList(pRule.SrcPorts, ipPortsPerRule)
+		remotePortChunks = SplitPortList(pRule.DstPorts, ipPortsPerRule)
+	}
+
+	for _, localAddr := range localAddrChunks {
+		localAddrs := strings.Join(localAddr, ",")
+
+		// iterate loop for each chunk of source port and append them in aclpolicy
+		for _, lPorts := range localPortChunks {
+			localPorts := appendPortsinList(lPorts)
+
+			for _, remoteAddr := range remoteAddrChunks {
+				remoteAddrs := strings.Join(remoteAddr, ",")
+
+				// iterate loop for each chunk of destination port and append them in aclpolicy
+				for _, rPorts := range remotePortChunks {
+					remotePorts := appendPortsinList(rPorts)
+
+					newPolicy := *aclPolicy
+					// Give each sub-rule a unique ID.
+					if s.supportedFeatures.Acl.AclRuleId {
+						newPolicy.Id = fmt.Sprintf("%s-%s-%d", policyId, ruleCopy.RuleId, i)
+						i++
+					}
+					// assign ports chunks in aclpolicy
+					newPolicy.LocalPorts = localPorts
+					newPolicy.RemotePorts = remotePorts
+					// assign addresses chunks in aclpolicy
+					newPolicy.LocalAddresses = localAddrs
+					newPolicy.RemoteAddresses = remoteAddrs
+					// Add this rule to the rules being returned
+					if debug {
+						log.WithField("rule", newPolicy).Debug("Expanded rule for local/remote addr.")
+					}
+					aclPolicies = append(aclPolicies, &newPolicy)
+				}
+			}
 		}
 	}
 
 	return aclPolicies, nil
+}
+
+func appendPortsinList(dPorts []*proto.PortRange) (listPorts string) {
+	dstPorts := make([]string, len(dPorts))
+	for ii, port := range dPorts {
+		dstPorts[ii] = protoPortToHCSPort(port)
+	}
+	listPorts = strings.Join(dstPorts, ",")
+	return
+}
+
+// convert proto.PortRange format port into HCS format port
+func protoPortToHCSPort(port *proto.PortRange) string {
+	portNum := ""
+	if port.First == port.Last {
+		portNum = fmt.Sprintf("%d", port.First)
+	} else {
+		portNum = fmt.Sprintf("%d-%d", port.First, port.Last)
+	}
+	return portNum
+}
+
+// This function will create chunks of ports/ports range with chunksize
+func SplitPortList(ports []*proto.PortRange, chunkSize int) (splits [][]*proto.PortRange) {
+
+	if len(ports) == 0 {
+		splits = append(splits, []*proto.PortRange{})
+	}
+	for i := 0; i < len(ports); i += chunkSize {
+		last := i + chunkSize
+
+		if last > len(ports) {
+			last = len(ports)
+		}
+
+		splits = append(splits, ports[i:last])
+	}
+	return
+}
+
+// This function will create chunks of IP addresses/Cidr with chunksize
+func SplitIPList(ipAddrs []string, chunkSize int) (splits [][]string) {
+
+	if len(ipAddrs) == 0 {
+		splits = append(splits, []string{})
+	}
+	for i := 0; i < len(ipAddrs); i += chunkSize {
+		last := i + chunkSize
+
+		if last > len(ipAddrs) {
+			last = len(ipAddrs)
+		}
+
+		splits = append(splits, ipAddrs[i:last])
+	}
+
+	return
 }
 
 func ruleHasNegativeMatches(pRule *proto.Rule) bool {
@@ -465,19 +650,6 @@ func ruleHasNegativeMatches(pRule *proto.Rule) bool {
 	return false
 }
 
-func portsContainRanges(ports []*proto.PortRange) bool {
-	if len(ports) > 1 {
-		return true
-	}
-
-	for _, portRange := range ports {
-		if portRange.First != portRange.Last {
-			return true
-		}
-	}
-	return false
-}
-
 // getIPSetAddresses retrieves all of the ip addresses (members) referenced by the provided
 // IP sets.
 func (s *PolicySets) getIPSetAddresses(setIds []string) ([]string, error) {
@@ -498,7 +670,7 @@ func (s *PolicySets) getIPSetAddresses(setIds []string) ([]string, error) {
 
 		if !found {
 			log.WithField("ipsetId", ipsetId).Info("IPSet could not be found")
-			return nil, MissingSet
+			return nil, ErrMissingIPSet
 		}
 	}
 
@@ -525,7 +697,7 @@ func protocolNameToNumber(protocolName string) uint16 {
 	}
 }
 
-// NewRule returns a new hns switch rule object instantiated with default values.
+// NewRule returns a new HNS switch rule object instantiated with default values.
 func (s *PolicySets) NewRule(isInbound bool, priority uint16) *hns.ACLPolicy {
 	direction := hns.Out
 	if isInbound {

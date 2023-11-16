@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os/exec"
@@ -22,16 +23,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/containernetworking/cni/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/ns"
+	"github.com/containernetworking/plugins/pkg/testutils"
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
 	. "github.com/onsi/gomega"
 
-	"github.com/projectcalico/libcalico-go/lib/backend/k8s/conversion"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/k8s/conversion"
 )
 
 type podSpec struct {
@@ -66,7 +68,7 @@ func createPod(clientset *kubernetes.Clientset, d deployment, nsName string, spe
 	// that load causes the issue and we put less load on the kernel.
 	handle, err := netlink.NewHandle()
 	panicIfError(err)
-	defer handle.Delete()
+	defer handle.Close()
 
 	name := spec.name
 	if name == "" {
@@ -98,14 +100,14 @@ func createPod(clientset *kubernetes.Clientset, d deployment, nsName string, spe
 		pod_in.ObjectMeta.Labels = spec.labels
 	}
 	log.WithField("pod_in", pod_in).Debug("Pod defined")
-	pod_out, err := clientset.CoreV1().Pods(nsName).Create(pod_in)
+	pod_out, err := clientset.CoreV1().Pods(nsName).Create(context.Background(), pod_in, metav1.CreateOptions{})
 	if err != nil {
 		panic(err)
 	}
 	log.WithField("pod_out", pod_out).Debug("Created pod")
 	pod_in = pod_out
 	pod_in.Status.PodIP = ip
-	pod_out, err = clientset.CoreV1().Pods(nsName).UpdateStatus(pod_in)
+	pod_out, err = clientset.CoreV1().Pods(nsName).UpdateStatus(context.Background(), pod_in, metav1.UpdateOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -114,17 +116,19 @@ func createPod(clientset *kubernetes.Clientset, d deployment, nsName string, spe
 	if host.isLocal {
 		// Create the cali interface, so that Felix does dataplane programming for the local
 		// endpoint.
-		interfaceName := conversion.VethNameForWorkload(nsName, name)
+		interfaceName := conversion.NewConverter().VethNameForWorkload(nsName, name)
 		log.WithField("interfaceName", interfaceName).Info("Prepare interface")
 
 		// Create a namespace.
-		podNamespace, err := ns.NewNS()
+		podNamespace, err := testutils.NewNS()
 		panicIfError(err)
 		log.WithField("podNamespace", podNamespace).Debug("Created namespace")
 
 		// Create a veth pair.
+		la := netlink.NewLinkAttrs()
+		la.Name = interfaceName
 		veth := &netlink.Veth{
-			LinkAttrs: netlink.LinkAttrs{Name: interfaceName},
+			LinkAttrs: la,
 			PeerName:  "p" + interfaceName[1:],
 		}
 
@@ -197,37 +201,29 @@ func removeLocalPodNetworking(pod *v1.Pod) {
 	if ln != nil {
 		log.WithField("key", key).Info("Cleanup local networking")
 
-		// Delete pod-side interface.
-		err := ln.namespace.Do(func(_ ns.NetNS) error {
-			return netlink.LinkDel(ln.podIf)
-		})
+		// Delete host-side interface.  This deletes the pod-side as a side-effect.
+		err := netlink.LinkDel(ln.hostIf)
 		panicIfError(err)
-
-		// Delete host-side interface.  Actually it seems this has already happened as part
-		// of the pod-side interface being deleted just above; so we don't need a separate
-		// operation here.
-		//err = netlink.LinkDel(ln.hostIf)
-		//panicIfError(err)
+		log.WithField("key", key).Info("Cleaned up pod iface")
 
 		// Delete namespace.
 		err = ln.namespace.Close()
 		panicIfError(err)
+		log.WithField("key", key).Info("Closed namespace")
 
 		// Delete local networking details.
 		delete(localNetworkingMap, key)
 	}
-
-	return
+	log.WithField("key", key).Info("Removed pod networking")
 }
 
 var GetNextPodAddr = ipAddrAllocator("10.28.%d.%d")
 
 func cleanupAllPods(clientset *kubernetes.Clientset, nsPrefix string) {
 	log.WithField("nsPrefix", nsPrefix).Info("Cleaning up all pods...")
-	nsList, err := clientset.CoreV1().Namespaces().List(metav1.ListOptions{})
-	if err != nil {
-		panic(err)
-	}
+	nsList, err := clientset.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
+	panicIfError(err)
+
 	log.WithField("count", len(nsList.Items)).Info("Namespaces present")
 	podsDeleted := 0
 	admission := make(chan int, 10)
@@ -235,21 +231,24 @@ func cleanupAllPods(clientset *kubernetes.Clientset, nsPrefix string) {
 	waiter.Add(len(nsList.Items))
 	for _, ns := range nsList.Items {
 		nsName := ns.ObjectMeta.Name
+		log.Infof("Queueing examination of namespace: %v", nsName)
 		go func() {
 			admission <- 1
 			if strings.HasPrefix(nsName, nsPrefix) {
-				podList, err := clientset.CoreV1().Pods(nsName).List(metav1.ListOptions{})
-				if err != nil {
-					panic(err)
-				}
+				log.Infof("Namespace matches prefix, getting pods: %v", nsName)
+
+				podList, err := clientset.CoreV1().Pods(nsName).List(context.Background(), metav1.ListOptions{})
+				panicIfError(err)
+
 				log.WithField("count", len(podList.Items)).WithField("namespace", nsName).Debug(
 					"Pods present")
 				for _, pod := range podList.Items {
-					err = clientset.CoreV1().Pods(nsName).Delete(pod.ObjectMeta.Name, deleteImmediately)
-					if err != nil {
-						panic(err)
-					}
+					log.Infof("Deleting pod: %v", pod.ObjectMeta.Name)
+					err = clientset.CoreV1().Pods(nsName).Delete(context.Background(), pod.ObjectMeta.Name, deleteImmediately)
+					panicIfError(err)
+					log.Infof("Deleted pod, cleaning up its netns: %v", pod.ObjectMeta.Name)
 					removeLocalPodNetworking(&pod)
+					log.Infof("Cleaned up pod netns: %v", pod.ObjectMeta.Name)
 				}
 				podsDeleted += len(podList.Items)
 			}
@@ -259,16 +258,17 @@ func cleanupAllPods(clientset *kubernetes.Clientset, nsPrefix string) {
 	}
 	waiter.Wait()
 
+	log.WithField("podsDeleted", podsDeleted).Info("Cleaned up all pods, checking metrics...")
 	Eventually(getNumEndpointsDefault(-1), "30s", "1s").Should(
 		BeNumerically("==", 0),
 		"Removal of pods wasn't reflected in Felix metrics",
 	)
-	log.WithField("podsDeleted", podsDeleted).Info("Cleaned up all pods")
+	log.WithField("podsDeleted", podsDeleted).Info("Pod cleanup done.")
 }
 
 var zeroGracePeriod int64 = 0
 
-var deleteImmediately = &metav1.DeleteOptions{GracePeriodSeconds: &zeroGracePeriod}
+var deleteImmediately = metav1.DeleteOptions{GracePeriodSeconds: &zeroGracePeriod}
 
 func runCommand(command string, args ...string) error {
 	cmd := exec.Command(command, args...)

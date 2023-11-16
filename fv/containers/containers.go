@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,33 +18,46 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/fv/utils"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/fv/connectivity"
+	"github.com/projectcalico/calico/felix/fv/tcpdump"
+	"github.com/projectcalico/calico/felix/fv/utils"
+
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 type Container struct {
-	Name     string
-	IP       string
-	Hostname string
-	runCmd   *exec.Cmd
+	Name           string
+	IP             string
+	ExtraSourceIPs []string
+	IPPrefix       string
+	IPv6           string
+	IPv6Prefix     string
+	Hostname       string
+	runCmd         *exec.Cmd
+	Stdin          io.WriteCloser
 
 	mutex         sync.Mutex
-	binaries      set.Set
+	binaries      set.Set[string]
 	stdoutWatches []*watch
+	stderrWatches []*watch
+	dataRaces     []string
 
-	logFinished sync.WaitGroup
+	logFinished      sync.WaitGroup
+	dropAllLogs      bool
+	ignoreEmptyLines bool
 }
 
 type watch struct {
@@ -53,6 +66,17 @@ type watch struct {
 }
 
 var containerIdx = 0
+
+func (c *Container) StopLogs() {
+	if c == nil {
+		log.Info("StopLogs no-op because nil container")
+		return
+	}
+
+	c.mutex.Lock()
+	c.dropAllLogs = true
+	c.mutex.Unlock()
+}
 
 func (c *Container) Stop() {
 	if c == nil {
@@ -69,7 +93,7 @@ func (c *Container) Stop() {
 	}
 	c.mutex.Unlock()
 
-	logCxt.Info("Stop")
+	logCxt.Info("Stopping...")
 
 	// Ask docker to stop the container.
 	withTimeoutPanic(logCxt, 30*time.Second, c.execDockerStop)
@@ -80,7 +104,7 @@ func (c *Container) Stop() {
 	startTime := time.Now()
 	for {
 		if !c.ListedInDockerPS() {
-			// Container has stopped.  Mkae sure the docker CLI command is dead (it should be already)
+			// Container has stopped.  Make sure the docker CLI command is dead (it should be already)
 			// and wait for its log.
 			logCxt.Info("Container stopped (no longer listed in 'docker ps')")
 			withTimeoutPanic(logCxt, 5*time.Second, func() { c.signalDockerRun(os.Kill) })
@@ -100,9 +124,10 @@ func (c *Container) Stop() {
 		time.Sleep(200 * time.Millisecond)
 	}
 	c.WaitNotRunning(60 * time.Second)
-	logCxt.Info("Container stopped")
 	withTimeoutPanic(logCxt, 5*time.Second, func() { c.signalDockerRun(os.Kill) })
 	withTimeoutPanic(logCxt, 10*time.Second, func() { c.logFinished.Wait() })
+
+	logCxt.Info("Container stopped")
 }
 
 func withTimeoutPanic(logCxt *log.Entry, t time.Duration, f func()) {
@@ -123,7 +148,7 @@ func withTimeoutPanic(logCxt *log.Entry, t time.Duration, f func()) {
 func (c *Container) execDockerStop() {
 	logCxt := log.WithField("container", c.Name)
 	logCxt.Info("Executing 'docker stop'")
-	cmd := exec.Command("docker", "stop", c.Name)
+	cmd := exec.Command("docker", "stop", "-t0", c.Name)
 	err := cmd.Run()
 	if err != nil {
 		logCxt.WithError(err).WithField("cmd", cmd).Error("docker stop command failed")
@@ -143,32 +168,77 @@ func (c *Container) signalDockerRun(sig os.Signal) {
 	if c.runCmd == nil {
 		return
 	}
-	c.runCmd.Process.Signal(sig)
+	err := c.runCmd.Process.Signal(sig)
+	if err != nil {
+		logCxt.WithError(err).Error("failed to signal 'docker run' process")
+		return
+	}
 	logCxt.Info("Signalled docker run")
 }
 
+func (c *Container) Signal(sig os.Signal) {
+	c.signalDockerRun(sig)
+}
+
 type RunOpts struct {
-	AutoRemove bool
+	AutoRemove       bool
+	WithStdinPipe    bool
+	IgnoreEmptyLines bool
+	SameNamespace    *Container
+	StopTimeoutSecs  int
+	StopSignal       string
+}
+
+func NextContainerIndex() int {
+	return containerIdx + 1
 }
 
 func Run(namePrefix string, opts RunOpts, args ...string) (c *Container) {
+	name := UniqueName(namePrefix)
+	return RunWithFixedName(name, opts, args...)
+}
 
+func UniqueName(namePrefix string) string {
 	// Build unique container name and struct.
 	containerIdx++
-	c = &Container{Name: fmt.Sprintf("%v-%d-%d-felixfv", namePrefix, os.Getpid(), containerIdx)}
+	name := fmt.Sprintf("%v-%d-%d-felixfv", namePrefix, os.Getpid(), containerIdx)
+	return name
+}
+
+func RunWithFixedName(name string, opts RunOpts, args ...string) (c *Container) {
+	c = &Container{
+		Name:             name,
+		ignoreEmptyLines: opts.IgnoreEmptyLines,
+	}
 
 	// Prep command to run the container.
 	log.WithField("container", c).Info("About to run container")
-	runArgs := []string{"run", "--name", c.Name, "--hostname", c.Name}
+	runArgs := []string{"run", "--init", "--cgroupns", "host", "--name", c.Name, "--stop-timeout", fmt.Sprint(opts.StopTimeoutSecs)}
+
+	if opts.StopSignal != "" {
+		runArgs = append(runArgs, "--stop-signal", opts.StopSignal)
+	}
 
 	if opts.AutoRemove {
 		runArgs = append(runArgs, "--rm")
+	}
+
+	if opts.SameNamespace != nil {
+		runArgs = append(runArgs, "--network=container:"+opts.SameNamespace.Name)
+	} else {
+		runArgs = append(runArgs, "--hostname", c.Name)
 	}
 
 	// Add remaining args
 	runArgs = append(runArgs, args...)
 
 	c.runCmd = utils.Command("docker", runArgs...)
+
+	if opts.WithStdinPipe {
+		var err error
+		c.Stdin, err = c.runCmd.StdinPipe()
+		Expect(err).NotTo(HaveOccurred())
+	}
 
 	// Get the command's output pipes, so we can merge those into the test's own logging.
 	stdout, err := c.runCmd.StdoutPipe()
@@ -183,7 +253,7 @@ func Run(namePrefix string, opts RunOpts, args ...string) (c *Container) {
 	// Merge container's output into our own logging.
 	c.logFinished.Add(2)
 	go c.copyOutputToLog("stdout", stdout, &c.logFinished, &c.stdoutWatches)
-	go c.copyOutputToLog("stderr", stderr, &c.logFinished, nil)
+	go c.copyOutputToLog("stderr", stderr, &c.logFinished, &c.stderrWatches)
 
 	// Note: it might take a long time for the container to start running, e.g. if the image
 	// needs to be downloaded.
@@ -191,10 +261,30 @@ func Run(namePrefix string, opts RunOpts, args ...string) (c *Container) {
 
 	// Fill in rest of container struct.
 	c.IP = c.GetIP()
+	c.IPPrefix = c.GetIPPrefix()
+	c.IPv6 = c.GetIPv6()
+	c.IPv6Prefix = c.GetIPv6Prefix()
 	c.Hostname = c.GetHostname()
-	c.binaries = set.New()
+	c.binaries = set.New[string]()
 	log.WithField("container", c).Info("Container now running")
 	return
+}
+
+func (c *Container) WatchStderrFor(re *regexp.Regexp) chan struct{} {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	log.WithFields(log.Fields{
+		"container": c.Name,
+		"regex":     re,
+	}).Info("Start watching stderr")
+
+	ch := make(chan struct{})
+	c.stderrWatches = append(c.stderrWatches, &watch{
+		regexp: re,
+		c:      ch,
+	})
+	return ch
 }
 
 func (c *Container) WatchStdoutFor(re *regexp.Regexp) chan struct{} {
@@ -252,9 +342,67 @@ func (c *Container) copyOutputToLog(streamName string, stream io.Reader, done *s
 	defer done.Done()
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(nil, 10*1024*1024) // Increase maximum buffer size (but don't pre-alloc).
+
+	// Felix is configured with the race detector enabled. When the race detector fires, we get output like this:
+	//
+	// ==================
+	// WARNING: DATA RACE
+	// <stack trace>
+	// ==================
+	//
+	// We capture that output and emit it to a dedicated log file so that the CI job can save it off.
+	// foundDataRace is set to true when we see the WARNING line and then it is set back to false when we
+	// see the trailing "==================".  We collect the text of the warning in dataRaceText.
+	//
+	// We do this for all containers because we already have the machinery here.
+	foundDataRace := false
+	dataRaceText := ""
+	dataRaceFile, err := os.OpenFile("data-races.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.WithError(err).Error("Failed to open data race log file.")
+	}
+	defer func() {
+		err := dataRaceFile.Close()
+		Expect(err).NotTo(HaveOccurred(), "Failed to write to data race log (close).")
+	}()
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		log.Info(c.Name, "[", streamName, "] ", line)
+
+		if c.ignoreEmptyLines && strings.Trim(line, " \r\n\t") == "" {
+			continue
+		}
+
+		// Check if we're dropping logs (e.g. because we're tearing down the container at the end of the test).
+		c.mutex.Lock()
+		droppingLogs := c.dropAllLogs
+		c.mutex.Unlock()
+		if !droppingLogs {
+			fmt.Fprintf(ginkgo.GinkgoWriter, "%v[%v] %v\n", c.Name, streamName, line)
+		}
+
+		// Capture data race warnings and log to file.
+		if strings.Contains(line, "WARNING: DATA RACE") {
+			_, err := fmt.Fprintf(dataRaceFile, "Detected data race (in %s) while running test: %s\n",
+				c.Name, ginkgo.CurrentGinkgoTestDescription().FullTestText)
+			Expect(err).NotTo(HaveOccurred(), "Failed to write to data race log.")
+			foundDataRace = true
+		}
+		if foundDataRace {
+			var err error
+			if strings.Contains(line, "==================") {
+				foundDataRace = false
+				c.mutex.Lock()
+				c.dataRaces = append(c.dataRaces, dataRaceText)
+				c.mutex.Unlock()
+				dataRaceText = ""
+				_, err = dataRaceFile.WriteString("\n\n")
+			} else {
+				dataRaceText += line + "\n"
+				_, err = dataRaceFile.WriteString(line + "\n")
+			}
+			Expect(err).NotTo(HaveOccurred(), "Failed to write to data race log.")
+		}
 
 		if watches == nil {
 			continue
@@ -276,12 +424,19 @@ func (c *Container) copyOutputToLog(streamName string, stream io.Reader, done *s
 	}
 	logCxt := log.WithFields(log.Fields{
 		"name":   c.Name,
-		"stream": stream,
+		"stream": streamName,
 	})
 	if scanner.Err() != nil {
 		logCxt.WithError(scanner.Err()).Error("Non-EOF error reading container stream")
 	}
 	logCxt.Info("Stream finished")
+}
+
+func (c *Container) DataRaces() []string {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	return c.dataRaces
 }
 
 func (c *Container) DockerInspect(format string) string {
@@ -294,8 +449,28 @@ func (c *Container) DockerInspect(format string) string {
 	return string(outputBytes)
 }
 
+func (c *Container) GetID() string {
+	output := c.DockerInspect("{{.Id}}")
+	return strings.TrimSpace(output)
+}
+
 func (c *Container) GetIP() string {
 	output := c.DockerInspect("{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}")
+	return strings.TrimSpace(output)
+}
+
+func (c *Container) GetIPPrefix() string {
+	output := c.DockerInspect("{{range .NetworkSettings.Networks}}{{.IPPrefixLen}}{{end}}")
+	return strings.TrimSpace(output)
+}
+
+func (c *Container) GetIPv6() string {
+	output := c.DockerInspect("{{range .NetworkSettings.Networks}}{{.GlobalIPv6Address}}{{end}}")
+	return strings.TrimSpace(output)
+}
+
+func (c *Container) GetIPv6Prefix() string {
+	output := c.DockerInspect("{{range .NetworkSettings.Networks}}{{.GlobalIPv6PrefixLen}}{{end}}")
 	return strings.TrimSpace(output)
 }
 
@@ -305,7 +480,7 @@ func (c *Container) GetHostname() string {
 }
 
 func (c *Container) GetPIDs(processName string) []int {
-	out, err := c.ExecOutput("pgrep", fmt.Sprintf("^%s$", processName))
+	out, err := c.ExecOutput("pgrep", "-f", fmt.Sprintf("^%s$", processName))
 	if err != nil {
 		log.WithError(err).Warn("pgrep failed, assuming no PIDs")
 		return nil
@@ -322,17 +497,71 @@ func (c *Container) GetPIDs(processName string) []int {
 	return pids
 }
 
+type ProcInfo struct {
+	PID  int
+	PPID int
+}
+
+var psRegexp = regexp.MustCompile(`^\s*(\d+)\s+(\d+)\s+(\S+)$`)
+
+func (c *Container) GetProcInfo(processName string) []ProcInfo {
+	out, err := c.ExecOutput("ps", "wwxo", "pid,ppid,comm")
+	if err != nil {
+		log.WithError(err).WithField("out", out).Warn("ps failed, assuming no PIDs")
+		return nil
+	}
+	var pids []ProcInfo
+	for _, line := range strings.Split(out, "\n") {
+		log.WithField("line", line).Debug("Parsing ps line")
+		matches := psRegexp.FindStringSubmatch(line)
+		if len(matches) == 0 {
+			continue
+		}
+		name := matches[3]
+		if name != processName {
+			continue
+		}
+		pid, err := strconv.Atoi(matches[1])
+		if err != nil {
+			log.WithError(err).WithField("line", line).Panic("Failed to parse ps output")
+		}
+		ppid, err := strconv.Atoi(matches[2])
+		if err != nil {
+			log.WithError(err).WithField("line", line).Panic("Failed to parse ps output")
+		}
+		pids = append(pids, ProcInfo{PID: pid, PPID: ppid})
+
+	}
+	return pids
+}
+
 func (c *Container) GetSinglePID(processName string) int {
 	// Get the process's PID.  This retry loop ensures that we don't get tripped up if we see multiple
-	// PIDs, which can happen transiently when a process restarts/forks off a subprocess.
+	// PIDs, which can happen transiently when a process restarts.
 	start := time.Now()
 	for {
-		pids := c.GetPIDs(processName)
-		if len(pids) == 1 {
-			return pids[0]
+		// Get the PID and parent PID of all processes with the right name.
+		procs := c.GetProcInfo(processName)
+		log.WithField("procs", procs).Debug("Got ProcInfos")
+		// Collect all the pids so we can detect forked child processes by their PPID.
+		pids := set.New[int]()
+		for _, p := range procs {
+			pids.Add(p.PID)
 		}
-		Expect(time.Since(start)).To(BeNumerically("<", time.Second),
-			"Timed out waiting for there to be a single PID")
+		// Filter the procs, ignore any that are children of another proc in the set.
+		var filteredProcs []ProcInfo
+		for _, p := range procs {
+			if pids.Contains(p.PPID) {
+				continue
+			}
+			filteredProcs = append(filteredProcs, p)
+		}
+		if len(filteredProcs) == 1 {
+			// Success, there's one process.
+			return filteredProcs[0].PID
+		}
+		ExpectWithOffset(1, time.Since(start)).To(BeNumerically("<", 5*time.Second),
+			fmt.Sprintf("Timed out waiting for there to be a single PID for %s", processName))
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -352,7 +581,7 @@ func (c *Container) WaitUntilRunning() {
 	}()
 
 	for {
-		Expect(stoppedChan).NotTo(BeClosed(), "Container failed before being listed in 'docker ps'")
+		Expect(stoppedChan).NotTo(BeClosed(), fmt.Sprintf("Container %s failed before being listed in 'docker ps'", c.Name))
 
 		cmd := utils.Command("docker", "ps")
 		out, err := cmd.CombinedOutput()
@@ -391,19 +620,14 @@ func (c *Container) WaitNotRunning(timeout time.Duration) {
 	}
 }
 
-func (c *Container) EnsureBinary(name string) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	if !c.binaries.Contains(name) {
-		utils.Command("docker", "cp", "../bin/"+name, c.Name+":/"+name).Run()
-		c.binaries.Add(name)
-	}
-}
-
 func (c *Container) CopyFileIntoContainer(hostPath, containerPath string) error {
 	cmd := utils.Command("docker", "cp", hostPath, c.Name+":"+containerPath)
 	return cmd.Run()
+}
+
+func (c *Container) FileExists(path string) bool {
+	err := c.ExecMayFail("test", "-e", path)
+	return err == nil
 }
 
 func (c *Container) Exec(cmd ...string) {
@@ -411,6 +635,13 @@ func (c *Container) Exec(cmd ...string) {
 	arg := []string{"exec", c.Name}
 	arg = append(arg, cmd...)
 	utils.Run("docker", arg...)
+}
+
+func (c *Container) ExecWithInput(input []byte, cmd ...string) {
+	log.WithField("container", c.Name).WithField("command", cmd).Info("Running command")
+	arg := []string{"exec", "-i", c.Name}
+	arg = append(arg, cmd...)
+	utils.RunWithInput(input, "docker", arg...)
 }
 
 func (c *Container) ExecMayFail(cmd ...string) error {
@@ -422,8 +653,36 @@ func (c *Container) ExecMayFail(cmd ...string) error {
 func (c *Container) ExecOutput(args ...string) (string, error) {
 	arg := []string{"exec", c.Name}
 	arg = append(arg, args...)
-	cmd := exec.Command("docker", arg...)
+	cmd := utils.Command("docker", arg...)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go c.copyOutputToLog("exec-err", stderr, &wg, nil)
+	defer wg.Wait()
 	out, err := cmd.Output()
+	if err != nil {
+		if out == nil {
+			return "", err
+		}
+		return string(out), err
+	}
+	return string(out), nil
+}
+
+func (c *Container) ExecOutputFn(args ...string) func() (string, error) {
+	return func() (string, error) {
+		return c.ExecOutput(args...)
+	}
+}
+
+func (c *Container) ExecCombinedOutput(args ...string) (string, error) {
+	arg := []string{"exec", c.Name}
+	arg = append(arg, args...)
+	cmd := utils.Command("docker", arg...)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if out == nil {
 			return "", err
@@ -437,30 +696,138 @@ func (c *Container) SourceName() string {
 	return c.Name
 }
 
-func (c *Container) CanConnectTo(ip, port, protocol string) bool {
+func (c *Container) SourceIPs() []string {
+	ips := []string{c.IP}
+	ips = append(ips, c.ExtraSourceIPs...)
+	return ips
+}
 
-	// Ensure that the container has the 'test-connection' binary.
-	c.EnsureBinary("test-connection")
+func (c *Container) PreRetryCleanup(ip, port, protocol string, opts ...connectivity.CheckOption) {
+}
 
-	// Run 'test-connection' to the target.
-	connectionCmd := utils.Command("docker", "exec", c.Name,
-		"/test-connection", "--protocol="+protocol, "-", ip, port)
-	outPipe, err := connectionCmd.StdoutPipe()
-	Expect(err).NotTo(HaveOccurred())
-	errPipe, err := connectionCmd.StderrPipe()
-	Expect(err).NotTo(HaveOccurred())
-	err = connectionCmd.Start()
-	Expect(err).NotTo(HaveOccurred())
+func (c *Container) CanConnectTo(ip, port, protocol string, opts ...connectivity.CheckOption) *connectivity.Result {
+	return connectivity.Check(c.Name, "Connection test", ip, port, protocol, opts...)
+}
 
-	wOut, err := ioutil.ReadAll(outPipe)
-	Expect(err).NotTo(HaveOccurred())
-	wErr, err := ioutil.ReadAll(errPipe)
-	Expect(err).NotTo(HaveOccurred())
-	err = connectionCmd.Wait()
+// AttachTCPDump returns tcpdump attached to the container
+func (c *Container) AttachTCPDump(iface string) *tcpdump.TCPDump {
+	return tcpdump.AttachUnavailable(c.GetID(), iface)
+}
 
-	log.WithFields(log.Fields{
-		"stdout": string(wOut),
-		"stderr": string(wErr)}).WithError(err).Info("Connection test")
+// NumTCBPFProgs Returns the number of TC BPF programs attached to the given interface.  Only direct-action
+// programs are listed (i.e. the type that we use).
+func (c *Container) NumTCBPFProgs(ifaceName string) int {
+	var total int
+	for _, dir := range []string{"ingress", "egress"} {
+		out, err := c.ExecOutput("tc", "filter", "show", "dev", ifaceName, dir)
+		Expect(err).NotTo(HaveOccurred())
+		count := strings.Count(out, "direct-action")
+		log.Debugf("Output from tc filter show for %s, dir=%s: %q (count=%d)", c.Name, dir, out, count)
+		total += count
+	}
+	return total
+}
 
-	return err == nil
+func (c *Container) NumTCBPFProgsFn(ifaceName string) func() int {
+	return func() int {
+		return c.NumTCBPFProgs(ifaceName)
+	}
+}
+
+// NumTCBPFProgs Returns the number of TC BPF programs attached to eth0.  Only direct-action programs are
+// listed (i.e. the type that we use).
+func (c *Container) NumTCBPFProgsEth0() int {
+	return c.NumTCBPFProgs("eth0")
+}
+
+// BPFRoutes returns the output of calico-bpf routes dump, trimmed of whitespace and sorted.
+func (c *Container) BPFRoutes() string {
+	out, err := c.ExecOutput("calico-bpf", "routes", "dump")
+	if err != nil {
+		log.WithError(err).Error("Failed to run calico-bpf")
+	}
+
+	lines := strings.Split(out, "\n")
+	var filteredLines []string
+	for _, l := range lines {
+		l = strings.TrimLeft(l, " ")
+		if len(l) == 0 {
+			continue
+		}
+		filteredLines = append(filteredLines, l)
+	}
+	sort.Strings(filteredLines)
+	return strings.Join(filteredLines, "\n")
+}
+
+// BPFNATDump returns parsed out NAT maps keyed by "<ip> port <port> proto <proto>". Each
+// value is list of "<ip>:<port>".
+func (c *Container) BPFNATDump() map[string][]string {
+	out, err := c.ExecOutput("calico-bpf", "nat", "dump")
+	if err != nil {
+		log.WithError(err).Error("Failed to run calico-bpf")
+	}
+
+	feMatch := regexp.MustCompile(`(.* port \d+ proto \d+) id (\d+) count.*`)
+
+	lines := strings.Split(out, "\n")
+	front := ""
+	id := ""
+	back := []string(nil)
+	nat := make(map[string][]string)
+
+	var beMatch *regexp.Regexp
+
+	for _, l := range lines {
+		if front != "" {
+			if be := beMatch.FindStringSubmatch(l); be != nil {
+				back = append(back, be[1])
+			} else {
+				nat[front] = back
+				back = []string(nil)
+				front = ""
+			}
+		}
+
+		if front == "" {
+			if fe := feMatch.FindStringSubmatch(l); fe == nil {
+				continue
+			} else {
+				front = fe[1]
+				id = fe[2]
+				beMatch = regexp.MustCompile("\\s+" + id + ":\\d+\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+:\\d+)")
+			}
+		}
+
+	}
+
+	if front != "" {
+		nat[front] = back
+	}
+
+	return nat
+}
+
+// BPFNATHasBackendForService returns true is the given service has the given backend programmed in NAT tables
+func (c *Container) BPFNATHasBackendForService(svcIP string, svcPort, proto int, ip string, port int) bool {
+	front := fmt.Sprintf("%s port %d proto %d", svcIP, svcPort, proto)
+	back := fmt.Sprintf("%s:%d", ip, port)
+
+	nat := c.BPFNATDump()
+	if natBack, ok := nat[front]; ok {
+		found := false
+		for _, b := range natBack {
+			if b == back {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	} else {
+		return false
+	}
+
+	return true
 }

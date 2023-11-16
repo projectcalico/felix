@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2018,2020-2021 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,8 @@
 package calc_test
 
 import (
-	. "github.com/alauda/felix/calc"
+	. "github.com/projectcalico/calico/felix/calc"
+	"github.com/projectcalico/calico/felix/config"
 
 	"reflect"
 
@@ -24,18 +25,26 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/dataplane/mock"
-	"github.com/alauda/felix/dispatcher"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/net"
+	kapiv1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	extdataplane "github.com/projectcalico/calico/felix/dataplane/external"
+	"github.com/projectcalico/calico/felix/dataplane/mock"
+	"github.com/projectcalico/calico/felix/dispatcher"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 
 var testIP = mustParseIP("10.0.0.1")
 var testIP2 = mustParseIP("10.0.0.2")
-var testIPAs6 = net.IP{testIP.To16()}
-var testIPAs4 = net.IP{testIP.To4()}
+var testIPAs6 = net.IP{IP: testIP.To16()}
+var testIPAs4 = net.IP{IP: testIP.To4()}
+var udpPort = proto.ServicePort{Port: 123, Protocol: "UDP"}
+var tcpPort = proto.ServicePort{Port: 321, Protocol: "TCP"}
 
 var _ = DescribeTable("Calculation graph pass-through tests",
 	func(key model.Key, input interface{}, expUpdate interface{}, expRemove interface{}) {
@@ -46,7 +55,9 @@ var _ = DescribeTable("Calculation graph pass-through tests",
 			log.WithField("message", message).Info("Received message")
 			messageReceived = message
 		}
-		cg := NewCalculationGraph(eb, "hostname").AllUpdDispatcher
+		conf := config.New()
+		conf.FelixHostname = "hostname"
+		cg := NewCalculationGraph(eb, conf, func() {}).AllUpdDispatcher
 
 		// Send in the update and flush the buffer.  It should deposit the message
 		// via our callback.
@@ -60,6 +71,8 @@ var _ = DescribeTable("Calculation graph pass-through tests",
 		})
 		eb.Flush()
 		Expect(reflect.ValueOf(messageReceived).Elem().Interface()).To(Equal(expUpdate))
+		_, err := extdataplane.WrapPayloadWithEnvelope(messageReceived, 0)
+		Expect(err).To(BeNil())
 
 		// Send in the delete and flush the buffer.  It should deposit the message
 		// via our callback.
@@ -73,6 +86,8 @@ var _ = DescribeTable("Calculation graph pass-through tests",
 		})
 		eb.Flush()
 		Expect(reflect.ValueOf(messageReceived).Elem().Interface()).To(Equal(expRemove))
+		_, err = extdataplane.WrapPayloadWithEnvelope(messageReceived, 0)
+		Expect(err).To(BeNil())
 	},
 	Entry("IPPool",
 		model.IPPoolKey{CIDR: mustParseNet("10.0.0.0/16")},
@@ -115,6 +130,82 @@ var _ = DescribeTable("Calculation graph pass-through tests",
 		proto.HostMetadataRemove{
 			Hostname: "foo",
 		}),
+	Entry("Global BGPConfiguration",
+		model.ResourceKey{Kind: v3.KindBGPConfiguration, Name: "default"},
+		&v3.BGPConfiguration{
+			Spec: v3.BGPConfigurationSpec{
+				ServiceClusterIPs: []v3.ServiceClusterIPBlock{
+					{
+						CIDR: "1.2.0.0/16",
+					},
+					{
+						CIDR: "fd5f::/120",
+					},
+				},
+				ServiceExternalIPs: []v3.ServiceExternalIPBlock{
+					{
+						CIDR: "255.200.0.0/24",
+					},
+				},
+				ServiceLoadBalancerIPs: []v3.ServiceLoadBalancerIPBlock{
+					{
+						CIDR: "255.220.0.0/24",
+					},
+				},
+			},
+		},
+		proto.GlobalBGPConfigUpdate{
+			ServiceClusterCidrs:      []string{"1.2.0.0/16", "fd5f::/120"},
+			ServiceExternalCidrs:     []string{"255.200.0.0/24"},
+			ServiceLoadbalancerCidrs: []string{"255.220.0.0/24"},
+		},
+		proto.GlobalBGPConfigUpdate{}),
+	Entry("Wireguard",
+		model.WireguardKey{NodeName: "localhost"},
+		&model.Wireguard{InterfaceIPv4Addr: &testIP, PublicKey: "azerty"},
+		proto.WireguardEndpointUpdate{
+			Hostname:          "localhost",
+			PublicKey:         "azerty",
+			InterfaceIpv4Addr: "10.0.0.1",
+		},
+		proto.WireguardEndpointRemove{Hostname: "localhost"}),
+	Entry("Services",
+		model.ResourceKey{Kind: model.KindKubernetesService, Name: "svcname", Namespace: "default"},
+		&kapiv1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "svcname",
+				Namespace: "default",
+			},
+			Spec: kapiv1.ServiceSpec{
+				Type:           "ClusterIP",
+				ClusterIP:      "10.96.0.1",
+				LoadBalancerIP: "1.1.1.1",
+				ExternalIPs:    []string{"1.2.3.4"},
+				Ports: []kapiv1.ServicePort{
+					{
+						Protocol: kapiv1.ProtocolUDP,
+						Port:     123,
+					},
+					{
+						Port: 321,
+					},
+				},
+			},
+		},
+		proto.ServiceUpdate{
+			Name:           "svcname",
+			Namespace:      "default",
+			Type:           "ClusterIP",
+			ClusterIp:      "10.96.0.1",
+			LoadbalancerIp: "1.1.1.1",
+			ExternalIps:    []string{"1.2.3.4"},
+			Ports:          []*proto.ServicePort{&udpPort, &tcpPort},
+		},
+		proto.ServiceRemove{
+			Name:      "svcname",
+			Namespace: "default",
+		},
+	),
 )
 
 var _ = Describe("Host IP duplicate squashing test", func() {
@@ -130,7 +221,9 @@ var _ = Describe("Host IP duplicate squashing test", func() {
 			log.WithField("message", message).Info("Received message")
 			messagesReceived = append(messagesReceived, message)
 		}
-		cg = NewCalculationGraph(eb, "hostname").AllUpdDispatcher
+		conf := config.New()
+		conf.FelixHostname = "hostname"
+		cg = NewCalculationGraph(eb, conf, func() {}).AllUpdDispatcher
 	})
 
 	It("should coalesce duplicate updates", func() {
@@ -233,13 +326,15 @@ var _ = Describe("specific scenario tests", func() {
 		mockDataplane = mock.NewMockDataplane()
 		eventBuf = NewEventSequencer(mockDataplane)
 		eventBuf.Callback = mockDataplane.OnEvent
-		calcGraph = NewCalculationGraph(eventBuf, localHostname)
+		conf := config.New()
+		conf.FelixHostname = localHostname
+		calcGraph = NewCalculationGraph(eventBuf, conf, func() {})
 		statsCollector := NewStatsCollector(func(stats StatsUpdate) error {
 			log.WithField("stats", stats).Info("Stats update")
 			return nil
 		})
 		statsCollector.RegisterWith(calcGraph)
-		validationFilter = NewValidationFilter(calcGraph.AllUpdDispatcher)
+		validationFilter = NewValidationFilter(calcGraph.AllUpdDispatcher, conf)
 	})
 
 	It("should squash no-op policy updates", func() {

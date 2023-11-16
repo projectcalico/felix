@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,49 +15,161 @@
 package infrastructure
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"path"
+	"regexp"
+	"strconv"
+	"strings"
 
+	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/fv/containers"
-	"github.com/alauda/felix/fv/utils"
+	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/projectcalico/calico/felix/fv/tcpdump"
+	"github.com/projectcalico/calico/felix/fv/utils"
 )
+
+// FIXME: isolate individual Felix instances in their own cgroups.  Unfortunately, this doesn't work on systems that are using cgroupv1
+// see https://elixir.bootlin.com/linux/v5.3.11/source/include/linux/cgroup-defs.h#L788 for explanation.
+const CreateCgroupV2 = false
 
 type Felix struct {
 	*containers.Container
 
 	// ExpectedIPIPTunnelAddr contains the IP that the infrastructure expects to
-	// get assigned to the IPIP tunnel.  Filled in by AddNode().
+	// get assigned to the IPIP tunnel.  Filled in by SetExpectedIPIPTunnelAddr().
 	ExpectedIPIPTunnelAddr string
+	// ExpectedVXLANTunnelAddr contains the IP that the infrastructure expects to
+	// get assigned to the IPv4 VXLAN tunnel.  Filled in by SetExpectedVXLANTunnelAddr().
+	ExpectedVXLANTunnelAddr string
+	// ExpectedVXLANV6TunnelAddr contains the IP that the infrastructure expects to
+	// get assigned to the IPv6 VXLAN tunnel.  Filled in by SetExpectedVXLANV6TunnelAddr().
+	ExpectedVXLANV6TunnelAddr string
+	// ExpectedWireguardTunnelAddr contains the IPv4 address that the infrastructure expects to
+	// get assigned to the IPv4 Wireguard tunnel.  Filled in by SetExpectedWireguardTunnelAddr().
+	ExpectedWireguardTunnelAddr string
+	// ExpectedWireguardV6TunnelAddr contains the IPv6 address that the infrastructure expects to
+	// get assigned to the IPv6 Wireguard tunnel.  Filled in by SetExpectedWireguardV6TunnelAddr().
+	ExpectedWireguardV6TunnelAddr string
+
+	// IP of the Typha that this Felix is using (if any).
+	TyphaIP string
+
+	// If set, acts like an external IP of a node. Filled in by SetExternalIP().
+	ExternalIP string
+
+	startupDelayed bool
+	Workloads      []workload
+}
+
+type workload interface {
+	Runs() bool
+	GetIP() string
+	GetInterfaceName() string
+	GetSpoofInterfaceName() string
 }
 
 func (f *Felix) GetFelixPID() int {
+	if f.startupDelayed {
+		log.Panic("GetFelixPID() called but startup is delayed")
+	}
 	return f.GetSinglePID("calico-felix")
 }
 
 func (f *Felix) GetFelixPIDs() []int {
+	if f.startupDelayed {
+		log.Panic("GetFelixPIDs() called but startup is delayed")
+	}
 	return f.GetPIDs("calico-felix")
 }
 
-func RunFelix(infra DatastoreInfra, options TopologyOptions) *Felix {
+func (f *Felix) TriggerDelayedStart() {
+	if !f.startupDelayed {
+		log.Panic("TriggerDelayedStart() called but startup wasn't delayed")
+	}
+	f.Exec("touch", "/start-trigger")
+	f.startupDelayed = false
+}
+
+func RunFelix(infra DatastoreInfra, id int, options TopologyOptions) *Felix {
 	log.Info("Starting felix")
 	ipv6Enabled := fmt.Sprint(options.EnableIPv6)
+	bpfEnableIPv6 := fmt.Sprint(options.BPFEnableIPv6)
 
 	args := infra.GetDockerArgs()
-	args = append(args,
-		"--privileged",
-		"-e", "FELIX_LOGSEVERITYSCREEN="+options.FelixLogSeverity,
-		"-e", "FELIX_PROMETHEUSMETRICSENABLED=true",
-		"-e", "FELIX_USAGEREPORTINGENABLED=false",
-		"-e", "FELIX_IPV6SUPPORT="+ipv6Enabled,
-		"-v", "/lib/modules:/lib/modules",
-	)
+	args = append(args, "--privileged")
+
+	// Collect the environment variables for starting this particular container.  Note: we
+	// are called concurrently with other instances of RunFelix so it's important to only
+	// read from options.*.
+	envVars := map[string]string{
+		// Enable core dumps.
+		"GOTRACEBACK": "crash",
+		"GORACE":      "history_size=2",
+		// Tell the wrapper to set the core file name pattern so we can find the dump.
+		"SET_CORE_PATTERN": "true",
+
+		"FELIX_LOGSEVERITYSCREEN":        options.FelixLogSeverity,
+		"FELIX_PROMETHEUSMETRICSENABLED": "true",
+		"FELIX_BPFLOGLEVEL":              "debug",
+		"FELIX_USAGEREPORTINGENABLED":    "false",
+		"FELIX_IPV6SUPPORT":              ipv6Enabled,
+		"FELIX_BPFIPV6SUPPORT":           bpfEnableIPv6,
+		// Disable log dropping, because it can cause flakes in tests that look for particular logs.
+		"FELIX_DEBUGDISABLELOGDROPPING": "true",
+	}
+	// Collect the volumes for this container.
+	wd, err := os.Getwd()
+	Expect(err).NotTo(HaveOccurred(), "failed to get working directory")
+
+	arch := utils.GetSysArch()
+
+	fvBin := os.Getenv("FV_BINARY")
+	if fvBin == "" {
+		fvBin = fmt.Sprintf("bin/calico-felix-%s", arch)
+	}
+	volumes := map[string]string{
+		path.Join(wd, "..", "bin"):        "/usr/local/bin",
+		path.Join(wd, "..", fvBin):        "/usr/local/bin/calico-felix",
+		path.Join(wd, "..", "bin", "bpf"): "/usr/lib/calico/bpf/",
+		"/lib/modules":                    "/lib/modules",
+		"/tmp":                            "/tmp",
+	}
+
+	containerName := containers.UniqueName(fmt.Sprintf("felix-%d", id))
+
+	if os.Getenv("FELIX_FV_ENABLE_BPF") == "true" {
+		if !options.TestManagesBPF {
+			log.Info("FELIX_FV_ENABLE_BPF=true, enabling BPF with env var")
+			envVars["FELIX_BPFENABLED"] = "true"
+		} else {
+			log.Info("FELIX_FV_ENABLE_BPF=true but test manages BPF state itself, not using env var")
+		}
+
+		if CreateCgroupV2 {
+			envVars["FELIX_DEBUGBPFCGROUPV2"] = containerName
+		}
+	}
+
+	if options.DelayFelixStart {
+		envVars["DELAY_FELIX_START"] = "true"
+	}
 
 	for k, v := range options.ExtraEnvVars {
+		envVars[k] = v
+	}
+
+	for k, v := range envVars {
 		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 
+	// Add in the volumes.
 	for k, v := range options.ExtraVolumes {
+		volumes[k] = v
+	}
+	for k, v := range volumes {
 		args = append(args, "-v", fmt.Sprintf("%s:%s", k, v))
 	}
 
@@ -65,10 +177,18 @@ func RunFelix(infra DatastoreInfra, options TopologyOptions) *Felix {
 		utils.Config.FelixImage,
 	)
 
-	c := containers.Run("felix",
-		containers.RunOpts{AutoRemove: true},
-		args...,
-	)
+	felixOpts := containers.RunOpts{
+		AutoRemove: true,
+	}
+	if options.FelixStopGraceful {
+		// Leave StopSignal defaulting to SIGTERM, and allow 10 seconds for Felix
+		// to handle that gracefully.
+		felixOpts.StopTimeoutSecs = 10
+	} else {
+		// Use SIGKILL to stop Felix immediately.
+		felixOpts.StopSignal = "SIGKILL"
+	}
+	c := containers.RunWithFixedName(containerName, felixOpts, args...)
 
 	if options.EnableIPv6 {
 		c.Exec("sysctl", "-w", "net.ipv6.conf.all.disable_ipv6=0")
@@ -94,6 +214,91 @@ func RunFelix(infra DatastoreInfra, options TopologyOptions) *Felix {
 		"-P", "FORWARD", "DROP")
 
 	return &Felix{
-		Container: c,
+		Container:      c,
+		startupDelayed: options.DelayFelixStart,
 	}
+}
+
+func (f *Felix) Stop() {
+	if CreateCgroupV2 {
+		_ = f.ExecMayFail("rmdir", path.Join("/run/calico/cgroup/", f.Name))
+	}
+	f.Container.Stop()
+}
+
+func (f *Felix) Restart() {
+	oldPID := f.GetFelixPID()
+	f.Exec("kill", "-HUP", fmt.Sprint(oldPID))
+	Eventually(f.GetFelixPID, "10s", "100ms").ShouldNot(Equal(oldPID))
+}
+
+func (f *Felix) SetEvn(env map[string]string) {
+	fn := "extra-env.sh"
+
+	file, err := os.OpenFile("./"+fn, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
+	Expect(err).NotTo(HaveOccurred())
+
+	fw := bufio.NewWriter(file)
+
+	for k, v := range env {
+		fmt.Fprintf(fw, "export %s=%v\n", k, v)
+	}
+
+	fw.Flush()
+	file.Close()
+
+	err = f.CopyFileIntoContainer("./"+fn, "/"+fn)
+	Expect(err).NotTo(HaveOccurred())
+}
+
+// AttachTCPDump returns tcpdump attached to the container
+func (f *Felix) AttachTCPDump(iface string) *tcpdump.TCPDump {
+	return tcpdump.Attach(f.Container.Name, "", iface)
+}
+
+func (f *Felix) ProgramIptablesDNAT(serviceIP, targetIP, chain string) {
+	f.Exec(
+		"iptables",
+		"-w", "10", // Retry this for 10 seconds, e.g. if something else is holding the lock
+		"-W", "100000", // How often to probe the lock in microsecs.
+		"-t", "nat", "-A", chain,
+		"--destination", serviceIP,
+		"-j", "DNAT", "--to-destination", targetIP,
+	)
+}
+
+type BPFIfState struct {
+	IfIndex  int
+	Workload bool
+	Ready    bool
+}
+
+var bpfIfStateRegexp = regexp.MustCompile(`.*([0-9]+) : \{flags: (.*) name: (.*)\}`)
+
+func (f *Felix) BPFIfState() map[string]BPFIfState {
+	out, err := f.ExecOutput("calico-bpf", "ifstate", "dump")
+	Expect(err).NotTo(HaveOccurred())
+
+	states := make(map[string]BPFIfState)
+
+	lines := strings.Split(out, "\n")
+	for _, line := range lines {
+		match := bpfIfStateRegexp.FindStringSubmatch(line)
+		if len(match) == 0 {
+			continue
+		}
+
+		name := match[3]
+		flags := match[2]
+		ifIndex, _ := strconv.Atoi(match[1])
+		state := BPFIfState{
+			IfIndex:  ifIndex,
+			Workload: strings.Contains(flags, "workload"),
+			Ready:    strings.Contains(flags, "ready"),
+		}
+
+		states[name] = state
+	}
+
+	return states
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017,2019 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,17 +18,16 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/k8sfv/leastsquares"
+	"github.com/projectcalico/calico/felix/k8sfv/leastsquares"
 )
 
 var _ = Context("least squares", func() {
-
 	It("should fit a straight line", func() {
 		p := []leastsquares.Point{
-			{1, 1},
-			{2, 2},
-			{3, 3},
-			{4, 4},
+			{X: 1, Y: 1},
+			{X: 2, Y: 2},
+			{X: 3, Y: 3},
+			{X: 4, Y: 4},
 		}
 		gradient, constant := leastsquares.LeastSquaresMethod(p)
 		Expect(gradient).To(BeNumerically("==", 1))

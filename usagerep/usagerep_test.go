@@ -4,34 +4,33 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package usagerep
 
 import (
-	"net/url"
-	"time"
-
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-
 	"context"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
+	"time"
 
-	"github.com/alauda/felix/buildinfo"
-	"github.com/alauda/felix/calc"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+	log "github.com/sirupsen/logrus"
+
+	"github.com/projectcalico/calico/felix/buildinfo"
+	"github.com/projectcalico/calico/felix/calc"
 )
 
-const expectedNumberOfURLParams = 12
+const expectedNumberOfURLParams = 13
 
 // These tests start a local HTTP server on a random port and tell the usage reporter to
 // connect to it.  Then we can check that it correctly makes HTTP requests at the right times.
@@ -47,12 +46,16 @@ var _ = Describe("UsageReporter with mocked URL and short interval", func() {
 	BeforeEach(func() {
 		// Open a listener on a random local port.
 		var err error
-		tcpListener, err = net.Listen("tcp", ":0")
+		tcpListener, err = net.Listen("tcp", "localhost:0")
 		Expect(err).NotTo(HaveOccurred())
 		httpHandler = &requestRecorder{}
 		go func() {
 			defer GinkgoRecover()
-			http.Serve(tcpListener, httpHandler)
+			// TODO: Investigate why this call sometimes returns an error.
+			err = http.Serve(tcpListener, httpHandler)
+			if err != nil {
+				log.WithError(err).Error("Failed to start HTTP server.")
+			}
 		}()
 
 		// Channels to send data to the UsageReporter.
@@ -60,7 +63,7 @@ var _ = Describe("UsageReporter with mocked URL and short interval", func() {
 		configUpdateC = make(chan map[string]string)
 
 		// Create a usage reporter and override its base URL and initial interval.
-		u = New(500*time.Millisecond, 1*time.Second, statsUpdateC, configUpdateC)
+		u = New(StaticItems{KubernetesVersion: "v1.23.2"}, 500*time.Millisecond, 1*time.Second, statsUpdateC, configUpdateC)
 		port := tcpListener.Addr().(*net.TCPAddr).Port
 		u.BaseURL = fmt.Sprintf("http://localhost:%d/UsageCheck/calicoVersionCheck?", port)
 
@@ -83,6 +86,7 @@ var _ = Describe("UsageReporter with mocked URL and short interval", func() {
 				"ClusterGUID":   "someguid",
 				"ClusterType":   "openstack,k8s,kdd",
 				"CalicoVersion": "v2.6.3",
+				"BPFEnabled":    "false",
 			}
 		}
 
@@ -127,6 +131,7 @@ var _ = Describe("UsageReporter with mocked URL and short interval", func() {
 				Expect(q.Get("guid")).To(Equal("someguid"))
 				Expect(q.Get("type")).To(Equal("openstack,k8s,kdd"))
 				Expect(q.Get("cal_ver")).To(Equal("v2.6.3"))
+				Expect(q.Get("k8s_ver")).To(Equal("v1.23.2"))
 				Expect(q.Get("alp")).To(Equal("false"))
 				Expect(q.Get("size")).To(Equal("1"))
 				Expect(q.Get("heps")).To(Equal("2"))
@@ -170,6 +175,7 @@ var _ = Describe("UsageReporter with mocked URL and short interval", func() {
 						"ClusterType":          "openstack,k8s,kdd,typha",
 						"CalicoVersion":        "v3.0.0",
 						"PolicySyncPathPrefix": "/var/run/nodeagent",
+						"BPFEnabled":           "true",
 					}
 				})
 
@@ -184,8 +190,9 @@ var _ = Describe("UsageReporter with mocked URL and short interval", func() {
 					q := url.Query()
 					Expect(q).To(HaveLen(expectedNumberOfURLParams), "unexpected number of URL parameters")
 					Expect(q.Get("guid")).To(Equal("someguid2"))
-					Expect(q.Get("type")).To(Equal("openstack,k8s,kdd,typha"))
+					Expect(q.Get("type")).To(Equal("openstack,k8s,kdd,typha,bpf"))
 					Expect(q.Get("cal_ver")).To(Equal("v3.0.0"))
+					Expect(q.Get("k8s_ver")).To(Equal("v1.23.2"))
 					Expect(q.Get("alp")).To(Equal("true"))
 					Expect(q.Get("size")).To(Equal("10"))
 					Expect(q.Get("heps")).To(Equal("20"))
@@ -209,30 +216,29 @@ func (h *requestRecorder) ServeHTTP(resp http.ResponseWriter, req *http.Request)
 	defer h.lock.Unlock()
 	h.requestsReceived = append(h.requestsReceived, req.RequestURI)
 
-	resp.Write([]byte(`{"usage_warning": "Warning!"}`))
+	_, err := resp.Write([]byte(`{"usage_warning": "Warning!"}`))
+	Expect(err).NotTo(HaveOccurred())
 }
 
 func (h *requestRecorder) GetRequestURIs() []string {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 	var result []string
-	for _, r := range h.requestsReceived {
-		result = append(result, r)
-	}
+	result = append(result, h.requestsReceived...)
 	return result
 }
 
 // These tests create a usage reporter but they don't start it.  Instead they validate its
-// internal calculation methods and and the default configuration.
+// internal calculation methods and the default configuration.
 var _ = Describe("UsageReporter with default URL", func() {
 	var u *UsageReporter
 
 	BeforeEach(func() {
-		u = New(5*time.Minute, 24*time.Hour, nil, nil)
+		u = New(StaticItems{KubernetesVersion: ""}, 5*time.Minute, 24*time.Hour, nil, nil)
 	})
 
 	It("should calculate correct URL mainline", func() {
-		rawURL := u.calculateURL("theguid", "atype", "testVer", true, calc.StatsUpdate{
+		rawURL := u.calculateURL("theguid", "atype", "testVer", true, false, calc.StatsUpdate{
 			NumHostEndpoints:     123,
 			NumWorkloadEndpoints: 234,
 			NumHosts:             10,
@@ -244,6 +250,7 @@ var _ = Describe("UsageReporter with default URL", func() {
 		Expect(q.Get("guid")).To(Equal("theguid"))
 		Expect(q.Get("type")).To(Equal("atype"))
 		Expect(q.Get("cal_ver")).To(Equal("testVer"))
+		Expect(q.Get("k8s_ver")).To(Equal("unknown"))
 		Expect(q.Get("alp")).To(Equal("true"))
 		Expect(q.Get("size")).To(Equal("10"))
 		Expect(q.Get("weps")).To(Equal("234"))
@@ -256,7 +263,7 @@ var _ = Describe("UsageReporter with default URL", func() {
 		Expect(url.Path).To(Equal("/UsageCheck/calicoVersionCheck"))
 	})
 	It("should default cluster type, GUID, and Calico Version", func() {
-		rawURL := u.calculateURL("", "", "", false, calc.StatsUpdate{
+		rawURL := u.calculateURL("", "", "", false, false, calc.StatsUpdate{
 			NumHostEndpoints:     123,
 			NumWorkloadEndpoints: 234,
 			NumHosts:             10,
@@ -268,6 +275,7 @@ var _ = Describe("UsageReporter with default URL", func() {
 		Expect(q.Get("guid")).To(Equal("baddecaf"))
 		Expect(q.Get("type")).To(Equal("unknown"))
 		Expect(q.Get("cal_ver")).To(Equal("unknown"))
+		Expect(q.Get("k8s_ver")).To(Equal("unknown"))
 		Expect(q.Get("alp")).To(Equal("false"))
 	})
 	It("should delay at least 5 minutes", func() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2016-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
-	"github.com/alauda/felix/ipsets"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/rules"
+	"github.com/projectcalico/calico/felix/dataplane/common"
+	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/rules"
 )
 
 // ipipManager manages the all-hosts IP set, which is used by some rules in our static chains
@@ -32,7 +33,7 @@ import (
 //
 // ipipManager also takes care of the configuration of the IPIP tunnel device.
 type ipipManager struct {
-	ipsetsDataplane ipsetsDataplane
+	ipsetsDataplane common.IPSetsDataplane
 
 	// activeHostnameToIP maps hostname to string IP address.  We don't bother to parse into
 	// net.IPs because we're going to pass them directly to the IPSet API.
@@ -50,7 +51,7 @@ type ipipManager struct {
 }
 
 func newIPIPManager(
-	ipsetsDataplane ipsetsDataplane,
+	ipsetsDataplane common.IPSetsDataplane,
 	maxIPSetSize int,
 	externalNodeCidrs []string,
 ) *ipipManager {
@@ -58,7 +59,7 @@ func newIPIPManager(
 }
 
 func newIPIPManagerWithShim(
-	ipsetsDataplane ipsetsDataplane,
+	ipsetsDataplane common.IPSetsDataplane,
 	maxIPSetSize int,
 	dataplane ipipDataplane,
 	externalNodeCIDRs []string,
@@ -200,7 +201,7 @@ func (d *ipipManager) setLinkAddressV4(linkName string, address net.IP) error {
 func (d *ipipManager) OnUpdate(msg interface{}) {
 	switch msg := msg.(type) {
 	case *proto.HostMetadataUpdate:
-		log.WithField("hostanme", msg.Hostname).Debug("Host update/create")
+		log.WithField("hostname", msg.Hostname).Debug("Host update/create")
 		d.activeHostnameToIP[msg.Hostname] = msg.Ipv4Addr
 		d.ipSetInSync = false
 	case *proto.HostMetadataRemove:
@@ -222,19 +223,9 @@ func (m *ipipManager) CompleteDeferredWork() error {
 		for _, ip := range m.activeHostnameToIP {
 			members = append(members, ip)
 		}
-		for _, ip := range m.externalNodeCIDRs {
-			members = append(members, ip)
-		}
+		members = append(members, m.externalNodeCIDRs...)
 		m.ipsetsDataplane.AddOrReplaceIPSet(m.ipSetMetadata, members)
 		m.ipSetInSync = true
 	}
 	return nil
-}
-
-// ipsetsDataplane is a shim interface for mocking the IPSets object.
-type ipsetsDataplane interface {
-	AddOrReplaceIPSet(setMetadata ipsets.IPSetMetadata, members []string)
-	AddMembers(setID string, newMembers []string)
-	RemoveMembers(setID string, removedMembers []string)
-	RemoveIPSet(setID string)
 }

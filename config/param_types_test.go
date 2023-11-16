@@ -15,15 +15,17 @@
 package config_test
 
 import (
-	. "github.com/alauda/felix/config"
+	"net"
 
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
+
+	"github.com/projectcalico/calico/felix/config"
 )
 
 var _ = DescribeTable("Endpoint list parameter parsing",
 	func(raw string, expected interface{}) {
-		p := EndpointListParam{Metadata{
+		p := config.EndpointListParam{config.Metadata{
 			Name: "Endpoints",
 		}}
 		actual, err := p.Parse(raw)
@@ -41,7 +43,7 @@ var _ = DescribeTable("Endpoint list parameter parsing",
 
 var _ = DescribeTable("CIDR list parameter parsing",
 	func(raw string, expected interface{}, expectSuccess bool) {
-		p := CIDRListParam{Metadata{
+		p := config.CIDRListParam{config.Metadata{
 			Name: "CIDRs",
 		}}
 		actual, err := p.Parse(raw)
@@ -58,4 +60,68 @@ var _ = DescribeTable("CIDR list parameter parsing",
 	Entry("Single CIDR subnet", "1.1.1.1/24", []string{"1.1.1.0/24"}, true),
 	Entry("Mix of IP and CIDRs", "1.1.1.1/24, 2.2.2.2", []string{"1.1.1.0/24", "2.2.2.2/32"}, true),
 	Entry("Reject IPv6", "aabc::1111/32", []string{}, false),
+)
+
+var _ = DescribeTable("KeyValue list parameter parsing",
+	func(raw string, expected map[string]string) {
+		p := config.KeyValueListParam{config.Metadata{
+			Name: "FeatureOverride",
+		}}
+		actual, err := p.Parse(raw)
+		if expected == nil {
+			Expect(err).NotTo(BeNil())
+		} else {
+			Expect(err).To(BeNil())
+			Expect(actual).To(Equal(expected))
+		}
+	},
+	Entry("Empty", "  ", map[string]string{}),
+	Entry("Single value", "key=value", map[string]string{
+		"key": "value",
+	}),
+	Entry("Malformed", "key=value,malformed", nil),
+	Entry("Spaces", "  key=value,  v2= x ,,,,", map[string]string{
+		"key": "value",
+		"v2":  " x ",
+	}),
+)
+
+var _ = DescribeTable("IPv4 list parameter parsing",
+	func(raw string, expected string, expectSuccess bool) {
+		p := config.Ipv4Param{config.Metadata{
+			Name: "IPv4",
+		}}
+		actual, err := p.Parse(raw)
+		if expectSuccess {
+			Expect(err).To(BeNil())
+			ipStr := actual.(net.IP)
+			Expect(ipStr.String()).To(Equal(expected))
+		} else {
+			Expect(err).NotTo(BeNil())
+		}
+	},
+
+	Entry("Empty", " ", "", false),
+	Entry("IPv4 address", "10.1.1.2", "10.1.1.2", true),
+	Entry("IPv6 address", "aabc::1111", "", false),
+)
+
+var _ = DescribeTable("IPv6 list parameter parsing",
+	func(raw string, expected string, expectSuccess bool) {
+		p := config.Ipv6Param{config.Metadata{
+			Name: "IPv6",
+		}}
+		actual, err := p.Parse(raw)
+		if expectSuccess {
+			Expect(err).To(BeNil())
+			ipStr := actual.(net.IP)
+			Expect(ipStr.String()).To(Equal(expected))
+		} else {
+			Expect(err).NotTo(BeNil())
+		}
+	},
+
+	Entry("Empty", " ", "", false),
+	Entry("IPv4 address", "10.1.1.2", "", false),
+	Entry("IPv6 address", "aabc::1111", "aabc::1111", true),
 )

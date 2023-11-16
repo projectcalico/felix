@@ -20,11 +20,11 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/jitter"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/errors"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/jitter"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/errors"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 type EndpointStatusReporter struct {
@@ -35,8 +35,8 @@ type EndpointStatusReporter struct {
 	stop               chan bool
 	datastore          datastore
 	epStatusIDToStatus map[model.Key]string
-	queuedDirtyIDs     set.Set
-	activeDirtyIDs     set.Set
+	queuedDirtyIDs     set.Set[model.Key]
+	activeDirtyIDs     set.Set[model.Key]
 	reportingDelay     time.Duration
 	resyncInterval     time.Duration
 	resyncTicker       stoppable
@@ -92,8 +92,8 @@ func newEndpointStatusReporterWithTickerChans(hostname string,
 		inSync:             inSync,
 		stop:               make(chan bool),
 		epStatusIDToStatus: make(map[model.Key]string),
-		queuedDirtyIDs:     set.New(),
-		activeDirtyIDs:     set.New(),
+		queuedDirtyIDs:     set.NewBoxed[model.Key](),
+		activeDirtyIDs:     set.NewBoxed[model.Key](),
 		resyncTicker:       resyncTicker,
 		resyncTickerC:      resyncTickerChan,
 		rateLimitTicker:    rateLimitTicker,
@@ -219,13 +219,13 @@ loop:
 				log.WithField("numDirtyEndpoints", esr.activeDirtyIDs.Len()).Debug(
 					"Unthrottled and updates pending")
 				var statID model.Key
-				esr.activeDirtyIDs.Iter(func(item interface{}) error {
-					statID = item.(model.Key)
+				esr.activeDirtyIDs.Iter(func(item model.Key) error {
+					statID = item
 					return set.StopIteration
 				})
 				// Then try to write the update to the datastore.
 				// Note: the update could be a deletion, in which case
-				// the read from the cache wil return nil.
+				// the read from the cache will return nil.
 				err := esr.writeEndpointStatus(ctx, statID,
 					esr.epStatusIDToStatus[statID])
 				if err != nil {
@@ -244,11 +244,11 @@ loop:
 				// queued set.
 				log.WithField("numQueuedUpdates", esr.queuedDirtyIDs.Len()).Debug(
 					"Copying queued set to dirty set")
-				esr.queuedDirtyIDs.Iter(func(item interface{}) error {
+				esr.queuedDirtyIDs.Iter(func(item model.Key) error {
 					esr.activeDirtyIDs.Add(item)
 					return nil
 				})
-				esr.queuedDirtyIDs = set.New()
+				esr.queuedDirtyIDs = set.NewBoxed[model.Key]()
 			}
 		}
 	}
@@ -323,9 +323,9 @@ func (esr *EndpointStatusReporter) writeEndpointStatus(ctx context.Context, epID
 		logCxt.Info("Writing endpoint status")
 		switch epID.(type) {
 		case model.HostEndpointStatusKey:
-			kv.Value = &model.HostEndpointStatus{status}
+			kv.Value = &model.HostEndpointStatus{Status: status}
 		case model.WorkloadEndpointStatusKey:
-			kv.Value = &model.WorkloadEndpointStatus{status}
+			kv.Value = &model.WorkloadEndpointStatus{Status: status}
 		}
 		applyCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		_, err = esr.datastore.Apply(applyCtx, &kv)

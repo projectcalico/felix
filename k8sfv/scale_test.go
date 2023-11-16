@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017,2019 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/alauda/felix/k8sfv/leastsquares"
+	"github.com/projectcalico/calico/felix/k8sfv/leastsquares"
 )
 
 var _ = Describe("testing the test code", func() {
@@ -48,12 +48,14 @@ var _ = Context("with a k8s clientset", func() {
 		log.Info(">>> BeforeEach <<<")
 		clientset = initialize(k8sServerEndpoint)
 		nsPrefix = getNamespacePrefix()
+		expectFelixReady()
 	})
 
 	AfterEach(func() {
 		log.Info(">>> AfterEach <<<")
 		time.Sleep(10 * time.Second)
 		cleanupAll(clientset, nsPrefix)
+		log.Info(">>> End of AfterEach <<<")
 	})
 
 	Context("with 1 remote node", func() {
@@ -90,8 +92,8 @@ var _ = Context("with a k8s clientset", func() {
 				triggerFelixGCAndMemoryDump()
 
 				// Get current occupancy.
-				heapInUse := getFelixFloatMetric("go_memstats_heap_inuse_bytes")
-				heapAlloc := getFelixFloatMetric("go_memstats_heap_alloc_bytes")
+				heapInUse := getFelixFloatMetricOrPanic("go_memstats_heap_inuse_bytes")
+				heapAlloc := getFelixFloatMetricOrPanic("go_memstats_heap_alloc_bytes")
 				log.WithFields(log.Fields{
 					"iteration": ii,
 					"heapInUse": heapInUse,
@@ -112,11 +114,11 @@ var _ = Context("with a k8s clientset", func() {
 				if ii >= ignore {
 					heapInUseMeasurements = append(
 						heapInUseMeasurements,
-						leastsquares.Point{float64(ii) - iiAverage, heapInUse},
+						leastsquares.Point{X: float64(ii) - iiAverage, Y: heapInUse},
 					)
 					heapAllocMeasurements = append(
 						heapAllocMeasurements,
-						leastsquares.Point{float64(ii) - iiAverage, heapAlloc},
+						leastsquares.Point{X: float64(ii) - iiAverage, Y: heapAlloc},
 					)
 				}
 
@@ -221,7 +223,20 @@ var _ = Context("with a k8s clientset", func() {
 	})
 })
 
+func expectFelixReady() {
+	EventuallyWithOffset(1,
+		func() int64 {
+			state, err := getFelixIntMetric("felix_resync_state")
+			if err != nil {
+				log.WithError(err).Error("Failed to get felix stat.")
+			}
+			return state
+		}, "10s").Should(
+		BeNumerically("==", 3), "Felix never reported in-sync with datastore")
+}
+
 func triggerFelixGCAndMemoryDump() {
-	exec.Command("pkill", "-USR1", "calico-felix").Run()
+	err := exec.Command("pkill", "-USR1", "calico-felix").Run()
+	Expect(err).ToNot(HaveOccurred())
 	time.Sleep(2 * time.Second)
 }

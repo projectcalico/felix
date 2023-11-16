@@ -1,6 +1,4 @@
-// +build fvtests
-
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,23 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build fvtests
+
 package fv_test
 
 import (
+	"fmt"
+	"os"
 	"testing"
+
+	"github.com/projectcalico/calico/felix/fv/connectivity"
+
+	"github.com/onsi/gomega/format"
 
 	. "github.com/onsi/ginkgo"
 	"github.com/onsi/ginkgo/reporters"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/fv/infrastructure"
-	"github.com/alauda/felix/fv/workload"
-
-	"github.com/projectcalico/libcalico-go/lib/testutils"
+	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/projectcalico/calico/libcalico-go/lib/testutils"
 )
+
+var realStdout = os.Stdout
 
 func init() {
 	testutils.HookLogrusForGinkgo()
+
+	// Avoid truncating diffs when Equals assertions fail.
+	format.TruncatedDiff = false
 }
 
 func TestFv(t *testing.T) {
@@ -39,13 +48,23 @@ func TestFv(t *testing.T) {
 	RunSpecsWithDefaultAndCustomReporters(t, "FV Suite", []Reporter{junitReporter})
 }
 
+var _ = BeforeEach(func() {
+	_, _ = fmt.Fprintf(realStdout, "\nFV-TEST-START: %s", CurrentGinkgoTestDescription().FullTestText)
+})
+
+var _ = JustAfterEach(func() {
+	if CurrentGinkgoTestDescription().Failed {
+		_, _ = fmt.Fprintf(realStdout, "\n")
+	}
+})
+
 var _ = AfterEach(func() {
-	defer workload.UnactivatedConnectivityCheckers.Clear()
+	defer connectivity.UnactivatedCheckers.Clear()
 	if CurrentGinkgoTestDescription().Failed {
 		// If the test has already failed, ignore any connectivity checker leak.
 		return
 	}
-	Expect(workload.UnactivatedConnectivityCheckers.Len()).To(BeZero(),
+	Expect(connectivity.UnactivatedCheckers.Len()).To(BeZero(),
 		"Test bug: ConnectivityChecker was created but not activated.")
 })
 

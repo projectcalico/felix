@@ -1,10 +1,10 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,16 +18,17 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/net"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
-	"github.com/projectcalico/libcalico-go/lib/selector"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
 
-	"github.com/alauda/felix/labelindex"
-	"github.com/alauda/felix/multidict"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/hash"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/net"
+	"github.com/projectcalico/calico/libcalico-go/lib/selector"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
+
+	"github.com/projectcalico/calico/felix/labelindex"
+	"github.com/projectcalico/calico/felix/multidict"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/hash"
 )
 
 // AllSelector is a pre-calculated copy of the "all()" selector.
@@ -44,8 +45,8 @@ func init() {
 	_ = AllSelector.String()
 }
 
-// RuleScanner scans the rules sent to it by the ActiveRulesCalculator, looking for tags and
-// selectors. It calculates the set of active tags and selectors and emits events when they become
+// RuleScanner scans the rules sent to it by the ActiveRulesCalculator, looking for
+// selectors. It calculates the set of active selectors and emits events when they become
 // active/inactive.
 //
 // Previously, Felix tracked tags and selectors separately, with a separate tag and label index.
@@ -93,6 +94,11 @@ type IPSetData struct {
 	// NamedPort contains the name of the named port represented by this IP set or "" for a
 	// selector-only IP set
 	NamedPort string
+	// The service that this IP set represents, in namespace/name format.
+	Service string
+	// Type of the ip set to represent for this service. This allows us to create service
+	// IP sets with and without port information.
+	ServiceIncludePorts bool
 	// cachedUID holds the calculated unique ID of this IP set, or "" if it hasn't been calculated
 	// yet.
 	cachedUID string
@@ -100,12 +106,24 @@ type IPSetData struct {
 
 func (d *IPSetData) UniqueID() string {
 	if d.cachedUID == "" {
-		selID := d.Selector.UniqueID()
-		if d.NamedPortProtocol == labelindex.ProtocolNone {
-			d.cachedUID = selID
+		if d.Service != "" {
+			// Service based IP set.
+			if d.ServiceIncludePorts {
+				// Service IP set including its ports
+				d.cachedUID = hash.MakeUniqueID("svc", d.Service)
+			} else {
+				// Service IP set with only its CIDR
+				d.cachedUID = hash.MakeUniqueID("svcnoport", d.Service)
+			}
 		} else {
-			idToHash := selID + "," + d.NamedPortProtocol.String() + "," + d.NamedPort
-			d.cachedUID = hash.MakeUniqueID("n", idToHash)
+			// Selector / named-port based IP set.
+			selID := d.Selector.UniqueID()
+			if d.NamedPortProtocol == labelindex.ProtocolNone {
+				d.cachedUID = selID
+			} else {
+				idToHash := selID + "," + d.NamedPortProtocol.String() + "," + d.NamedPort
+				d.cachedUID = hash.MakeUniqueID("n", idToHash)
+			}
 		}
 	}
 	return d.cachedUID
@@ -116,6 +134,11 @@ func (d *IPSetData) UniqueID() string {
 func (d *IPSetData) DataplaneProtocolType() proto.IPSetUpdate_IPSetType {
 	if d.NamedPortProtocol != labelindex.ProtocolNone {
 		return proto.IPSetUpdate_IP_AND_PORT
+	}
+	if d.Service != "" {
+		if d.ServiceIncludePorts {
+			return proto.IPSetUpdate_IP_AND_PORT
+		}
 	}
 	return proto.IPSetUpdate_NET
 }
@@ -152,7 +175,7 @@ func (rs *RuleScanner) OnPolicyInactive(key model.PolicyKey) {
 func (rs *RuleScanner) updateRules(key interface{}, inbound, outbound []model.Rule, untracked, preDNAT bool, origNamespace string) (parsedRules *ParsedRules) {
 	log.Debugf("Scanning rules (%v in, %v out) for key %v",
 		len(inbound), len(outbound), key)
-	// Extract all the new selectors/tags/named ports.
+	// Extract all the new selectors/named ports.
 	currentUIDToIPSet := make(map[string]*IPSetData)
 	parsedInbound := make([]*ParsedRule, len(inbound))
 	for ii, rule := range inbound {
@@ -185,7 +208,7 @@ func (rs *RuleScanner) updateRules(key interface{}, inbound, outbound []model.Ru
 	}
 
 	// Figure out which IP sets are new.
-	addedUids := set.New()
+	addedUids := set.New[string]()
 	for uid := range currentUIDToIPSet {
 		log.Debugf("Checking if UID %v is new.", uid)
 		if !rs.rulesIDToUIDs.Contains(key, uid) {
@@ -195,7 +218,7 @@ func (rs *RuleScanner) updateRules(key interface{}, inbound, outbound []model.Ru
 	}
 
 	// Figure out which IP sets are no-longer in use.
-	removedUids := set.New()
+	removedUids := set.New[string]()
 	rs.rulesIDToUIDs.Iter(key, func(uid string) {
 		if _, ok := currentUIDToIPSet[uid]; !ok {
 			log.Debugf("Removed UID: %v", uid)
@@ -204,8 +227,7 @@ func (rs *RuleScanner) updateRules(key interface{}, inbound, outbound []model.Ru
 	})
 
 	// Add the new into the index, triggering events as we discover newly-active IP sets.
-	addedUids.Iter(func(item interface{}) error {
-		uid := item.(string)
+	addedUids.Iter(func(uid string) error {
 		rs.rulesIDToUIDs.Put(key, uid)
 		if !rs.uidsToRulesIDs.ContainsKey(uid) {
 			ipSet := currentUIDToIPSet[uid]
@@ -219,8 +241,7 @@ func (rs *RuleScanner) updateRules(key interface{}, inbound, outbound []model.Ru
 	})
 
 	// And remove the old, triggering events as we clean up unused IP sets.
-	removedUids.Iter(func(item interface{}) error {
-		uid := item.(string)
+	removedUids.Iter(func(uid string) error {
 		rs.rulesIDToUIDs.Discard(key, uid)
 		rs.uidsToRulesIDs.Discard(uid, key)
 		if !rs.uidsToRulesIDs.ContainsKey(uid) {
@@ -237,9 +258,9 @@ func (rs *RuleScanner) updateRules(key interface{}, inbound, outbound []model.Ru
 
 // ParsedRules holds our intermediate representation of either a policy's rules or a profile's
 // rules.  As part of its processing, the RuleScanner converts backend rules into ParsedRules.
-// Where backend rules contain selectors, tags and named ports, ParsedRules only contain
+// Where backend rules contain selectors and named ports, ParsedRules only contain
 // IPSet IDs.  The RuleScanner calculates the relevant IDs as it processes the rules and diverts
-// the details of the active tags, selectors and named ports to the named port index, which
+// the details of the active selectors and named ports to the named port index, which
 // figures out the members that should be in those IP sets.
 type ParsedRules struct {
 	// For NetworkPolicies, Namespace is set to the original namespace of the NetworkPolicy.
@@ -256,7 +277,7 @@ type ParsedRules struct {
 	PreDNAT bool
 }
 
-// ParsedRule is like a backend.model.Rule, except the tag and selector matches and named ports are
+// ParsedRule is like a backend.model.Rule, except the selector matches and named ports are
 // replaced with pre-calculated ipset IDs.
 type ParsedRule struct {
 	Action string
@@ -275,6 +296,7 @@ type ParsedRule struct {
 	ICMPCode             *int
 	SrcIPSetIDs          []string
 	DstIPSetIDs          []string
+	DstIPPortSetIDs      []string
 
 	NotProtocol             *numorstring.Protocol
 	NotSrcNets              []*net.IPNet
@@ -301,14 +323,20 @@ type ParsedRule struct {
 	OriginalSrcServiceAccountSelector string
 	OriginalDstServiceAccountNames    []string
 	OriginalDstServiceAccountSelector string
+	OriginalSrcService                string
+	OriginalSrcServiceNamespace       string
+	OriginalDstService                string
+	OriginalDstServiceNamespace       string
 
 	// These fields allow us to pass through the HTTP match criteria from the V3 datamodel. The iptables dataplane
 	// does not implement the match, but other dataplanes such as Dikastes do.
 	HTTPMatch *model.HTTPMatch
+
+	Metadata *model.RuleMetadata
 }
 
 func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IPSetData) {
-	srcSel, dstSel, notSrcSels, notDstSels := extractTagsAndSelectors(rule)
+	srcSel, dstSel, notSrcSels, notDstSels := extractSelectors(rule)
 
 	// In the datamodel, named ports are included in the list of ports as an "or" match; i.e. the
 	// list of ports matches the packet if either one of the numeric ports matches, or one of the
@@ -322,8 +350,12 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 	// Named ports on our endpoints have a protocol attached but our rules have the protocol at
 	// the top level.  Convert that to a protocol that we can use with the IP set calculation logic.
 	namedPortProto := labelindex.ProtocolTCP
-	if rule.Protocol != nil && labelindex.ProtocolUDP.MatchesModelProtocol(*rule.Protocol) {
-		namedPortProto = labelindex.ProtocolUDP
+	if rule.Protocol != nil {
+		if labelindex.ProtocolUDP.MatchesModelProtocol(*rule.Protocol) {
+			namedPortProto = labelindex.ProtocolUDP
+		} else if labelindex.ProtocolSCTP.MatchesModelProtocol(*rule.Protocol) {
+			namedPortProto = labelindex.ProtocolSCTP
+		}
 	}
 
 	// Convert each named port into an IP set definition.  As an optimization, if there's a selector
@@ -359,6 +391,18 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		dstSelIPSets = selectorsToIPSets(dstSel)
 	}
 
+	// Include any Service IPSet as well.
+	var dstIPPortSets []*IPSetData
+	if rule.DstService != "" {
+		svc := fmt.Sprintf("%s/%s", rule.DstServiceNamespace, rule.DstService)
+		dstIPPortSets = append(dstIPPortSets, &IPSetData{Service: svc, ServiceIncludePorts: true})
+	}
+
+	if rule.SrcService != "" {
+		svc := fmt.Sprintf("%s/%s", rule.SrcServiceNamespace, rule.SrcService)
+		srcSelIPSets = append(srcSelIPSets, &IPSetData{Service: svc, ServiceIncludePorts: false})
+	}
+
 	notSrcSelIPSets := selectorsToIPSets(notSrcSels)
 	notDstSelIPSets := selectorsToIPSets(notDstSels)
 
@@ -378,6 +422,7 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		DstPorts:             dstNumericPorts,
 		DstNamedPortIPSetIDs: ipSetsToUIDs(dstNamedPortIPSets),
 		DstIPSetIDs:          ipSetsToUIDs(dstSelIPSets),
+		DstIPPortSetIDs:      ipSetsToUIDs(dstIPPortSets),
 
 		ICMPType: rule.ICMPType,
 		ICMPCode: rule.ICMPCode,
@@ -408,7 +453,14 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 		OriginalSrcServiceAccountSelector: rule.OriginalSrcServiceAccountSelector,
 		OriginalDstServiceAccountNames:    rule.OriginalDstServiceAccountNames,
 		OriginalDstServiceAccountSelector: rule.OriginalDstServiceAccountSelector,
+		OriginalSrcService:                rule.SrcService,
+		OriginalSrcServiceNamespace:       rule.SrcServiceNamespace,
+		OriginalDstService:                rule.DstService,
+		OriginalDstServiceNamespace:       rule.DstServiceNamespace,
 		HTTPMatch:                         rule.HTTPMatch,
+
+		// Pass through metadata (used by iptables backend)
+		Metadata: rule.Metadata,
 	}
 
 	allIPSets = append(allIPSets, srcNamedPortIPSets...)
@@ -417,6 +469,7 @@ func ruleToParsedRule(rule *model.Rule) (parsedRule *ParsedRule, allIPSets []*IP
 	allIPSets = append(allIPSets, notDstNamedPortIPSets...)
 	allIPSets = append(allIPSets, srcSelIPSets...)
 	allIPSets = append(allIPSets, dstSelIPSets...)
+	allIPSets = append(allIPSets, dstIPPortSets...)
 	allIPSets = append(allIPSets, notSrcSelIPSets...)
 	allIPSets = append(allIPSets, notDstSelIPSets...)
 
@@ -473,19 +526,18 @@ func splitNamedAndNumericPorts(ports []numorstring.Port) (numericPorts []numorst
 	return
 }
 
-// extractTagsAndSelectors extracts the tag and selector matches from the rule and converts them
+// extractSelectors extracts the selector matches from the rule and converts them
 // to selector.Selector objects.  Where it is likely to make the resulting IP sets smaller (or
 // fewer in number), it tries to combine multiple match criteria into a single selector.
 //
 // Returns at most one positive src/dst selector in src/dst.  The named port logic above relies on
 // this.  We still return a slice for those values in order to make it easier to use the utility
 // functions uniformly.
-func extractTagsAndSelectors(rule *model.Rule) (src, dst, notSrc, notDst []selector.Selector) {
-	// Calculate a minimal set of selectors.  We can always combine a positive match on selector
-	// and tag. combineMatchesIfPossible will also try to combine the negative matches into that
-	// single selector, if possible.
-	srcRawSel, notSrcSel, notSrcTag := combineMatchesIfPossible(rule.SrcSelector, rule.SrcTag, rule.NotSrcSelector, rule.NotSrcTag)
-	dstRawSel, notDstSel, notDstTag := combineMatchesIfPossible(rule.DstSelector, rule.DstTag, rule.NotDstSelector, rule.NotDstTag)
+func extractSelectors(rule *model.Rule) (src, dst, notSrc, notDst []selector.Selector) {
+	// Calculate a minimal set of selectors.  combineMatchesIfPossible will try to combine the
+	// negative matches into that single selector, if possible.
+	srcRawSel, notSrcSel := combineMatchesIfPossible(rule.SrcSelector, rule.NotSrcSelector)
+	dstRawSel, notDstSel := combineMatchesIfPossible(rule.DstSelector, rule.NotDstSelector)
 
 	parseAndAppendSelectorIfNonZero := func(slice []selector.Selector, rawSelector string) []selector.Selector {
 		if rawSelector == "" {
@@ -502,19 +554,15 @@ func extractTagsAndSelectors(rule *model.Rule) (src, dst, notSrc, notDst []selec
 	src = parseAndAppendSelectorIfNonZero(src, srcRawSel)
 	dst = parseAndAppendSelectorIfNonZero(dst, dstRawSel)
 	notSrc = parseAndAppendSelectorIfNonZero(notSrc, notSrcSel)
-	notSrc = parseAndAppendSelectorIfNonZero(notSrc, tagToSelector(notSrcTag))
 	notDst = parseAndAppendSelectorIfNonZero(notDst, notDstSel)
-	notDst = parseAndAppendSelectorIfNonZero(notDst, tagToSelector(notDstTag))
 
 	return
 }
 
-func combineMatchesIfPossible(positiveSel, positiveTag, negatedSel, negatedTag string) (string, string, string) {
-	// Combine any positive tag and selector into a single selector.
-	positiveSel = combineSelectorAndTag(positiveSel, positiveTag)
+func combineMatchesIfPossible(positiveSel, negatedSel string) (string, string) {
 	if positiveSel == "" {
 		// There were no positive matches, we can't do any further optimization.
-		return positiveSel, negatedSel, negatedTag
+		return positiveSel, negatedSel
 	}
 
 	// We have a positive selector so the rule is limited to matching known endpoints.
@@ -528,26 +576,5 @@ func combineMatchesIfPossible(positiveSel, positiveTag, negatedSel, negatedTag s
 		positiveSel = fmt.Sprintf("(%s) && (!(%s))", positiveSel, negatedSel)
 		negatedSel = ""
 	}
-	if negatedTag != "" {
-		positiveSel = fmt.Sprintf("(%s) && (!has(%s))", positiveSel, negatedTag)
-		negatedTag = ""
-	}
-	return positiveSel, negatedSel, negatedTag
-}
-
-func combineSelectorAndTag(sel string, tag string) string {
-	if tag == "" {
-		return sel
-	}
-	if sel == "" {
-		return tagToSelector(tag)
-	}
-	return fmt.Sprintf("(%s) && has(%s)", sel, tag)
-}
-
-func tagToSelector(tag string) string {
-	if tag == "" {
-		return ""
-	}
-	return fmt.Sprintf("has(%s)", tag)
+	return positiveSel, negatedSel
 }

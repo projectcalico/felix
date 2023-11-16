@@ -1,4 +1,4 @@
-// Copyright (c) 2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2018-2022 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,13 @@ package calc
 import (
 	"strings"
 
-	"github.com/alauda/felix/dispatcher"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/backend/api"
-	"github.com/projectcalico/libcalico-go/lib/backend/k8s/conversion"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
+	apiv3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+
+	"github.com/projectcalico/calico/felix/dispatcher"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/api"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/k8s/conversion"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -34,26 +36,29 @@ type ProfileDecoder struct {
 }
 
 func NewProfileDecoder(callbacks passthruCallbacks) *ProfileDecoder {
-	return &ProfileDecoder{callbacks: callbacks, converter: conversion.Converter{}}
+	return &ProfileDecoder{callbacks: callbacks, converter: conversion.NewConverter()}
 }
 
 func (p *ProfileDecoder) RegisterWith(d *dispatcher.Dispatcher) {
-	d.Register(model.ProfileLabelsKey{}, p.OnUpdate)
+	d.Register(model.ResourceKey{}, p.OnUpdate)
 }
 
 func (p *ProfileDecoder) OnUpdate(update api.Update) (filterOut bool) {
-	// This type assertion is safe because we only registered for ProfileLabels updates.
-	key := update.Key.(model.ProfileLabelsKey)
-	log.WithField("key", key.String()).Debug("Decoding ProfileLabels")
+	// This type assertion is safe because we only registered for v3 Resource updates.
+	key := update.Key.(model.ResourceKey)
+	if key.Kind != apiv3.KindProfile {
+		return
+	}
+	log.WithField("key", key.String()).Debug("Decoding Profile")
 	idInterface := p.classifyProfile(key)
 	switch id := idInterface.(type) {
 	case nil:
-		log.WithField("key", key.String()).Debug("Ignoring ProfileLabels")
+		log.WithField("key", key.String()).Debug("Ignoring Profile labels")
 	case proto.ServiceAccountID:
 		if update.Value == nil {
 			p.callbacks.OnServiceAccountRemove(id)
 		} else {
-			labels := update.Value.(map[string]string)
+			labels := update.Value.(*apiv3.Profile).Spec.LabelsToApply
 			msg := proto.ServiceAccountUpdate{
 				Id: &id, Labels: decodeLabels(conversion.ServiceAccountLabelPrefix, labels)}
 			p.callbacks.OnServiceAccountUpdate(&msg)
@@ -62,7 +67,7 @@ func (p *ProfileDecoder) OnUpdate(update api.Update) (filterOut bool) {
 		if update.Value == nil {
 			p.callbacks.OnNamespaceRemove(id)
 		} else {
-			labels := update.Value.(map[string]string)
+			labels := update.Value.(*apiv3.Profile).Spec.LabelsToApply
 			msg := proto.NamespaceUpdate{
 				Id: &id, Labels: decodeLabels(conversion.NamespaceLabelPrefix, labels)}
 			p.callbacks.OnNamespaceUpdate(&msg)
@@ -71,7 +76,7 @@ func (p *ProfileDecoder) OnUpdate(update api.Update) (filterOut bool) {
 	return false
 }
 
-func (p *ProfileDecoder) classifyProfile(key model.ProfileLabelsKey) interface{} {
+func (p *ProfileDecoder) classifyProfile(key model.ResourceKey) interface{} {
 	namespace, name, err := p.converter.ProfileNameToServiceAccount(key.Name)
 	if err == nil {
 		return proto.ServiceAccountID{Name: name, Namespace: namespace}

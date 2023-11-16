@@ -1,6 +1,4 @@
-// +build fvtests
-
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,25 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build fvtests
+
 package fv_test
 
 import (
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
-
+	"context"
+	"errors"
 	"time"
 
-	"context"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"errors"
+	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 
-	"github.com/alauda/felix/fv/containers"
-	"github.com/alauda/felix/fv/infrastructure"
-	"github.com/alauda/felix/fv/metrics"
-	"github.com/alauda/felix/fv/workload"
-	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	client "github.com/projectcalico/libcalico-go/lib/clientv3"
-	"github.com/projectcalico/libcalico-go/lib/options"
+	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
+	"github.com/projectcalico/calico/libcalico-go/lib/options"
+
+	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/projectcalico/calico/felix/fv/metrics"
+	"github.com/projectcalico/calico/felix/fv/workload"
 )
 
 const (
@@ -44,15 +45,17 @@ const (
 var _ = Context("Config update tests, after starting felix", func() {
 
 	var (
-		etcd     *containers.Container
-		felix    *infrastructure.Felix
-		felixPID int
-		client   client.Interface
-		w        [3]*workload.Workload
+		etcd          *containers.Container
+		felix         *infrastructure.Felix
+		felixPID      int
+		client        client.Interface
+		infra         infrastructure.DatastoreInfra
+		w             [3]*workload.Workload
+		cfgChangeTime time.Time
 	)
 
 	BeforeEach(func() {
-		felix, etcd, client = infrastructure.StartSingleNodeEtcdTopology(infrastructure.DefaultTopologyOptions())
+		felix, etcd, client, infra = infrastructure.StartSingleNodeEtcdTopology(infrastructure.DefaultTopologyOptions())
 		felixPID = felix.GetSinglePID("calico-felix")
 	})
 
@@ -69,9 +72,10 @@ var _ = Context("Config update tests, after starting felix", func() {
 		felix.Stop()
 
 		if CurrentGinkgoTestDescription().Failed {
-			etcd.Exec("etcdctl", "ls", "--recursive", "/")
+			etcd.Exec("etcdctl", "get", "/", "--prefix", "--keys-only")
 		}
 		etcd.Stop()
+		infra.Stop()
 	})
 
 	shouldStayUp := func() {
@@ -90,6 +94,17 @@ var _ = Context("Config update tests, after starting felix", func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		err := client.EnsureInitialized(ctx, "a-new-version", "updated-type")
+		Expect(err).NotTo(HaveOccurred())
+
+		config := api.NewFelixConfiguration()
+		config.Name = "default"
+		config.Spec.HealthTimeoutOverrides = []api.HealthTimeoutOverride{
+			{
+				Name:    "InternalDataplaneMainLoop",
+				Timeout: metav1.Duration{Duration: 20 * time.Second},
+			},
+		}
+		config, err = client.FelixConfigurations().Create(ctx, config, options.SetOptions{})
 		Expect(err).NotTo(HaveOccurred())
 	}
 
@@ -126,7 +141,12 @@ var _ = Context("Config update tests, after starting felix", func() {
 	})
 
 	shouldExitAfterADelay := func() {
-		Consistently(felix.GetFelixPIDs, "1s", "100ms").Should(ContainElement(felixPID))
+		// The config delay time is 2s in Felix, so let's check that the config remains the same for at least
+		// 1s since the time of the config change.
+		monitorTime := time.Second - time.Since(cfgChangeTime)
+		if monitorTime > 0 {
+			Consistently(felix.GetFelixPIDs, monitorTime, "100ms").Should(ContainElement(felixPID))
+		}
 		Eventually(felix.GetFelixPIDs, "10s", "100ms").ShouldNot(ContainElement(felixPID))
 
 		// Update felix pid after restart.
@@ -157,9 +177,16 @@ var _ = Context("Config update tests, after starting felix", func() {
 				Eventually(felix.GetFelixPIDs, "5s", "100ms").ShouldNot(ContainElement(felixPID))
 				felixPID = felix.GetSinglePID("calico-felix")
 
+				// Wait for felix to come in to sync; otherwise we may manage to remove the config before
+				// felix loads it.
+				waitForFelixInSync(felix)
+
 				// Then remove the config that we added.
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
+
+				// Track the current time and then make the config change.
+				cfgChangeTime = time.Now()
 				config.Spec.InterfacePrefix = ""
 				_, err := client.FelixConfigurations().Update(ctx, config, options.SetOptions{})
 				Expect(err).NotTo(HaveOccurred())
@@ -170,7 +197,7 @@ var _ = Context("Config update tests, after starting felix", func() {
 	})
 
 	Context("after switching kube-proxy mode that should trigger a restart", func() {
-		// This test simulate kube-proxy switching between iptables to ipvs mode by adding/removing
+		// This test simulates kube-proxy switching between iptables to ipvs mode by adding/removing
 		// kube-ipvs0 dummy interface.
 		var proxy *kubeProxy
 
@@ -181,6 +208,8 @@ var _ = Context("Config update tests, after starting felix", func() {
 
 		Context("after switch to ipvs mode that should trigger a restart", func() {
 			BeforeEach(func() {
+				// Track the current time and then make the config change.
+				cfgChangeTime = time.Now()
 				err := proxy.switchToMode(kubeProxyModeIPVS)
 				Expect(err).NotTo(HaveOccurred())
 			})
@@ -190,7 +219,8 @@ var _ = Context("Config update tests, after starting felix", func() {
 
 		Context("after switch to iptables mode that should trigger a restart", func() {
 			BeforeEach(func() {
-				// First switch to ipvs mode.
+				// Track the current time and then make the config change to ipvs mode
+				cfgChangeTime = time.Now()
 				err := proxy.switchToMode(kubeProxyModeIPVS)
 				Expect(err).NotTo(HaveOccurred())
 
@@ -198,7 +228,8 @@ var _ = Context("Config update tests, after starting felix", func() {
 				shouldExitAfterADelay()
 				waitForFelixInSync(felix)
 
-				// Back to iptables mode.
+				// Track the current time and then make the config change back to iptables mode.
+				cfgChangeTime = time.Now()
 				err = proxy.switchToMode(kubeProxyModeIptables)
 				Expect(err).NotTo(HaveOccurred())
 			})

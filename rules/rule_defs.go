@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,11 +21,12 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/config"
-	"github.com/alauda/felix/ipsets"
-	"github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
+
+	"github.com/projectcalico/calico/felix/config"
+	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
 )
 
 const (
@@ -41,8 +42,10 @@ const (
 	ChainFilterForward = ChainNamePrefix + "FORWARD"
 	ChainFilterOutput  = ChainNamePrefix + "OUTPUT"
 
-	ChainRawPrerouting = ChainNamePrefix + "PREROUTING"
-	ChainRawOutput     = ChainNamePrefix + "OUTPUT"
+	ChainRawPrerouting         = ChainNamePrefix + "PREROUTING"
+	ChainRawOutput             = ChainNamePrefix + "OUTPUT"
+	ChainRawUntrackedFlows     = ChainNamePrefix + "untracked-flows"
+	ChainRawBPFUntrackedPolicy = ChainNamePrefix + "untracked-policy"
 
 	ChainFailsafeIn  = ChainNamePrefix + "failsafe-in"
 	ChainFailsafeOut = ChainNamePrefix + "failsafe-out"
@@ -52,16 +55,20 @@ const (
 	ChainNATOutput      = ChainNamePrefix + "OUTPUT"
 	ChainNATOutgoing    = ChainNamePrefix + "nat-outgoing"
 
-	ChainManglePrerouting = ChainNamePrefix + "PREROUTING"
+	ChainManglePrerouting  = ChainNamePrefix + "PREROUTING"
+	ChainManglePostrouting = ChainNamePrefix + "POSTROUTING"
 
 	IPSetIDNATOutgoingAllPools  = "all-ipam-pools"
 	IPSetIDNATOutgoingMasqPools = "masq-ipam-pools"
 
-	IPSetIDAllHostNets = "all-hosts-net"
-	IPSetIDThisHostIPs = "this-host"
+	IPSetIDAllHostNets        = "all-hosts-net"
+	IPSetIDAllVXLANSourceNets = "all-vxlan-net"
+	IPSetIDThisHostIPs        = "this-host"
 
 	ChainFIPDnat = ChainNamePrefix + "fip-dnat"
 	ChainFIPSnat = ChainNamePrefix + "fip-snat"
+
+	ChainCIDRBlock = ChainNamePrefix + "cidr-block"
 
 	PolicyInboundPfx   PolicyChainNamePrefix  = ChainNamePrefix + "pi-"
 	PolicyOutboundPfx  PolicyChainNamePrefix  = ChainNamePrefix + "po-"
@@ -82,7 +89,12 @@ const (
 	ChainForwardCheck        = ChainNamePrefix + "forward-check"
 	ChainForwardEndpointMark = ChainNamePrefix + "forward-endpoint-mark"
 
+	ChainSetWireguardIncomingMark = ChainNamePrefix + "wireguard-incoming-mark"
+
+	ChainRpfSkip = ChainNamePrefix + "rpf-skip"
+
 	WorkloadToEndpointPfx   = ChainNamePrefix + "tw-"
+	WorkloadPfxSpecialAllow = "ALLOW"
 	WorkloadFromEndpointPfx = ChainNamePrefix + "fw-"
 
 	SetEndPointMarkPfx = ChainNamePrefix + "sm-"
@@ -91,6 +103,8 @@ const (
 	HostFromEndpointPfx        = ChainNamePrefix + "fh-"
 	HostToEndpointForwardPfx   = ChainNamePrefix + "thfw-"
 	HostFromEndpointForwardPfx = ChainNamePrefix + "fhfw-"
+
+	RPFChain = ChainNamePrefix + "rpf"
 
 	RuleHashPrefix = "cali:"
 
@@ -105,11 +119,15 @@ const (
 	// rule).
 	HistoricInsertedNATRuleRegex = `-A POSTROUTING .* felix-masq-ipam-pools .*|` +
 		`-A POSTROUTING -o tunl0 -m addrtype ! --src-type LOCAL --limit-iface-out -m addrtype --src-type LOCAL -j MASQUERADE`
+
+	KubeProxyInsertRuleRegex = `-j KUBE-[a-zA-Z0-9-]*SERVICES|-j KUBE-FORWARD`
 )
 
 // Typedefs to prevent accidentally passing the wrong prefix to the Policy/ProfileChainName()
-type PolicyChainNamePrefix string
-type ProfileChainNamePrefix string
+type (
+	PolicyChainNamePrefix  string
+	ProfileChainNamePrefix string
+)
 
 var (
 	// AllHistoricChainNamePrefixes lists all the prefixes that we've used for chains.  Keeping
@@ -137,13 +155,29 @@ var (
 	// LegacyV4IPSetNames contains some extra IP set names that were used in older versions of
 	// Felix and don't fit our versioned pattern.
 	LegacyV4IPSetNames = []string{"felix-masq-ipam-pools", "felix-all-ipam-pools"}
+
+	// Rule previxes used by kube-proxy.  Note: we exclude the so-called utility chains KUBE-MARK-MASQ and co because
+	// they are jointly owned by kube-proxy and kubelet.
+	KubeProxyChainPrefixes = []string{
+		"KUBE-FORWARD",
+		"KUBE-SERVICES",
+		"KUBE-EXTERNAL-SERVICES",
+		"KUBE-NODEPORTS",
+		"KUBE-SVC-",
+		"KUBE-SEP-",
+		"KUBE-FW-",
+		"KUBE-XLB-",
+	}
 )
 
 type RuleRenderer interface {
 	StaticFilterTableChains(ipVersion uint8) []*iptables.Chain
 	StaticNATTableChains(ipVersion uint8) []*iptables.Chain
+	StaticNATPostroutingChains(ipVersion uint8) []*iptables.Chain
 	StaticRawTableChains(ipVersion uint8) []*iptables.Chain
+	StaticBPFModeRawChains(ipVersion uint8, wgEncryptHost, disableConntrack bool) []*iptables.Chain
 	StaticMangleTableChains(ipVersion uint8) []*iptables.Chain
+	StaticFilterForwardAppendRules() []iptables.Rule
 
 	WorkloadDispatchChains(map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint) []*iptables.Chain
 	WorkloadEndpointToIptablesChains(
@@ -155,14 +189,17 @@ type RuleRenderer interface {
 		profileIDs []string,
 	) []*iptables.Chain
 
+	WorkloadInterfaceAllowChains(endpoints map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint) []*iptables.Chain
+
 	EndpointMarkDispatchChains(
 		epMarkMapper EndpointMarkMapper,
 		wlEndpoints map[proto.WorkloadEndpointID]*proto.WorkloadEndpoint,
 		hepEndpoints map[string]proto.HostEndpointID,
 	) []*iptables.Chain
 
-	HostDispatchChains(map[string]proto.HostEndpointID, bool) []*iptables.Chain
+	HostDispatchChains(map[string]proto.HostEndpointID, string, bool) []*iptables.Chain
 	FromHostDispatchChains(map[string]proto.HostEndpointID, string) []*iptables.Chain
+	ToHostDispatchChains(map[string]proto.HostEndpointID, string) []*iptables.Chain
 	HostEndpointToFilterChains(
 		ifaceName string,
 		epMarkMapper EndpointMarkMapper,
@@ -172,18 +209,27 @@ type RuleRenderer interface {
 		egressForwardPolicyNames []string,
 		profileIDs []string,
 	) []*iptables.Chain
+	HostEndpointToMangleEgressChains(
+		ifaceName string,
+		egressPolicyNames []string,
+		profileIDs []string,
+	) []*iptables.Chain
+	HostEndpointToRawEgressChain(
+		ifaceName string,
+		egressPolicyNames []string,
+	) *iptables.Chain
 	HostEndpointToRawChains(
 		ifaceName string,
 		ingressPolicyNames []string,
 		egressPolicyNames []string,
 	) []*iptables.Chain
-	HostEndpointToMangleChains(
+	HostEndpointToMangleIngressChains(
 		ifaceName string,
 		preDNATPolicyNames []string,
 	) []*iptables.Chain
 
 	PolicyToIptablesChains(policyID *proto.PolicyID, policy *proto.Policy, ipVersion uint8) []*iptables.Chain
-	ProfileToIptablesChains(profileID *proto.ProfileID, policy *proto.Profile, ipVersion uint8) []*iptables.Chain
+	ProfileToIptablesChains(profileID *proto.ProfileID, policy *proto.Profile, ipVersion uint8) (inbound, outbound *iptables.Chain)
 	ProtoRuleToIptablesRules(pRule *proto.Rule, ipVersion uint8) []iptables.Rule
 
 	MakeNatOutgoingRule(protocol string, action iptables.Action, ipVersion uint8) iptables.Rule
@@ -191,13 +237,24 @@ type RuleRenderer interface {
 
 	DNATsToIptablesChains(dnats map[string]string) []*iptables.Chain
 	SNATsToIptablesChains(snats map[string]string) []*iptables.Chain
+	BlockedCIDRsToIptablesChains(cidrs []string, ipVersion uint8) []*iptables.Chain
+
+	WireguardIncomingMarkChain() *iptables.Chain
+
+	IptablesFilterDenyAction() iptables.Action
 }
 
 type DefaultRuleRenderer struct {
 	Config
-	inputAcceptActions []iptables.Action
-	filterAllowAction  iptables.Action
-	mangleAllowAction  iptables.Action
+	inputAcceptActions       []iptables.Action
+	filterAllowAction        iptables.Action
+	mangleAllowAction        iptables.Action
+	blockCIDRAction          iptables.Action
+	iptablesFilterDenyAction iptables.Action
+}
+
+func (r *DefaultRuleRenderer) IptablesFilterDenyAction() iptables.Action {
+	return r.iptablesFilterDenyAction
 }
 
 func (r *DefaultRuleRenderer) ipSetConfig(ipVersion uint8) *ipsets.IPVersionConfig {
@@ -233,15 +290,38 @@ type Config struct {
 	OpenStackMetadataPort        uint16
 	OpenStackSpecialCasesEnabled bool
 
-	IPIPEnabled bool
+	VXLANEnabled   bool
+	VXLANEnabledV6 bool
+	VXLANPort      int
+	VXLANVNI       int
+
+	IPIPEnabled            bool
+	FelixConfigIPIPEnabled *bool
 	// IPIPTunnelAddress is an address chosen from an IPAM pool, used as a source address
 	// by the host when sending traffic to a workload over IPIP.
 	IPIPTunnelAddress net.IP
+	// Same for VXLAN.
+	VXLANTunnelAddress   net.IP
+	VXLANTunnelAddressV6 net.IP
+
+	AllowVXLANPacketsFromWorkloads bool
+	AllowIPIPPacketsFromWorkloads  bool
+
+	WireguardEnabled            bool
+	WireguardEnabledV6          bool
+	WireguardInterfaceName      string
+	WireguardInterfaceNameV6    string
+	WireguardIptablesMark       uint32
+	WireguardListeningPort      int
+	WireguardListeningPortV6    int
+	WireguardEncryptHostTraffic bool
+	RouteSource                 string
 
 	IptablesLogPrefix         string
 	EndpointToHostAction      string
 	IptablesFilterAllowAction string
 	IptablesMangleAllowAction string
+	IptablesFilterDenyAction  string
 
 	FailsafeInboundHostPorts  []config.ProtoPort
 	FailsafeOutboundHostPorts []config.ProtoPort
@@ -250,6 +330,18 @@ type Config struct {
 
 	NATPortRange                       numorstring.Port
 	IptablesNATOutgoingInterfaceFilter string
+
+	NATOutgoingAddress net.IP
+	BPFEnabled         bool
+
+	ServiceLoopPrevention string
+}
+
+var unusedBitsInBPFMode = map[string]bool{
+	"IptablesMarkPass":            true,
+	"IptablesMarkScratch1":        true,
+	"IptablesMarkEndpoint":        true,
+	"IptablesMarkNonCaliEndpoint": true,
 }
 
 func (c *Config) validate() {
@@ -262,6 +354,10 @@ func (c *Config) validate() {
 	for i := 0; i < myValue.NumField(); i++ {
 		fieldName := myType.Field(i).Name
 		if strings.HasPrefix(fieldName, "IptablesMark") && fieldName != "IptablesMarkNonCaliEndpoint" {
+			if c.BPFEnabled && unusedBitsInBPFMode[fieldName] {
+				log.WithField("field", fieldName).Debug("Ignoring unused field in BPF mode.")
+				continue
+			}
 			bits := myValue.Field(i).Interface().(uint32)
 			if bits == 0 {
 				log.WithField("field", fieldName).Panic(
@@ -284,6 +380,18 @@ func (c *Config) validate() {
 func NewRenderer(config Config) RuleRenderer {
 	log.WithField("config", config).Info("Creating rule renderer.")
 	config.validate()
+
+	// First, what should we do when packets are not accepted.
+	var iptablesFilterDenyAction iptables.Action
+	switch config.IptablesFilterDenyAction {
+	case "REJECT":
+		log.Info("packets that are not passed by any policy or profile will be rejected.")
+		iptablesFilterDenyAction = iptables.RejectAction{}
+	default:
+		log.Info("packets that are not passed by any policy or profile will be dropped.")
+		iptablesFilterDenyAction = iptables.DropAction{}
+	}
+
 	// Convert configured actions to rule slices.
 	// First, what should we do with packets that come from workloads to the host itself.
 	var inputAcceptActions []iptables.Action
@@ -291,6 +399,9 @@ func NewRenderer(config Config) RuleRenderer {
 	case "DROP":
 		log.Info("Workload to host packets will be dropped.")
 		inputAcceptActions = []iptables.Action{iptables.DropAction{}}
+	case "REJECT":
+		log.Info("Workload to host packets will be rejected.")
+		inputAcceptActions = []iptables.Action{iptables.RejectAction{}}
 	case "ACCEPT":
 		log.Info("Workload to host packets will be accepted.")
 		inputAcceptActions = []iptables.Action{iptables.AcceptAction{}}
@@ -299,7 +410,7 @@ func NewRenderer(config Config) RuleRenderer {
 		inputAcceptActions = []iptables.Action{iptables.ReturnAction{}}
 	}
 
-	//What should we do with packets that are accepted in the forwarding chain
+	// What should we do with packets that are accepted in the forwarding chain
 	var filterAllowAction, mangleAllowAction iptables.Action
 	switch config.IptablesFilterAllowAction {
 	case "RETURN":
@@ -318,10 +429,25 @@ func NewRenderer(config Config) RuleRenderer {
 		mangleAllowAction = iptables.AcceptAction{}
 	}
 
+	// How should we block CIDRs for loop prevention?
+	var blockCIDRAction iptables.Action
+	switch config.ServiceLoopPrevention {
+	case "Drop":
+		log.Info("Packets to unknown service IPs will be dropped")
+		blockCIDRAction = iptables.DropAction{}
+	case "Reject":
+		log.Info("Packets to unknown service IPs will be rejected")
+		blockCIDRAction = iptables.RejectAction{}
+	default:
+		log.Info("Packets to unknown service IPs will be allowed to loop")
+	}
+
 	return &DefaultRuleRenderer{
-		Config:             config,
-		inputAcceptActions: inputAcceptActions,
-		filterAllowAction:  filterAllowAction,
-		mangleAllowAction:  mangleAllowAction,
+		Config:                   config,
+		inputAcceptActions:       inputAcceptActions,
+		filterAllowAction:        filterAllowAction,
+		mangleAllowAction:        mangleAllowAction,
+		blockCIDRAction:          blockCIDRAction,
+		iptablesFilterDenyAction: iptablesFilterDenyAction,
 	}
 }

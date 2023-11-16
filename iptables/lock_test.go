@@ -16,11 +16,10 @@ package iptables_test
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"time"
 
-	. "github.com/alauda/felix/iptables"
+	. "github.com/projectcalico/calico/felix/iptables"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -86,7 +85,7 @@ var _ = Describe("GrabIptablesLocks FV", func() {
 	var fileName string
 
 	BeforeEach(func() {
-		f, err := ioutil.TempFile("", "iptlocktest")
+		f, err := os.CreateTemp("", "iptlocktest")
 		Expect(err).NotTo(HaveOccurred())
 		fileName = f.Name()
 		f.Close()

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,23 +18,24 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/ipsets"
-	"github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/rules"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/felix/dataplane/common"
+	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/rules"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
 )
 
 var _ = Describe("Masquerade manager", func() {
 	var (
 		masqMgr      *masqManager
 		natTable     *mockTable
-		ipSets       *mockIPSets
+		ipSets       *common.MockIPSets
 		ruleRenderer rules.RuleRenderer
 	)
 
 	BeforeEach(func() {
-		ipSets = newMockIPSets()
+		ipSets = common.NewMockIPSets()
 		natTable = newMockTable("nat")
 		ruleRenderer = rules.NewRenderer(rules.Config{
 			IPSetConfigV4: ipsets.NewIPVersionConfig(
@@ -53,9 +54,9 @@ var _ = Describe("Masquerade manager", func() {
 	})
 
 	It("should create its IP sets on startup", func() {
-		Expect(ipSets.Members).To(Equal(map[string]set.Set{
-			"all-ipam-pools":  set.New(),
-			"masq-ipam-pools": set.New(),
+		Expect(ipSets.Members).To(Equal(map[string]set.Set[string]{
+			"all-ipam-pools":  set.New[string](),
+			"masq-ipam-pools": set.New[string](),
 		}))
 	})
 
@@ -76,7 +77,8 @@ var _ = Describe("Masquerade manager", func() {
 					Masquerade: true,
 				},
 			})
-			masqMgr.CompleteDeferredWork()
+			err := masqMgr.CompleteDeferredWork()
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("should add the pool to the masq IP set", func() {
@@ -101,7 +103,8 @@ var _ = Describe("Masquerade manager", func() {
 		})
 		It("an extra CompleteDeferredWork should be a no-op", func() {
 			natTable.UpdateCalled = false
-			masqMgr.CompleteDeferredWork()
+			err := masqMgr.CompleteDeferredWork()
+			Expect(err).ToNot(HaveOccurred())
 			Expect(natTable.UpdateCalled).To(BeFalse())
 		})
 		It("an unrelated update shouldn't trigger work", func() {
@@ -110,7 +113,8 @@ var _ = Describe("Masquerade manager", func() {
 				Hostname: "foo",
 				Ipv4Addr: "10.0.0.17",
 			})
-			masqMgr.CompleteDeferredWork()
+			err := masqMgr.CompleteDeferredWork()
+			Expect(err).ToNot(HaveOccurred())
 			Expect(natTable.UpdateCalled).To(BeFalse())
 		})
 
@@ -123,7 +127,8 @@ var _ = Describe("Masquerade manager", func() {
 						Masquerade: false,
 					},
 				})
-				masqMgr.CompleteDeferredWork()
+				err := masqMgr.CompleteDeferredWork()
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("should not add the pool to the masq IP set", func() {
@@ -152,10 +157,11 @@ var _ = Describe("Masquerade manager", func() {
 					masqMgr.OnUpdate(&proto.IPAMPoolRemove{
 						Id: "pool-1",
 					})
-					masqMgr.CompleteDeferredWork()
+					err := masqMgr.CompleteDeferredWork()
+					Expect(err).ToNot(HaveOccurred())
 				})
 				It("should remove from the masq IP set", func() {
-					Expect(ipSets.Members["masq-ipam-pools"]).To(Equal(set.New()))
+					Expect(ipSets.Members["masq-ipam-pools"]).To(Equal(set.New[string]()))
 				})
 				It("should remove from the all IP set", func() {
 					Expect(ipSets.Members["all-ipam-pools"]).To(Equal(set.From(
@@ -173,13 +179,14 @@ var _ = Describe("Masquerade manager", func() {
 						masqMgr.OnUpdate(&proto.IPAMPoolRemove{
 							Id: "pool-2",
 						})
-						masqMgr.CompleteDeferredWork()
+						err := masqMgr.CompleteDeferredWork()
+						Expect(err).ToNot(HaveOccurred())
 					})
 					It("masq set should be empty", func() {
-						Expect(ipSets.Members["masq-ipam-pools"]).To(Equal(set.New()))
+						Expect(ipSets.Members["masq-ipam-pools"]).To(Equal(set.New[string]()))
 					})
 					It("all set should be empty", func() {
-						Expect(ipSets.Members["all-ipam-pools"]).To(Equal(set.New()))
+						Expect(ipSets.Members["all-ipam-pools"]).To(Equal(set.New[string]()))
 					})
 					It("should program empty chain", func() {
 						natTable.checkChains([][]*iptables.Chain{{{
@@ -201,11 +208,12 @@ var _ = Describe("Masquerade manager", func() {
 					Masquerade: false,
 				},
 			})
-			masqMgr.CompleteDeferredWork()
+			err := masqMgr.CompleteDeferredWork()
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("should not add the pool to the masq IP set", func() {
-			Expect(ipSets.Members["masq-ipam-pools"]).To(Equal(set.New()))
+			Expect(ipSets.Members["masq-ipam-pools"]).To(Equal(set.New[string]()))
 		})
 		It("should add the pool to the all IP set", func() {
 			Expect(ipSets.Members["all-ipam-pools"]).To(Equal(set.From("10.0.0.0/16")))

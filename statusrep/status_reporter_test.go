@@ -25,10 +25,10 @@ import (
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/alauda/felix/jitter"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/backend/model"
-	calierrors "github.com/projectcalico/libcalico-go/lib/errors"
+	"github.com/projectcalico/calico/felix/jitter"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	calierrors "github.com/projectcalico/calico/libcalico-go/lib/errors"
 )
 
 const hostname = "localhostname"
@@ -60,10 +60,6 @@ var remoteHostEPKey = model.HostEndpointStatusKey{
 }
 
 var wlEPUp = model.WorkloadEndpointStatus{
-	Status: "up",
-}
-
-var wlEPUpRegion = model.WorkloadEndpointStatus{
 	Status: "up",
 }
 

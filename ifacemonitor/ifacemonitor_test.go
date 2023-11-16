@@ -1,5 +1,5 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
-
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -15,6 +15,9 @@
 package ifacemonitor_test
 
 import (
+	"errors"
+	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,8 +28,9 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
-	"github.com/alauda/felix/ifacemonitor"
-	"github.com/projectcalico/libcalico-go/lib/set"
+	"github.com/projectcalico/calico/libcalico-go/lib/set"
+
+	"github.com/projectcalico/calico/felix/ifacemonitor"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -35,13 +39,14 @@ import (
 type linkModel struct {
 	index int
 	state string
-	addrs set.Set
+	addrs set.Set[string]
 }
 
 type netlinkTest struct {
 	linkUpdates    chan netlink.LinkUpdate
-	addrUpdates    chan netlink.AddrUpdate
+	routeUpdates   chan netlink.RouteUpdate
 	userSubscribed chan int
+	cancel         chan struct{}
 
 	nextIndex int
 	links     map[string]linkModel
@@ -50,22 +55,27 @@ type netlinkTest struct {
 	// possible after we've read and/or written that data - instead of using defer - because we
 	// don't want to hold the mutex when writing to a channel (which is often what happens next
 	// in the same function).
-	linksMutex sync.Mutex
+	linksMutex  sync.Mutex
+	LinkListErr error
 }
 
 type addrState struct {
 	ifaceName string
-	addrs     set.Set
+	addrs     set.Set[string]
 }
 
 type linkUpdate struct {
 	name  string
 	state ifacemonitor.State
+	index int
 }
+
+type inSyncupdate struct{}
 
 type mockDataplane struct {
 	linkC chan linkUpdate
 	addrC chan addrState
+	syncC chan inSyncupdate
 }
 
 func (nl *netlinkTest) addLink(name string) {
@@ -83,7 +93,7 @@ func (nl *netlinkTest) addLinkNoSignal(name string) {
 	nl.links[name] = linkModel{
 		index: nl.nextIndex,
 		state: "down",
-		addrs: set.New(),
+		addrs: set.New[string](),
 	}
 	nl.nextIndex++
 	nl.linksMutex.Unlock()
@@ -147,16 +157,16 @@ func (nl *netlinkTest) signalLink(name string, oldIndex int) {
 	nl.linksMutex.Unlock()
 
 	// Build the update.
+	la := netlink.NewLinkAttrs()
+	la.Name = name
+	la.Index = index
+	la.RawFlags = rawFlags
 	update := netlink.LinkUpdate{
 		Header: unix.NlMsghdr{
 			Type: msgType,
 		},
 		Link: &netlink.Dummy{
-			LinkAttrs: netlink.LinkAttrs{
-				Name:     name,
-				Index:    index,
-				RawFlags: rawFlags,
-			},
+			LinkAttrs: la,
 		},
 	}
 
@@ -195,30 +205,42 @@ func (nl *netlinkTest) signalAddr(name string, addr string, exists bool) {
 		panic("Address parsing failed")
 	}
 	nl.linksMutex.Lock()
-	update := netlink.AddrUpdate{
-		LinkIndex:   nl.links[name].index,
-		NewAddr:     exists,
-		LinkAddress: *net,
+
+	routeUpd := netlink.RouteUpdate{}
+	routeUpd.Dst = net
+	routeUpd.Route.Type = unix.RTN_LOCAL
+	routeUpd.Table = unix.RT_TABLE_LOCAL
+	routeUpd.LinkIndex = nl.links[name].index
+	if exists {
+		routeUpd.Type = unix.RTM_NEWROUTE
+	} else {
+		routeUpd.Type = unix.RTM_DELROUTE
 	}
+
 	nl.linksMutex.Unlock()
 
 	// Send it.
 	log.WithField("channel", nl.linkUpdates).Info("Test code signaling an addr update")
-	nl.addrUpdates <- update
+	nl.routeUpdates <- routeUpd
 	log.Info("Test code signaled an addr update")
 }
 
 func (nl *netlinkTest) Subscribe(
 	linkUpdates chan netlink.LinkUpdate,
-	addrUpdates chan netlink.AddrUpdate,
-) error {
+	routeUpdates chan netlink.RouteUpdate,
+) (chan struct{}, error) {
 	nl.linkUpdates = linkUpdates
-	nl.addrUpdates = addrUpdates
+	nl.routeUpdates = routeUpdates
+	nl.cancel = make(chan struct{})
 	nl.userSubscribed <- 1
-	return nil
+	return nl.cancel, nil
 }
 
 func (nl *netlinkTest) LinkList() ([]netlink.Link, error) {
+	if nl.LinkListErr != nil {
+		return nil, nl.LinkListErr
+	}
+
 	links := []netlink.Link{}
 	nl.linksMutex.Lock()
 	for name, link := range nl.links {
@@ -226,16 +248,49 @@ func (nl *netlinkTest) LinkList() ([]netlink.Link, error) {
 		if link.state == "up" {
 			rawFlags = syscall.IFF_RUNNING
 		}
+		la := netlink.NewLinkAttrs()
+		la.Name = name
+		la.Index = link.index
+		la.RawFlags = rawFlags
 		links = append(links, &netlink.Dummy{
-			LinkAttrs: netlink.LinkAttrs{
-				Name:     name,
-				Index:    link.index,
-				RawFlags: rawFlags,
-			},
+			LinkAttrs: la,
 		})
 	}
 	nl.linksMutex.Unlock()
 	return links, nil
+}
+
+func (nl *netlinkTest) ListLocalRoutes(link netlink.Link, family int) ([]netlink.Route, error) {
+	name := link.Attrs().Name
+	nl.linksMutex.Lock()
+	defer nl.linksMutex.Unlock()
+	model, prs := nl.links[name]
+	var routes []netlink.Route
+	if prs {
+		model.addrs.Iter(func(addr string) error {
+			net, err := netlink.ParseIPNet(addr)
+			if err != nil {
+				panic("Address parsing failed")
+			}
+			if strings.ContainsRune(addr, ':') {
+				if family == netlink.FAMILY_V6 {
+					routes = append(routes, netlink.Route{
+						Type: unix.RTN_LOCAL,
+						Dst:  net,
+					})
+				}
+			} else {
+				if family == netlink.FAMILY_V4 {
+					routes = append(routes, netlink.Route{
+						Type: unix.RTN_LOCAL,
+						Dst:  net,
+					})
+				}
+			}
+			return nil
+		})
+	}
+	return routes, nil
 }
 
 func (nl *netlinkTest) AddrList(link netlink.Link, family int) ([]netlink.Addr, error) {
@@ -245,8 +300,7 @@ func (nl *netlinkTest) AddrList(link netlink.Link, family int) ([]netlink.Addr, 
 	model, prs := nl.links[name]
 	addrs := []netlink.Addr{}
 	if prs {
-		model.addrs.Iter(func(item interface{}) error {
-			addr := item.(string)
+		model.addrs.Iter(func(addr string) error {
 			net, err := netlink.ParseIPNet(addr)
 			if err != nil {
 				panic("Address parsing failed")
@@ -270,29 +324,31 @@ func (nl *netlinkTest) AddrList(link netlink.Link, family int) ([]netlink.Addr, 
 	return addrs, nil
 }
 
-func (dp *mockDataplane) linkStateCallback(ifaceName string, ifaceState ifacemonitor.State) {
+func (dp *mockDataplane) linkStateCallback(ifaceName string, ifaceState ifacemonitor.State, idx int) {
 	log.WithFields(log.Fields{"name": ifaceName, "state": ifaceState}).Info("CALLBACK LINK")
 	dp.linkC <- linkUpdate{
 		name:  ifaceName,
 		state: ifaceState,
+		index: idx,
 	}
 	log.Info("mock dataplane reported link callback")
 }
 
-func (dp *mockDataplane) expectLinkStateCb(ifaceName string, state ifacemonitor.State) {
+func (dp *mockDataplane) expectLinkStateCb(ifaceName string, state ifacemonitor.State, idx int) {
 	var upd linkUpdate
 	Eventually(dp.linkC).Should(Receive(&upd))
-	Expect(upd).To(Equal(linkUpdate{
+	ExpectWithOffset(1, upd).To(Equal(linkUpdate{
 		name:  ifaceName,
 		state: state,
-	}))
+		index: idx,
+	}), "Received unexpected link state callback.")
 }
 
 func (dp *mockDataplane) notExpectLinkStateCb() {
-	Consistently(dp.linkC, "200ms", "20ms").ShouldNot(Receive())
+	ConsistentlyWithOffset(1, dp.linkC, "50ms", "5ms").ShouldNot(Receive())
 }
 
-func (dp *mockDataplane) addrStateCallback(ifaceName string, addrs set.Set) {
+func (dp *mockDataplane) addrStateCallback(ifaceName string, addrs set.Set[string]) {
 	log.WithFields(log.Fields{
 		"ifaceName": ifaceName,
 		"addrs":     addrs,
@@ -302,7 +358,7 @@ func (dp *mockDataplane) addrStateCallback(ifaceName string, addrs set.Set) {
 }
 
 func (dp *mockDataplane) notExpectAddrStateCb() {
-	Consistently(dp.addrC, "200ms", "20ms").ShouldNot(Receive())
+	ConsistentlyWithOffset(1, dp.addrC, "50ms", "5ms").ShouldNot(Receive())
 }
 
 func (dp *mockDataplane) expectAddrStateCb(ifaceName string, addr string, present bool) {
@@ -318,24 +374,46 @@ func (dp *mockDataplane) expectAddrStateCb(ifaceName string, addr string, presen
 		"ifaceName": cbIface.ifaceName,
 		"addrs":     cbIface.addrs,
 	}).Debug("Mock dp got addr cb")
-	Expect(cbIface.ifaceName).To(Equal(ifaceName))
+	ExpectWithOffset(1, cbIface.ifaceName).To(Equal(ifaceName),
+		"Got update for unexpected interface name")
 	if (addr == "") && (!present) {
 		// Expected to get a nil addrs.
-		Expect(cbIface.addrs).To(BeNil())
+		ExpectWithOffset(1, cbIface.addrs).To(BeNil(), "Expected no addresses")
 	}
 	if (addr != "") && (!present) && cbIface.addrs != nil {
 		// Expected addr to be missing
-		Expect(cbIface.addrs.Contains(addr)).To(BeFalse())
+		ExpectWithOffset(1, cbIface.addrs.Contains(addr)).To(BeFalse(),
+			fmt.Sprintf("Expected %v not to contain %v", cbIface.addrs, addr))
 	}
 	if (addr != "") && present {
 		// Expected addr to be present
-		Expect(cbIface.addrs.Contains(addr)).To(BeTrue())
+		ExpectWithOffset(1, cbIface.addrs.Contains(addr)).To(BeTrue(),
+			fmt.Sprintf("Expected %v to contain %v", cbIface.addrs, addr))
 	}
 }
+
+func (dp *mockDataplane) synchronizationCallBack() {
+	log.Info("In sync callback fired")
+	dp.syncC <- inSyncupdate{}
+	log.Info("mock dataplane reported sync callback")
+}
+
+func (dp *mockDataplane) expectInSyncCB() {
+	var syncIface inSyncupdate
+	EventuallyWithOffset(1, dp.syncC).Should(Receive(&syncIface))
+}
+
+func (dp *mockDataplane) expectNoInSyncCB() {
+	ConsistentlyWithOffset(1, dp.syncC, "100ms").ShouldNot(Receive())
+}
+
+var errFatal = errors.New("fatal error")
 
 var _ = Describe("ifacemonitor", func() {
 	var nl *netlinkTest
 	var resyncC chan time.Time
+	var fatalErrC chan struct{}
+	var expectInSync bool
 	var im *ifacemonitor.InterfaceMonitor
 	var dp *mockDataplane
 
@@ -344,12 +422,24 @@ var _ = Describe("ifacemonitor", func() {
 		// trigger channel - both controlled by this code.
 		nl = &netlinkTest{
 			userSubscribed: make(chan int),
+			nextIndex:      10,
 		}
 		resyncC = make(chan time.Time)
 		config := ifacemonitor.Config{
-			InterfaceExcludes: []string{"kube-ipvs0"},
+			// Test the regexp ability of interface excludes
+			InterfaceExcludes: []*regexp.Regexp{
+				regexp.MustCompile("^kube-ipvs.*"),
+				regexp.MustCompile("^veth1$"),
+				regexp.MustCompile("dummy"),
+			},
 		}
-		im = ifacemonitor.NewWithStubs(config, nl, resyncC)
+		fatalErrC = make(chan struct{})
+		fatalErrCallback := func(err error) {
+			log.WithError(err).Info("Fatal error reported")
+			close(fatalErrC) // Signal to test code that we saw the fatal error callback.
+			panic(errFatal)  // Break out of the MonitorInterfaces goroutine (this panic is recovered below).
+		}
+		im = ifacemonitor.NewWithStubs(config, nl, resyncC, fatalErrCallback)
 
 		// Register this test code's callbacks, which (a) log; and (b) send to a 1- or
 		// 2-buffered channel, so that the test code _must_ explicitly indicate when it
@@ -362,47 +452,99 @@ var _ = Describe("ifacemonitor", func() {
 		dp = &mockDataplane{
 			linkC: make(chan linkUpdate, 1),
 			addrC: make(chan addrState, 2),
+			syncC: make(chan inSyncupdate, 1),
 		}
-		im.Callback = dp.linkStateCallback
+		im.StateCallback = dp.linkStateCallback
 		im.AddrCallback = dp.addrStateCallback
+		im.InSyncCallback = dp.synchronizationCallBack
+		expectInSync = true
+	})
 
+	JustBeforeEach(func() {
 		// Start the monitor running, and wait until it has subscribed to our test netlink
 		// stub.
-		go im.MonitorInterfaces()
-		<-nl.userSubscribed
+		go func() {
+			defer GinkgoRecover()
+			defer func() {
+				v := recover()
+				if v == errFatal { // Our expected fatal error.
+					return
+				}
+				panic(v)
+			}()
+			im.MonitorInterfaces()
+		}()
+		Eventually(nl.userSubscribed).Should(Receive())
+		if expectInSync {
+			dp.expectInSyncCB()
+		} else {
+			dp.expectNoInSyncCB()
+		}
+		log.Info("Monitor interfaces subscribed")
+	})
+
+	Context("with an error from LinkList", func() {
+		BeforeEach(func() {
+			nl.LinkListErr = fmt.Errorf("dummy err")
+			expectInSync = false
+		})
+
+		It("should report a fatal error", func() {
+			log.Info("Waiting for fatal error...")
+			Eventually(fatalErrC).Should(BeClosed())
+		})
 	})
 
 	It("should skip netlink address updates for ipvs", func() {
-		// Should not receives any address callbacks.
-		nl.addLink("kube-ipvs0")
-		resyncC <- time.Time{}
-		dp.notExpectAddrStateCb()
-		dp.notExpectLinkStateCb()
-		nl.addAddr("kube-ipvs0", "10.100.0.1/32")
-		dp.notExpectAddrStateCb()
+		var netlinkUpdates = func(iface string) {
+			// Should not receive any address callbacks.
+			idx := nl.nextIndex
 
-		nl.changeLinkState("kube-ipvs0", "up")
-		dp.expectLinkStateCb("kube-ipvs0", ifacemonitor.StateUp)
-		nl.changeLinkState("kube-ipvs0", "down")
-		dp.expectLinkStateCb("kube-ipvs0", ifacemonitor.StateDown)
+			nl.addLink(iface)
+			resyncC <- time.Time{}
+			dp.notExpectAddrStateCb()
+			dp.expectLinkStateCb(iface, ifacemonitor.StateDown, idx)
+			nl.addAddr(iface, "10.100.0.1/32")
+			dp.notExpectAddrStateCb()
 
-		// Should notify down from up on deletion.
-		nl.changeLinkState("kube-ipvs0", "up")
-		dp.expectLinkStateCb("kube-ipvs0", ifacemonitor.StateUp)
-		nl.delLink("kube-ipvs0")
-		dp.notExpectAddrStateCb()
-		dp.expectLinkStateCb("kube-ipvs0", ifacemonitor.StateDown)
+			nl.changeLinkState(iface, "up")
+			dp.expectLinkStateCb(iface, ifacemonitor.StateUp, idx)
+			nl.changeLinkState(iface, "down")
+			dp.expectLinkStateCb(iface, ifacemonitor.StateDown, idx)
 
-		// Check it can be added again.
-		nl.addLink("kube-ipvs0")
-		resyncC <- time.Time{}
-		dp.notExpectAddrStateCb()
-		dp.notExpectLinkStateCb()
+			// Should notify not present from up on deletion.
+			nl.changeLinkState(iface, "up")
+			dp.expectLinkStateCb(iface, ifacemonitor.StateUp, idx)
+			nl.delLink(iface)
+			dp.notExpectAddrStateCb()
+			dp.expectLinkStateCb(iface, ifacemonitor.StateNotPresent, idx)
 
-		// Clean it.
-		nl.delLink("kube-ipvs0")
-		dp.notExpectAddrStateCb()
-		dp.notExpectLinkStateCb()
+			// Check it can be added again.
+			idx = nl.nextIndex
+			nl.addLink(iface)
+			resyncC <- time.Time{}
+			dp.expectLinkStateCb(iface, ifacemonitor.StateDown, idx)
+			dp.notExpectAddrStateCb()
+
+			// Clean it.
+			nl.delLink(iface)
+			dp.expectLinkStateCb(iface, ifacemonitor.StateNotPresent, idx)
+			dp.notExpectAddrStateCb()
+		}
+
+		// Repeat for 3 different interfaces (to test regexp of interface excludes)
+		for index := 0; index < 3; index++ {
+			interfaceName := fmt.Sprintf("kube-ipvs%d", index)
+			netlinkUpdates(interfaceName)
+		}
+
+		// Repeat test for second interface exclude entry
+		netlinkUpdates("veth1")
+
+		// Repeat test for third interface exclude entry
+		netlinkUpdates("0dummy1")
+
+		Expect(fatalErrC).ToNot(BeClosed())
 	})
 
 	It("should handle mainline netlink updates", func() {
@@ -413,8 +555,10 @@ var _ = Describe("ifacemonitor", func() {
 		// is that the resync completes as a no-op first, and the addLink causes a
 		// notification afterwards.  But either way we expect to get the same callbacks to
 		// the dataplane, so we don't need to distinguish between these two possibilities.
+		idx := nl.nextIndex
 		nl.addLink("eth0")
 		resyncC <- time.Time{}
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateDown, idx)
 		dp.expectAddrStateCb("eth0", "", true)
 		nl.addAddr("eth0", "10.0.240.10/24")
 		dp.expectAddrStateCb("eth0", "10.0.240.10", true)
@@ -422,7 +566,7 @@ var _ = Describe("ifacemonitor", func() {
 		// Set the link up, and expect a link callback.  Addresses are unchanged, so there
 		// is no address callback.
 		nl.changeLinkState("eth0", "up")
-		dp.expectLinkStateCb("eth0", ifacemonitor.StateUp)
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateUp, idx)
 
 		// Add an address.
 		nl.addAddr("eth0", "172.19.34.1/27")
@@ -441,18 +585,18 @@ var _ = Describe("ifacemonitor", func() {
 
 		// Set link down.
 		nl.changeLinkState("eth0", "down")
-		dp.expectLinkStateCb("eth0", ifacemonitor.StateDown)
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateDown, idx)
 
 		// Set link up again.
 		nl.changeLinkState("eth0", "up")
-		dp.expectLinkStateCb("eth0", ifacemonitor.StateUp)
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateUp, idx)
 
 		// Test when a deleted link is detected in a resync.  The monitor should report
 		// "Spotted interface removal on resync" and make link and address callbacks
 		// accordingly.
 		nl.delLinkNoSignal("eth0")
 		resyncC <- time.Time{}
-		dp.expectLinkStateCb("eth0", ifacemonitor.StateDown)
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateNotPresent, idx)
 		dp.expectAddrStateCb("eth0", "", false)
 
 		// Trigger another resync.  Nothing is expected.  We ensure that the resync
@@ -461,9 +605,12 @@ var _ = Describe("ifacemonitor", func() {
 		// ready to read it.)
 		resyncC <- time.Time{}
 		resyncC <- time.Time{}
+
+		Expect(fatalErrC).ToNot(BeClosed())
 	})
 
 	It("should handle an interface rename", func() {
+		defer log.Info("Exiting...")
 		// Add a link and an address.  No link callback expected because the link is not up
 		// yet.  But we do get an address callback because those are independent of link
 		// state.  (Note that if the monitor's initial resync runs slowly enough, it might
@@ -471,22 +618,24 @@ var _ = Describe("ifacemonitor", func() {
 		// is that the resync completes as a no-op first, and the addLink causes a
 		// notification afterwards.  But either way we expect to get the same callbacks to
 		// the dataplane, so we don't need to distinguish between these two possibilities.
+		idx := nl.nextIndex
 		nl.addLink("eth0")
 		resyncC <- time.Time{}
 		dp.expectAddrStateCb("eth0", "", true)
 		nl.addAddr("eth0", "10.0.240.10/24")
 		dp.expectAddrStateCb("eth0", "10.0.240.10", true)
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateDown, idx)
 
 		// Set the link up, and expect a link callback.  Addresses are unchanged, so there
 		// is no address callback.
 		nl.changeLinkState("eth0", "up")
-		dp.expectLinkStateCb("eth0", ifacemonitor.StateUp)
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateUp, idx)
 
 		// Rename the interface, address and old name should be signalled as gone.
 		nl.renameLink("eth0", "eth1")
-		dp.expectLinkStateCb("eth0", ifacemonitor.StateDown)
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateNotPresent, idx)
 		dp.expectAddrStateCb("eth0", "10.0.240.10", false)
-		dp.expectLinkStateCb("eth1", ifacemonitor.StateUp)
+		dp.expectLinkStateCb("eth1", ifacemonitor.StateUp, idx)
 		dp.expectAddrStateCb("eth1", "10.0.240.10", true)
 
 		// Trigger another resync.  Nothing is expected.  We ensure that the resync
@@ -495,12 +644,16 @@ var _ = Describe("ifacemonitor", func() {
 		// ready to read it.)
 		resyncC <- time.Time{}
 		resyncC <- time.Time{}
+
+		Expect(fatalErrC).ToNot(BeClosed())
 	})
 
 	It("should handle link flap", func() {
 		// Add a link and an address.
+		idx := nl.nextIndex
 		nl.addLink("eth0")
 		resyncC <- time.Time{}
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateDown, idx)
 		dp.expectAddrStateCb("eth0", "", true)
 		nl.addAddr("eth0", "10.0.240.10/24")
 		dp.expectAddrStateCb("eth0", "10.0.240.10", true)
@@ -508,13 +661,13 @@ var _ = Describe("ifacemonitor", func() {
 		// Set the link up, and expect a link callback.  Addresses are unchanged, so there
 		// is no address callback.
 		nl.changeLinkState("eth0", "up")
-		dp.expectLinkStateCb("eth0", ifacemonitor.StateUp)
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateUp, idx)
 
 		// Delete the link, and have that picked up by resync.  For this scenario we have to
 		// assume that there is never any Netlink signal for the link deletion.
 		_ = nl.delLinkNoSignal("eth0")
 		resyncC <- time.Time{}
-		dp.expectLinkStateCb("eth0", ifacemonitor.StateDown)
+		dp.expectLinkStateCb("eth0", ifacemonitor.StateNotPresent, idx)
 		dp.expectAddrStateCb("eth0", "", false)
 
 		// Add the link again, with the same ifIndex, but hold the signal through Netlink.
@@ -527,5 +680,23 @@ var _ = Describe("ifacemonitor", func() {
 
 		// Now we should see an address callback again.
 		dp.expectAddrStateCb("eth0", "10.0.240.10", true)
+
+		Expect(fatalErrC).ToNot(BeClosed())
+	})
+
+	It("should reconnect to netlink if channel goes down", func() {
+		oldCancel := nl.cancel
+		close(nl.linkUpdates)
+		Eventually(oldCancel).Should(BeClosed())
+		Eventually(nl.userSubscribed).Should(Receive())
+		Expect(fatalErrC).ToNot(BeClosed())
+	})
+
+	It("should report a fatal error if routes channel goes down", func() {
+		oldCancel := nl.cancel
+		close(nl.routeUpdates)
+		Eventually(oldCancel).Should(BeClosed())
+		Eventually(nl.userSubscribed).Should(Receive())
+		Expect(fatalErrC).ToNot(BeClosed())
 	})
 })

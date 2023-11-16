@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2021 Tigera, Inc. All rights reserved.
 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,15 +18,27 @@ package calc_test
 // the model package.
 
 import (
-	. "github.com/projectcalico/libcalico-go/lib/backend/model"
-	"github.com/projectcalico/libcalico-go/lib/net"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	log "github.com/sirupsen/logrus"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	v1 "k8s.io/api/core/v1"
+	discovery "k8s.io/api/discovery/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	v3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
+
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/encap"
+	"github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	. "github.com/projectcalico/calico/libcalico-go/lib/backend/model"
+	"github.com/projectcalico/calico/libcalico-go/lib/net"
 )
 
 // Canned hostnames.
-
-const localHostname = "localhostname"
-const remoteHostname = "remotehostname"
+var (
+	localHostname   = "localhostname"
+	remoteHostname  = "remotehostname"
+	remoteHostname2 = "remotehostname2"
+)
 
 // Canned selectors.
 
@@ -53,11 +65,16 @@ var (
 
 // Canned workload endpoints.
 
-var localWlEpKey1 = WorkloadEndpointKey{localHostname, "orch", "wl1", "ep1"}
-var remoteWlEpKey1 = WorkloadEndpointKey{remoteHostname, "orch", "wl1", "ep1"}
+var localWlEpKey1 = WorkloadEndpointKey{Hostname: localHostname, OrchestratorID: "orch", WorkloadID: "wl1", EndpointID: "ep1"}
 var localWlEp1Id = "orch/wl1/ep1"
-var localWlEpKey2 = WorkloadEndpointKey{localHostname, "orch", "wl2", "ep2"}
+var localWlEpKey2 = WorkloadEndpointKey{Hostname: localHostname, OrchestratorID: "orch", WorkloadID: "wl2", EndpointID: "ep2"}
 var localWlEp2Id = "orch/wl2/ep2"
+
+// A remote workload endpoint
+var remoteWlEpKey1 = WorkloadEndpointKey{Hostname: remoteHostname, OrchestratorID: "orch", WorkloadID: "wl1", EndpointID: "ep1"}
+
+// Same as remoteWlEpKey1 but on a different host.
+var remoteWlEpKey2 = WorkloadEndpointKey{Hostname: remoteHostname2, OrchestratorID: "orch", WorkloadID: "wl1", EndpointID: "ep1"}
 
 var localWlEp1 = WorkloadEndpoint{
 	State:      "active",
@@ -147,13 +164,6 @@ var localWlEp1DifferentIPs = WorkloadEndpoint{
 	},
 }
 
-var ep1IPs = []string{
-	"10.0.0.1", // ep1
-	"fc00:fe11::1",
-	"10.0.0.2", // shared with ep2
-	"fc00:fe11::2",
-}
-
 var localWlEp2 = WorkloadEndpoint{
 	State:      "active",
 	Name:       "cali2",
@@ -200,6 +210,17 @@ var localWlEp2NoProfiles = WorkloadEndpoint{
 		mustParseNet("10.0.0.3/32")},
 	IPv6Nets: []net.IPNet{mustParseNet("fc00:fe11::2/128"),
 		mustParseNet("fc00:fe11::3/128")},
+}
+
+var remoteWlEp1 = WorkloadEndpoint{
+	State:      "active",
+	Name:       "remote-wep-1",
+	Mac:        mustParseMac("01:02:03:04:05:06"),
+	ProfileIDs: []string{"prof-1", "prof-2", "prof-missing"},
+	IPv4Nets:   []net.IPNet{mustParseNet("10.0.0.5/32")},
+	Labels: map[string]string{
+		"id": "rem-ep-1",
+	},
 }
 
 var hostEpWithName = HostEndpoint{
@@ -486,7 +507,7 @@ var profileRules1 = ProfileRules{
 		{SrcSelector: allSelector},
 	},
 	OutboundRules: []Rule{
-		{SrcTag: "tag-1"},
+		{SrcSelector: "has(tag-1)"},
 	},
 }
 
@@ -504,7 +525,7 @@ var profileRules1TagUpdate = ProfileRules{
 		{SrcSelector: bEpBSelector},
 	},
 	OutboundRules: []Rule{
-		{SrcTag: "tag-2"},
+		{SrcSelector: "has(tag-2)"},
 	},
 }
 
@@ -513,19 +534,50 @@ var profileRules1NegatedTagSelUpdate = ProfileRules{
 		{NotSrcSelector: bEpBSelector},
 	},
 	OutboundRules: []Rule{
-		{NotSrcTag: "tag-2"},
+		{NotSrcSelector: "has(tag-2)"},
 	},
 }
 
-var profileTags1 = []string{"tag-1"}
-var profileLabels1 = map[string]string{
-	"profile": "prof-1",
+var profileLabels1Tag1 = &v3.Profile{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "prof-1",
+	},
+	Spec: v3.ProfileSpec{
+		LabelsToApply: map[string]string{
+			"profile": "prof-1",
+			"tag-1":   "",
+		},
+	},
 }
-var profileLabels2 = map[string]string{
-	"profile": "prof-2",
+var profileLabels1 = &v3.Profile{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "prof-1",
+	},
+	Spec: v3.ProfileSpec{
+		LabelsToApply: map[string]string{
+			"profile": "prof-1",
+		},
+	},
 }
-var profileLabelsTag1 = map[string]string{
-	"tag-1": "foobar",
+var profileLabels2 = &v3.Profile{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "prof-2",
+	},
+	Spec: v3.ProfileSpec{
+		LabelsToApply: map[string]string{
+			"profile": "prof-2",
+		},
+	},
+}
+var profileLabelsTag1 = &v3.Profile{
+	ObjectMeta: metav1.ObjectMeta{
+		Name: "prof-1",
+	},
+	Spec: v3.ProfileSpec{
+		LabelsToApply: map[string]string{
+			"tag-1": "foobar",
+		},
+	},
 }
 
 var tag1LabelID = ipSetIDForTag("tag-1")
@@ -567,4 +619,325 @@ var netSet2 = NetworkSet{
 	Labels: map[string]string{
 		"a": "b",
 	},
+}
+
+var localHostIP = mustParseIP("192.168.0.1")
+var remoteHostIP = mustParseIP("192.168.0.2")
+var remoteHostIPv6 = mustParseIP("dead:beef:0001::2")
+var remoteHost2IP = mustParseIP("192.168.0.3")
+var remoteHost2IPv6 = mustParseIP("dead:beef:0001::3")
+
+var localHostIPWithPrefix = "192.168.0.1/24"
+var remoteHostIPWithPrefix = "192.168.0.2/24"
+
+var localHostVXLANTunnelConfigKey = HostConfigKey{
+	Hostname: localHostname,
+	Name:     "IPv4VXLANTunnelAddr",
+}
+var remoteHostVXLANTunnelConfigKey = HostConfigKey{
+	Hostname: remoteHostname,
+	Name:     "IPv4VXLANTunnelAddr",
+}
+var remoteHostVXLANV6TunnelConfigKey = HostConfigKey{
+	Hostname: remoteHostname,
+	Name:     "IPv6VXLANTunnelAddr",
+}
+var remoteHost2VXLANTunnelConfigKey = HostConfigKey{
+	Hostname: remoteHostname2,
+	Name:     "IPv4VXLANTunnelAddr",
+}
+
+var remoteHostVXLANTunnelMACConfigKey = HostConfigKey{
+	Hostname: remoteHostname,
+	Name:     "VXLANTunnelMACAddr",
+}
+
+var remoteHostVXLANV6TunnelMACConfigKey = HostConfigKey{
+	Hostname: remoteHostname,
+	Name:     "VXLANTunnelMACAddrV6",
+}
+
+var ipPoolKey = IPPoolKey{
+	CIDR: mustParseNet("10.0.0.0/16"),
+}
+
+var ipPoolKey2 = IPPoolKey{
+	CIDR: mustParseNet("11.0.0.0/16"),
+}
+
+var hostCoveringIPPoolKey = IPPoolKey{
+	CIDR: mustParseNet("192.168.0.0/24"),
+}
+
+var hostCoveringIPPool = IPPool{
+	CIDR:       mustParseNet("192.168.0.0/24"),
+	Disabled:   true,
+	Masquerade: true,
+}
+
+var ipPoolWithIPIP = IPPool{
+	CIDR:     mustParseNet("10.0.0.0/16"),
+	IPIPMode: encap.Always,
+}
+
+var v6IPPoolKey = IPPoolKey{
+	CIDR: mustParseNet("feed:beef::/64"),
+}
+
+var v6IPPool = IPPool{
+	CIDR: mustParseNet("feed:beef::/64"),
+}
+
+var ipPoolWithVXLAN = IPPool{
+	CIDR:       mustParseNet("10.0.0.0/16"),
+	VXLANMode:  encap.Always,
+	Masquerade: true,
+}
+
+var ipPool2WithVXLAN = IPPool{
+	CIDR:       mustParseNet("11.0.0.0/16"),
+	VXLANMode:  encap.Always,
+	Masquerade: true,
+}
+
+var v6IPPoolWithVXLAN = IPPool{
+	CIDR:       mustParseNet("feed:beef::/64"),
+	VXLANMode:  encap.Always,
+	Masquerade: true,
+}
+
+var workloadIPs = "WorkloadIPs"
+
+var ipPoolWithVXLANSlash32 = IPPool{
+	CIDR:       mustParseNet("10.0.0.0/32"),
+	VXLANMode:  encap.Always,
+	Masquerade: true,
+}
+
+var ipPoolWithVXLANCrossSubnet = IPPool{
+	CIDR:       mustParseNet("10.0.0.0/16"),
+	VXLANMode:  encap.CrossSubnet,
+	Masquerade: false, // For coverage, make this different to the Always version of the pool
+}
+
+var remoteIPAMBlockKey = BlockKey{
+	CIDR: mustParseNet("10.0.1.0/29"),
+}
+
+var remoteIPAMSlash32BlockKey = BlockKey{
+	CIDR: mustParseNet("10.0.0.0/32"),
+}
+
+var remotev6IPAMBlockKey = BlockKey{
+	CIDR: mustParseNet("feed:beef:0:0:1::/96"),
+}
+
+var localIPAMBlockKey = BlockKey{
+	CIDR: mustParseNet("10.0.0.0/29"),
+}
+
+var localHostAffinity = "host:" + localHostname
+var remoteHostAffinity = "host:" + remoteHostname
+var remoteHost2Affinity = "host:" + remoteHostname2
+var remoteIPAMBlock = AllocationBlock{
+	CIDR:        mustParseNet("10.0.1.0/29"),
+	Affinity:    &remoteHostAffinity,
+	Allocations: make([]*int, 8),
+	Unallocated: []int{0, 1, 2, 3, 4, 5, 6, 7},
+}
+var remoteIPAMBlockSlash32 = AllocationBlock{
+	CIDR:        mustParseNet("10.0.0.0/32"),
+	Affinity:    &remoteHostAffinity,
+	Allocations: make([]*int, 1),
+	Unallocated: []int{0},
+}
+var remotev6IPAMBlock = AllocationBlock{
+	CIDR:        mustParseNet("feed:beef:0:0:1::/96"),
+	Affinity:    &remoteHostAffinity,
+	Allocations: make([]*int, 8),
+	Unallocated: []int{0, 1, 2, 3, 4, 5, 6, 7},
+}
+var remoteIPAMBlockWithBorrows = AllocationBlock{
+	CIDR:     mustParseNet("10.0.1.0/29"),
+	Affinity: &remoteHostAffinity,
+	Allocations: []*int{
+		intPtr(0),
+		intPtr(1),
+		intPtr(2),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	},
+	Unallocated: []int{3, 4, 5, 6, 7},
+	Attributes: []AllocationAttribute{
+		{},
+		{AttrSecondary: map[string]string{
+			IPAMBlockAttributeNode: remoteHostname,
+		}},
+		{AttrSecondary: map[string]string{
+			IPAMBlockAttributeNode: remoteHostname2,
+		}},
+	},
+}
+var remoteIPAMBlockWithBorrowsSwitched = AllocationBlock{
+	CIDR:     mustParseNet("10.0.1.0/29"),
+	Affinity: &remoteHost2Affinity,
+	Allocations: []*int{
+		intPtr(0),
+		intPtr(1),
+		intPtr(2),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	},
+	Unallocated: []int{3, 4, 5, 6, 7},
+	Attributes: []AllocationAttribute{
+		{},
+		{AttrSecondary: map[string]string{
+			IPAMBlockAttributeNode: remoteHostname2,
+		}},
+		{AttrSecondary: map[string]string{
+			IPAMBlockAttributeNode: remoteHostname,
+		}},
+	},
+}
+
+var localIPAMBlockWithBorrows = AllocationBlock{
+	CIDR:     mustParseNet("10.0.0.0/29"),
+	Affinity: &localHostAffinity,
+	Allocations: []*int{
+		intPtr(0),
+		intPtr(1),
+		intPtr(2),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	},
+	Unallocated: []int{3, 4, 5, 6, 7},
+	Attributes: []AllocationAttribute{
+		{},
+		{AttrSecondary: map[string]string{
+			IPAMBlockAttributeNode: localHostname,
+		}},
+		{AttrSecondary: map[string]string{
+			IPAMBlockAttributeNode: remoteHostname,
+		}},
+	},
+}
+
+// Resource for endpoint slice and service policy tests.
+var p = int32(80)
+var tcp = v1.ProtocolTCP
+var endpointSliceKey1 = model.ResourceKey{Name: "eps", Namespace: "default", Kind: "KubernetesEndpointSlice"}
+var endpointSliceKey2 = model.ResourceKey{Name: "eps-2", Namespace: "default", Kind: "KubernetesEndpointSlice"}
+var endpointSlice1 = discovery.EndpointSlice{
+	ObjectMeta: metav1.ObjectMeta{Name: "eps", Namespace: "default", Labels: map[string]string{"kubernetes.io/service-name": "svc"}},
+	Endpoints: []discovery.Endpoint{
+		{Addresses: []string{"10.0.0.1"}},
+	},
+	Ports: []discovery.EndpointPort{
+		{Port: &p, Protocol: &tcp},
+	},
+}
+var endpointSlice1NewIPs = discovery.EndpointSlice{
+	ObjectMeta: metav1.ObjectMeta{Name: "eps", Namespace: "default", Labels: map[string]string{"kubernetes.io/service-name": "svc"}},
+	Endpoints: []discovery.Endpoint{
+		{Addresses: []string{"10.0.0.1"}},
+		{Addresses: []string{"10.0.0.2"}},
+		{Addresses: []string{"10.0.0.3"}},
+	},
+	Ports: []discovery.EndpointPort{
+		{Port: &p, Protocol: &tcp},
+	},
+}
+var endpointSlice1NewIPs2 = discovery.EndpointSlice{
+	ObjectMeta: metav1.ObjectMeta{Name: "eps", Namespace: "default", Labels: map[string]string{"kubernetes.io/service-name": "svc"}},
+	Endpoints: []discovery.Endpoint{
+		{Addresses: []string{"10.0.0.2"}},
+		{Addresses: []string{"10.0.0.3"}},
+		{Addresses: []string{"10.0.0.4"}},
+	},
+	Ports: []discovery.EndpointPort{
+		{Port: &p, Protocol: &tcp},
+	},
+}
+var endpointSlice2NewIPs2 = discovery.EndpointSlice{
+	ObjectMeta: metav1.ObjectMeta{Name: "eps-2", Namespace: "default", Labels: map[string]string{"kubernetes.io/service-name": "svc"}},
+	Endpoints: []discovery.Endpoint{
+		{Addresses: []string{"10.0.0.2"}},
+		{Addresses: []string{"10.0.0.3"}},
+		{Addresses: []string{"10.0.0.4"}},
+	},
+	Ports: []discovery.EndpointPort{
+		{Port: &p, Protocol: &tcp},
+	},
+}
+var servicePolicyKey = model.PolicyKey{Name: "svc-policy"}
+var servicePolicyKey2 = model.PolicyKey{Name: "svc-policy2"}
+var servicePolicy = model.Policy{
+	Namespace: "default",
+	OutboundRules: []model.Rule{
+		{
+			Action:              "Allow",
+			DstService:          "svc",
+			DstServiceNamespace: "default",
+		},
+	},
+	Types:    []string{"egress"},
+	Selector: "all()",
+}
+
+var servicePolicyNoPorts = model.Policy{
+	Namespace: "default",
+	InboundRules: []model.Rule{
+		{
+			Action:              "Allow",
+			SrcService:          "svc",
+			SrcServiceNamespace: "default",
+			Protocol:            &protoTCP,
+			SrcPorts: []numorstring.Port{
+				{
+					MinPort: 80,
+					MaxPort: 80,
+				},
+			},
+		},
+	},
+	Types:    []string{"ingress"},
+	Selector: "all()",
+}
+
+func intPtr(i int) *int {
+	return &i
+}
+
+var localHostVXLANTunnelIP = "10.0.0.0"
+var remoteHostVXLANTunnelIP = "10.0.1.0"
+var remoteHostVXLANV6TunnelIP = "feed:beef:0:0:1::0"
+var remoteHostVXLANTunnelIP2 = "10.0.1.1"
+var remoteHost2VXLANTunnelIP = "10.0.2.0"
+var remoteHostVXLANTunnelMAC = "66:74:c5:72:3f:01"
+var remoteHostVXLANV6TunnelMAC = "10:f3:27:5c:47:66"
+
+var t = true
+
+var wgPrivateKey1 = mustGeneratePrivateKey()
+var wgPublicKey1 = wgPrivateKey1.PublicKey()
+var wgPrivateKey2 = mustGeneratePrivateKey()
+var wgPublicKey2 = wgPrivateKey2.PublicKey()
+
+func mustGeneratePrivateKey() wgtypes.Key {
+	if k, err := wgtypes.GeneratePrivateKey(); err != nil {
+		log.WithError(err).Fatal("Error generating wireguard private key")
+	} else {
+		return k
+	}
+	// This will never run, but it's included to appease golanci-lint
+	return wgtypes.Key{}
 }

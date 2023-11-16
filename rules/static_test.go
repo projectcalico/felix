@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 package rules_test
 
 import (
-	. "github.com/alauda/felix/rules"
+	. "github.com/projectcalico/calico/felix/rules"
 
 	"fmt"
 	"net"
@@ -23,11 +23,12 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/config"
-	"github.com/alauda/felix/ipsets"
-	. "github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
+
+	"github.com/projectcalico/calico/felix/config"
+	"github.com/projectcalico/calico/felix/ipsets"
+	. "github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
 )
 
 var _ = Describe("Static", func() {
@@ -38,21 +39,66 @@ var _ = Describe("Static", func() {
 		rr = NewRenderer(conf).(*DefaultRuleRenderer)
 	})
 
+	checkManglePostrouting := func(ipVersion uint8, ipvs bool) {
+		It("should generate expected cali-POSTROUTING chain in the mangle table", func() {
+			expRules := []Rule{
+				// Accept already accepted.
+				{Match: Match().MarkSingleBitSet(0x10),
+					Action: ReturnAction{},
+				},
+			}
+			if ipvs {
+				// Accept IPVS-forwarded traffic.
+				expRules = append(expRules, Rule{
+					Match:  Match().MarkNotClear(0xff00),
+					Action: ReturnAction{},
+				})
+			}
+			expRules = append(expRules, []Rule{
+				// Clear all Calico mark bits.
+				{Action: ClearMarkAction{Mark: 0xf0}},
+				// For DNAT'd traffic, apply host endpoint policy.
+				{
+					Match:  Match().ConntrackState("DNAT"),
+					Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+				},
+				// Accept if policy allowed packet.
+				{
+					Match:   Match().MarkSingleBitSet(0x10),
+					Action:  ReturnAction{},
+					Comment: []string{"Host endpoint policy accepted packet."},
+				},
+			}...)
+			Expect(rr.StaticManglePostroutingChain(ipVersion)).To(Equal(&Chain{
+				Name:  "cali-POSTROUTING",
+				Rules: expRules,
+			}))
+		})
+	}
+
 	for _, trueOrFalse := range []bool{true, false} {
+		var denyAction Action
+		denyAction = DropAction{}
+		denyActionString := "DROP"
+		if trueOrFalse {
+			denyAction = RejectAction{}
+			denyActionString = "REJECT"
+		}
+
 		kubeIPVSEnabled := trueOrFalse
-		Describe("with default config", func() {
+		Describe(fmt.Sprintf("with default config and IPVS=%v", kubeIPVSEnabled), func() {
 			BeforeEach(func() {
 				conf = Config{
 					WorkloadIfacePrefixes: []string{"cali"},
 					IPSetConfigV4:         ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
 					IPSetConfigV6:         ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
 					FailsafeInboundHostPorts: []config.ProtoPort{
-						{Protocol: "tcp", Port: 22},
-						{Protocol: "tcp", Port: 1022},
+						{Net: "0.0.0.0/0", Protocol: "tcp", Port: 22},
+						{Net: "0.0.0.0/0", Protocol: "tcp", Port: 1022},
 					},
 					FailsafeOutboundHostPorts: []config.ProtoPort{
-						{Protocol: "tcp", Port: 23},
-						{Protocol: "tcp", Port: 1023},
+						{Net: "0.0.0.0/0", Protocol: "tcp", Port: 23},
+						{Net: "0.0.0.0/0", Protocol: "tcp", Port: 1023},
 					},
 					IptablesMarkAccept:          0x10,
 					IptablesMarkPass:            0x20,
@@ -61,8 +107,55 @@ var _ = Describe("Static", func() {
 					IptablesMarkEndpoint:        0xff00,
 					IptablesMarkNonCaliEndpoint: 0x100,
 					KubeIPVSSupportEnabled:      kubeIPVSEnabled,
-					KubeNodePortRanges:          []numorstring.Port{{30030, 30040, ""}},
+					KubeNodePortRanges:          []numorstring.Port{{MinPort: 30030, MaxPort: 30040, PortName: ""}},
+					IptablesFilterDenyAction:    denyActionString,
 				}
+			})
+
+			Context("with OpenStack special cases", func() {
+				BeforeEach(func() {
+					conf.OpenStackSpecialCasesEnabled = true
+				})
+
+				It("IPv4: Should return expected raw PREROUTING chain", func() {
+					Expect(findChain(rr.StaticRawTableChains(4), "cali-PREROUTING")).To(Equal(&Chain{
+						Name: "cali-PREROUTING",
+						Rules: []Rule{
+							{Action: ClearMarkAction{Mark: 0xf0}},
+							{Match: Match().InInterface("cali+"),
+								Action: SetMarkAction{Mark: 0x40}},
+							{Match: Match().MarkMatchesWithMask(0x40, 0x40),
+								Action: JumpAction{Target: ChainRpfSkip}},
+							{Match: Match().Protocol("udp").SourceNet("0.0.0.0").SourcePorts(68).DestPorts(67),
+								Action: AcceptAction{}},
+							{Match: Match().MarkSingleBitSet(0x40).RPFCheckFailed(false),
+								Action: denyAction},
+							{Match: Match().MarkClear(0x40),
+								Action: JumpAction{Target: ChainDispatchFromHostEndpoint}},
+							{Match: Match().MarkSingleBitSet(0x10),
+								Action: AcceptAction{}},
+						},
+					}))
+				})
+
+				It("IPv6: Should return expected raw PREROUTING chain", func() {
+					Expect(findChain(rr.StaticRawTableChains(6), "cali-PREROUTING")).To(Equal(&Chain{
+						Name: "cali-PREROUTING",
+						Rules: []Rule{
+							{Action: ClearMarkAction{Mark: 0xf0}},
+							{Match: Match().InInterface("cali+"),
+								Action: SetMarkAction{Mark: 0x40}},
+							{Match: Match().MarkMatchesWithMask(0x40, 0x40),
+								Action: JumpAction{Target: ChainRpfSkip}},
+							{Match: Match().MarkSingleBitSet(0x40).RPFCheckFailed(false),
+								Action: denyAction},
+							{Match: Match().MarkClear(0x40),
+								Action: JumpAction{Target: ChainDispatchFromHostEndpoint}},
+							{Match: Match().MarkSingleBitSet(0x10),
+								Action: AcceptAction{}},
+						},
+					}))
+				})
 			})
 
 			for _, ipVersion := range []uint8{4, 6} {
@@ -114,6 +207,44 @@ var _ = Describe("Static", func() {
 						},
 					}
 
+					if ipVersion == 4 {
+						expRawFailsafeIn = &Chain{
+							Name: "cali-failsafe-in",
+							Rules: []Rule{
+								{Match: Match().Protocol("tcp").DestPorts(22).SourceNet("0.0.0.0/0"), Action: AcceptAction{}},
+								{Match: Match().Protocol("tcp").DestPorts(1022).SourceNet("0.0.0.0/0"), Action: AcceptAction{}},
+								{Match: Match().Protocol("tcp").SourcePorts(23).SourceNet("0.0.0.0/0"), Action: AcceptAction{}},
+								{Match: Match().Protocol("tcp").SourcePorts(1023).SourceNet("0.0.0.0/0"), Action: AcceptAction{}},
+							},
+						}
+
+						expRawFailsafeOut = &Chain{
+							Name: "cali-failsafe-out",
+							Rules: []Rule{
+								{Match: Match().Protocol("tcp").DestPorts(23).DestNet("0.0.0.0/0"), Action: AcceptAction{}},
+								{Match: Match().Protocol("tcp").DestPorts(1023).DestNet("0.0.0.0/0"), Action: AcceptAction{}},
+								{Match: Match().Protocol("tcp").SourcePorts(22).SourceNet("0.0.0.0/0"), Action: AcceptAction{}},
+								{Match: Match().Protocol("tcp").SourcePorts(1022).SourceNet("0.0.0.0/0"), Action: AcceptAction{}},
+							},
+						}
+
+						expFailsafeIn = &Chain{
+							Name: "cali-failsafe-in",
+							Rules: []Rule{
+								{Match: Match().Protocol("tcp").DestPorts(22).SourceNet("0.0.0.0/0"), Action: AcceptAction{}},
+								{Match: Match().Protocol("tcp").DestPorts(1022).SourceNet("0.0.0.0/0"), Action: AcceptAction{}},
+							},
+						}
+
+						expFailsafeOut = &Chain{
+							Name: "cali-failsafe-out",
+							Rules: []Rule{
+								{Match: Match().Protocol("tcp").DestPorts(23).DestNet("0.0.0.0/0"), Action: AcceptAction{}},
+								{Match: Match().Protocol("tcp").DestPorts(1023).DestNet("0.0.0.0/0"), Action: AcceptAction{}},
+							},
+						}
+					}
+
 					expForwardCheck := &Chain{
 						Name: "cali-forward-check",
 						Rules: []Rule{
@@ -126,19 +257,19 @@ var _ = Describe("Static", func() {
 									DestPortRanges(portRanges).
 									DestIPSet(ipSetThisHost),
 								Action:  GotoAction{Target: ChainDispatchSetEndPointMark},
-								Comment: "To kubernetes NodePort service",
+								Comment: []string{"To kubernetes NodePort service"},
 							},
 							{
 								Match: Match().Protocol("udp").
 									DestPortRanges(portRanges).
 									DestIPSet(ipSetThisHost),
 								Action:  GotoAction{Target: ChainDispatchSetEndPointMark},
-								Comment: "To kubernetes NodePort service",
+								Comment: []string{"To kubernetes NodePort service"},
 							},
 							{
 								Match:   Match().NotDestIPSet(ipSetThisHost),
 								Action:  JumpAction{Target: ChainDispatchSetEndPointMark},
-								Comment: "To kubernetes service",
+								Comment: []string{"To kubernetes service"},
 							},
 						},
 					}
@@ -163,10 +294,12 @@ var _ = Describe("Static", func() {
 							{
 								Match:   Match().MarkSingleBitSet(0x10),
 								Action:  AcceptAction{},
-								Comment: "Policy explicitly accepted packet.",
+								Comment: []string{"Policy explicitly accepted packet."},
 							},
 						},
 					}
+
+					checkManglePostrouting(ipVersion, kubeIPVSEnabled)
 
 					It("should include the expected forward chain in the filter chains", func() {
 						Expect(findChain(rr.StaticFilterTableChains(ipVersion), "cali-FORWARD")).To(Equal(&Chain{
@@ -183,11 +316,7 @@ var _ = Describe("Static", func() {
 									Action: JumpAction{Target: ChainToWorkloadDispatch}},
 								// Outgoing host endpoint chains.
 								{Action: JumpAction{Target: ChainDispatchToHostEndpointForward}},
-								{
-									Match:   Match().MarkSingleBitSet(0x10),
-									Action:  AcceptAction{},
-									Comment: "Policy explicitly accepted packet.",
-								},
+								{Action: JumpAction{Target: ChainCIDRBlock}},
 							},
 						}))
 					})
@@ -219,7 +348,7 @@ var _ = Describe("Static", func() {
 									{
 										Match:   Match().MarkSingleBitSet(0x10),
 										Action:  AcceptAction{},
-										Comment: "Host endpoint policy accepted packet.",
+										Comment: []string{"Host endpoint policy accepted packet."},
 									},
 								},
 							}))
@@ -243,7 +372,7 @@ var _ = Describe("Static", func() {
 									{
 										Match:   Match().MarkSingleBitSet(0x10),
 										Action:  AcceptAction{},
-										Comment: "Host endpoint policy accepted packet.",
+										Comment: []string{"Host endpoint policy accepted packet."},
 									},
 								},
 							}))
@@ -269,11 +398,14 @@ var _ = Describe("Static", func() {
 
 									// Non-workload traffic, send to host chains.
 									{Action: ClearMarkAction{Mark: 0xf0}},
-									{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+									{
+										Match:  Match().NotConntrackState("DNAT"),
+										Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+									},
 									{
 										Match:   Match().MarkSingleBitSet(0x10),
 										Action:  AcceptAction{},
-										Comment: "Host endpoint policy accepted packet.",
+										Comment: []string{"Host endpoint policy accepted packet."},
 									},
 								},
 							}))
@@ -291,11 +423,14 @@ var _ = Describe("Static", func() {
 
 									// Non-workload traffic, send to host chains.
 									{Action: ClearMarkAction{Mark: 0xf0}},
-									{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+									{
+										Match:  Match().NotConntrackState("DNAT"),
+										Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+									},
 									{
 										Match:   Match().MarkSingleBitSet(0x10),
 										Action:  AcceptAction{},
-										Comment: "Host endpoint policy accepted packet.",
+										Comment: []string{"Host endpoint policy accepted packet."},
 									},
 								},
 							}))
@@ -352,7 +487,7 @@ var _ = Describe("Static", func() {
 						Expect(findChain(rr.StaticRawTableChains(ipVersion), "cali-failsafe-out")).To(Equal(expRawFailsafeOut))
 					})
 					It("should return only the expected raw chains", func() {
-						Expect(len(rr.StaticRawTableChains(ipVersion))).To(Equal(4))
+						Expect(len(rr.StaticRawTableChains(ipVersion))).To(Equal(5))
 					})
 				})
 			}
@@ -364,6 +499,10 @@ var _ = Describe("Static", func() {
 						{Action: ClearMarkAction{Mark: 0xf0}},
 						{Match: Match().InInterface("cali+"),
 							Action: SetMarkAction{Mark: 0x40}},
+						{Match: Match().MarkMatchesWithMask(0x40, 0x40),
+							Action: JumpAction{Target: ChainRpfSkip}},
+						{Match: Match().MarkSingleBitSet(0x40).RPFCheckFailed(false),
+							Action: denyAction},
 						{Match: Match().MarkClear(0x40),
 							Action: JumpAction{Target: ChainDispatchFromHostEndpoint}},
 						{Match: Match().MarkSingleBitSet(0x10),
@@ -378,8 +517,10 @@ var _ = Describe("Static", func() {
 						{Action: ClearMarkAction{Mark: 0xf0}},
 						{Match: Match().InInterface("cali+"),
 							Action: SetMarkAction{Mark: 0x40}},
-						{Match: Match().MarkSingleBitSet(0x40).RPFCheckFailed(),
-							Action: DropAction{}},
+						{Match: Match().MarkMatchesWithMask(0x40, 0x40),
+							Action: JumpAction{Target: ChainRpfSkip}},
+						{Match: Match().MarkSingleBitSet(0x40).RPFCheckFailed(false),
+							Action: denyAction},
 						{Match: Match().MarkClear(0x40),
 							Action: JumpAction{Target: ChainDispatchFromHostEndpoint}},
 						{Match: Match().MarkSingleBitSet(0x10),
@@ -399,7 +540,7 @@ var _ = Describe("Static", func() {
 						{Action: JumpAction{Target: ChainDispatchFromHostEndpoint}},
 						{Match: Match().MarkSingleBitSet(0x10),
 							Action:  AcceptAction{},
-							Comment: "Host endpoint policy accepted packet."},
+							Comment: []string{"Host endpoint policy accepted packet."}},
 					},
 				}))
 			})
@@ -414,7 +555,7 @@ var _ = Describe("Static", func() {
 						{Action: JumpAction{Target: ChainDispatchFromHostEndpoint}},
 						{Match: Match().MarkSingleBitSet(0x10),
 							Action:  AcceptAction{},
-							Comment: "Host endpoint policy accepted packet."},
+							Comment: []string{"Host endpoint policy accepted packet."}},
 					},
 				}))
 			})
@@ -425,7 +566,7 @@ var _ = Describe("Static", func() {
 					Rules: []Rule{
 						{Action: JumpAction{Target: "cali-from-wl-dispatch"}},
 						{Action: ReturnAction{},
-							Comment: "Configured DefaultEndpointToHostAction"},
+							Comment: []string{"Configured DefaultEndpointToHostAction"}},
 					},
 				}))
 			})
@@ -441,7 +582,7 @@ var _ = Describe("Static", func() {
 						{Match: Match().ProtocolNum(ProtoICMPv6).ICMPV6Type(136), Action: AcceptAction{}},
 						{Action: JumpAction{Target: "cali-from-wl-dispatch"}},
 						{Action: ReturnAction{},
-							Comment: "Configured DefaultEndpointToHostAction"},
+							Comment: []string{"Configured DefaultEndpointToHostAction"}},
 					},
 				}))
 			})
@@ -478,7 +619,7 @@ var _ = Describe("Static", func() {
 			})
 		})
 
-		Describe("with IPIP enabled", func() {
+		Describe(fmt.Sprintf("with IPIP enabled and IPVS=%v", kubeIPVSEnabled), func() {
 			epMark := uint32(0xff00)
 			BeforeEach(func() {
 				conf = Config{
@@ -494,8 +635,11 @@ var _ = Describe("Static", func() {
 					IptablesMarkEndpoint:        epMark,
 					IptablesMarkNonCaliEndpoint: 0x100,
 					KubeIPVSSupportEnabled:      kubeIPVSEnabled,
+					IptablesFilterDenyAction:    denyActionString,
 				}
 			})
+
+			checkManglePostrouting(4, kubeIPVSEnabled)
 
 			expInputChainIPIPV4IPVS := &Chain{
 				Name: "cali-INPUT",
@@ -507,10 +651,10 @@ var _ = Describe("Static", func() {
 						DestAddrType("LOCAL"),
 
 						Action:  AcceptAction{},
-						Comment: "Allow IPIP packets from Calico hosts"},
+						Comment: []string{"Allow IPIP packets from Calico hosts"}},
 					{Match: Match().ProtocolNum(4),
-						Action:  DropAction{},
-						Comment: "Drop IPIP packets from non-Calico hosts"},
+						Action:  RejectAction{},
+						Comment: []string{"Reject IPIP packets from non-Calico hosts"}},
 
 					// Forward check chain.
 					{Action: ClearMarkAction{Mark: epMark}},
@@ -534,7 +678,7 @@ var _ = Describe("Static", func() {
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
-						Comment: "Host endpoint policy accepted packet.",
+						Comment: []string{"Host endpoint policy accepted packet."},
 					},
 				},
 			}
@@ -549,10 +693,10 @@ var _ = Describe("Static", func() {
 						DestAddrType("LOCAL"),
 
 						Action:  AcceptAction{},
-						Comment: "Allow IPIP packets from Calico hosts"},
+						Comment: []string{"Allow IPIP packets from Calico hosts"}},
 					{Match: Match().ProtocolNum(4),
 						Action:  DropAction{},
-						Comment: "Drop IPIP packets from non-Calico hosts"},
+						Comment: []string{"Drop IPIP packets from non-Calico hosts"}},
 
 					// Per-prefix workload jump rules.  Note use of goto so that we
 					// don't return here.
@@ -569,7 +713,7 @@ var _ = Describe("Static", func() {
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
-						Comment: "Host endpoint policy accepted packet.",
+						Comment: []string{"Host endpoint policy accepted packet."},
 					},
 				},
 			}
@@ -600,7 +744,7 @@ var _ = Describe("Static", func() {
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
-						Comment: "Host endpoint policy accepted packet.",
+						Comment: []string{"Host endpoint policy accepted packet."},
 					},
 				},
 			}
@@ -622,7 +766,7 @@ var _ = Describe("Static", func() {
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
-						Comment: "Host endpoint policy accepted packet.",
+						Comment: []string{"Host endpoint policy accepted packet."},
 					},
 				},
 			}
@@ -648,16 +792,19 @@ var _ = Describe("Static", func() {
 							DestIPSet("cali40all-hosts-net").
 							SrcAddrType(AddrTypeLocal, false),
 						Action:  AcceptAction{},
-						Comment: "Allow IPIP packets to other Calico hosts",
+						Comment: []string{"Allow IPIP packets to other Calico hosts"},
 					},
 
 					// Non-workload traffic, send to host chains.
 					{Action: ClearMarkAction{Mark: 0xf0}},
-					{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+					{
+						Match:  Match().NotConntrackState("DNAT"),
+						Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+					},
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
-						Comment: "Host endpoint policy accepted packet.",
+						Comment: []string{"Host endpoint policy accepted packet."},
 					},
 				},
 			}
@@ -678,16 +825,19 @@ var _ = Describe("Static", func() {
 							DestIPSet("cali40all-hosts-net").
 							SrcAddrType(AddrTypeLocal, false),
 						Action:  AcceptAction{},
-						Comment: "Allow IPIP packets to other Calico hosts",
+						Comment: []string{"Allow IPIP packets to other Calico hosts"},
 					},
 
 					// Non-workload traffic, send to host chains.
 					{Action: ClearMarkAction{Mark: 0xf0}},
-					{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+					{
+						Match:  Match().NotConntrackState("DNAT"),
+						Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+					},
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
-						Comment: "Host endpoint policy accepted packet.",
+						Comment: []string{"Host endpoint policy accepted packet."},
 					},
 				},
 			}
@@ -710,11 +860,14 @@ var _ = Describe("Static", func() {
 
 					// Non-workload traffic, send to host chains.
 					{Action: ClearMarkAction{Mark: 0xf0}},
-					{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+					{
+						Match:  Match().NotConntrackState("DNAT"),
+						Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+					},
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
-						Comment: "Host endpoint policy accepted packet.",
+						Comment: []string{"Host endpoint policy accepted packet."},
 					},
 				},
 			}
@@ -731,11 +884,14 @@ var _ = Describe("Static", func() {
 
 					// Non-workload traffic, send to host chains.
 					{Action: ClearMarkAction{Mark: 0xf0}},
-					{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+					{
+						Match:  Match().NotConntrackState("DNAT"),
+						Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+					},
 					{
 						Match:   Match().MarkSingleBitSet(0x10),
 						Action:  AcceptAction{},
-						Comment: "Host endpoint policy accepted packet.",
+						Comment: []string{"Host endpoint policy accepted packet."},
 					},
 				},
 			}
@@ -786,7 +942,113 @@ var _ = Describe("Static", func() {
 					},
 				}))
 			})
-			It("IPv4: Should return expected NAT postrouting chain", func() {
+
+			Describe("with IPv4 VXLAN enabled", func() {
+				BeforeEach(func() {
+					conf.VXLANEnabled = true
+				})
+
+				checkManglePostrouting(4, kubeIPVSEnabled)
+
+				It("IPv4: Should return expected NAT postrouting chain", func() {
+					Expect(rr.StaticNATPostroutingChains(4)).To(Equal([]*Chain{
+						{
+							Name: "cali-POSTROUTING",
+							Rules: []Rule{
+								{Action: JumpAction{Target: "cali-fip-snat"}},
+								{Action: JumpAction{Target: "cali-nat-outgoing"}},
+								{
+									Match: Match().
+										OutInterface("tunl0").
+										NotSrcAddrType(AddrTypeLocal, true).
+										SrcAddrType(AddrTypeLocal, false),
+									Action: MasqAction{},
+								},
+							},
+						},
+					}))
+				})
+
+				Describe("and IPv4 tunnel IP", func() {
+					BeforeEach(func() {
+						conf.VXLANTunnelAddress = net.IP{10, 0, 0, 1}
+					})
+
+					It("IPv4: Should return expected NAT postrouting chain", func() {
+						Expect(rr.StaticNATPostroutingChains(4)).To(Equal([]*Chain{
+							{
+								Name: "cali-POSTROUTING",
+								Rules: []Rule{
+									{Action: JumpAction{Target: "cali-fip-snat"}},
+									{Action: JumpAction{Target: "cali-nat-outgoing"}},
+									{
+										Match: Match().
+											OutInterface("tunl0").
+											NotSrcAddrType(AddrTypeLocal, true).
+											SrcAddrType(AddrTypeLocal, false),
+										Action: MasqAction{},
+									},
+									{
+										Match: Match().
+											OutInterface("vxlan.calico").
+											NotSrcAddrType(AddrTypeLocal, true).
+											SrcAddrType(AddrTypeLocal, false),
+										Action: MasqAction{},
+									},
+								},
+							},
+						}))
+					})
+				})
+			})
+
+			Describe("with IPv6 VXLAN enabled", func() {
+				BeforeEach(func() {
+					conf.VXLANEnabledV6 = true
+				})
+
+				checkManglePostrouting(6, kubeIPVSEnabled)
+
+				It("IPv6: Should return expected NAT postrouting chain", func() {
+					Expect(rr.StaticNATPostroutingChains(6)).To(Equal([]*Chain{
+						{
+							Name: "cali-POSTROUTING",
+							Rules: []Rule{
+								{Action: JumpAction{Target: "cali-fip-snat"}},
+								{Action: JumpAction{Target: "cali-nat-outgoing"}},
+							},
+						},
+					}))
+				})
+
+				Describe("and IPv6 tunnel IP", func() {
+					BeforeEach(func() {
+						conf.VXLANTunnelAddressV6 = net.ParseIP("dead:beef::1")
+
+					})
+
+					It("IPv6: Should return expected NAT postrouting chain", func() {
+						Expect(rr.StaticNATPostroutingChains(6)).To(Equal([]*Chain{
+							{
+								Name: "cali-POSTROUTING",
+								Rules: []Rule{
+									{Action: JumpAction{Target: "cali-fip-snat"}},
+									{Action: JumpAction{Target: "cali-nat-outgoing"}},
+									{
+										Match: Match().
+											OutInterface("vxlan-v6.calico").
+											NotSrcAddrType(AddrTypeLocal, true).
+											SrcAddrType(AddrTypeLocal, false),
+										Action: MasqAction{},
+									},
+								},
+							},
+						}))
+					})
+				})
+			})
+
+			It("IPv6: Should return expected NAT postrouting chain", func() {
 				Expect(rr.StaticNATPostroutingChains(6)).To(Equal([]*Chain{
 					{
 						Name: "cali-POSTROUTING",
@@ -814,15 +1076,15 @@ var _ = Describe("Static", func() {
 				IptablesMarkNonCaliEndpoint: 0x100,
 				KubeIPVSSupportEnabled:      true,
 				KubeNodePortRanges: []numorstring.Port{
-					{30030, 30040, ""},
-					{30130, 30140, ""},
-					{30230, 30240, ""},
-					{30330, 30340, ""},
-					{30430, 30440, ""},
-					{30530, 30540, ""},
-					{30630, 30640, ""},
-					{30730, 30740, ""},
-					{30830, 30840, ""},
+					{MinPort: 30030, MaxPort: 30040, PortName: ""},
+					{MinPort: 30130, MaxPort: 30140, PortName: ""},
+					{MinPort: 30230, MaxPort: 30240, PortName: ""},
+					{MinPort: 30330, MaxPort: 30340, PortName: ""},
+					{MinPort: 30430, MaxPort: 30440, PortName: ""},
+					{MinPort: 30530, MaxPort: 30540, PortName: ""},
+					{MinPort: 30630, MaxPort: 30640, PortName: ""},
+					{MinPort: 30730, MaxPort: 30740, PortName: ""},
+					{MinPort: 30830, MaxPort: 30840, PortName: ""},
 				},
 			}
 		})
@@ -832,18 +1094,18 @@ var _ = Describe("Static", func() {
 			ipSetThisHost := fmt.Sprintf("cali%d0this-host", ipVersion)
 
 			portRanges1 := []*proto.PortRange{
-				{30030, 30040},
-				{30130, 30140},
-				{30230, 30240},
-				{30330, 30340},
-				{30430, 30440},
-				{30530, 30540},
-				{30630, 30640},
+				{First: 30030, Last: 30040},
+				{First: 30130, Last: 30140},
+				{First: 30230, Last: 30240},
+				{First: 30330, Last: 30340},
+				{First: 30430, Last: 30440},
+				{First: 30530, Last: 30540},
+				{First: 30630, Last: 30640},
 			}
 
 			portRanges2 := []*proto.PortRange{
-				{30730, 30740},
-				{30830, 30840},
+				{First: 30730, Last: 30740},
+				{First: 30830, Last: 30840},
 			}
 
 			expForwardCheck := &Chain{
@@ -858,33 +1120,33 @@ var _ = Describe("Static", func() {
 							DestPortRanges(portRanges1).
 							DestIPSet(ipSetThisHost),
 						Action:  GotoAction{Target: ChainDispatchSetEndPointMark},
-						Comment: "To kubernetes NodePort service",
+						Comment: []string{"To kubernetes NodePort service"},
 					},
 					{
 						Match: Match().Protocol("udp").
 							DestPortRanges(portRanges1).
 							DestIPSet(ipSetThisHost),
 						Action:  GotoAction{Target: ChainDispatchSetEndPointMark},
-						Comment: "To kubernetes NodePort service",
+						Comment: []string{"To kubernetes NodePort service"},
 					},
 					{
 						Match: Match().Protocol("tcp").
 							DestPortRanges(portRanges2).
 							DestIPSet(ipSetThisHost),
 						Action:  GotoAction{Target: ChainDispatchSetEndPointMark},
-						Comment: "To kubernetes NodePort service",
+						Comment: []string{"To kubernetes NodePort service"},
 					},
 					{
 						Match: Match().Protocol("udp").
 							DestPortRanges(portRanges2).
 							DestIPSet(ipSetThisHost),
 						Action:  GotoAction{Target: ChainDispatchSetEndPointMark},
-						Comment: "To kubernetes NodePort service",
+						Comment: []string{"To kubernetes NodePort service"},
 					},
 					{
 						Match:   Match().NotDestIPSet(ipSetThisHost),
 						Action:  JumpAction{Target: ChainDispatchSetEndPointMark},
-						Comment: "To kubernetes service",
+						Comment: []string{"To kubernetes service"},
 					},
 				},
 			}
@@ -931,7 +1193,7 @@ var _ = Describe("Static", func() {
 
 				{Action: JumpAction{Target: "cali-from-wl-dispatch"}},
 				{Action: ReturnAction{},
-					Comment: "Configured DefaultEndpointToHostAction"},
+					Comment: []string{"Configured DefaultEndpointToHostAction"}},
 			},
 		}
 
@@ -953,7 +1215,7 @@ var _ = Describe("Static", func() {
 
 				{Action: JumpAction{Target: "cali-from-wl-dispatch"}},
 				{Action: ReturnAction{},
-					Comment: "Configured DefaultEndpointToHostAction"},
+					Comment: []string{"Configured DefaultEndpointToHostAction"}},
 			},
 		}
 
@@ -1035,7 +1297,7 @@ var _ = Describe("Static", func() {
 
 				{Action: JumpAction{Target: "cali-from-wl-dispatch"}},
 				{Action: ReturnAction{},
-					Comment: "Configured DefaultEndpointToHostAction"},
+					Comment: []string{"Configured DefaultEndpointToHostAction"}},
 			},
 		}
 
@@ -1057,7 +1319,7 @@ var _ = Describe("Static", func() {
 
 				{Action: JumpAction{Target: "cali-from-wl-dispatch"}},
 				{Action: ReturnAction{},
-					Comment: "Configured DefaultEndpointToHostAction"},
+					Comment: []string{"Configured DefaultEndpointToHostAction"}},
 			},
 		}
 
@@ -1104,11 +1366,7 @@ var _ = Describe("Static", func() {
 							Action: JumpAction{Target: ChainToWorkloadDispatch}},
 						// Outgoing host endpoint chains.
 						{Action: JumpAction{Target: ChainDispatchToHostEndpointForward}},
-						{
-							Match:   Match().MarkSingleBitSet(0x10),
-							Action:  ReturnAction{},
-							Comment: "Policy explicitly accepted packet.",
-						},
+						{Action: JumpAction{Target: ChainCIDRBlock}},
 					},
 				}))
 			})
@@ -1131,7 +1389,7 @@ var _ = Describe("Static", func() {
 						{
 							Match:   Match().MarkSingleBitSet(0x10),
 							Action:  ReturnAction{},
-							Comment: "Host endpoint policy accepted packet.",
+							Comment: []string{"Host endpoint policy accepted packet."},
 						},
 					},
 				}))
@@ -1149,14 +1407,149 @@ var _ = Describe("Static", func() {
 
 						// Non-workload traffic, send to host chains.
 						{Action: ClearMarkAction{Mark: 0xf0}},
-						{Action: JumpAction{Target: ChainDispatchToHostEndpoint}},
+						{
+							Match:  Match().NotConntrackState("DNAT"),
+							Action: JumpAction{Target: ChainDispatchToHostEndpoint},
+						},
 						{
 							Match:   Match().MarkSingleBitSet(0x10),
 							Action:  ReturnAction{},
-							Comment: "Host endpoint policy accepted packet.",
+							Comment: []string{"Host endpoint policy accepted packet."},
 						},
 					},
 				}))
+			})
+		}
+	})
+
+	Describe("with WireGuard enabled", func() {
+		type testConf struct {
+			IPVersion  uint8
+			EnableIPv4 bool
+			EnableIPv6 bool
+		}
+		for _, testConfig := range []testConf{
+			{4, true, false},
+			{6, true, false},
+			{4, false, true},
+			{6, false, true},
+			{4, true, true},
+			{6, true, true},
+		} {
+			enableIPv4 := testConfig.EnableIPv4
+			enableIPv6 := testConfig.EnableIPv6
+			ipVersion := testConfig.IPVersion
+			Describe(fmt.Sprintf("IPv4 enabled: %v, IPv6 enabled: %v", enableIPv4, enableIPv6), func() {
+				BeforeEach(func() {
+					conf = Config{
+						WorkloadIfacePrefixes:       []string{"cali"},
+						IPSetConfigV4:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV4, "cali", nil, nil),
+						IPSetConfigV6:               ipsets.NewIPVersionConfig(ipsets.IPFamilyV6, "cali", nil, nil),
+						IptablesMarkAccept:          0x10,
+						IptablesMarkPass:            0x20,
+						IptablesMarkScratch0:        0x40,
+						IptablesMarkScratch1:        0x80,
+						IptablesMarkEndpoint:        0xff00,
+						IptablesMarkNonCaliEndpoint: 0x100,
+						WireguardEnabled:            enableIPv4,
+						WireguardEnabledV6:          enableIPv6,
+						WireguardInterfaceName:      "wireguard.cali",
+						WireguardInterfaceNameV6:    "wg-v6.cali",
+						WireguardIptablesMark:       0x100000,
+						WireguardListeningPort:      51820,
+						WireguardListeningPortV6:    51821,
+						WireguardEncryptHostTraffic: true,
+						RouteSource:                 "WorkloadIPs",
+					}
+				})
+
+				It("should include the expected input chain in the filter chains", func() {
+					rules := []Rule{}
+					if ipVersion == 4 && enableIPv4 {
+						// IPv4 Wireguard rules
+						rules = append(rules,
+							Rule{Match: Match().
+								ProtocolNum(17).
+								DestPorts(51820).
+								DestAddrType("LOCAL"),
+
+								Action:  AcceptAction{},
+								Comment: []string{"Allow incoming IPv4 Wireguard packets"}})
+					}
+					if ipVersion == 6 && enableIPv6 {
+						// IPv6 Wireguard rules
+						rules = append(rules,
+							Rule{Match: Match().
+								ProtocolNum(17).
+								DestPorts(51821).
+								DestAddrType("LOCAL"),
+
+								Action:  AcceptAction{},
+								Comment: []string{"Allow incoming IPv6 Wireguard packets"}})
+					}
+					rules = append(rules,
+						// Per-prefix workload jump rules.  Note use of goto so that we
+						// don't return here.
+						Rule{Match: Match().InInterface("cali+"),
+							Action: GotoAction{Target: "cali-wl-to-host"}},
+
+						// Untracked packets already matched in raw table.
+						Rule{Match: Match().MarkSingleBitSet(0x10),
+							Action: AcceptAction{},
+						},
+
+						// Non-workload traffic, send to host chains.
+						Rule{Action: ClearMarkAction{Mark: 0xf0}},
+						Rule{Action: JumpAction{Target: ChainDispatchFromHostEndpoint}},
+						Rule{
+							Match:   Match().MarkSingleBitSet(0x10),
+							Action:  AcceptAction{},
+							Comment: []string{"Host endpoint policy accepted packet."},
+						},
+					)
+
+					Expect(findChain(rr.StaticFilterTableChains(ipVersion), "cali-INPUT")).To(Equal(&Chain{
+						Name:  "cali-INPUT",
+						Rules: rules,
+					}))
+				})
+
+				It("should include the expected WireGuard PREROUTING chain in the raw chains", func() {
+					Expect(findChain(rr.StaticRawTableChains(ipVersion), "cali-PREROUTING")).To(Equal(&Chain{
+						Name: "cali-PREROUTING",
+						Rules: []Rule{
+							{Match: nil,
+								Action: ClearMarkAction{Mark: 0xf0}},
+							{Match: nil,
+								Action: JumpAction{Target: "cali-wireguard-incoming-mark"}},
+							{Match: Match().InInterface("cali+"),
+								Action: SetMarkAction{Mark: 0x40}},
+							{Match: Match().MarkMatchesWithMask(0x40, 0x40),
+								Action: JumpAction{Target: ChainRpfSkip}},
+							{Match: Match().MarkMatchesWithMask(0x40, 0x40).RPFCheckFailed(false),
+								Action: DropAction{}},
+							{Match: Match().MarkClear(0x40),
+								Action: JumpAction{Target: "cali-from-host-endpoint"}},
+							{Match: Match().MarkMatchesWithMask(0x10, 0x10),
+								Action: AcceptAction{}},
+						},
+					}))
+					Expect(findChain(rr.StaticRawTableChains(ipVersion), "cali-wireguard-incoming-mark")).To(Equal(&Chain{
+						Name: "cali-wireguard-incoming-mark",
+						Rules: []Rule{
+							{Match: Match().InInterface("lo"),
+								Action: ReturnAction{}},
+							{Match: Match().InInterface("wireguard.cali"),
+								Action: ReturnAction{}},
+							{Match: Match().InInterface("wg-v6.cali"),
+								Action: ReturnAction{}},
+							{Match: Match().InInterface("cali+"),
+								Action: ReturnAction{}},
+							{Match: nil,
+								Action: SetMarkAction{Mark: 0x100000}},
+						},
+					}))
+				})
 			})
 		}
 	})

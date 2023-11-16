@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017-2018,2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,24 +15,37 @@
 package rules_test
 
 import (
+	"fmt"
 	"strings"
 
-	. "github.com/alauda/felix/rules"
+	. "github.com/projectcalico/calico/felix/rules"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/ipsets"
-	. "github.com/alauda/felix/iptables"
+	"github.com/projectcalico/calico/felix/ipsets"
+	. "github.com/projectcalico/calico/felix/iptables"
 )
 
 var _ = Describe("Endpoints", func() {
 	const (
 		ProtoUDP  = 17
 		ProtoIPIP = 4
+		VXLANPort = 4789
+		VXLANVNI  = 4096
 	)
 
 	for _, trueOrFalse := range []bool{true, false} {
+		var denyAction Action
+		denyAction = DropAction{}
+		denyActionCommand := "DROP"
+		denyActionString := "Drop"
+		if trueOrFalse {
+			denyAction = RejectAction{}
+			denyActionCommand = "REJECT"
+			denyActionString = "Reject"
+		}
+
 		kubeIPVSEnabled := trueOrFalse
 		var rrConfigNormalMangleReturn = Config{
 			IPIPEnabled:                 true,
@@ -47,6 +60,9 @@ var _ = Describe("Endpoints", func() {
 			IptablesMarkNonCaliEndpoint: 0x0100,
 			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
 			IptablesMangleAllowAction:   "RETURN",
+			IptablesFilterDenyAction:    denyActionCommand,
+			VXLANPort:                   4789,
+			VXLANVNI:                    4096,
 		}
 
 		var rrConfigConntrackDisabledReturnAction = Config{
@@ -63,15 +79,24 @@ var _ = Describe("Endpoints", func() {
 			KubeIPVSSupportEnabled:      kubeIPVSEnabled,
 			DisableConntrackInvalid:     true,
 			IptablesFilterAllowAction:   "RETURN",
+			IptablesFilterDenyAction:    denyActionCommand,
+			VXLANPort:                   4789,
+			VXLANVNI:                    4096,
 		}
 
 		var renderer RuleRenderer
 		var epMarkMapper EndpointMarkMapper
 
+		dropVXLANRule := Rule{
+			Match: Match().ProtocolNum(ProtoUDP).
+				DestPorts(uint16(VXLANPort)),
+			Action:  denyAction,
+			Comment: []string{fmt.Sprintf("%s VXLAN encapped packets originating in workloads", denyActionString)},
+		}
 		dropIPIPRule := Rule{
 			Match:   Match().ProtocolNum(ProtoIPIP),
-			Action:  DropAction{},
-			Comment: "Drop IPinIP encapped packets originating in pods",
+			Action:  denyAction,
+			Comment: []string{fmt.Sprintf("%s IPinIP encapped packets originating in workloads", denyActionString)},
 		}
 
 		Context("with normal config", func() {
@@ -95,11 +120,11 @@ var _ = Describe("Endpoints", func() {
 							{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
 								Action: AcceptAction{}},
 							{Match: Match().ConntrackState("INVALID"),
-								Action: DropAction{}},
+								Action: denyAction},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
-							{Action: DropAction{},
-								Comment: "Drop if no profiles matched"},
+							{Action: denyAction,
+								Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
 						},
 					},
 					{
@@ -109,12 +134,13 @@ var _ = Describe("Endpoints", func() {
 							{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
 								Action: AcceptAction{}},
 							{Match: Match().ConntrackState("INVALID"),
-								Action: DropAction{}},
+								Action: denyAction},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
+							dropVXLANRule,
 							dropIPIPRule,
-							{Action: DropAction{},
-								Comment: "Drop if no profiles matched"},
+							{Action: denyAction,
+								Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
 						},
 					},
 					{
@@ -137,15 +163,15 @@ var _ = Describe("Endpoints", func() {
 					{
 						Name: "cali-tw-cali1234",
 						Rules: []Rule{
-							{Action: DropAction{},
-								Comment: "Endpoint admin disabled"},
+							{Action: denyAction,
+								Comment: []string{"Endpoint admin disabled"}},
 						},
 					},
 					{
 						Name: "cali-fw-cali1234",
 						Rules: []Rule{
-							{Action: DropAction{},
-								Comment: "Endpoint admin disabled"},
+							{Action: denyAction,
+								Comment: []string{"Endpoint admin disabled"}},
 						},
 					},
 					{
@@ -173,37 +199,37 @@ var _ = Describe("Endpoints", func() {
 							{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
 								Action: AcceptAction{}},
 							{Match: Match().ConntrackState("INVALID"),
-								Action: DropAction{}},
+								Action: denyAction},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-pi-ai"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-pi-bi"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
-								Action:  DropAction{},
-								Comment: "Drop if no policies passed packet"},
+								Action:  denyAction,
+								Comment: []string{fmt.Sprintf("%s if no policies passed packet", denyActionString)}},
 
 							{Action: JumpAction{Target: "cali-pri-prof1"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if profile accepted"},
+								Comment: []string{"Return if profile accepted"}},
 							{Action: JumpAction{Target: "cali-pri-prof2"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if profile accepted"},
+								Comment: []string{"Return if profile accepted"}},
 
-							{Action: DropAction{},
-								Comment: "Drop if no profiles matched"},
+							{Action: denyAction,
+								Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
 						},
 					},
 					{
@@ -213,38 +239,39 @@ var _ = Describe("Endpoints", func() {
 							{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
 								Action: AcceptAction{}},
 							{Match: Match().ConntrackState("INVALID"),
-								Action: DropAction{}},
+								Action: denyAction},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
+							dropVXLANRule,
 							dropIPIPRule,
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-po-ae"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-po-be"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
-								Action:  DropAction{},
-								Comment: "Drop if no policies passed packet"},
+								Action:  denyAction,
+								Comment: []string{fmt.Sprintf("%s if no policies passed packet", denyActionString)}},
 
 							{Action: JumpAction{Target: "cali-pro-prof1"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if profile accepted"},
+								Comment: []string{"Return if profile accepted"}},
 							{Action: JumpAction{Target: "cali-pro-prof2"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if profile accepted"},
+								Comment: []string{"Return if profile accepted"}},
 
-							{Action: DropAction{},
-								Comment: "Drop if no profiles matched"},
+							{Action: denyAction,
+								Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
 						},
 					},
 					{
@@ -269,40 +296,40 @@ var _ = Describe("Endpoints", func() {
 							{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
 								Action: AcceptAction{}},
 							{Match: Match().ConntrackState("INVALID"),
-								Action: DropAction{}},
+								Action: denyAction},
 
 							// Host endpoints get extra failsafe rules.
 							{Action: JumpAction{Target: "cali-failsafe-out"}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-po-ae"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-po-be"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
-								Action:  DropAction{},
-								Comment: "Drop if no policies passed packet"},
+								Action:  denyAction,
+								Comment: []string{fmt.Sprintf("%s if no policies passed packet", denyActionString)}},
 
 							{Action: JumpAction{Target: "cali-pro-prof1"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if profile accepted"},
+								Comment: []string{"Return if profile accepted"}},
 							{Action: JumpAction{Target: "cali-pro-prof2"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if profile accepted"},
+								Comment: []string{"Return if profile accepted"}},
 
-							{Action: DropAction{},
-								Comment: "Drop if no profiles matched"},
+							{Action: denyAction,
+								Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
 						},
 					},
 					{
@@ -312,40 +339,40 @@ var _ = Describe("Endpoints", func() {
 							{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
 								Action: AcceptAction{}},
 							{Match: Match().ConntrackState("INVALID"),
-								Action: DropAction{}},
+								Action: denyAction},
 
 							// Host endpoints get extra failsafe rules.
 							{Action: JumpAction{Target: "cali-failsafe-in"}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-pi-ai"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-pi-bi"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
-								Action:  DropAction{},
-								Comment: "Drop if no policies passed packet"},
+								Action:  denyAction,
+								Comment: []string{fmt.Sprintf("%s if no policies passed packet", denyActionString)}},
 
 							{Action: JumpAction{Target: "cali-pri-prof1"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if profile accepted"},
+								Comment: []string{"Return if profile accepted"}},
 							{Action: JumpAction{Target: "cali-pri-prof2"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if profile accepted"},
+								Comment: []string{"Return if profile accepted"}},
 
-							{Action: DropAction{},
-								Comment: "Drop if no profiles matched"},
+							{Action: denyAction,
+								Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
 						},
 					},
 					{
@@ -355,25 +382,25 @@ var _ = Describe("Endpoints", func() {
 							{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
 								Action: AcceptAction{}},
 							{Match: Match().ConntrackState("INVALID"),
-								Action: DropAction{}},
+								Action: denyAction},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-po-afe"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-po-bfe"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
-								Action:  DropAction{},
-								Comment: "Drop if no policies passed packet"},
+								Action:  denyAction,
+								Comment: []string{fmt.Sprintf("%s if no policies passed packet", denyActionString)}},
 						},
 					},
 					{
@@ -383,25 +410,25 @@ var _ = Describe("Endpoints", func() {
 							{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
 								Action: AcceptAction{}},
 							{Match: Match().ConntrackState("INVALID"),
-								Action: DropAction{}},
+								Action: denyAction},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-pi-afi"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-pi-bfi"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 							{Match: Match().MarkClear(0x10),
-								Action:  DropAction{},
-								Comment: "Drop if no policies passed packet"},
+								Action:  denyAction,
+								Comment: []string{fmt.Sprintf("%s if no policies passed packet", denyActionString)}},
 						},
 					},
 					{
@@ -423,7 +450,7 @@ var _ = Describe("Endpoints", func() {
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-po-c"}},
@@ -432,7 +459,7 @@ var _ = Describe("Endpoints", func() {
 								Action: NoTrackAction{}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 
 							// No drop actions or profiles in raw table.
 						},
@@ -445,7 +472,7 @@ var _ = Describe("Endpoints", func() {
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-pi-c"}},
@@ -454,7 +481,7 @@ var _ = Describe("Endpoints", func() {
 								Action: NoTrackAction{}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 
 							// No drop actions or profiles in raw table.
 						},
@@ -463,7 +490,7 @@ var _ = Describe("Endpoints", func() {
 			})
 
 			It("should render host endpoint mangle chains with pre-DNAT policies", func() {
-				Expect(renderer.HostEndpointToMangleChains(
+				Expect(renderer.HostEndpointToMangleIngressChains(
 					"eth0",
 					[]string{"c"},
 				)).To(Equal([]*Chain{
@@ -476,20 +503,20 @@ var _ = Describe("Endpoints", func() {
 							{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
 								Action: ReturnAction{}},
 							{Match: Match().ConntrackState("INVALID"),
-								Action: DropAction{}},
+								Action: denyAction},
 
 							// Host endpoints get extra failsafe rules.
 							{Action: JumpAction{Target: "cali-failsafe-in"}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-pi-c"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 
 							// No drop actions or profiles in raw table.
 						},
@@ -525,8 +552,8 @@ var _ = Describe("Endpoints", func() {
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Action: DropAction{},
-								Comment: "Drop if no profiles matched"},
+							{Action: denyAction,
+								Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
 						},
 					},
 					{
@@ -539,10 +566,11 @@ var _ = Describe("Endpoints", func() {
 								Action: ReturnAction{}},
 
 							{Action: ClearMarkAction{Mark: 0x8}},
+							dropVXLANRule,
 							dropIPIPRule,
 
-							{Action: DropAction{},
-								Comment: "Drop if no profiles matched"},
+							{Action: denyAction,
+								Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
 						},
 					},
 					{
@@ -555,7 +583,7 @@ var _ = Describe("Endpoints", func() {
 			})
 
 			It("should render host endpoint mangle chains with pre-DNAT policies", func() {
-				Expect(renderer.HostEndpointToMangleChains(
+				Expect(renderer.HostEndpointToMangleIngressChains(
 					"eth0",
 					[]string{"c"},
 				)).To(Equal([]*Chain{
@@ -571,18 +599,177 @@ var _ = Describe("Endpoints", func() {
 
 							{Action: ClearMarkAction{Mark: 0x8}},
 
-							{Comment: "Start of policies",
+							{Comment: []string{"Start of policies"},
 								Action: ClearMarkAction{Mark: 0x10}},
 							{Match: Match().MarkClear(0x10),
 								Action: JumpAction{Target: "cali-pi-c"}},
 							{Match: Match().MarkSingleBitSet(0x8),
 								Action:  ReturnAction{},
-								Comment: "Return if policy accepted"},
+								Comment: []string{"Return if policy accepted"}},
 
 							// No drop actions or profiles in raw table.
 						},
 					},
 				}))
+			})
+		})
+		Describe("Disabling adding drop encap rules", func() {
+			Context("VXLAN allowed, IPIP dropped", func() {
+				It("should render a minimal workload endpoint without VXLAN drop encap rule and with IPIP drop encap rule", func() {
+					rrConfigNormalMangleReturn.AllowVXLANPacketsFromWorkloads = true
+					renderer = NewRenderer(rrConfigNormalMangleReturn)
+					epMarkMapper = NewEndpointMarkMapper(rrConfigNormalMangleReturn.IptablesMarkEndpoint,
+						rrConfigNormalMangleReturn.IptablesMarkNonCaliEndpoint)
+					Expect(renderer.WorkloadEndpointToIptablesChains(
+						"cali1234", epMarkMapper,
+						true,
+						nil,
+						nil,
+						nil,
+					)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+						{
+							Name: "cali-tw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: denyAction},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								{Action: denyAction,
+									Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
+							},
+						},
+						{
+							Name: "cali-fw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: denyAction},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								dropIPIPRule,
+								{Action: denyAction,
+									Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
+							},
+						},
+						{
+							Name: "cali-sm-cali1234",
+							Rules: []Rule{
+								{Action: SetMaskedMarkAction{Mark: 0xd400, Mask: 0xff00}},
+							},
+						},
+					})))
+				})
+			})
+			Context("VXLAN dropped, IPIP allowed", func() {
+				It("should render a minimal workload endpoint with VXLAN drop encap rule and without IPIP drop encap rule", func() {
+					rrConfigNormalMangleReturn.AllowIPIPPacketsFromWorkloads = true
+					renderer = NewRenderer(rrConfigNormalMangleReturn)
+					epMarkMapper = NewEndpointMarkMapper(rrConfigNormalMangleReturn.IptablesMarkEndpoint,
+						rrConfigNormalMangleReturn.IptablesMarkNonCaliEndpoint)
+					Expect(renderer.WorkloadEndpointToIptablesChains(
+						"cali1234", epMarkMapper,
+						true,
+						nil,
+						nil,
+						nil,
+					)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+						{
+							Name: "cali-tw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: denyAction},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								{Action: denyAction,
+									Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
+							},
+						},
+						{
+							Name: "cali-fw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: denyAction},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								dropVXLANRule,
+								{Action: denyAction,
+									Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
+							},
+						},
+						{
+							Name: "cali-sm-cali1234",
+							Rules: []Rule{
+								{Action: SetMaskedMarkAction{Mark: 0xd400, Mask: 0xff00}},
+							},
+						},
+					})))
+				})
+			})
+			Context("VXLAN and IPIP allowed", func() {
+				It("should render a minimal workload endpoint without both VXLAN and IPIP drop encap rule", func() {
+					rrConfigNormalMangleReturn.AllowVXLANPacketsFromWorkloads = true
+					rrConfigNormalMangleReturn.AllowIPIPPacketsFromWorkloads = true
+					renderer = NewRenderer(rrConfigNormalMangleReturn)
+					epMarkMapper = NewEndpointMarkMapper(rrConfigNormalMangleReturn.IptablesMarkEndpoint,
+						rrConfigNormalMangleReturn.IptablesMarkNonCaliEndpoint)
+					Expect(renderer.WorkloadEndpointToIptablesChains(
+						"cali1234", epMarkMapper,
+						true,
+						nil,
+						nil,
+						nil,
+					)).To(Equal(trimSMChain(kubeIPVSEnabled, []*Chain{
+						{
+							Name: "cali-tw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: denyAction},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								{Action: denyAction,
+									Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
+							},
+						},
+						{
+							Name: "cali-fw-cali1234",
+							Rules: []Rule{
+								// conntrack rules.
+								{Match: Match().ConntrackState("RELATED,ESTABLISHED"),
+									Action: AcceptAction{}},
+								{Match: Match().ConntrackState("INVALID"),
+									Action: denyAction},
+
+								{Action: ClearMarkAction{Mark: 0x8}},
+								{Action: denyAction,
+									Comment: []string{fmt.Sprintf("%s if no profiles matched", denyActionString)}},
+							},
+						},
+						{
+							Name: "cali-sm-cali1234",
+							Rules: []Rule{
+								{Action: SetMaskedMarkAction{Mark: 0xd400, Mask: 0xff00}},
+							},
+						},
+					})))
+				})
+			})
+			AfterEach(func() {
+				rrConfigNormalMangleReturn.AllowIPIPPacketsFromWorkloads = false
+				rrConfigNormalMangleReturn.AllowVXLANPacketsFromWorkloads = false
 			})
 		})
 	}

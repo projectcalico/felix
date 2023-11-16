@@ -18,10 +18,10 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/ipsets"
-	"github.com/alauda/felix/iptables"
-	"github.com/alauda/felix/proto"
-	"github.com/alauda/felix/rules"
+	"github.com/projectcalico/calico/felix/ipsets"
+	"github.com/projectcalico/calico/felix/iptables"
+	"github.com/projectcalico/calico/felix/proto"
+	"github.com/projectcalico/calico/felix/rules"
 )
 
 type dnat struct {
@@ -87,14 +87,14 @@ func floatingIPManagerTests(ipVersion uint8) func() {
 		JustBeforeEach(func() {
 			renderer := rules.NewRenderer(rrConfigNormal)
 			natTable = newMockTable("nat")
-			fipMgr = newFloatingIPManager(natTable, renderer, ipVersion)
+			fipMgr = newFloatingIPManager(natTable, renderer, ipVersion, true)
 		})
 
 		It("should be constructable", func() {
 			Expect(fipMgr).ToNot(BeNil())
 		})
 
-		Context("with a workload endpoint", func() {
+		Context("with floatingIPs enabled", func() {
 			JustBeforeEach(func() {
 				fipMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
 					Id: &proto.WorkloadEndpointID{
@@ -112,7 +112,8 @@ func floatingIPManagerTests(ipVersion uint8) func() {
 						Ipv6Nets:   []string{"2001:db8:2::2/128"},
 					},
 				})
-				fipMgr.CompleteDeferredWork()
+				err := fipMgr.CompleteDeferredWork()
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("should have empty NAT chains", func() {
@@ -148,7 +149,8 @@ func floatingIPManagerTests(ipVersion uint8) func() {
 							},
 						},
 					})
-					fipMgr.CompleteDeferredWork()
+					err := fipMgr.CompleteDeferredWork()
+					Expect(err).ToNot(HaveOccurred())
 				})
 
 				It("should have expected NAT chains", func() {
@@ -184,7 +186,175 @@ func floatingIPManagerTests(ipVersion uint8) func() {
 								EndpointId:     "endpoint-id-11",
 							},
 						})
-						fipMgr.CompleteDeferredWork()
+						err := fipMgr.CompleteDeferredWork()
+						Expect(err).ToNot(HaveOccurred())
+					})
+
+					It("should have empty NAT chains", func() {
+						natTable.checkChains([][]*iptables.Chain{{
+							expectedDNATChain(),
+							expectedSNATChain(),
+						}})
+					})
+				})
+			})
+		})
+
+		Context("with floatingIPs disabled", func() {
+			JustBeforeEach(func() {
+				fipMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
+					Id: &proto.WorkloadEndpointID{
+						OrchestratorId: "k8s",
+						WorkloadId:     "pod-11",
+						EndpointId:     "endpoint-id-11",
+					},
+					Endpoint: &proto.WorkloadEndpoint{
+						State:      "up",
+						Mac:        "01:02:03:04:05:06",
+						Name:       "cali12345-ab",
+						ProfileIds: []string{},
+						Tiers:      []*proto.TierInfo{},
+						Ipv4Nets:   []string{"10.0.240.2/24"},
+						Ipv6Nets:   []string{"2001:db8:2::2/128"},
+					},
+				})
+				err := fipMgr.CompleteDeferredWork()
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("should have empty NAT chains", func() {
+				natTable.checkChains([][]*iptables.Chain{{
+					expectedDNATChain(),
+					expectedSNATChain(),
+				}})
+			})
+
+			Context("with non-OpenStack floating IPs added to the endpoint", func() {
+				JustBeforeEach(func() {
+					fipMgr.enabled = false
+					fipMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
+						Id: &proto.WorkloadEndpointID{
+							OrchestratorId: "k8s",
+							WorkloadId:     "pod-11",
+							EndpointId:     "endpoint-id-11",
+						},
+						Endpoint: &proto.WorkloadEndpoint{
+							State:      "up",
+							Mac:        "01:02:03:04:05:06",
+							Name:       "cali12345-ab",
+							ProfileIds: []string{},
+							Tiers:      []*proto.TierInfo{},
+							Ipv4Nets:   []string{"10.0.240.2/24"},
+							Ipv6Nets:   []string{"2001:db8:2::2/128"},
+							Ipv4Nat: []*proto.NatInfo{
+								{ExtIp: "172.16.1.3", IntIp: "10.0.240.2"},
+								{ExtIp: "172.18.1.4", IntIp: "10.0.240.2"},
+							},
+							Ipv6Nat: []*proto.NatInfo{
+								{ExtIp: "2001:db8:3::2", IntIp: "2001:db8:2::2"},
+								{ExtIp: "2001:db8:4::2", IntIp: "2001:db8:2::2"},
+							},
+						},
+					})
+					err := fipMgr.CompleteDeferredWork()
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("should have empty NAT chains", func() {
+					natTable.checkChains([][]*iptables.Chain{{
+						expectedDNATChain(),
+						expectedSNATChain(),
+					}})
+				})
+
+				Context("with the endpoint removed", func() {
+					JustBeforeEach(func() {
+						fipMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+							Id: &proto.WorkloadEndpointID{
+								OrchestratorId: "k8s",
+								WorkloadId:     "pod-11",
+								EndpointId:     "endpoint-id-11",
+							},
+						})
+						err := fipMgr.CompleteDeferredWork()
+						Expect(err).ToNot(HaveOccurred())
+					})
+
+					It("should have empty NAT chains", func() {
+						natTable.checkChains([][]*iptables.Chain{{
+							expectedDNATChain(),
+							expectedSNATChain(),
+						}})
+					})
+				})
+			})
+
+			Context("with OpenStack-configured floating IPs added to the endpoint", func() {
+				JustBeforeEach(func() {
+					fipMgr.enabled = false
+					fipMgr.OnUpdate(&proto.WorkloadEndpointUpdate{
+						Id: &proto.WorkloadEndpointID{
+							OrchestratorId: "openstack",
+							WorkloadId:     "vm-11",
+							EndpointId:     "endpoint-id-11",
+						},
+						Endpoint: &proto.WorkloadEndpoint{
+							State:      "up",
+							Mac:        "01:02:03:04:05:06",
+							Name:       "cali12345-ab",
+							ProfileIds: []string{},
+							Tiers:      []*proto.TierInfo{},
+							Ipv4Nets:   []string{"10.0.240.2/24"},
+							Ipv6Nets:   []string{"2001:db8:2::2/128"},
+							Ipv4Nat: []*proto.NatInfo{
+								{ExtIp: "172.16.1.3", IntIp: "10.0.240.2"},
+								{ExtIp: "172.18.1.4", IntIp: "10.0.240.2"},
+							},
+							Ipv6Nat: []*proto.NatInfo{
+								{ExtIp: "2001:db8:3::2", IntIp: "2001:db8:2::2"},
+								{ExtIp: "2001:db8:4::2", IntIp: "2001:db8:2::2"},
+							},
+						},
+					})
+					err := fipMgr.CompleteDeferredWork()
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("should have expected NAT chains", func() {
+					if ipVersion == 4 {
+						natTable.checkChains([][]*iptables.Chain{{
+							expectedDNATChain([]dnat{
+								{extIP: "172.16.1.3", intIP: "10.0.240.2"},
+								{extIP: "172.18.1.4", intIP: "10.0.240.2"},
+							}...),
+							expectedSNATChain([]snat{
+								{extIP: "172.16.1.3", intIP: "10.0.240.2"},
+							}...),
+						}})
+					} else {
+						natTable.checkChains([][]*iptables.Chain{{
+							expectedDNATChain([]dnat{
+								{extIP: "2001:db8:3::2", intIP: "2001:db8:2::2"},
+								{extIP: "2001:db8:4::2", intIP: "2001:db8:2::2"},
+							}...),
+							expectedSNATChain([]snat{
+								{extIP: "2001:db8:3::2", intIP: "2001:db8:2::2"},
+							}...),
+						}})
+					}
+				})
+
+				Context("with the endpoint removed", func() {
+					JustBeforeEach(func() {
+						fipMgr.OnUpdate(&proto.WorkloadEndpointRemove{
+							Id: &proto.WorkloadEndpointID{
+								OrchestratorId: "openstack",
+								WorkloadId:     "vm-11",
+								EndpointId:     "endpoint-id-11",
+							},
+						})
+						err := fipMgr.CompleteDeferredWork()
+						Expect(err).ToNot(HaveOccurred())
 					})
 
 					It("should have empty NAT chains", func() {

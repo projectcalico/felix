@@ -22,7 +22,7 @@ find . -name "*.coverprofile" -type f -delete
 
 echo "Calculating packages to cover..."
 go_dirs=$(find -type f -name '*.go' | \
-	      grep -vE '/vendor/|\./proto/|.glide|/k8sfv/|/fv/|/dataplane/windows/' | \
+	      grep -vE '/vendor/|\./proto/|.glide|/k8sfv/|/fv/' | \
 	      xargs -n 1 dirname | \
 	      sort | uniq | \
 	      tr '\n' ',' | \
@@ -30,16 +30,16 @@ go_dirs=$(find -type f -name '*.go' | \
 echo "Covering: $go_dirs"
 test ! -z "$go_dirs"
 
-test_pkgs=$(go list -f '{{ if .TestGoFiles | or .XTestGoFiles }}{{ .ImportPath }}{{ end }}' \
+test_pkgs=$(go list -buildvcs=false -f '{{ if .TestGoFiles | or .XTestGoFiles }}{{ .ImportPath }}{{ end }}' \
                     ./... | grep -v /vendor/ )
 test ! -z "$test_pkgs"
 echo "Packages with tests: $test_pkgs"
 
-ginkgo -cover -covermode=count -coverpkg=${go_dirs} -r -skipPackage fv,k8sfv,windows "$@"
+ginkgo -cover -covermode=count -coverpkg=${go_dirs} -keepGoing -r "$@"
 gocovmerge $(find . -name '*.coverprofile') > combined.coverprofile
 
 # Print the coverage.  We use sed to remove the verbose prefix and trim down
 # the whitespace.
 go tool cover -func combined.coverprofile | \
-  sed 's=github.com/alauda/felix/==' | \
+  sed 's=github.com/projectcalico/felix/==' | \
   column -t

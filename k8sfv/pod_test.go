@@ -1,4 +1,4 @@
-// Copyright (c) 2017 Tigera, Inc. All rights reserved.
+// Copyright (c) 2017,2020 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,13 @@
 package main
 
 import (
+	"context"
 	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	log "github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -63,7 +65,7 @@ var _ = Context("with a k8s clientset", func() {
 
 			// Clear the pod's IP address.
 			podOut.Status.PodIP = ""
-			_, err := clientset.CoreV1().Pods(nsName).UpdateStatus(podOut)
+			_, err := clientset.CoreV1().Pods(nsName).UpdateStatus(context.Background(), podOut, metav1.UpdateOptions{})
 			panicIfError(err)
 
 			// Short wait, then delete the pod.

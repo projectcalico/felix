@@ -19,7 +19,7 @@ import (
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/proto"
+	"github.com/projectcalico/calico/felix/proto"
 )
 
 var (

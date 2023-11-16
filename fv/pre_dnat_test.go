@@ -1,6 +1,4 @@
-// +build fvtests
-
-// Copyright (c) 2017-2018 Tigera, Inc. All rights reserved.
+// Copyright (c) 2020-2021 Tigera, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,23 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build fvtests
+
 package fv_test
 
 import (
 	"strconv"
 	"time"
 
+	"github.com/projectcalico/calico/felix/fv/connectivity"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/alauda/felix/fv/containers"
-	"github.com/alauda/felix/fv/infrastructure"
-	"github.com/alauda/felix/fv/utils"
-	"github.com/alauda/felix/fv/workload"
-	"github.com/projectcalico/libcalico-go/lib/apiconfig"
-	api "github.com/projectcalico/libcalico-go/lib/apis/v3"
-	client "github.com/projectcalico/libcalico-go/lib/clientv3"
-	"github.com/projectcalico/libcalico-go/lib/numorstring"
+	api "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
+	"github.com/projectcalico/api/pkg/lib/numorstring"
+
+	"github.com/projectcalico/calico/libcalico-go/lib/apiconfig"
+	client "github.com/projectcalico/calico/libcalico-go/lib/clientv3"
+
+	"github.com/projectcalico/calico/felix/fv/containers"
+	"github.com/projectcalico/calico/felix/fv/infrastructure"
+	"github.com/projectcalico/calico/felix/fv/utils"
+	"github.com/projectcalico/calico/felix/fv/workload"
 )
 
 // Setup for planned further FV tests:
@@ -68,16 +72,12 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 		for ii := range w {
 			iiStr := strconv.Itoa(ii)
 			w[ii] = workload.Run(felix, "w"+iiStr, "default", "10.65.0.1"+iiStr, "8055", "tcp")
-			w[ii].ConfigureInDatastore(infra)
+			w[ii].ConfigureInInfra(infra)
 		}
 
 		// We will use this container to model an external client trying to connect into
 		// workloads on a host.  Create a route in the container for the workload CIDR.
-		externalClient = containers.Run("external-client",
-			containers.RunOpts{AutoRemove: true},
-			"--privileged", // So that we can add routes inside the container.
-			utils.Config.BusyboxImage,
-			"/bin/sh", "-c", "sleep 1000")
+		externalClient = infrastructure.RunExtClient("ext-client")
 		externalClient.Exec("ip", "r", "add", "10.65.0.0/24", "via", felix.IP)
 	})
 
@@ -123,7 +123,7 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 		})
 
 		It("everyone can connect to node ports", func() {
-			cc := &workload.ConnectivityChecker{}
+			cc := &connectivity.Checker{}
 			cc.ExpectSome(w[0], w[1], 32011)
 			cc.ExpectSome(w[1], w[0], 32010)
 			cc.ExpectSome(externalClient, w[1], 32011)
@@ -163,7 +163,7 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 				})
 
 				It("external client cannot connect", func() {
-					cc := &workload.ConnectivityChecker{}
+					cc := &connectivity.Checker{}
 					cc.ExpectSome(w[0], w[1], 32011)
 					cc.ExpectSome(w[1], w[0], 32010)
 					cc.ExpectNone(externalClient, w[1], 32011)
@@ -195,7 +195,7 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 					})
 
 					It("external client can connect to 32010 but not 32011", func() {
-						cc := &workload.ConnectivityChecker{}
+						cc := &connectivity.Checker{}
 						cc.ExpectSome(w[0], w[1], 32011)
 						cc.ExpectSome(w[1], w[0], 32010)
 						cc.ExpectNone(externalClient, w[1], 32011)
@@ -228,7 +228,7 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 					})
 
 					It("external client cannot connect", func() {
-						cc := &workload.ConnectivityChecker{}
+						cc := &connectivity.Checker{}
 						cc.ExpectSome(w[0], w[1], 32011)
 						cc.ExpectSome(w[1], w[0], 32010)
 						cc.ExpectNone(externalClient, w[1], 32011)
@@ -251,7 +251,7 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 				})
 
 				It("no one can connect via NodePorts", func() {
-					cc := &workload.ConnectivityChecker{}
+					cc := &connectivity.Checker{}
 					cc.ExpectNone(w[0], w[1], 32011)
 					cc.ExpectNone(w[1], w[0], 32010)
 					cc.ExpectNone(externalClient, w[1], 32011)
@@ -283,7 +283,7 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 					})
 
 					It("clients can connect to 32010 but not 32011", func() {
-						cc := &workload.ConnectivityChecker{}
+						cc := &connectivity.Checker{}
 						cc.ExpectNone(w[0], w[1], 32011)
 						cc.ExpectSome(w[1], w[0], 32010)
 						cc.ExpectNone(externalClient, w[1], 32011)
@@ -309,7 +309,7 @@ var _ = infrastructure.DatastoreDescribe("pre-dnat with initialized Felix, 2 wor
 						})
 
 						It("only external client can connect to 32010; no one to 32011", func() {
-							cc := &workload.ConnectivityChecker{}
+							cc := &connectivity.Checker{}
 							cc.ExpectNone(w[0], w[1], 32011)
 							cc.ExpectNone(w[1], w[0], 32010)
 							cc.ExpectNone(externalClient, w[1], 32011)

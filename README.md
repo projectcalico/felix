@@ -1,7 +1,6 @@
-[![Build Status](https://semaphoreci.com/api/v1/calico/felix-2/branches/master/shields_badge.svg)](https://semaphoreci.com/calico/felix-2)
-[![Coverage Status](https://coveralls.io/repos/alauda/felix/badge.svg?branch=master&service=github)](https://coveralls.io/github/alauda/felix?branch=master)
+![Build Status](https://tigera.semaphoreci.com/badges/felix.svg?style=shields&key=48267e65-4acc-4f27-a88f-c3df0e8e2c3b)
 [![Slack Status](https://slack.projectcalico.org/badge.svg)](https://slack.projectcalico.org)
-[![IRC Channel](https://img.shields.io/badge/irc-%23calico-blue.svg)](https://kiwiirc.com/client/irc.freenode.net/#calico)
+[![Go Report Card](https://goreportcard.com/badge/github.com/projectcalico/felix)](https://goreportcard.com/report/github.com/projectcalico/felix)
 # Project Calico
 
 <blockquote>
@@ -11,6 +10,12 @@ Note that the documentation in this repo is targeted at Calico contributors.
 
 This repository contains the source code for Project Calico's per-host
 daemon, Felix.
+
+## Licensing
+
+Felix itself, along with most of Calico, is licensed under the Apache v2.0 license.  The BPF programs
+in the bpf-gpl directory are licensed under the GPL v2.0 for compatibility with Linux kernel helper 
+functions. 
 
 ## How can I get support for contributing to Project Calico?
 
@@ -83,7 +88,7 @@ $ make build-all # OR
 $ make image-all
 ```
 
-Note that the `image` and `image-all` targets have the `build` targets as a depedency.
+Note that the `image` and `image-all` targets have the `build` targets as a dependency.
 
 ## How can I run Felix's unit tests?
 
